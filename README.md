@@ -2,7 +2,7 @@
 
 An autonomous Operator for product development with Shikiru.
 
-Shikiri-yaku is a small background service that sits between a Product Owner and Shikiru, the
+Shikiri-yaku is a small background service that sits between a Product Owner and [Shikiru](https://github.com/ferrum-code-dev/shikiru), the
 coordinator that runs coding agents. The Product Owner describes outcomes and makes product
 decisions in a chat (Telegram first, other channels later). Shikiri-yaku takes responsibility for
 getting the technical work done: it briefs Shikiru, watches its events, answers the escalations it

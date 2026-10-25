@@ -1,6 +1,6 @@
 # Shikiri-yaku: design
 
-Status: proposal, 25 October 2026. It supersedes the archived initial, v2 and v3 concepts (§17 lists what was kept from them) and builds on what the current Shikiru implementation provides (`../shikiru`: its `README.md`, `docs/design.md` and the MCP server). This is a design, not code.
+Status: current design, 25 October 2026. No code exists yet. It supersedes the archived initial, v2 and v3 concepts (§17 lists what was kept from them) and builds on what the current Shikiru implementation provides ([Shikiru](https://github.com/ferrum-code-dev/shikiru): its `README.md`, `docs/design.md` and the MCP server). This document is the design, not code.
 
 **How to read it.** §1–§13 are the design: idea, architecture, objects, control loop, the nine scenarios, memory, Shikiru extensions, reasoners and host authority, defaults, trade-offs and the proof plan. §14 reviews it from the PO's side. §15–§16 are the implementation estimate and the feasibility assessment (including the dogfooding protocol). §17 records what the earlier concepts contributed.
 
