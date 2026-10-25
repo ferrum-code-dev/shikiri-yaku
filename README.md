@@ -15,9 +15,10 @@ honestly as implemented, verified, integrated or released.
   buttons. An autonomy dial lets routine choices be taken without waiting, and it grows only on
   track record.
 - **Shikiru stays the source of truth.** Shikiri-yaku reads and commands it through MCP and keeps
-  only what Shikiru cannot: the conversation, goals across components, decisions, incidents and an
-  intent journal for restart recovery. What Shikiru lacks for this is added to Shikiru as a
-  requirement, not worked around in the Operator.
+  only what Shikiru cannot: the conversation, goals across components, a small model of the
+  product's components, decisions, incidents and an intent journal for restart recovery. Nothing
+  of the Operator is stored in the managed repositories. What Shikiru lacks for this is added to
+  Shikiru as a requirement, not worked around in the Operator.
 - **Agents are replaceable,** on subscription or API access, and all model use goes through
   Shikiru, so usage, quota and ladders stay in one place. Reasoning agents investigate and
   propose; they never hold host rights.
@@ -25,6 +26,6 @@ honestly as implemented, verified, integrated or released.
 
 ## Status
 
-Design stage, no code yet. The full design, with the nine scenarios, the remembered state, the
-requested Shikiru extensions, the effort estimate and the plan to build it with Shikiru itself, is
-in [docs/design.md](docs/design.md).
+Design stage, no code yet. The design, with the nine scenarios, the remembered state and the
+required Shikiru changes, is in [docs/design.md](docs/design.md). The effort estimate and the plan
+to build it with Shikiru itself are in [docs/plan.md](docs/plan.md).
