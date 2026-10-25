@@ -1,8 +1,8 @@
 # Shikiri-yaku: design
 
-Status: current design, 25 October 2026. No code exists yet. It supersedes the archived initial, v2 and v3 concepts (§17 lists what was kept from them) and builds on what the current Shikiru implementation provides ([Shikiru](https://github.com/ferrum-code-dev/shikiru): its `README.md`, `docs/design.md` and the MCP server). This document is the design, not code.
+Status: current design. No code exists yet. It builds on what the current Shikiru implementation provides ([Shikiru](https://github.com/ferrum-code-dev/shikiru): its `README.md`, `docs/design.md` and the MCP server). This document is the design, not code.
 
-**How to read it.** §1–§13 are the design: idea, architecture, objects, control loop, the nine scenarios, memory, Shikiru extensions, reasoners and host authority, defaults, trade-offs and the proof plan. §14 reviews it from the PO's side. §15–§16 are the implementation estimate and the feasibility assessment (including the dogfooding protocol). §17 records what the earlier concepts contributed.
+**How to read it.** §1–§13 are the design: idea, architecture, objects, control loop, the nine scenarios, memory, Shikiru extensions, reasoners and host authority, defaults, trade-offs and the proof plan. §14 reviews it from the PO's side. §15–§16 are the implementation estimate and the feasibility assessment (including the dogfooding protocol).
 
 ## 1. Idea in one paragraph
 
@@ -424,7 +424,7 @@ The first weeks of dogfooding (§16.4) provide the baseline to compare against.
 
 ## 14. Review: what the scenarios missed
 
-The nine scenarios cover the core loop. Re-reading them as the PO, these gaps remain. Rows 11 to 13 come from a second review focused on speed and PO workload. Each item is judged against KISS/YAGNI: **MVP** means it ships in the first version because it is cheap and removes real PO work; **Later** means it is designed for but not built until its trigger occurs.
+The nine scenarios cover the core loop. Re-reading them as the PO, these gaps remain. Each item is judged against KISS/YAGNI: **MVP** means it ships in the first version because it is cheap and removes real PO work; **Later** means it is designed for but not built until its trigger occurs.
 
 ### Gaps in the PO flow
 
@@ -460,7 +460,7 @@ Estimates are anchored on how Shikiru itself was built with AI agents (git and `
 |---|---|
 | Shikiru core without UI (engine, domain, store, operator services, agents, plugins, CLI, MCP) | about 30k lines of source |
 | Whole of Shikiru | 56k source and 67k test lines; 1,023 commits; 305 tasks in 36 days |
-| Core delivered | about 95 tasks in about 14 days (17 Sep to 1 Oct) |
+| Core delivered | about 95 tasks in about 14 days |
 | Rework after "feature complete" | four remediation phases (7, 7b, 7c, 7d), about 40 tasks on top of about 55 feature tasks, so budget **0.5–0.7 tasks of rework per feature task** |
 | Test code ratio | about 1.2 lines of test per line of source |
 
@@ -483,8 +483,6 @@ Included: scenarios 1–9 with Telegram only, the MVP items of §14 (including t
 | `yaku init` wizard. `yaku doctor` plus a documented `yaku.toml` is enough for one host | A second installation |
 | Release command and probe, per-topic standing rules, bug subtype, ETA, hardening tasks (§14 *Later*) | Their listed triggers |
 | E3 (idempotency key), E5 (project pause) in Shikiru | A duplicate task or a coarse-stop complaint in practice |
-
-Net effect of the second review on the estimate: one instance per product (§3.1), the Judge cut, merging access needs into decisions and the plan-then-execute repair path remove more work than the dial, charter, goal queue, flow measures and minimal preview add. About two tasks fewer, which is within the noise of the estimate.
 
 ### Work breakdown
 
@@ -526,7 +524,7 @@ Build in the order A, B, C, D so each phase ends with something the PO can use: 
 
 ## 16. Assessment: can Shikiru build it, and does it boost development?
 
-**Key fact, confirmed by you:** Shikiru has no track record on real product work yet. Nothing below is measured on real work. Every figure about benefit is an assumption to be tested.
+**Key fact:** Shikiru has no track record on real product work yet. Nothing below is measured on real work. Every figure about benefit is an assumption to be tested.
 
 ### 16.1 Can it be implemented with Shikiru?
 
@@ -602,35 +600,3 @@ Under this staging the Operator is built mostly with Shikiru, which doubles as i
 Once the Operator runs, this same pair is its first product instance: one product, `shikiri-yaku`, with two components (`yaku` and `shikiru`). That also gives the multi-component path a real test.
 
 Two things the pilot must establish before the plan is released: that a Shikiru-fix task can complete end to end under the builder (rule 8), and that a promotion with rollback works on a copy of a real state database (rule 2).
-
-## 17. Earlier concepts (archive: initial, v2, v3)
-
-The three archived concepts reached nearly the same architecture as this one: a standalone service, MCP-only access to Shikiru, a small journal, rules plus a decision model plus a reasoner, fingerprinted incidents with a shared budget, one decision identity across channels, restart reconciliation and a typed privileged helper. Differences worth recording:
-
-**Taken over**
-
-| Idea | From | Now in |
-|---|---|---|
-| Never use `accept` to clear an escalation; never lower acceptance criteria as "recovery"; repository and agent text is evidence, not instruction | Initial | §6 guardrails |
-| A table of default responses per situation | Initial | §6 |
-| A concrete decision message the PO would receive | Initial | Scenario 4 |
-| No completion percentages from a changing task count | Initial | §4 |
-| Curated agent environment, so the billing path never changes silently; no probing a blocked profile with inference | Initial | §10 |
-| Telegram: save updates before advancing the offset; 24-hour retention means re-presenting open decisions | Initial | §11 |
-| One-glance split of what the Operator handles and what needs a human | v2 | §4 autonomy contract |
-| Narrower authority on a personal machine than on a dedicated one | v2 | §10 host mode |
-| Confirm that work has really stopped before a disruptive change | v3 | Scenario 2 |
-| Ignore results from an obsolete attempt; reconcile uncertain effects before a replacement starts | v3 | Scenario 3 fencing |
-| Pin dependency versions and check adapter compatibility before unattended work | v3 | §11 `yaku doctor` |
-| The reasoner proposes, the service validates and executes; application repairs stay Shikiru tasks | v3 | Scenario 2 and §10 (plan, step policy, Host execution) |
-
-**Left out on purpose**
-
-| Idea | From | Why |
-|---|---|---|
-| Every host repair as a typed verb | v2, v3 | Plans are shell steps checked by an allow-list step policy, with typed verbs only for privileged steps. Far less code and it copes with unfamiliar failures; the price is a policy that is an allow-list, not a proof (§12, item 4) |
-| Required idempotency keys on `submit_task` as a Shikiru change | v3 | The embedded marker plus `list_tasks` covers a lost receipt. E3 stays optional |
-| Several projects of several products in one service, with portfolio digests and cross-project incident links | v2, v3 | One instance per product (§3.1) |
-| Decision model as a first-class part of every route from release one | v3 | E2 and the reasoner's classification cover triage. The Judge interface exists but is off until replays justify it |
-| No decision model in the first release | Initial | Now the same position, for a different reason: E2 makes most of the model unnecessary. The interface is kept for the case in which the free-text remainder of `decision_required` proves too hard for the reasoner |
-| MCP Tasks extension, ACP adapter | v2, v3 | Adopt only when they remove code |
