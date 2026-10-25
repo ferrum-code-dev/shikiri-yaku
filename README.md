@@ -16,8 +16,10 @@ honestly as implemented, verified, integrated or released.
   track record.
 - **Shikiru stays the source of truth.** Shikiri-yaku reads and commands it through MCP and keeps
   only what Shikiru cannot: the conversation, goals across components, decisions, incidents and an
-  intent journal for restart recovery.
-- **Agents are replaceable,** on subscription or API access. Reasoning agents investigate and
+  intent journal for restart recovery. What Shikiru lacks for this is added to Shikiru as a
+  requirement, not worked around in the Operator.
+- **Agents are replaceable,** on subscription or API access, and all model use goes through
+  Shikiru, so usage, quota and ladders stay in one place. Reasoning agents investigate and
   propose; they never hold host rights.
 - **Small by design:** one Python process, SQLite, one TOML file and the OS service manager.
 
