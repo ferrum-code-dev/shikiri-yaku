@@ -184,7 +184,7 @@ With extension E2 (§9) most classification is a field lookup, and the reasoner 
 | `quota_exhausted`, `ladder_exhausted` | Wait, or decision | Report the reset time and let other work run; an allowed alternative rung, otherwise a spend decision (scenario 7) |
 | `agent_error`, `agent_stuck`, `agent_protocol` | Case | Read the session; `retry` on another rung; a recurrence becomes an incident |
 | `iterations_exhausted` | Case, or decision | Read the review loop. A technical disagreement gets guidance through `send_message`; an unclear or contested criterion goes to the PO |
-| `integration_conflict`, `integration_blocked` | Case | Inspect base and task branches, then `retry`. In the test sample all seven cleared this way |
+| `integration_conflict`, `integration_blocked` | Case | Inspect base and task branches, then `retry`. A plain retry is the expected first response (assumption, §16.2) |
 | `uncommitted_work`, `off_task_branch` | Case | Preserve the work first (inspect, never clean up), then follow the packet's own options |
 | `pr_closed`, `dependency_cancelled` | Decision | Someone chose to stop this work; report the consequences and ask |
 | `engine_error`, event `engine_fault` | Case | Host probes and `doctor`, engine restart through the CLI, incident by fingerprint |
@@ -196,7 +196,7 @@ With extension E2 (§9) most classification is a field lookup, and the reasoner 
 ### 1. The PO describes a goal
 
 1. A message that is not a command, a button tap or a reply is classified by a small read-only reasoner call (`new goal | answer | status question | change to a goal | other`). With every model down, commands and buttons still work, and free text gets "reasoning is down, use the commands".
-2. **Intake** runs one read-only reasoner session per *plausibly affected* component, in its main checkout. The session has the goal, the product charter, the repo's own instructions and docs, the project's recent Shikiru tasks and the relevant past decisions. It returns: affected components, a brief with acceptance criteria per component, ordering between components, **assumptions**, and **open questions** each with a recommended answer. **Definition of ready:** every acceptance criterion must be checkable, meaning an observable condition plus how it is verified (automated test, command, or "PO check"). Intake rewrites vague criteria; "PO check" ones feed the preview (scenario 6). In the test project 21 of 42 done tasks needed a second review round, so vague criteria are expensive.
+2. **Intake** runs one read-only reasoner session per *plausibly affected* component, in its main checkout. The session has the goal, the product charter, the repo's own instructions and docs, the project's recent Shikiru tasks and the relevant past decisions. It returns: affected components, a brief with acceptance criteria per component, ordering between components, **assumptions**, and **open questions** each with a recommended answer. **Definition of ready:** every acceptance criterion must be checkable, meaning an observable condition plus how it is verified (automated test, command, or "PO check"). Intake rewrites vague criteria; "PO check" ones feed the preview (scenario 6). Vague criteria cost extra review rounds.
 3. **Question gate.** A question goes to the PO only if all hold: the answer changes customer-visible behavior, scope, cost or delivery; it is not answerable from project knowledge or the charter; and no cheap reversible default exists. Everything else becomes a visible assumption. At most three questions, in one message, each with a recommended answer; "ok" accepts all recommendations.
 4. **Start or queue.** The goal becomes `active` if fewer than `max_active_goals` (default 2) are active. Otherwise it is `queued` in the PO's priority order ("do G-5 first") and the PO is told its position. Intake and its questions run at once, so they are answered while earlier goals are still running. Without blocking questions an active goal is submitted at once, and the Operator tells the PO what it understood, what it assumed and where work started. With blocking questions it submits the unaffected components and holds the rest.
 5. **Submission.** One `submit_task` per component carries the *outcome-level brief*, not technical tasks. Shikiru's Leader triages and decomposes (its `plan` mode). Cross-component order (an API before its client) is the Operator's only scheduling duty: the dependent item is submitted when its prerequisite is **Integrated**, because Shikiru task branches start from the base branch. Shikiru's `depends_on` is per project, and Shikiru runs one engine per repository, so multi-repository coordination sits above it and the Operator keeps the link table.
@@ -220,7 +220,7 @@ Typical sources: an `escalation` with a technical reason, an `engine_fault`, an 
 * The case file is re-rendered from the journal for every attempt, so changing agent loses nothing and no native session needs to be portable.
 * **Fencing.** Every attempt has a number. The result of an attempt that is no longer current (a slow agent that timed out and was replaced) is discarded and never applied. Before a replacement starts, the previous attempt's uncertain host changes are reconciled.
 * Exhausting the budget gives a short owner message in product terms: what is blocked, what was tried, what is needed or which decision unblocks it. It is still not a request that the PO run commands.
-* **Fix once.** A fingerprint that recurs within 14 days leads to a decision-free Shikiru task that makes the setup reproducible (a bootstrap script or a documented prerequisite), under class `prevention`. Repairing the same thing repeatedly is the failure mode: in the test sample one environment cause came back five times.
+* **Fix once.** A fingerprint that recurs within 14 days leads to a decision-free Shikiru task that makes the setup reproducible (a bootstrap script or a documented prerequisite), under class `prevention`. Repairing the same thing repeatedly is the failure mode.
 
 ### 4. A real product decision
 
@@ -414,7 +414,7 @@ Failure-injection runs against two small real projects, and replays of historica
 
 | Measure | Why |
 |---|---|
-| **PO wait time**: decision created to answered or defaulted, and the task-hours blocked meanwhile. This is the primary measure | It is the idle time the Operator exists to remove. The test sample had 631 task-hours of waiting |
+| **PO wait time**: decision created to answered or defaulted, and the task-hours blocked meanwhile. This is the primary measure | It is the idle time the Operator exists to remove. Whether it dominates elapsed time is assumption 1 of §16.2, and the dogfooding baseline will show it |
 | **Lead time per goal**: accepted to Integrated, and to PO-accepted | Shows whether development actually got faster |
 | **Autonomy share**: decisions and repairs by level, and the recommendation acceptance rate | Shows whether the dial is earning its promotions |
 | **Rework rate**: follow-up goals after *Change*, and tasks created after Verified | Speed without correctness is not speed |
@@ -438,7 +438,7 @@ The nine scenarios cover the core loop. Re-reading them as the PO, these gaps re
 | 6 | **Release.** Production release is neither tracked nor performed | An Integrated goal produces one decision, "Release now?", and on yes runs the component's `release.command`, then its `release_probe`, and only then may reports say "released". It needs its own authority, because it has a production blast radius | **Later**: trigger is the PO wanting releases tracked |
 | 7 | **Bug reports with screenshots.** The most common PO input after goals | Attachments are stored and their paths are passed in the brief. Intake first tries to reproduce read-only and attaches the finding. Starts as a goal subtype, not a new pipeline | **Later**: trigger is the first real bug report |
 | 8 | **Cost and ETA per goal.** The PO asks "how much is this using?" and "when will it be done?" | Usage is a digest line (MVP, covered above). ETA is a range from the median cycle time of recent similar tasks, queue length and known quota resets | Usage **MVP**. ETA **Later** |
-| 9 | **Recurring causes.** The same fingerprint fixed again and again on the host | Two occurrences within 14 days submit a Shikiru task that makes the setup reproducible (bootstrap script or a documented prerequisite), as a technical, decision-free task under class `prevention` (scenario 3) | **MVP**, in Phase C. In the test sample one environment cause came back five times |
+| 9 | **Recurring causes.** The same fingerprint fixed again and again on the host | Two occurrences within 14 days submit a Shikiru task that makes the setup reproducible (bootstrap script or a documented prerequisite), as a technical, decision-free task under class `prevention` (scenario 3) | **MVP**, in Phase C |
 | 10 | **Technical lead answers** (see the fourth triage route in §6) | Explicit route under class `decision.technical`, so design choices never reach the PO | **MVP** |
 | 11 | **Product charter** | Written once in a 15-minute onboarding chat; answers questions before they are asked (§4) | **MVP** |
 | 12 | **Goal queue and a limit on active goals.** Handing over several goals at once stretches lead time and exhausts quota | `max_active_goals` (default 2) and a priority order the PO can change (scenario 1). It queues goals, not tasks; Shikiru still schedules tasks | **MVP**: one number and one state |
@@ -526,7 +526,7 @@ Build in the order A, B, C, D so each phase ends with something the PO can use: 
 
 ## 16. Assessment: can Shikiru build it, and does it boost development?
 
-**Key fact, confirmed by you:** Shikiru has so far only run on simple projects that verify its core functionality. It has no track record on real product work. The assessment below is built on that, and it lowers some of my earlier confidence.
+**Key fact, confirmed by you:** Shikiru has no track record on real product work yet. Nothing below is measured on real work. Every figure about benefit is an assumption to be tested.
 
 ### 16.1 Can it be implemented with Shikiru?
 
@@ -548,43 +548,36 @@ Build in the order A, B, C, D so each phase ends with something the PO can use: 
 | # | Condition | Why |
 |---|---|---|
 | 1 | Prepare the repo first: one commit with the plan and `AGENTS.md`, then `shikiru init`, with `project.trackers` set to `tasks/plan.md` and `tasks/todo.md` | Shikiru needs a git root with a commit. The first plan is human-reviewed |
-| 2 | Keep live externals out of the agent loop. Telegram and package-manager tests are a human-launched smoke script, not part of `poe check` | The Codex `workspace-write` sandbox blocked a dev server and gave no browser in the test project. Network and host changes would fail the same way. Agents inherit your environment, so the bot token must not be in it |
+| 2 | Keep live externals out of the agent loop. Telegram and package-manager tests are a human-launched smoke script, not part of `poe check` | Agents run with your privileges and environment, and Codex's `workspace-write` sandbox may block network access, a dev server or a browser. Network and host changes would fail or leak, and the bot token must not be in the environment |
 | 3 | A disposable host (Docker image or VM) for the repair path | Testing "install a system package and recover" on your machine is unsafe; Shikiru's isolation is a convention, not a sandbox |
 | 4 | Pin Shikiru while building with it. Develop E1 and E2 on a branch of the Shikiru repo and upgrade the build host deliberately | Entry points are written at install time; a moving engine under a running build is avoidable risk |
-| 5 | Small tasks: about 300 lines of change each, with testable acceptance criteria | In the test project 21 of 42 done tasks needed two review rounds and one needed five |
+| 5 | Small tasks: about 300 lines of change each, with testable acceptance criteria | Large or vague tasks cost review rounds; small, checkable ones keep Shikiru's review loop short (assumption, confirm in the pilot) |
 | 6 | Pilot first and keep the manual fallback (above) | Shikiru is unproven on real work |
 
 Phase 0 runs in two repositories (Shikiru: E1 and E2; Operator: scaffold copied from Shikiru's gate). Phases A to D follow in dependency order with `integration = "merge"` and `max_parallel = 2`. From Phase A on, the relay lets the PO answer the build's own Shikiru escalations from Telegram, and from Phase B the Operator can supervise the rest of its own build. That is a worthwhile test but must not be the only one.
 
 ### 16.2 Does it boost development?
 
-**Honest answer: the mechanism is real and I can show it in the data, but the size of the boost on real product work is unknown, and it depends on how reliable Shikiru turns out to be.**
+**Honest answer: the mechanism is clear, but nothing has been measured.** Shikiru has not been used on real product work, so the size of the boost is a set of assumptions, not a result. The first weeks of dogfooding (§16.4) are meant to confirm or refute them.
 
-**What the data shows.** The only history on this machine is `test-project/.shikiru/state.db`, a small React/TypeScript app driven by Codex, 5 to 16 October 2026. I read a read-only copy. It is a *verification project*, so its numbers describe a testbed, not product work.
+| # | Assumption | How it is checked |
+|---|---|---|
+| 1 | Elapsed time in Shikiru-driven development is dominated by waiting for a person (an escalation left unanswered for hours, overnight, or while the PO is busy), not by agent working time | PO wait time and the task-hours blocked meanwhile, against lead time (§13) |
+| 2 | A large share of escalations is routine: environment gaps (a missing tool, a dev server that cannot start in the sandbox, no browser for UI checks), integration blocks that a plain retry clears, and technical choices the brief and charter already answer. The rest are genuine product decisions | The escalation corpus from dogfooding, classified by cause (§16.4, rule 9) |
+| 3 | The same environment cause tends to recur until the setup is made reproducible, so fixing it once removes a whole series of interruptions | Recurrence counts per fingerprint |
+| 4 | Real work adds genuine product questions, scope disagreements and review rounds, so the avoidable share of interruptions is smaller than in a purely technical exercise. No target figure is promised | Autonomy share and the recommendation acceptance rate (§13) |
+| 5 | The Operator removes waiting. It does not make agents write better code or lower their cost | Rework rate and usage (§13) |
 
-| Measure | Value |
-|---|---|
-| Tasks | 46 (42 done, 3 cancelled, 1 escalated). 15 submitted by you, 31 created by the Leader |
-| Escalations raised | 28 (0.6 per task): 19 Leader `decision_required`, 7 integration conflicts or blocks, 2 cancelled dependencies |
-| Time tasks waited for an answer | 631 task-hours in total. Half of the answered escalations waited over 4 hours; the longest 6.4 days; one is open after 155 hours |
-| Your commands | 141 for 42 done tasks, inflated by testing of Shikiru itself (stops, take-overs) |
-
-**What the escalations were.** About 15 to 17 of the 19 Leader decisions concerned the **environment**: no browser available for UI acceptance checks, a dev server that could not bind in the sandbox, missing `vite`/`react`. The same cause recurred (T-36 five times, T-41 four, T-35 twice). The agents wrote in the packets that they could not provision a browser themselves. One item was clearly product and access (E-27: ad provider, placement, consent). All seven integration blocks were cleared by a plain `retry`.
-
-**What this proves, and what it does not.**
-* It proves the **gap the Operator fills**: Shikiru's agents stop and wait for a person when the environment lacks something, and that wait dominated elapsed time. An Operator that installs the capability once, recognizes the repeat and applies routine retries would have removed most of those 28 interruptions in this sample.
-* It does **not** prove the rate on real work. A test project that intentionally exercises a verification flow, with a UI acceptance step and a sandbox that has no browser, probably over-produces environment escalations. Real work will likely add more genuine product questions, scope disagreements and review rounds. I would not quote "90% fewer interruptions" as an expectation; it only describes this testbed.
-* It says nothing about cost or code quality. The Operator removes waiting and interruptions. It does not make agents write better code, and mean time per done task here (309 minutes) is unchanged except for blocked time.
-* The boost is **capped by Shikiru**. If Shikiru's own core loop proves unreliable on real work, the Operator only supervises that unreliability, more quietly.
+**The boost is capped by Shikiru.** If Shikiru's own core loop proves unreliable on real work, the Operator only supervises that unreliability, more quietly.
 
 **Costs the Operator adds:** reasoner usage for investigation, one more service to keep running, and new failure modes, a wrong repair plan and a misclassified decision. The attempt budgets, the pre-declared verification probe and the reporting of every action bound that.
 
 ### 16.3 Recommendation, adjusted for an unproven Shikiru
 
-Do not commit to the whole Operator on the strength of this data. Stage it so evidence arrives before the expensive part is built, which is also what YAGNI asks.
+Do not commit to the whole Operator on the strength of assumptions. Stage it so evidence arrives before the expensive part is built, which is also what YAGNI asks.
 
 1. **Stage 1, dogfooding (§16.4):** build the Operator's Phase 0 and A with Shikiru, and fix the Shikiru defects that block it with a second Shikiru instance in the Shikiru repo. Record escalations, waits and your commands. This is the first honest baseline.
-2. **Stage 2, MVP Phases A and B:** the relay, goal intake, charter, decision flow and autonomy dial. These are useful whatever the escalation mix turns out to be, since they remove the need to watch tmux and decompose goals, and the dial removes the waiting that dominated the test sample.
+2. **Stage 2, MVP Phases A and B:** the relay, goal intake, charter, decision flow and autonomy dial. These are useful whatever the escalation mix turns out to be, since they remove the need to watch tmux and decompose goals, and the dial removes waiting for the PO.
 3. **Stage 3, decision gate:** replay the real escalations from Stages 1 and 2 through the Phase A triage rules in shadow mode. **Build the repair path of Phase C beyond retries, engine recovery and health probes only if at least about half of real escalations are technical and routable to a rule or a repair.** If most turn out to be product decisions, the better investment is the decision flow, the dial and the acceptance note, and Phase C stays at routine retries and engine recovery.
 4. **Stage 4:** hardening, drills and the soak week, as in §15.
 
