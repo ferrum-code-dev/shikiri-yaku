@@ -2,30 +2,27 @@
 
 An autonomous Operator for product development with Shikiru.
 
-Shikiri-yaku is a small background service that sits between a Product Owner and [Shikiru](https://github.com/ferrum-code-dev/shikiru), the
-coordinator that runs coding agents. The Product Owner describes outcomes and makes product
-decisions in a chat (Telegram first, other channels later). Shikiri-yaku takes responsibility for
-getting the technical work done: it briefs Shikiru, watches its events, answers the escalations it
-is entitled to answer, repairs the development machine when work stalls, and reports progress
-honestly as implemented, verified, integrated or released.
+Shikiri-yaku is a small background service that sits between a Product Owner and
+[Shikiru](https://github.com/ferrum-code-dev/shikiru), the coordinator that runs coding agents.
+Shikiru stops and waits for a person when it raises an escalation. Shikiri-yaku takes that seat:
+it watches the escalations of every Shikiru project of a product, sorts each into a category and
+hands it to a handler. A handler either resolves it (retry, wait for a quota reset, restart an
+engine, install a missing tool after the owner approves the exact command) or forwards it to the
+Product Owner in a chat (Telegram first), where one tap applies the answer in Shikiru.
 
-- **One instance per product.** A product has one or more components, each a Shikiru project
-  (repository). Several products mean several instances, each with its own chat bot.
-- **Only product questions reach the owner,** each with consequences, a recommendation and
-  buttons. An autonomy dial lets routine choices be taken without waiting, and it grows only on
-  track record.
-- **Shikiru stays the source of truth.** Shikiri-yaku reads and commands it through MCP and keeps
-  only what Shikiru cannot: the conversation, goals across components, a small model of the
-  product's components, decisions, incidents and an intent journal for restart recovery. Nothing
-  of the Operator is stored in the managed repositories. What Shikiru lacks for this is added to
-  Shikiru as a requirement, not worked around in the Operator.
-- **Agents are replaceable,** on subscription or API access, and all model use goes through
-  Shikiru, so usage, quota and ladders stay in one place. Reasoning agents investigate and
-  propose; they never hold host rights.
+- **Small fixed core, growth by extension.** Categories, handlers, actions, reasoning jobs and
+  channels are registered extensions; routine decisions, goal intake and digests come later
+  without changing the core.
+- **Every route ends at the owner.** Anything unknown, unsure or failed is forwarded, so nothing
+  is dropped and nothing works worse than plain forwarding.
+- **Agents propose, code acts.** The Operator's reasoning agent runs with tools disabled; only
+  plain code runs commands, and only ones the owner approved.
+- **Shikiru stays the source of truth,** read and commanded through MCP. Nothing of the Operator
+  is stored in the managed repositories.
+- **One instance per product,** with its own chat bot. Each component is a Shikiru project.
 - **Small by design:** one Python process, SQLite, one TOML file and the OS service manager.
 
 ## Status
 
-Design stage, no code yet. The design, with the nine scenarios, the remembered state and the
-required Shikiru changes, is in [docs/design.md](docs/design.md). The effort estimate and the plan
-to build it with Shikiru itself are in [docs/plan.md](docs/plan.md).
+Design stage, no code yet. The design is in [docs/design.md](docs/design.md). The effort estimate
+and the plan to build it with Shikiru itself are in [docs/plan.md](docs/plan.md).
