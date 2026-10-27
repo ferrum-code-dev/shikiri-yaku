@@ -9,7 +9,7 @@ merged and `uv run poe check` passes.
 
 ## Phase A: relay
 
-- [ ] A1. Settings and instance directory
+- [x] A1. Settings and instance directory
 - [ ] A2. Journal
 - [ ] A3. Signals, classification and extensions
 - [ ] A4. Ports, composition root and CLI
