@@ -5,7 +5,7 @@ merged and `uv run poe check` passes.
 
 ## Phase 0: setup
 
-- [ ] T0. Scaffold with the quality gate
+- [x] T0. Scaffold with the quality gate
 
 ## Phase A: relay
 

@@ -1,0 +1,167 @@
+[project]
+name = "shikiri-yaku"
+version = "0.1.0"
+description = "An escalation router between a Product Owner and Shikiru."
+readme = "README.md"
+requires-python = ">=3.14"
+
+[project.scripts]
+shikiri-yaku = "shikiri_yaku.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shikiri_yaku"]
+
+[dependency-groups]
+dev = [
+  "ruff>=0.16,<0.17",
+  "basedpyright>=1.40,<1.41",
+  "import-linter>=2.15,<2.16",
+  "vulture>=2.16,<2.17",
+  "pytest>=9.1,<9.2",
+  "pytest-timeout>=2.4,<2.5",
+  "poethepoet>=0.48,<0.49",
+]
+
+[tool.poe.tasks]
+format-check = "ruff format --check ."
+lint = "ruff check ."
+comments = "python -m tests.support.comment_rule"
+literals = "python -m tests.support.literal_rule"
+imports = "lint-imports"
+types = "basedpyright"
+dead-code = "vulture"
+test = "pytest"
+
+[tool.poe.tasks.fix]
+sequence = [
+  { cmd = "ruff format ." },
+  { cmd = "ruff check --fix ." },
+]
+
+[tool.poe.tasks.check]
+sequence = ["format-check", "lint", "comments", "literals", "imports", "types", "dead-code", "test"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src"]
+extend-exclude = ["*.md"]  # the gate formats Python; docs/design.md is the spec and stays as written
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "CPY001",  # No per-file copyright headers are needed.
+  "D100",    # Docstrings belong on public contracts, not on everything;
+  "D101",    # requiring one everywhere turned them into the comments the conventions ban.
+  "D102",    # The D2xx/D4xx rules stay on, so the docstrings we do write remain well-formed.
+  "D103",
+  "D104",
+  "D105",
+  "D107",
+  "D203",    # conflicts with D211 (no blank line before class docstring)
+  "D213",    # conflicts with D212 (multi-line docstring summary on first line)
+  "COM812",  # formatter already governs trailing commas
+  "ASYNC109", # injected timeout parameters are the project's convention, not asyncio.timeout
+  "PLR0913", # constructors take their collaborators as parameters (design §12)
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sqlite3" = { msg = "SQL only in shikiri_yaku.journal (docs/design.md §12)" }
+"subprocess" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
+"asyncio.create_subprocess_exec" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
+"asyncio.create_subprocess_shell" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
+"time.sleep" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"asyncio.sleep" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.time" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.time_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.monotonic" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.monotonic_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.perf_counter" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"time.perf_counter_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"datetime.datetime.now" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"datetime.datetime.utcnow" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"datetime.datetime.today" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"datetime.date.today" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+
+[tool.ruff.lint.per-file-ignores]
+"src/shikiri_yaku/journal/**" = ["TID251"]  # the journal is the only place with SQL
+"tests/**" = ["S101", "D", "ANN", "PLR2004"]
+"tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.importlinter]
+root_package = "shikiri_yaku"
+
+[[tool.importlinter.contracts]]
+name = "Domain imports nothing else of the project (docs/design.md §12)"
+type = "forbidden"
+source_modules = ["shikiri_yaku.domain"]
+forbidden_modules = [
+  "shikiri_yaku.app",
+  "shikiri_yaku.extensions",
+  "shikiri_yaku.ports",
+  "shikiri_yaku.adapters",
+  "shikiri_yaku.journal",
+  "shikiri_yaku.bootstrap",
+  "shikiri_yaku.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "App and extensions import domain and ports only (docs/design.md §12)"
+type = "forbidden"
+source_modules = ["shikiri_yaku.app", "shikiri_yaku.extensions"]
+forbidden_modules = [
+  "shikiri_yaku.adapters",
+  "shikiri_yaku.journal",
+  "shikiri_yaku.bootstrap",
+  "shikiri_yaku.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters and journal implement ports, not the application (docs/design.md §12)"
+type = "forbidden"
+source_modules = ["shikiri_yaku.adapters", "shikiri_yaku.journal"]
+forbidden_modules = [
+  "shikiri_yaku.app",
+  "shikiri_yaku.extensions",
+  "shikiri_yaku.bootstrap",
+  "shikiri_yaku.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only bootstrap builds concrete objects (docs/design.md §12)"
+type = "forbidden"
+source_modules = ["shikiri_yaku.ports", "shikiri_yaku.cli"]
+forbidden_modules = ["shikiri_yaku.adapters", "shikiri_yaku.journal"]
+
+[[tool.importlinter.contracts]]
+name = "Nothing but the CLI imports the composition root (docs/design.md §12)"
+type = "forbidden"
+source_modules = [
+  "shikiri_yaku.domain",
+  "shikiri_yaku.app",
+  "shikiri_yaku.extensions",
+  "shikiri_yaku.ports",
+  "shikiri_yaku.adapters",
+  "shikiri_yaku.journal",
+]
+forbidden_modules = ["shikiri_yaku.bootstrap", "shikiri_yaku.cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+timeout = 60
+
+[tool.vulture]
+paths = ["src/shikiri_yaku", "tests"]
+min_confidence = 80
