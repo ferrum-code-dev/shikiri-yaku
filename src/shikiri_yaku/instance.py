@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 HOME_DIRECTORY_NAME: Final = ".shikiri-yaku"
 LOCK_FILE_NAME: Final = "instance.lock"
+JOURNAL_FILE_NAME: Final = "journal.db"
 
 
 class InstanceLockedError(Exception):

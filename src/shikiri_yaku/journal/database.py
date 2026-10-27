@@ -18,7 +18,11 @@ BUSY_TIMEOUT_S: Final = 5
 LATEST_VERSION: Final = len(MIGRATIONS)
 
 
-class JournalTooNewError(Exception):
+class JournalError(Exception):
+    """The journal file cannot be opened or used; the message says why."""
+
+
+class JournalTooNewError(JournalError):
     """The database was written by a newer version of the code, so this one must not touch it."""
 
 
@@ -51,14 +55,25 @@ class Database:
 
     @classmethod
     def open(cls, path: Path | str) -> Self:
-        """Open or create the journal and bring its schema up to date."""
-        connection = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA foreign_keys = ON")
+        """Open or create the journal and bring its schema up to date.
+
+        Whatever SQLite refuses is raised as JournalError, so callers never handle sqlite3 errors.
+        """
+        try:
+            connection = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
+        except sqlite3.Error as error:
+            message = f"cannot open {path}: {error}"
+            raise JournalError(message) from error
         database = cls(connection)
         try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA foreign_keys = ON")
             database._migrate()
+        except sqlite3.Error as error:
+            connection.close()
+            message = f"cannot use {path}: {error}"
+            raise JournalError(message) from error
         except BaseException:
             connection.close()
             raise

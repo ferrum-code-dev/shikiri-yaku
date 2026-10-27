@@ -92,6 +92,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "src/shikiri_yaku/journal/**" = ["TID251"]  # the journal is the only place with SQL
+"src/shikiri_yaku/adapters/clock.py" = ["TID251"]  # the Clock adapter is the only place that reads time
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
 
@@ -168,3 +169,4 @@ timeout = 60
 [tool.vulture]
 paths = ["src/shikiri_yaku", "tests"]
 min_confidence = 80
+ignore_names = ["destination", "message_ref", "timeout_s"]  # parameters of ports whose adapters come later

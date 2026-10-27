@@ -1,7 +1,7 @@
 """The journal: SQLite access, and the only place with SQL (design §9, §12)."""
 
 from shikiri_yaku.journal.cursors import Cursor, CursorStore, Lifecycle
-from shikiri_yaku.journal.database import Database, Inserted, JournalTooNewError
+from shikiri_yaku.journal.database import Database, Inserted, JournalError, JournalTooNewError
 from shikiri_yaku.journal.messages import (
     Delivery,
     Direction,
@@ -19,6 +19,7 @@ __all__ = [
     "Delivery",
     "Direction",
     "Inserted",
+    "JournalError",
     "JournalTooNewError",
     "Lifecycle",
     "MessageStore",

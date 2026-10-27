@@ -12,7 +12,7 @@ merged and `uv run poe check` passes.
 - [x] A1. Settings and instance directory
 - [x] A2. Journal
 - [x] A3. Signals, classification and extensions
-- [ ] A4. Ports, composition root and CLI
+- [ ] A4. Ports, composition root and CLI (ports, Clock, bootstrap, run and doctor in; install-service needs its own task; import contract cli→bootstrap needs a decision)
 - [ ] A5. Shikiru MCP adapter
 - [ ] A6. Event source
 - [ ] A7. Liveness and health sources
