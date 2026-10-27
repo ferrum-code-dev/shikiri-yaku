@@ -90,6 +90,8 @@ Acceptance:
 * `doctor` reports each failed check by name and exits non-zero; passes on a valid instance.
 * The generated unit/plist contains the login-shell PATH and the exact `run` command (golden file
   test on content that matters, not on whitespace).
+* `Clock` offers `now()` and `sleep(seconds)`; the gate bans `time.*`, `asyncio.sleep` and `datetime.now` elsewhere. The `CommandRunner`
+  adapter module is the only one exempt from the subprocess ban (a per-file ignore in `pyproject.toml`).
 
 ### A5. Shikiru MCP adapter (high)
 
