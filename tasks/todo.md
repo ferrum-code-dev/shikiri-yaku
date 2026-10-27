@@ -10,7 +10,7 @@ merged and `uv run poe check` passes.
 ## Phase A: relay
 
 - [x] A1. Settings and instance directory
-- [ ] A2. Journal
+- [x] A2. Journal
 - [ ] A3. Signals, classification and extensions
 - [ ] A4. Ports, composition root and CLI
 - [ ] A5. Shikiru MCP adapter
