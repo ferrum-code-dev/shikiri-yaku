@@ -102,6 +102,9 @@ Acceptance:
 §3.1, §12. `install-service <product>` writes a launchd plist (macOS) or systemd user unit (Linux)
 named `shikiri-yaku-<product>`, with the PATH of the user's login shell and the exact `run` command.
 
+Also: `doctor` shows a held instance lock as "running", not as a failure, because a service that is
+up holds it; the check still fails when the lock file cannot be opened.
+
 Acceptance:
 * The generated unit/plist contains the login-shell PATH and the exact `run` command (golden file
   test on content that matters, not on whitespace).
