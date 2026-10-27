@@ -117,6 +117,9 @@ Acceptance:
 lifecycle state, create signals for open escalations, never replay history; a clean stop in the
 history counts as respected. Repeat the first sync when the cursor falls behind retention.
 
+Note: `CursorStore.respect_stop` does nothing for a project without a cursor row, so the first sync
+records its batch before it respects a clean stop.
+
 Acceptance:
 * After a simulated crash between the signal insert and the cursor commit, a restart yields exactly
   one signal per source event.
@@ -145,6 +148,10 @@ asyncio task; `Forward` hands the signal to the product handler with the note. T
 records automatic actions in `ops` and answers budget questions (`retry_budget_per_day`,
 `restart_budget_per_hour`). The scheduler dispatches parked signals when due and sends due reminders
 (`reminder_first_h`, `reminder_repeat_h`). `WaitUntil` parks the signal.
+
+Note: `ops.identity` is unique, so every automatic action needs its own identity (for example
+`retry:<project>:<task>:<reason>:<n>`), and the journal needs a query that counts the ops of a
+`(project, task, reason, kind)` since a given time; add it to `OpStore` with its test.
 
 Acceptance:
 * A handler that raises, one that times out and an unregistered category each end as a forward carrying the failure in the note.
