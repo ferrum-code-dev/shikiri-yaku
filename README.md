@@ -15,8 +15,8 @@ Product Owner in a chat (Telegram first), where one tap applies the answer in Sh
   without changing the core.
 - **Every route ends at the owner.** Anything unknown, unsure or failed is forwarded, so nothing
   is dropped and nothing works worse than plain forwarding.
-- **Agents propose, code acts.** The Operator's reasoning agent runs with tools disabled; only
-  plain code runs commands, and only ones the owner approved.
+- **Agents propose, code acts.** The Operator's reasoning agent runs with tools disabled and only
+  names what is missing; plain code builds the command, and runs it only after the owner approved it.
 - **Shikiru stays the source of truth,** read and commanded through MCP. Nothing of the Operator
   is stored in the managed repositories.
 - **One instance per product,** with its own chat bot. Each component is a Shikiru project.
