@@ -19,7 +19,7 @@ Shikiru's build record shows what agents did on Shikiru, not what Shikiru does o
 
 ### Scope
 
-Included: the first release of the [design](design.md): the core, the product, technical and notice handlers, the install action, Telegram, macOS first. Everything in the design's [extensions](design.md#13-extensions) table is out of scope until its trigger appears.
+Included: the first release of the [design](design.md): the core, the product, infrastructure, review and notice handlers, the install action, Telegram with topics, macOS first. Everything in the design's [extensions](design.md#13-extensions) table is out of scope until its trigger appears.
 
 ### Work breakdown
 
@@ -28,28 +28,29 @@ One *task* is one Shikiru task: an Implementer and Leader loop ending in a revie
 | Phase | Delivers | Feature tasks | Source lines | Usable result |
 |---|---|---|---|---|
 | **0 Setup** | [S1](design.md#11-shikiru-what-is-used-what-is-needed) (structured escalation view) in the Shikiru repository; Operator scaffold with Shikiru's quality gate, the `AGENTS.md` from [§12](design.md#12-engineering-rules), a test bot and the `config.toml` skeleton | 1 in Shikiru, 1 in the Operator | about 0.2k | Shikiru offers what the Operator needs; the rules are enforced from the first commit |
-| **A Relay** | Config and journal; ports, composition root, `run`, `doctor` and service install (with the login-shell PATH); the Shikiru MCP adapter with links and reconnect; the event source with cursors and first sync; the liveness source; signals and the classifier rules; Router, loop guard and scheduler; the product handler with templates and answers (needs S1); command confirmation and "resolved elsewhere"; Telegram send, edit and size limits; Telegram inbound, dedupe, offsets and allow-list; `/status`, `/open`, `/help`; `/goal` with its restart rule; wait-time measures | 14 | 1.3k | **The PO answers every Shikiru escalation from the phone and stops watching tmux.** Real escalation data starts to accumulate |
-| **B Technical basics** | Retry; quota wait with `WaitUntil`; engine restart (including `engine_error`); the notice handler and the technical handler's messages | 4 | 0.3k | Routine technical escalations stop reaching the PO |
-| **C Install** | Reasoner spike (tools-off and schema flags on Claude and Codex); Reasoner interface, adapter and the `assess_blocker` job with host facts; name validation and recipes; the approval flow on `ops`; the Executor (login shell, closed stdin, timeout, process group, host lock); restart handling of interrupted installs | 7 | 0.6k | Missing tools are installed with one tap |
-| **D Hardening** | The drills of [§15](design.md#15-proving-it-works); the contract-test script against a real Shikiru with its fake agent; crash-point tests; security review of the install path | 4 | 0.1k | Scenario 8 and the proof |
-| **Total** | | **about 31 feature tasks (30 in the Operator, 1 in Shikiru)** | **about 2.5k** (tests about 3k) | |
-| **Rework allowance** | Review and remediation rounds | **15–21 tasks** | | |
+| **A Relay** | Config, instance directory and journal; ports, composition root, `run`, `doctor` and service install (with the login-shell PATH); the Shikiru MCP adapter with links and reconnect; the event source with cursors and first sync; the liveness source with the clean-stop rule and the health source; signals, the Classifier interface, extension registration and the rule table; Router, loop guard and scheduler; the product handler with templates and answers (needs S1); command confirmation and "resolved elsewhere"; Telegram send, edit, destinations and size limits; Telegram inbound, dedupe, offsets and allow-list; `/status`, `/open`, `/help`; `/goal` with its restart rule; wait-time measures | 14 | 1.4k | **The PO answers every Shikiru escalation from the phone and stops watching tmux.** Real escalation data starts to accumulate |
+| **B Topics** | The Telegram destination function (product group, one forum topic per component, one for other signals); the startup reconcile that creates and closes topics; group updates, the allow-list in a group, and `/goal` inside a topic | 3 | 0.3k | Escalations of each component are in their own topic |
+| **C Infrastructure basics and review** | Retry; quota wait with `WaitUntil`; engine restart (including `engine_error`); the review handler for pull requests; the notice handler (finished work, health) and the infrastructure handler's messages | 5 | 0.4k | Routine infrastructure escalations stop reaching the PO; pull-request links arrive |
+| **D Install** | Reasoner spike (tool-limit and schema flags on Claude and Codex); Reasoner interface, adapter and the `assess_blocker` job with host facts; the ladder with cooldown and the health signal; name validation and recipes; the approval flow on `ops`; the Executor (login shell, closed stdin, timeout, process group, host lock); restart handling of interrupted installs | 8 | 0.7k | Missing tools are installed with one tap |
+| **E Hardening** | The drills of [§15](design.md#15-proving-it-works); the contract-test script against a real Shikiru with its fake agent; crash-point tests; security review of the install path | 4 | 0.1k | Scenario 8 and the proof |
+| **Total** | | **about 36 feature tasks (35 in the Operator, 1 in Shikiru)** | **about 3.1k** (tests about 3.7k) | |
+| **Rework allowance** | Review and remediation rounds | **18–25 tasks** | | |
 
 ### Time
 
 | Measure | Estimate | Notes |
 |---|---|---|
 | **Relay** (Phases 0 and A) | **about 1 week** | About 16 tasks plus rework. Usable from the day it runs |
-| **First release** (all phases) | **2–3 weeks**, plan for 3 | About 46–53 tasks including rework at 4–6 a day is 8–13 working days, then a soak week on a real project |
+| **First release** (all phases) | **2–3 weeks**, plan for 3 | About 54–61 tasks including rework at 4–6 a day is 9–15 working days, then a soak week on a real project |
 | Optimistic / pessimistic | 2 weeks / 5 weeks | Pessimistic if Telegram or agent CLI quirks need redesign, or quota windows throttle the build |
 | **Human time** | About 1 hour a day | Reviewing the plan and escalations, approving, running drills. Half a day of setup: bot, test host, a sandbox project pair |
 | **Agent compute** | Not estimated | No usage figures exist to extrapolate from. Measure with Shikiru's usage view after Phase A |
 
-Confidence is medium for the task count and low for calendar time. **The largest schedule risk is not code volume but real-world failure modes** (Telegram delivery, agent login expiry, package managers) that only drills reveal. Keep Phase D and the soak week.
+Confidence is medium for the task count and low for calendar time. **The largest schedule risk is not code volume but real-world failure modes** (Telegram delivery, agent login expiry, package managers) that only drills reveal. Keep Phase E and the soak week.
 
 ### Order of work
 
-0, A, B, C, D. Each phase ends with something the PO uses. A is the core and stays fixed afterwards; B and C are the first extensions and prove that adding one does not change the core. S1 gates only the product handler task of A; the Watcher, journal and Telegram tasks do not wait for it. Keep each task small (about 300 lines of change) with testable acceptance criteria.
+0, A, B, C, D, E. Each phase ends with something the PO uses. A is the core and stays fixed afterwards; B, C and D are extensions (a channel destination, handlers and actions, a Reasoner) and prove that adding one does not change the core. S1 gates only the product handler task of A; the Watcher, journal and Telegram tasks do not wait for it. Keep each task small (about 300 lines of change) with testable acceptance criteria.
 
 ## 2. Assessment
 
@@ -87,9 +88,10 @@ Building the Operator would be Shikiru's first real project, so expect Shikiru d
 ### 2.3 Staging
 
 1. **Relay first** (Phases 0 and A), built with Shikiru as in [§2.4](#24-dogfooding). It is useful whatever the escalation mix turns out to be, and it starts recording that mix.
-2. **Technical basics** (Phase B) next. Cheap, and retries and quota waits are expected to be common.
-3. **Gate before Phase C.** Look at the recorded escalations. Build the install path if missing tools appear among them; otherwise move C after whichever extension the measures point to.
-4. **Extensions** in the order the measures suggest: the most frequent kind of signal that still reaches the PO, and the most frequent kind of approval the PO gives unchanged.
+2. **Topics** (Phase B) right after the relay. The dogfooding pair already has two components, which is where one chat gets confusing. It changes no handler.
+3. **Infrastructure basics and review** (Phase C) next. Cheap, and retries, quota waits and pull-request links are expected to be common.
+4. **Gate before Phase D.** Look at the recorded escalations. Build the install path if missing tools appear among them; otherwise move D after whichever extension the measures point to.
+5. **Extensions** in the order the measures suggest: the most frequent kind of signal that still reaches the PO, and the most frequent kind of approval the PO gives unchanged.
 
 ### 2.4 Dogfooding
 
