@@ -59,7 +59,8 @@ classes, and do not chase a coverage number.
 
 ## Style
 
-Names come from the design's vocabulary: signal, category, extension, handler, action, outcome,
+Validated data (config, Shikiru payloads, Telegram payloads) is parsed by pydantic models with
+`extra="forbid"`; do not hand-write validators or table readers. Names come from the design's vocabulary: signal, category, extension, handler, action, outcome,
 Reasoner, Channel, journal, op. Functions are short. Comments explain why, never what; follow the
 comment rule. Docstrings only on public contracts. No code for a case the design does not describe.
 
