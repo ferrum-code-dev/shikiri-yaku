@@ -67,14 +67,14 @@ class MessageStore:
         notice_key: str | None,
         now: datetime,
     ) -> Inserted:
-        """Journal a message before it is sent; a notice key already used is "already known"."""
+        """Journal a message before it is sent; a notice already queued for that chat is known."""
         with self._database.transaction() as connection:
             created = connection.execute(
                 """
                 INSERT INTO messages (signal_number, direction, channel, chat, purpose, notice_key,
                                       delivery, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (notice_key) DO NOTHING
+                ON CONFLICT (notice_key, channel, chat) DO NOTHING
                 """,
                 (
                     signal_number,
@@ -90,7 +90,8 @@ class MessageStore:
             if created.rowcount == 1:
                 return Inserted(created.lastrowid or 0, is_new=True)
             row = connection.execute(
-                "SELECT id FROM messages WHERE notice_key = ?", (notice_key,)
+                "SELECT id FROM messages WHERE notice_key = ? AND channel = ? AND chat = ?",
+                (notice_key, channel, chat),
             ).fetchone()
             return Inserted(row["id"], is_new=False)
 

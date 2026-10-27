@@ -14,14 +14,17 @@ from shikiri_yaku.journal import (
     Inserted,
     JournalTooNewError,
     Lifecycle,
+    MessageStore,
     NewOp,
     NewSignal,
     OpState,
     OpStore,
+    Purpose,
     SignalState,
     SignalStore,
 )
 from shikiri_yaku.journal.database import LATEST_VERSION
+from shikiri_yaku.journal.migrations import MIGRATIONS
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -205,3 +208,44 @@ def test_process_killed_after_signal_insert_leaves_cursor_and_signals_unchanged(
     process.join()
     assert process.exitcode == 1
     _assert_batch_left_nothing(journal_path)
+
+
+def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
+    signal = SignalStore(memory).insert_if_absent(_signal("E1"), NOW).row_id
+    messages = MessageStore(memory)
+
+    def queue(chat: str) -> Inserted:
+        return messages.record_outbound(
+            signal_number=signal,
+            channel="telegram",
+            chat=chat,
+            purpose=Purpose.NOTICE,
+            notice_key="done:api:T-1",
+            now=NOW,
+        )
+
+    first, second = queue("owner-a"), queue("owner-b")
+    assert (first.is_new, second.is_new) == (True, True)
+    assert first.row_id != second.row_id
+    retry = queue("owner-b")
+    assert (retry.row_id, retry.is_new) == (second.row_id, False)
+    assert len(messages.unconfirmed()) == 2
+
+
+def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> None:
+    connection = memory.connection
+    for table in ("messages", "ops", "signals", "cursors"):
+        connection.execute(f"DROP TABLE {table}")
+    for statement in MIGRATIONS[0]:
+        connection.execute(statement)
+    connection.execute("PRAGMA user_version = 1")
+    connection.execute(
+        "INSERT INTO messages (direction, channel, chat, delivery, created_at, notice_key)"
+        " VALUES ('out', 'telegram', 'owner-a', 'sent', 'then', 'done:api:T-1')"
+    )
+    for number, statements in enumerate(MIGRATIONS[1:], start=2):
+        for statement in statements:
+            connection.execute(statement)
+        connection.execute(f"PRAGMA user_version = {number}")
+    rows = connection.execute("SELECT notice_key FROM messages").fetchall()
+    assert [row["notice_key"] for row in rows] == ["done:api:T-1"]

@@ -1,4 +1,8 @@
-"""The numbered migrations of the journal: migration N is MIGRATIONS[N - 1] and is never edited."""
+"""The numbered migrations of the journal: migration N is MIGRATIONS[N - 1] and is never edited.
+
+Migration 2 makes a notice unique per key and chat, not per key: the key names the notice and each
+owner's chat gets its own copy of it (design §7).
+"""
 
 from __future__ import annotations
 
@@ -74,5 +78,30 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             updated_at TEXT NOT NULL
         )
         """,
+    ),
+    (
+        """
+        CREATE TABLE messages_by_destination (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_number INTEGER REFERENCES signals (number),
+            direction TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            chat TEXT NOT NULL,
+            platform_message_id TEXT,
+            purpose TEXT,
+            notice_key TEXT,
+            delivery TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """,
+        "INSERT INTO messages_by_destination SELECT * FROM messages",
+        "DROP TABLE messages",
+        "ALTER TABLE messages_by_destination RENAME TO messages",
+        """
+        CREATE UNIQUE INDEX messages_platform
+            ON messages (channel, chat, platform_message_id, direction)
+            WHERE platform_message_id IS NOT NULL
+        """,
+        "CREATE UNIQUE INDEX messages_notice ON messages (notice_key, channel, chat)",
     ),
 )
