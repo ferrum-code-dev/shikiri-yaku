@@ -8,19 +8,22 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from shikiri_yaku.domain.classification import Category, Verdict
     from shikiri_yaku.domain.outcome import Outcome
-    from shikiri_yaku.domain.signal import Signal
+    from shikiri_yaku.domain.signal import Kind, Signal
 
 
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """Claims the signals whose reason key is in `reasons`; `None` claims every other signal.
+    """Claims escalations by `reasons` and the other signals by `kinds`.
 
+    `catch_all` claims every signal no other rule claims; it names nothing and comes last.
     A rule with `verdicts` applies only when the Reasoner's verdict on the signal is one of them.
-    Without a verdict function such a rule never applies.
+    Without an assessment function such a rule never applies.
     """
 
-    reasons: frozenset[str] | None
+    reasons: frozenset[str] = frozenset()
+    kinds: frozenset[Kind] = frozenset()
     verdicts: frozenset[Verdict] = frozenset()
+    catch_all: bool = False
 
 
 class Handler(Protocol):

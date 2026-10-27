@@ -17,6 +17,8 @@ class Kind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Signal:
+    """`reason` matters for escalations only; the other kinds are sorted by `kind` (design §5)."""
+
     project: str
     kind: Kind
     source_id: str
@@ -28,7 +30,3 @@ class Signal:
     @property
     def id(self) -> str:
         return f"{self.project}:{self.kind.value}:{self.source_id}"
-
-    @property
-    def reason_key(self) -> str:
-        return self.reason if self.kind is Kind.ESCALATION else self.kind.value

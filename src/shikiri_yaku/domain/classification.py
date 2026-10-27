@@ -25,14 +25,25 @@ class Source(StrEnum):
     REASONER = "reasoner"
 
 
-type VerdictFn = Callable[[Signal], Awaitable[Verdict]]
+@dataclass(frozen=True, slots=True)
+class Assessment:
+    """The Reasoner's answer for one signal: its verdict and the one-line suggestion for the PO."""
+
+    verdict: Verdict
+    note: str
+
+
+type AssessFn = Callable[[Signal], Awaitable[Assessment]]
 
 
 @dataclass(frozen=True, slots=True)
 class Classification:
+    """A signal's category and who set it; `note` and `verdict` are set only by the Reasoner."""
+
     category: Category
     source: Source
-    verdict: Verdict | None
+    note: str = ""
+    verdict: Verdict | None = None
 
 
 class Classifier(Protocol):
