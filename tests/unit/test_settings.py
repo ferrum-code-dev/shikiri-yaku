@@ -65,27 +65,85 @@ _API: Final = '[[components]]\nname = "api"\npath = "/src/shop-api"\n'
 _TELEGRAM: Final = "[channels.telegram]\nowners = [123456789]\n"
 _MINIMAL: Final = f"{_HEADER}\n{_API}\n{_TELEGRAM}"
 
+_LADDER: Final = 'ladder = ["claude:<model>:<effort>", "codex:<model>:<effort>"]'
+
+
+def _edit(original: str, replacement: str) -> str:
+    assert original in _SAMPLE
+    return _SAMPLE.replace(original, replacement, 1)
+
+
 _REJECTED: list[tuple[str, tuple[str, ...]]] = [
     (_MINIMAL.replace(_HEADER, ""), ("'product' is required",)),
     (_HEADER + _TELEGRAM, ("'components' is required",)),
-    (_HEADER + _API, ("'channels' is required",)),
+    (_HEADER + _API, ("'channels.telegram' is required",)),
     (_HEADER + _API + "[channels.telegram]\n", ("'channels.telegram.owners' is required",)),
     (_MINIMAL + "\n[surprise]\nvalue = 1\n", ("'surprise' is not a known key",)),
     (
         _MINIMAL + "\n[operator]\nliveness_intervall_s = 30\n",
         ("'operator.liveness_intervall_s' is not a known key",),
     ),
+    (_MINIMAL + "\n[telegram]\nowners = [123456789]\n", ("'telegram' is not a known key",)),
     (_MINIMAL + "\n" + _API, ("'components[1].name'", "'api'")),
     (
         _HEADER + '[[components]]\nname = "api"\npath = "src/shop-api"\n' + _TELEGRAM,
-        ("'components[0].path' must be an absolute path",),
+        ("'components[0].path' is invalid: must be an absolute path",),
     ),
+    (_edit(_LADDER + "\n", ""), ("'reasoner.ladder' is required",)),
     (
         _HEADER
         + '[[components]]\nname = "api"\npath = "/src/api"\nhost = "build-box"\n'
         + _TELEGRAM,
         ("'components[0].host'", "not supported yet"),
     ),
+]
+
+_BAD_VALUES: list[tuple[str, str]] = [
+    ("product", _edit('product = "shop"', 'product = ""')),
+    ("product", _edit('product = "shop"', 'product = "sh/op"')),
+    ("product", _edit('product = "shop"', 'product = "sh.op"')),
+    ("product", _edit('product = "shop"', 'product = "sh:op"')),
+    ("product", _edit('product = "shop"', 'product = "sh op"')),
+    ("product", _edit('product = "shop"', 'product = "-shop"')),
+    ("components[1].name", _edit('name = "web"', 'name = "we/b"')),
+    ("channels.telegram.owners", _edit("owners = [123456789]", "owners = []")),
+    ("reasoner.ladder", _edit(_LADDER, "ladder = []")),
+    ("operator.liveness_interval_s", _edit("liveness_interval_s = 60", "liveness_interval_s = 0")),
+    ("operator.stop_grace_min", _edit("stop_grace_min = 2", "stop_grace_min = -1")),
+    ("operator.lost_command_min", _edit("lost_command_min = 2", "lost_command_min = 0")),
+    (
+        "operator.link_unreachable_min",
+        _edit("link_unreachable_min = 10", "link_unreachable_min = 0"),
+    ),
+    (
+        "handlers.infrastructure.command_timeout_min",
+        _edit("command_timeout_min = 10", "command_timeout_min = 0"),
+    ),
+    (
+        "handlers.infrastructure.quota_wait_max_h",
+        _edit("quota_wait_max_h = 24", "quota_wait_max_h = 0"),
+    ),
+    (
+        "handlers.infrastructure.retry_budget_per_day",
+        _edit("retry_budget_per_day = 1", "retry_budget_per_day = 0"),
+    ),
+    (
+        "handlers.infrastructure.restart_budget_per_hour",
+        _edit("restart_budget_per_hour = 1", "restart_budget_per_hour = 0"),
+    ),
+    (
+        "handlers.infrastructure.approval_expiry_h",
+        _edit("approval_expiry_h = 24", "approval_expiry_h = 0"),
+    ),
+    ("handlers.product.reminder_first_h", _edit("reminder_first_h = 4", "reminder_first_h = 0")),
+    (
+        "handlers.product.reminder_repeat_h",
+        _edit("reminder_repeat_h = 24", "reminder_repeat_h = 0"),
+    ),
+    ("reasoner.timeout_s", _edit("timeout_s = 120", "timeout_s = 0")),
+    ("reasoner.timeout_s", _edit("timeout_s = 120", "timeout_s = 1.5")),
+    ("reasoner.cooldown_min", _edit("cooldown_min = 5", "cooldown_min = 0")),
+    ("reasoner.max_parallel", _edit("max_parallel = 2", "max_parallel = 0")),
 ]
 
 
@@ -148,3 +206,22 @@ def test_a_broken_file_is_rejected_with_the_key_at_fault(
 
     for fragment in expected:
         assert fragment in str(raised.value)
+
+
+@pytest.mark.parametrize(("key", "config"), _BAD_VALUES)
+def test_a_value_outside_its_rule_is_rejected_with_its_key(
+    tmp_path: Path, key: str, config: str
+) -> None:
+    with pytest.raises(SettingsError) as raised:
+        load_settings(_write(tmp_path, config))
+
+    assert f"'{key}'" in str(raised.value)
+
+
+@pytest.mark.parametrize("name", ["shop", "Shop-2_b", "2fast"])
+def test_a_name_of_letters_digits_hyphens_and_underscores_is_accepted(
+    tmp_path: Path, name: str
+) -> None:
+    settings = load_settings(_write(tmp_path, _edit('product = "shop"', f'product = "{name}"')))
+
+    assert settings.product == name

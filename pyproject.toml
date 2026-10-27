@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "An escalation router between a Product Owner and Shikiru."
 readme = "README.md"
 requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.13,<2.14",
+]
 
 [project.scripts]
 shikiri-yaku = "shikiri_yaku.cli:main"
