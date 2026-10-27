@@ -11,7 +11,7 @@ merged and `uv run poe check` passes.
 
 - [x] A1. Settings and instance directory
 - [x] A2. Journal
-- [ ] A3. Signals, classification and extensions
+- [x] A3. Signals, classification and extensions
 - [ ] A4. Ports, composition root and CLI
 - [ ] A5. Shikiru MCP adapter
 - [ ] A6. Event source
