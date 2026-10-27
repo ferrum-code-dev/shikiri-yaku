@@ -90,7 +90,9 @@ below covers the part that lands first.
 
 Acceptance:
 * `run` with a valid config starts and stops on SIGTERM with exit code 0.
-* `doctor` reports each failed check by name and exits non-zero; passes on a valid instance.
+* `doctor` reports each failed check by name and exits non-zero; passes on a valid instance. A path
+  of the wrong type (a directory where a file belongs, or the reverse) or one that cannot be read
+  fails its own check and does not stop the others.
 * `Clock` offers `now()` and `sleep(seconds)`; the gate bans `time.*`, `asyncio.sleep` and
   `datetime.now` elsewhere. The `CommandRunner` adapter and its subprocess exemption come with the
   Executor in phase D.

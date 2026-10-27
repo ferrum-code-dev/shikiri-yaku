@@ -19,7 +19,11 @@ LOCK_FILE_NAME: Final = "instance.lock"
 JOURNAL_FILE_NAME: Final = "journal.db"
 
 
-class InstanceLockedError(Exception):
+class InstanceLockError(Exception):
+    """The instance lock cannot be taken; the message says why."""
+
+
+class InstanceLockedError(InstanceLockError):
     """Another process holds the instance lock, so this instance is already running."""
 
 
@@ -33,7 +37,12 @@ def instance_dir(product: str, home: Path | None = None) -> Path:
 def instance_lock(directory: Path) -> Generator[None]:
     """Hold the instance lock of a directory until the block ends; a second holder is refused."""
     lock_path = directory / LOCK_FILE_NAME
-    with lock_path.open("a", encoding="utf-8") as handle:
+    try:
+        handle = lock_path.open("a", encoding="utf-8")
+    except OSError as error:
+        message = f"cannot open {lock_path}: {error}"
+        raise InstanceLockError(message) from error
+    with handle:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:

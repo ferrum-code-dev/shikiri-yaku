@@ -72,6 +72,43 @@ def _journal_not_a_database(home: Path) -> None:
     (_directory(home) / JOURNAL_FILE_NAME).write_bytes(b"not a journal" * 100)
 
 
+def _journal_becomes_directory(home: Path) -> None:
+    (_directory(home) / JOURNAL_FILE_NAME).mkdir()
+
+
+def _config_becomes_directory(home: Path) -> None:
+    config = _directory(home) / "config.toml"
+    config.unlink()
+    config.mkdir()
+
+
+def _config_not_utf8(home: Path) -> None:
+    (_directory(home) / "config.toml").write_bytes(b"\xff" * 10)
+
+
+def _token_becomes_directory(home: Path) -> None:
+    token = _directory(home) / "secrets" / "telegram.token"
+    token.unlink()
+    token.mkdir()
+    token.chmod(0o600)
+
+
+def _secrets_become_file(home: Path) -> None:
+    secrets = _directory(home) / "secrets"
+    (secrets / "telegram.token").unlink()
+    secrets.rmdir()
+    secrets.write_text("", encoding="utf-8")
+
+
+def _lock_becomes_directory(home: Path) -> None:
+    (_directory(home) / "instance.lock").mkdir()
+
+
+def _token_path_and_lock_broken(home: Path) -> None:
+    _secrets_become_file(home)
+    _lock_becomes_directory(home)
+
+
 def _run_doctor(home: Path) -> int:
     return main(["doctor", _PRODUCT, "--home", str(home)])
 
@@ -87,10 +124,17 @@ def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFi
     ("breakage", "failed"),
     [
         (_remove_config, {"config"}),
+        (_config_becomes_directory, {"config"}),
+        (_config_not_utf8, {"config"}),
         (_remove_component, {"components"}),
         (_loosen_token, {"token file"}),
+        (_token_becomes_directory, {"token file"}),
+        (_secrets_become_file, {"token file"}),
+        (_lock_becomes_directory, {"instance lock"}),
+        (_token_path_and_lock_broken, {"token file", "instance lock"}),
         (_journal_too_new, {"journal"}),
         (_journal_not_a_database, {"journal"}),
+        (_journal_becomes_directory, {"journal"}),
     ],
 )
 def test_doctor_names_each_failed_check_and_exits_non_zero(
@@ -118,6 +162,13 @@ def test_doctor_names_the_instance_lock_while_another_holder_runs(
 def test_run_is_refused_while_another_holder_has_the_instance_lock(tmp_path: Path) -> None:
     with instance_lock(_instance(tmp_path)):
         assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
+
+
+def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> None:
+    _instance(tmp_path)
+    _lock_becomes_directory(tmp_path)
+
+    assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
 
 
 def _exit_with(argv: list[str]) -> None:

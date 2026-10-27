@@ -182,6 +182,9 @@ def load_settings(instance_dir: Path) -> Settings:
     except FileNotFoundError as error:
         message = f"no {CONFIG_FILE_NAME} in {instance_dir}"
         raise SettingsError(message) from error
+    except (OSError, UnicodeDecodeError) as error:
+        message = f"cannot read {config}: {error}"
+        raise SettingsError(message) from error
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:

@@ -9,7 +9,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.instance import InstanceLockedError, instance_dir, instance_lock
+from shikiri_yaku.instance import InstanceLockError, instance_dir, instance_lock
 from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import SettingsError, load_settings
 
@@ -60,7 +60,7 @@ def _run(directory: Path, compose: Compose) -> int:
                 asyncio.run(_serve())
             finally:
                 composition.close()
-    except (SettingsError, InstanceLockedError, CompositionError) as error:
+    except (SettingsError, InstanceLockError, CompositionError) as error:
         sys.stderr.write(f"{error}\n")
         return 1
     return 0
@@ -97,16 +97,30 @@ def _report(results: Sequence[tuple[str, str | None]]) -> int:
 
 def _components_problem(settings: Settings) -> str | None:
     missing = [
-        str(component.path) for component in settings.components if not component.path.is_dir()
+        str(component.path)
+        for component in settings.components
+        if not _is_directory(component.path)
     ]
     return f"not a directory: {', '.join(missing)}" if missing else None
 
 
+def _is_directory(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
 def _token_problem(token: Path) -> str | None:
     try:
-        mode = stat.S_IMODE(token.stat().st_mode)
+        status = token.stat()
     except FileNotFoundError:
         return f"{token} does not exist"
+    except OSError as error:
+        return f"{token} cannot be read: {error}"
+    if not stat.S_ISREG(status.st_mode):
+        return f"{token} is not a regular file"
+    mode = stat.S_IMODE(status.st_mode)
     return None if mode == TOKEN_MODE else f"{token} has mode {mode:04o}, must be {TOKEN_MODE:04o}"
 
 
@@ -114,7 +128,7 @@ def _lock_problem(directory: Path) -> str | None:
     try:
         with instance_lock(directory):
             return None
-    except InstanceLockedError as error:
+    except InstanceLockError as error:
         return str(error)
 
 
