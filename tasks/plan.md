@@ -235,5 +235,9 @@ Acceptance:
 * **C Infrastructure basics and review:** retry, quota wait, engine restart, review handler, notice
   handler.
 * **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
-  recipes, approval flow, Executor, restart handling.
+  recipes, approval flow, Executor, restart handling. The `assess` function given to
+  `RuleClassifier` never raises: a Reasoner failure becomes `Assessment(OTHER, "Reasoner failed: …")`,
+  which the classifier already sends to `product` with that note. `RuleClassifier` rejects two rules
+  claiming one reason; relax that to (reason, verdict) pairs when a second category shares
+  `decision_required`.
 * **E Hardening:** drills, contract-test script, crash-point tests, security review.
