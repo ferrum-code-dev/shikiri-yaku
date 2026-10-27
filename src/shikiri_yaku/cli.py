@@ -7,14 +7,14 @@ import stat
 import sys
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.bootstrap import CompositionError, compose
 from shikiri_yaku.instance import InstanceLockedError, instance_dir, instance_lock
+from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import SettingsError, load_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from shikiri_yaku.settings import Settings
 
@@ -22,7 +22,17 @@ _PROGRAM = "shikiri-yaku"
 TOKEN_MODE: Final = 0o600
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+class Lifecycle(Protocol):
+    """A composed instance, as the command line sees it: it is closed when the command ends."""
+
+    def close(self) -> None: ...
+
+
+type Compose = Callable[[Settings, Path], Lifecycle]
+
+
+def main(argv: Sequence[str] | None, compose: Compose) -> int:
+    """Run one command. The caller passes the composition, so this module builds nothing."""
     parser = argparse.ArgumentParser(prog=_PROGRAM)
     parser.add_argument("--version", action="version", version=f"%(prog)s {version(_PROGRAM)}")
     commands = parser.add_subparsers(required=True)
@@ -33,7 +43,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _add_product(doctor)
     doctor.set_defaults(command=_doctor)
     arguments = parser.parse_args(argv)
-    return arguments.command(instance_dir(arguments.product, arguments.home))
+    return arguments.command(instance_dir(arguments.product, arguments.home), compose)
 
 
 def _add_product(parser: argparse.ArgumentParser) -> None:
@@ -41,7 +51,7 @@ def _add_product(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--home", type=Path, help="parent of the instance directory")
 
 
-def _run(directory: Path) -> int:
+def _run(directory: Path, compose: Compose) -> int:
     try:
         settings = load_settings(directory)
         with instance_lock(directory):
@@ -64,7 +74,7 @@ async def _serve() -> None:
     await stop.wait()
 
 
-def _doctor(directory: Path) -> int:
+def _doctor(directory: Path, compose: Compose) -> int:
     try:
         settings = load_settings(directory)
     except SettingsError as error:
@@ -74,7 +84,7 @@ def _doctor(directory: Path) -> int:
             ("components", _components_problem(settings)),
             ("token file", _token_problem(settings.telegram.token_file)),
             ("instance lock", _lock_problem(directory)),
-            ("journal", _journal_problem(settings, directory)),
+            ("journal", _journal_problem(settings, directory, compose)),
         ]
     )
 
@@ -108,7 +118,7 @@ def _lock_problem(directory: Path) -> str | None:
         return str(error)
 
 
-def _journal_problem(settings: Settings, directory: Path) -> str | None:
+def _journal_problem(settings: Settings, directory: Path, compose: Compose) -> str | None:
     try:
         composition = compose(settings, directory)
     except CompositionError as error:

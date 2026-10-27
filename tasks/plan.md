@@ -79,19 +79,31 @@ Acceptance:
 
 §12, §3.2. `ports.py` with `ShikiruClient`, `Channel`, `Reasoner`, `Classifier`, `CommandRunner` and
 `Clock` protocols and the typed exceptions that cross them. `bootstrap.py` builds the object graph
-from settings (adapters are fakes or not-yet-implemented placeholders that raise a clear error).
-CLI: `run <product>` (starts the asyncio loop, takes the instance lock, stops cleanly on SIGTERM),
-`doctor <product>` (validates config, paths, token file mode `0600`, lock, journal opens), and
-`install-service <product>` that writes a launchd plist (macOS) or systemd user unit (Linux)
-named `shikiri-yaku-<product>` with the PATH of the user's login shell.
+from settings and is the console entry point: `main` hands the command line its composition, so the
+command line never imports bootstrap. Only existing adapters are wired (the journal and the system
+clock); no placeholder adapters are added.
+CLI: `run <product>` (starts the asyncio loop, takes the instance lock, stops cleanly on SIGTERM) and
+`doctor <product>` (validates config, paths, token file mode `0600`, lock, journal opens).
+
+Split (decided): `install-service` is task A4b. A4 stays unchecked until A4b is done; the acceptance
+below covers the part that lands first.
 
 Acceptance:
 * `run` with a valid config starts and stops on SIGTERM with exit code 0.
 * `doctor` reports each failed check by name and exits non-zero; passes on a valid instance.
+* `Clock` offers `now()` and `sleep(seconds)`; the gate bans `time.*`, `asyncio.sleep` and
+  `datetime.now` elsewhere. The `CommandRunner` adapter and its subprocess exemption come with the
+  Executor in phase D.
+
+### A4b. Install service (normal)
+
+§3.1, §12. `install-service <product>` writes a launchd plist (macOS) or systemd user unit (Linux)
+named `shikiri-yaku-<product>`, with the PATH of the user's login shell and the exact `run` command.
+
+Acceptance:
 * The generated unit/plist contains the login-shell PATH and the exact `run` command (golden file
   test on content that matters, not on whitespace).
-* `Clock` offers `now()` and `sleep(seconds)`; the gate bans `time.*`, `asyncio.sleep` and `datetime.now` elsewhere. The `CommandRunner`
-  adapter module is the only one exempt from the subprocess ban (a per-file ignore in `pyproject.toml`).
+* Both renderers are covered by tests that never write to the real launchd or systemd directories.
 
 ### A5. Shikiru MCP adapter (high)
 
@@ -107,6 +119,8 @@ Acceptance:
   fake agent: events arrive, an escalation has `question`, `agent_options` and `resolutions`, a
   resolve is acknowledged, a second resolve is `rejected`, `start` brings `engine_up`. Record its output in the task report.
 * Unit tests with a fake MCP session cover reconnect backoff and the mapping of each exception.
+* `doctor` gets one MCP probe per component (design §3.2): the link comes up and `status` answers.
+  The probe is registered in `bootstrap.py` with this adapter. It is not claimed by A4.
 
 ### A6. Event source (high)
 
@@ -235,7 +249,9 @@ Acceptance:
 * **C Infrastructure basics and review:** retry, quota wait, engine restart, review handler, notice
   handler.
 * **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
-  recipes, approval flow, Executor, restart handling. The `assess` function given to
+  recipes, approval flow, Executor (with the `CommandRunner` adapter and its subprocess exemption in
+  `pyproject.toml`), restart handling. `doctor` gets the Reasoner CLI probe (design §3.2) with the
+  Reasoner adapter. The `assess` function given to
   `RuleClassifier` never raises: a Reasoner failure becomes `Assessment(OTHER, "Reasoner failed: …")`,
   which the classifier already sends to `product` with that note. `RuleClassifier` rejects two rules
   claiming one reason; relax that to (reason, verdict) pairs when a second category shares

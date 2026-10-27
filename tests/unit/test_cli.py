@@ -1,4 +1,4 @@
-"""Unit tests for the command line: run and doctor (design §3.1, §10)."""
+"""Integration tests of run and doctor through bootstrap.main (design §3.1, §10)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 
-from shikiri_yaku.cli import main
+from shikiri_yaku.bootstrap import main
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION

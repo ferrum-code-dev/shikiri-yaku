@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-shikiri-yaku = "shikiri_yaku.cli:main"
+shikiri-yaku = "shikiri_yaku.bootstrap:main"
 
 [build-system]
 requires = ["hatchling"]

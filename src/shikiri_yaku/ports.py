@@ -27,6 +27,7 @@ __all__ = [
     "CommandError",
     "CommandResult",
     "CommandRunner",
+    "CompositionError",
     "EngineStatus",
     "Reasoner",
     "ReasonerError",
@@ -125,3 +126,7 @@ class ReasonerError(Exception):
 
 class CommandError(Exception):
     """A host command could not be run to its end: it did not start, or it timed out."""
+
+
+class CompositionError(Exception):
+    """An instance cannot be wired, because its journal cannot be opened or used at startup."""
