@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Annotated, Final, Self
 
 from pydantic import (
     AfterValidator,
-    AliasPath,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -143,17 +142,23 @@ class ReasonerSettings(_FrozenModel):
     max_parallel: PositiveInt = REASONER_MAX_PARALLEL
 
 
+class ChannelsSettings(_FrozenModel):
+    telegram: TelegramSettings
+
+
 class Settings(_FrozenModel):
     """The whole config.toml; `telegram` is read from `[channels.telegram]`."""
 
-    model_config = ConfigDict(validate_by_name=True)
-
     product: Name
     components: Annotated[tuple[Component, ...], _AT_LEAST_ONE]
-    telegram: TelegramSettings = Field(validation_alias=AliasPath("channels", "telegram"))
+    channels: ChannelsSettings
     operator: OperatorSettings = Field(default_factory=OperatorSettings)
     handlers: HandlersSettings = Field(default_factory=HandlersSettings)
     reasoner: ReasonerSettings | None = None
+
+    @property
+    def telegram(self) -> TelegramSettings:
+        return self.channels.telegram
 
     @model_validator(mode="after")
     def _names_are_unique(self) -> Self:
@@ -183,7 +188,7 @@ def load_settings(instance_dir: Path) -> Settings:
         message = f"{config} is not valid TOML: {error}"
         raise SettingsError(message) from error
     try:
-        return Settings.model_validate(data, by_name=False, context={"instance_dir": instance_dir})
+        return Settings.model_validate(data, context={"instance_dir": instance_dir})
     except ValidationError as error:
         problems = [_translate(problem) for problem in error.errors()]
         raise SettingsError("\n".join(problems)) from error

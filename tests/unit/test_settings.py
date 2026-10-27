@@ -8,6 +8,7 @@ from typing import Final
 import pytest
 
 from shikiri_yaku.settings import (
+    ChannelsSettings,
     Component,
     HandlersSettings,
     InfrastructureSettings,
@@ -76,7 +77,7 @@ def _edit(original: str, replacement: str) -> str:
 _REJECTED: list[tuple[str, tuple[str, ...]]] = [
     (_MINIMAL.replace(_HEADER, ""), ("'product' is required",)),
     (_HEADER + _TELEGRAM, ("'components' is required",)),
-    (_HEADER + _API, ("'channels.telegram' is required",)),
+    (_HEADER + _API, ("'channels' is required",)),
     (_HEADER + _API + "[channels.telegram]\n", ("'channels.telegram.owners' is required",)),
     (_MINIMAL + "\n[surprise]\nvalue = 1\n", ("'surprise' is not a known key",)),
     (
@@ -84,6 +85,18 @@ _REJECTED: list[tuple[str, tuple[str, ...]]] = [
         ("'operator.liveness_intervall_s' is not a known key",),
     ),
     (_MINIMAL + "\n[telegram]\nowners = [123456789]\n", ("'telegram' is not a known key",)),
+    (
+        _MINIMAL + '\n[channels.email]\naddress = "po@example.invalid"\n',
+        ("'channels.email' is not a known key",),
+    ),
+    (
+        _HEADER + _API + "[channels]\nowners = [999]\n" + _TELEGRAM,
+        ("'channels.owners' is not a known key",),
+    ),
+    (
+        _HEADER + _API + "[channels.telegram]\nowners = [123456789]\ntoken = 1\n",
+        ("'channels.telegram.token' is not a known key",),
+    ),
     (_MINIMAL + "\n" + _API, ("'components[1].name'", "'api'")),
     (
         _HEADER + '[[components]]\nname = "api"\npath = "src/shop-api"\n' + _TELEGRAM,
@@ -162,8 +175,10 @@ def test_the_design_sample_loads_with_its_documented_values(tmp_path: Path) -> N
             Component(name="api", path=Path.home() / "src" / "shop-api"),
             Component(name="web", path=Path.home() / "src" / "shop-web"),
         ),
-        telegram=TelegramSettings(
-            token_file=tmp_path / "secrets" / "telegram.token", owners=(123456789,)
+        channels=ChannelsSettings(
+            telegram=TelegramSettings(
+                token_file=tmp_path / "secrets" / "telegram.token", owners=(123456789,)
+            )
         ),
         operator=OperatorSettings(
             liveness_interval_s=60, stop_grace_min=2, lost_command_min=2, link_unreachable_min=10
