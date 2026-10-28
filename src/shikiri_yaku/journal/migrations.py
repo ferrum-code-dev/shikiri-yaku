@@ -2,6 +2,8 @@
 
 Migration 2 makes a notice unique per key and chat, not per key: the key names the notice and each
 owner's chat gets its own copy of it (design §7).
+Migration 3 keeps the time of the newest lifecycle event: the liveness rule needs to know whether
+a clean stop happened before this run of the Operator (design §4).
 """
 
 from __future__ import annotations
@@ -103,5 +105,12 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             WHERE platform_message_id IS NOT NULL
         """,
         "CREATE UNIQUE INDEX messages_notice ON messages (notice_key, channel, chat)",
+    ),
+    (
+        "ALTER TABLE cursors ADD COLUMN lifecycle_at TEXT",
+        """
+        UPDATE cursors SET lifecycle_at = '1970-01-01T00:00:00+00:00'
+        WHERE lifecycle_event_id IS NOT NULL
+        """,
     ),
 )

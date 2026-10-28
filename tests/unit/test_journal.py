@@ -176,7 +176,7 @@ def test_op_is_approved_by_exactly_one_of_two_concurrent_callers(tmp_path: Path)
 def test_batch_commits_signals_and_cursor_together(journal_path: Path) -> None:
     database = Database.open(journal_path)
     cursors = CursorStore(database, SignalStore(database))
-    stop = Lifecycle(event_id=18, kind="engine_stopped", has_reason=False)
+    stop = Lifecycle(event_id=18, kind="engine_stopped", has_reason=False, at=NOW)
     cursors.record_batch(PROJECT, [_signal("E1")], 20, stop, NOW)
     cursors.record_batch(PROJECT, [], 25, None, NOW)
     cursor = cursors.get(PROJECT)

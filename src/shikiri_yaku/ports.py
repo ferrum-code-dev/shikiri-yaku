@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from shikiri_yaku.domain.classification import Assessment
-    from shikiri_yaku.domain.signal import Closing, Lifecycle, Signal
+    from shikiri_yaku.domain.signal import Closing, Lifecycle, LifecycleState, Signal
 
 __all__ = [
     "Ack",
@@ -40,6 +40,8 @@ __all__ = [
     "EscalationView",
     "EventJournal",
     "EventKinds",
+    "LifecycleJournal",
+    "LivenessJournal",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -51,6 +53,7 @@ __all__ = [
     "ShikiruProtocolError",
     "ShikiruRejectedError",
     "ShikiruTask",
+    "SignalLog",
     "TaskDetail",
     "TaskStatus",
 ]
@@ -249,6 +252,30 @@ class EventJournal(Protocol):
     ) -> None:
         """Apply the changes in order, move the cursor, save the respected stop; all or nothing."""
         ...
+
+
+class LifecycleJournal(Protocol):
+    """What the liveness source reads and saves in the journal (design §4, §9)."""
+
+    def state(self, project: str) -> LifecycleState | None:
+        """Return the project's cursor facts, or None until its first sync is recorded."""
+        ...
+
+    def respect_stop(self, project: str, event_id: int) -> None:
+        """Remember a clean stop that was respected, so it never triggers a restart."""
+        ...
+
+
+class SignalLog(Protocol):
+    """Where a source opens and closes its signals; opening a known id changes nothing."""
+
+    def open(self, signal: Signal, now: datetime) -> None: ...
+
+    def close(self, closing: Closing, now: datetime) -> None: ...
+
+
+class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
+    """Everything the liveness source needs of the journal."""
 
 
 class Channel(Protocol):

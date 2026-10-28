@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 class Kind(StrEnum):
@@ -39,6 +43,16 @@ class Lifecycle:
     event_id: int
     kind: str
     has_reason: bool
+    at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleState:
+    """What the liveness rule reads about a project: where its events end and its newest stop."""
+
+    last_event_id: int
+    lifecycle: Lifecycle | None
+    respected_stop_id: int | None
 
 
 @dataclass(frozen=True, slots=True)

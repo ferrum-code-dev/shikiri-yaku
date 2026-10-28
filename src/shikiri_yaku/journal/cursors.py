@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.signal import Lifecycle
+from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.signals import NewSignal
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import datetime
 
     from shikiri_yaku.journal.database import Database, Inserted
     from shikiri_yaku.journal.signals import Change, SignalStore
@@ -39,6 +40,7 @@ class CursorStore:
                 row["lifecycle_event_id"],
                 row["lifecycle_kind"],
                 has_reason=bool(row["lifecycle_has_reason"]),
+                at=datetime.fromisoformat(row["lifecycle_at"]),
             )
         return Cursor(project, row["last_event_id"], lifecycle, row["respected_stop_id"])
 
@@ -69,14 +71,15 @@ class CursorStore:
             connection.execute(
                 """
                 INSERT INTO cursors (project, last_event_id, lifecycle_event_id, lifecycle_kind,
-                                     lifecycle_has_reason)
-                VALUES (:project, :last_event_id, :event_id, :kind, :has_reason)
+                                     lifecycle_has_reason, lifecycle_at)
+                VALUES (:project, :last_event_id, :event_id, :kind, :has_reason, :at)
                 ON CONFLICT (project) DO UPDATE SET
                     last_event_id = excluded.last_event_id,
                     lifecycle_event_id = COALESCE(excluded.lifecycle_event_id, lifecycle_event_id),
                     lifecycle_kind = COALESCE(excluded.lifecycle_kind, lifecycle_kind),
                     lifecycle_has_reason =
-                        COALESCE(excluded.lifecycle_has_reason, lifecycle_has_reason)
+                        COALESCE(excluded.lifecycle_has_reason, lifecycle_has_reason),
+                    lifecycle_at = COALESCE(excluded.lifecycle_at, lifecycle_at)
                 """,
                 {
                     "project": project,
@@ -84,6 +87,7 @@ class CursorStore:
                     "event_id": None if lifecycle is None else lifecycle.event_id,
                     "kind": None if lifecycle is None else lifecycle.kind,
                     "has_reason": None if lifecycle is None else int(lifecycle.has_reason),
+                    "at": None if lifecycle is None else stamp(lifecycle.at),
                 },
             )
             if respected_stop_id is not None:

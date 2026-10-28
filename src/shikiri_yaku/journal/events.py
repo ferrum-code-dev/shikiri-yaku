@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.signal import Closing, Signal
+from shikiri_yaku.domain.signal import Closing, LifecycleState, Signal
 from shikiri_yaku.journal.signals import NewSignal
 
 if TYPE_CHECKING:
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.signal import Lifecycle
     from shikiri_yaku.journal.cursors import CursorStore
-    from shikiri_yaku.journal.signals import Change
+    from shikiri_yaku.journal.signals import Change, SignalStore
 
 
 class JournalEvents:
@@ -41,8 +41,10 @@ class JournalEvents:
 
 
 def _stored(change: Signal | Closing) -> Change:
-    if isinstance(change, Closing):
-        return change
+    return change if isinstance(change, Closing) else _stored_signal(change)
+
+
+def _stored_signal(change: Signal) -> NewSignal:
     return NewSignal(
         id=change.id,
         project=change.project,
@@ -52,3 +54,26 @@ def _stored(change: Signal | Closing) -> Change:
         task_id=change.task_id,
         escalation_id=change.escalation_id,
     )
+
+
+class JournalSources:
+    """The journal as the liveness and health sources see it."""
+
+    def __init__(self, cursors: CursorStore, signals: SignalStore) -> None:
+        self._cursors = cursors
+        self._signals = signals
+
+    def state(self, project: str) -> LifecycleState | None:
+        cursor = self._cursors.get(project)
+        if cursor is None:
+            return None
+        return LifecycleState(cursor.last_event_id, cursor.lifecycle, cursor.respected_stop_id)
+
+    def respect_stop(self, project: str, event_id: int) -> None:
+        self._cursors.respect_stop(project, event_id)
+
+    def open(self, signal: Signal, now: datetime) -> None:
+        self._signals.insert_if_absent(_stored_signal(signal), now)
+
+    def close(self, closing: Closing, now: datetime) -> None:
+        self._signals.close(closing, now)

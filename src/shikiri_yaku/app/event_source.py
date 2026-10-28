@@ -184,5 +184,7 @@ def _lifecycle(events: list[ShikiruEvent]) -> Lifecycle | None:
     """Return the newest start or stop in the batch."""
     for event in reversed(events):
         if event.kind in {EventKinds.ENGINE_STARTED, EventKinds.ENGINE_STOPPED}:
-            return Lifecycle(event.id, event.kind, has_reason=STOP_REASON_KEY in event.data)
+            return Lifecycle(
+                event.id, event.kind, has_reason=STOP_REASON_KEY in event.data, at=event.ts
+            )
     return None
