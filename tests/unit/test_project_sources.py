@@ -42,6 +42,7 @@ class _Session:
         self.clean_stop = clean_stop
         self.stop_observed = False
         self.status_times: list[datetime] = []
+        self.successful_status_calls = 0
         self.finished = asyncio.Event()
         self.active = False
         self.unreachable_until = START
@@ -49,6 +50,8 @@ class _Session:
         self.failed = False
         self.poison_until = START
         self.open_health_on_good_batch: list[str] | None = None
+        self.status_unreachable_until = START
+        self.open_health_on_status_recovery: list[str] | None = None
 
     @asynccontextmanager
     async def connect(self) -> AsyncGenerator[ToolSession]:
@@ -76,8 +79,17 @@ class _Session:
         else:
             assert name == "status"
             self.status_times.append(self.clock.now())
+            if self.clock.now() < self.status_unreachable_until:
+                message = "status link lost"
+                raise ConnectionError(message)
+            if (
+                self.status_unreachable_until > START
+                and self.open_health_on_status_recovery is None
+            ):
+                self.open_health_on_status_recovery = self.open_health()
             self.stop_observed = self.clock.now() >= START + timedelta(minutes=1)
-            if len(self.status_times) >= 5:
+            self.successful_status_calls += 1
+            if self.successful_status_calls >= 5:
                 self.finished.set()
             return CallToolResult(
                 content=[],
@@ -213,5 +225,25 @@ def test_runtime_malformed_event_opens_one_health_signal_and_blocks_liveness_unt
             "api:health:events:2026-10-28T09:00:00.000000Z"
         ]
         assert min(session.status_times) >= session.poison_until
+    finally:
+        database.close()
+
+
+def test_runtime_status_link_outage_survives_good_event_polls_and_recovers(
+    tmp_path: Path,
+) -> None:
+    database = Database.open(":memory:")
+    try:
+        session = _Session(_Clock(), database, clean_stop=False)
+        session.status_unreachable_until = START + timedelta(minutes=12)
+        asyncio.run(_run(_settings(tmp_path), database, session))
+        rows = database.connection.execute("SELECT id, state FROM signals WHERE kind = 'health'")
+        assert [tuple(row) for row in rows] == [("api:health:link:2026-10-28T09:00Z", "closed")]
+        assert session.open_health_on_status_recovery == ["api:health:link:2026-10-28T09:00Z"]
+        assert len(session.status_times) >= 13
+        assert session.status_times[-1] >= session.status_unreachable_until
+        cursor = CursorStore(database, SignalStore(database)).get("api")
+        assert cursor is not None
+        assert cursor.last_event_id == 1
     finally:
         database.close()

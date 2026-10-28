@@ -55,6 +55,7 @@ class ProjectSources:
                 if not await self._guarded(LIVENESS_SCOPE, self._liveness.check()):
                     continue
                 due = self._clock.now() + self._interval
+            self._health.link_recovered()
 
     async def _guarded(self, scope: str, work: Awaitable[object]) -> bool:
         try:
@@ -62,10 +63,8 @@ class ProjectSources:
         except ShikiruLinkDownError:
             self._health.link_failed()
         except ShikiruError as error:
-            self._health.link_recovered()
             self._health.source_failed(scope, error)
         else:
-            self._health.link_recovered()
             self._health.source_recovered(scope)
             return True
         await self._clock.sleep(self._retry_s)
