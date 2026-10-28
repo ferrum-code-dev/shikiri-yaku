@@ -167,9 +167,21 @@ records its batch before it respects a clean stop.
 Acceptance:
 * After a simulated crash between the signal insert and the cursor commit, a restart yields exactly
   one signal per source event.
-* First sync of a project with history produces signals only for currently open escalations.
+* First sync of a project with history produces signals only for currently open escalations (open pull requests follow in A6b).
 * `engine_fault` events of a running engine produce nothing; a fault-stop produces one `engine_fault` signal.
 * `escalation_resolved` closes the open signal of that escalation, whoever caused it.
+
+### A6b. First sync opens pull requests that are waiting (normal)
+
+§4 "First sync". While paging the history, the first sync also tracks which pull requests are open:
+a `pr_opened` with no later `pr_withdrawn`, `task_done` or `pr_closed` escalation for its task (the
+escalation event's data names its reason). After the escalations, it creates a `pr_review` signal
+for each open pull request, with the id and text of a live `pr_opened` event, so a later live read
+of the same event is recognised by id.
+
+Acceptance:
+* First sync with a history of an open PR, a withdrawn PR, a merged PR and a closed PR produces one `pr_review` signal, for the open one.
+* A restart after a first sync, and a repeated first sync after the cursor fell behind, add no second signal for the same PR.
 
 ### A7. Liveness and health sources (high)
 

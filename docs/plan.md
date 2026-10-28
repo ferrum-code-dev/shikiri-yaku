@@ -33,7 +33,7 @@ One *task* is one Shikiru task: an Implementer and Leader loop ending in a revie
 | **C Infrastructure basics and review** | Retry; quota wait with `WaitUntil`; engine restart (including `engine_error`); the review handler for pull requests; the notice handler (finished work, health) and the infrastructure handler's messages | 5 | 0.4k | Routine infrastructure escalations stop reaching the PO; pull-request links arrive |
 | **D Install** | Reasoner spike (tool-limit and schema flags on Claude and Codex); Reasoner interface, adapter and the `assess_blocker` job with host facts; the ladder with cooldown and the health signal; name validation and recipes; the approval flow on `ops`; the Executor (login shell, closed stdin, timeout, process group, host lock); restart handling of interrupted installs | 8 | 0.7k | Missing tools are installed with one tap |
 | **E Hardening** | The drills of [§15](design.md#15-proving-it-works); the contract-test script against a real Shikiru with its fake agent; crash-point tests; security review of the install path | 4 | 0.1k | Scenario 8 and the proof |
-| **Total** | | **about 38 feature tasks (37 in the Operator, 1 in Shikiru)** | **about 3.3k** (tests about 3.9k) | |
+| **Total** | | **about 39 feature tasks (38 in the Operator, 1 in Shikiru)** | **about 3.3k** (tests about 3.9k) | |
 | **Rework allowance** | Review and remediation rounds | **19–27 tasks** | | |
 
 ### Time

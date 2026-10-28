@@ -166,7 +166,7 @@ A `pr_review` signal also closes when its task is `task_done` (merged) or raises
 
 Everything else is ignored, including the `engine_fault` events of an engine that is still running: Shikiru retries those itself, and if they persist it stops the engine, which is the signal above. The cursor advance and the journal rows it causes commit in one transaction, so a crash replays at most one batch, and signals are deduplicated by id.
 
-**First sync of a project.** Read all events once (paging until none are left) and keep only the lifecycle state; then create signals for the currently open escalations from `list_escalations`; the cursor is the last event read. History is never replayed as signals. A clean stop already in the history counts as respected (below), so a project the PO left stopped is not restarted when the Operator is first installed.
+**First sync of a project.** Read all events once (paging until none are left) and keep only the state: the lifecycle and which pull requests are still open (a `pr_opened` with no later `pr_withdrawn`, `task_done` or `pr_closed` escalation for its task); then create signals for the currently open escalations from `list_escalations` and a `pr_review` signal for each open pull request; the cursor is the last event read. History is never replayed as signals, but a pull request waiting for the PO is current state, not history. A clean stop already in the history counts as respected (below), so a project the PO left stopped is not restarted when the Operator is first installed.
 
 **Liveness source.** A crashed engine raises no escalation. Every minute the source reads `status.engine_up`:
 
