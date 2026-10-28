@@ -422,6 +422,10 @@ the buttons from every copy once a resolution is observed. A12 keeps command-eve
 reconciliation, lost commands and resolutions made elsewhere. `/status`, `/open`, `/help`, free-text help
 and `/goal` stay with A13 and A14.
 
+Order note: A12 is built before A11c2 to A11c4. A12 and A11c4 both edit every copy of a message to
+remove its buttons or show its final state; whichever is built second reuses the mechanism of the
+first and does not add another.
+
 Acceptance:
 * An offline composition test runs an inbound tap through Replies to a journaled resolve.
 * A later answer to a resolved question gets the recorded resolution and time.
