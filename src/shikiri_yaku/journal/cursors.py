@@ -3,21 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.domain.signal import Lifecycle
+from shikiri_yaku.journal.signals import NewSignal
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
     from shikiri_yaku.journal.database import Database, Inserted
-    from shikiri_yaku.journal.signals import NewSignal, SignalStore
-
-
-@dataclass(frozen=True)
-class Lifecycle:
-    """The newest `engine_started` or `engine_stopped` event of a project."""
-
-    event_id: int
-    kind: str
-    has_reason: bool
+    from shikiri_yaku.journal.signals import Change, SignalStore
 
 
 @dataclass(frozen=True)
@@ -51,18 +45,24 @@ class CursorStore:
     def record_batch(
         self,
         project: str,
-        signals: Sequence[NewSignal],
+        changes: Sequence[Change],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
     ) -> list[Inserted]:
-        """Insert the signals of one batch of events and advance the cursor, in one transaction.
+        """Apply the changes of one batch of events and advance the cursor, in one transaction.
 
-        Signals go first, so a crash between the two leaves the cursor behind and the batch is
-        read again; the signals are then recognised by id.
+        The changes go first and in event order, so a crash between them and the cursor leaves
+        the cursor behind and the batch is read again; the signals are then recognised by id.
+        Returns what each new signal's insert gave, in order.
         """
         with self._database.transaction() as connection:
-            inserted = [self._signals.insert_if_absent(signal, now) for signal in signals]
+            inserted: list[Inserted] = []
+            for change in changes:
+                if isinstance(change, NewSignal):
+                    inserted.append(self._signals.insert_if_absent(change, now))
+                else:
+                    self._signals.close(change, now)
             connection.execute(
                 """
                 INSERT INTO cursors (project, last_event_id, lifecycle_event_id, lifecycle_kind,

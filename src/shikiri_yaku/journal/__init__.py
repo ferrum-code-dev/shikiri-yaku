@@ -2,6 +2,7 @@
 
 from shikiri_yaku.journal.cursors import Cursor, CursorStore, Lifecycle
 from shikiri_yaku.journal.database import Database, Inserted, JournalError, JournalTooNewError
+from shikiri_yaku.journal.events import JournalEvents
 from shikiri_yaku.journal.messages import (
     Delivery,
     Direction,
@@ -20,6 +21,7 @@ __all__ = [
     "Direction",
     "Inserted",
     "JournalError",
+    "JournalEvents",
     "JournalTooNewError",
     "Lifecycle",
     "MessageStore",

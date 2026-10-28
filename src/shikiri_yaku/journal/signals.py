@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     import sqlite3
     from datetime import datetime
 
+    from shikiri_yaku.domain.signal import Closing
     from shikiri_yaku.journal.database import Database
 
 
@@ -32,6 +33,9 @@ class NewSignal:
     text: str
     task_id: str | None = None
     escalation_id: str | None = None
+
+
+type Change = NewSignal | Closing
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,27 @@ class SignalStore:
             ).rowcount
             row = connection.execute("SELECT number FROM signals WHERE id = ?", (signal.id,))
             return Inserted(row.fetchone()["number"], is_new=created == 1)
+
+    def close(self, closing: Closing, now: datetime) -> int:
+        """Close the non-final signals that match every field given; return how many."""
+        return self._database.connection.execute(
+            """
+            UPDATE signals SET state = :closed, updated_at = :now
+            WHERE project = :project AND state NOT IN (:resolved, :closed)
+                AND (:kind IS NULL OR kind = :kind)
+                AND (:escalation_id IS NULL OR escalation_id = :escalation_id)
+                AND (:task_id IS NULL OR task_id = :task_id)
+            """,
+            {
+                "closed": SignalState.CLOSED,
+                "resolved": SignalState.RESOLVED,
+                "now": stamp(now),
+                "project": closing.project,
+                "kind": closing.kind,
+                "escalation_id": closing.escalation_id,
+                "task_id": closing.task_id,
+            },
+        ).rowcount
 
     def get(self, number: int) -> StoredSignal | None:
         row = self._database.connection.execute(

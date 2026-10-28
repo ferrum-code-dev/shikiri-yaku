@@ -30,3 +30,22 @@ class Signal:
     @property
     def id(self) -> str:
         return f"{self.project}:{self.kind.value}:{self.source_id}"
+
+
+@dataclass(frozen=True, slots=True)
+class Lifecycle:
+    """The newest `engine_started` or `engine_stopped` event of a project."""
+
+    event_id: int
+    kind: str
+    has_reason: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Closing:
+    """Closes the open signals that match every field given: what a source learned has ended."""
+
+    project: str
+    kind: Kind | None = None
+    escalation_id: str | None = None
+    task_id: str | None = None

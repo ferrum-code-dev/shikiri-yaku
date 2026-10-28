@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from shikiri_yaku.domain.classification import Assessment
-    from shikiri_yaku.domain.signal import Signal
+    from shikiri_yaku.domain.signal import Closing, Lifecycle, Signal
 
 __all__ = [
     "Ack",
@@ -38,6 +38,8 @@ __all__ = [
     "EscalationResolution",
     "EscalationStatus",
     "EscalationView",
+    "EventJournal",
+    "EventKinds",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -85,6 +87,18 @@ class ShikiruEvent(_ShikiruPayload):
     kind: str
     message: str
     data: dict[str, Any]
+
+
+class EventKinds:
+    """Event kinds the Operator acts on (design §4). Shikiru adds kinds, so these are text."""
+
+    ESCALATION: Final = "escalation"
+    ESCALATION_RESOLVED: Final = "escalation_resolved"
+    TASK_DONE: Final = "task_done"
+    PR_OPENED: Final = "pr_opened"
+    PR_WITHDRAWN: Final = "pr_withdrawn"
+    ENGINE_STARTED: Final = "engine_started"
+    ENGINE_STOPPED: Final = "engine_stopped"
 
 
 class EscalationStatus:
@@ -214,6 +228,29 @@ class ShikiruClient(Protocol):
         Raises ShikiruRejectedError when the command exits nonzero and CommandError when it
         cannot be run to its end.
         """
+
+
+class EventJournal(Protocol):
+    """What an event source keeps in the journal (design §4, §9)."""
+
+    def last_event_id(self, project: str) -> int | None:
+        """Return the project's cursor, or None until its first sync is recorded."""
+        ...
+
+    def record_batch(
+        self,
+        project: str,
+        changes: Sequence[Signal | Closing],
+        last_event_id: int,
+        lifecycle: Lifecycle | None,
+        now: datetime,
+    ) -> None:
+        """Apply the changes in order and move the cursor, all or nothing."""
+        ...
+
+    def respect_stop(self, project: str, event_id: int) -> None:
+        """Only for a project whose cursor is recorded."""
+        ...
 
 
 class Channel(Protocol):

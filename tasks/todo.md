@@ -16,7 +16,7 @@ merged and `uv run poe check` passes.
 - [x] A4b. Install service (install-service writes the launchd plist or systemd unit; doctor shows a held lock as running)
 - [x] A5a. Shikiru MCP link and read verbs
 - [x] A5b. Shikiru commands, `start` and the contract check
-- [ ] A6. Event source
+- [x] A6. Event source
 - [ ] A7. Liveness and health sources
 - [ ] A8. Router, loop guard and scheduler
 - [ ] A9. Product handler
