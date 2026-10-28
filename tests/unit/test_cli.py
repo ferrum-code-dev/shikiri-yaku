@@ -15,6 +15,7 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku import cli
+from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.bootstrap import compose, main
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
@@ -195,6 +196,22 @@ def test_doctor_names_a_component_whose_mcp_link_does_not_come_up(
 
     assert _run_doctor(tmp_path, _unreachable_link) == 1
     assert _failed(capsys.readouterr().out) == {"link api"}
+
+
+def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = _instance(tmp_path)
+    second = tmp_path / "web"
+    second.mkdir()
+    with (directory / "config.toml").open("a", encoding="utf-8") as config:
+        config.write(f'\n[[components]]\nname = "web"\npath = "{second}"\n')
+    composed = partial(
+        compose, link=lambda _executable, project: stdio_connector(sys.executable, project)
+    )
+
+    assert cli.main(["doctor", _PRODUCT, "--home", str(tmp_path)], composed) == 1
+    assert _failed(capsys.readouterr().out) == {"link api", "link web"}
 
 
 def test_doctor_shows_a_held_instance_lock_as_running_and_passes(

@@ -116,8 +116,8 @@ class Ack(_ShikiruPayload):
 
     id: int
     status: str
-    result: dict[str, Any] | None = None
-    message: str | None = None
+    result: dict[str, Any] | None
+    message: str | None
 
     @property
     def task_id(self) -> str | None:

@@ -17,6 +17,7 @@ from shikiri_yaku.ports import (
     AckStatus,
     EngineStatus,
     EscalationView,
+    ShikiruError,
     ShikiruEvent,
     ShikiruLinkDownError,
     ShikiruProtocolError,
@@ -218,7 +219,9 @@ async def probe_link(connect: Connector, timeout_s: float) -> None:
     try:
         async with asyncio.timeout(timeout_s), connect() as session:
             await _invoke(session, "status", {}, EngineStatus, timeout_s)
-    except (OSError, TimeoutError) as error:
+    except ShikiruError:
+        raise
+    except Exception as error:
         message = f"the link did not come up: {error}"
         raise ShikiruLinkDownError(message) from error
 

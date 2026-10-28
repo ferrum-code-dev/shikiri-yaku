@@ -494,3 +494,16 @@ def test_start_engine_runs_the_stored_argument_list() -> None:
 
     _run(FakeSession(), scenario, runner)
     assert runner.calls == [(_START_ARGV, _START_TIMEOUT_S)]
+
+
+@pytest.mark.parametrize("missing", ["result", "message"])
+def test_an_ack_without_a_field_the_client_reads_is_a_protocol_error(missing: str) -> None:
+    ack = {"id": 3, "status": "done", "result": None, "message": None}
+    del ack[missing]
+    session = FakeSession({"resolve_escalation": _reply(ack)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        with pytest.raises(ShikiruProtocolError):
+            await client.resolve_escalation("E-1", "retry")
+
+    _run(session, scenario)
