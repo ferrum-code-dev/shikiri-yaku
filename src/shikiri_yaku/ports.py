@@ -18,7 +18,7 @@ from shikiri_yaku.domain.classification import Classifier
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from shikiri_yaku.domain.classification import Assessment
+    from shikiri_yaku.domain.classification import Assessment, Classification
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
     from shikiri_yaku.domain.schedule import Awaiting, Outgoing, Parked
     from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
@@ -43,12 +43,14 @@ __all__ = [
     "EscalationView",
     "EventJournal",
     "EventKinds",
+    "Forwarder",
     "LifecycleJournal",
     "LivenessJournal",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
     "ResolutionKind",
+    "RoutingLog",
     "ScheduleLog",
     "ShikiruClient",
     "ShikiruError",
@@ -316,6 +318,39 @@ class ScheduleLog(Protocol):
         ...
 
     def delivered(self, outgoing: Outgoing, message_ref: str) -> None: ...
+
+
+class RoutingLog(Protocol):
+    """What the Router writes in the journal about one signal's handling (design §6, §9).
+
+    Every move is conditional on the state the Router expects, so a signal is handled once.
+    """
+
+    def begin(
+        self,
+        number: int,
+        classification: Classification | None,
+        handler: str | None,
+        now: datetime,
+    ) -> bool:
+        """Take a new signal for handling and store its classification and handler.
+
+        False means the signal is no longer new. The classification is None when classifying failed,
+        and the handler is None when no handler is registered for the category.
+        """
+        ...
+
+    def resolve(self, number: int, note: str, now: datetime) -> None: ...
+
+    def forwarded(self, number: int, note: str, now: datetime) -> None: ...
+
+    def park(self, number: int, wake_at: datetime, note: str, now: datetime) -> None: ...
+
+
+class Forwarder(Protocol):
+    """The product fallback: puts a signal in front of the PO with the note of what was tried."""
+
+    async def forward(self, signal: Signal, note: str) -> None: ...
 
 
 class WakeTarget(Protocol):

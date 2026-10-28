@@ -149,7 +149,7 @@ class SignalStore:
         category: str,
         classified_by: str,
         verdict: str | None,
-        handler: str,
+        handler: str | None,
         now: datetime,
     ) -> None:
         self._database.connection.execute(
