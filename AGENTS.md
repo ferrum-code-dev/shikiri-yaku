@@ -59,8 +59,12 @@ classes, and do not chase a coverage number.
 
 ## Style
 
-Validated data (config, Shikiru payloads, Telegram payloads) is parsed by pydantic models with
-`extra="forbid"`; do not hand-write validators or table readers. Names come from the design's vocabulary: signal, category, extension, handler, action, outcome,
+Validated data is parsed by pydantic models; do not hand-write validators or table readers. Our
+own files (config) use `extra="forbid"`, so a misspelled key is an error. Payloads of other systems
+(Shikiru, Telegram) use `extra="ignore"` and declare only the fields the Operator reads, so the
+other side can add fields without breaking us; a field we read and that is missing is an error. Values
+the other side may extend (statuses, reasons, kinds) are `str`, with named constants for the ones
+the code acts on, never a closed enum. Names come from the design's vocabulary: signal, category, extension, handler, action, outcome,
 Reasoner, Channel, journal, op. Functions are short. Comments explain why, never what; follow the
 comment rule. Docstrings only on public contracts. No code for a case the design does not describe.
 
