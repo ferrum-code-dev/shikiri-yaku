@@ -51,6 +51,7 @@ class StoredSignal:
     category: str | None
     classified_by: str | None
     verdict: str | None
+    classification_note: str | None
     handler: str | None
     state: SignalState
     notes: str | None
@@ -70,6 +71,7 @@ def _signal(row: sqlite3.Row) -> StoredSignal:
         category=row["category"],
         classified_by=row["classified_by"],
         verdict=row["verdict"],
+        classification_note=row["classification_note"],
         handler=row["handler"],
         state=SignalState(row["state"]),
         notes=row["notes"],
@@ -151,14 +153,16 @@ class SignalStore:
         verdict: str | None,
         handler: str | None,
         now: datetime,
+        note: str = "",
     ) -> None:
         self._database.connection.execute(
             """
-            UPDATE signals SET category = ?, classified_by = ?, verdict = ?, classified_at = ?,
-                               handler = ?, updated_at = ?
+            UPDATE signals SET category = ?, classified_by = ?, verdict = ?,
+                               classification_note = ?, classified_at = ?, handler = ?,
+                               updated_at = ?
             WHERE number = ?
             """,
-            (category, classified_by, verdict, stamp(now), handler, stamp(now), number),
+            (category, classified_by, verdict, note, stamp(now), handler, stamp(now), number),
         )
 
     def transition(

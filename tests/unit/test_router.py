@@ -9,7 +9,7 @@ import pytest
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
-from shikiri_yaku.domain.classification import Category, Classification, Source
+from shikiri_yaku.domain.classification import Category, Classification, Source, Verdict
 from shikiri_yaku.domain.outcome import Forward, Resolved, WaitUntil
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal import (
@@ -39,16 +39,19 @@ class _Clock:
 
 
 class _Classifier:
-    def __init__(self, category: Category = INFRA, *, failing: bool = False) -> None:
+    def __init__(
+        self, category: Category = INFRA, *, failing: bool = False, note: str = ""
+    ) -> None:
         self.category = category
         self.failing = failing
+        self.note = note
 
     async def classify(self, signal: Signal) -> Classification:
         del signal
         if self.failing:
             message = "model is down"
             raise RuntimeError(message)
-        return Classification(self.category, Source.RULE)
+        return Classification(self.category, Source.REASONER, self.note, Verdict.HOST_TOOL)
 
 
 class _Handler:
@@ -87,9 +90,11 @@ class _FirstHangs:
 class _Fallback:
     def __init__(self) -> None:
         self.forwarded: list[tuple[str, str]] = []
+        self.suggestions: list[str] = []
 
-    async def forward(self, signal: Signal, note: str) -> None:
+    async def forward(self, signal: Signal, note: str, suggestion: str) -> None:
         self.forwarded.append((signal.id, note))
+        self.suggestions.append(suggestion)
 
 
 @pytest.fixture
@@ -245,3 +250,24 @@ def test_a_parked_signal_keeps_its_due_time_and_wakes_its_handler(world: _World)
 
     assert world.stored(number).state is SignalState.RESOLVED
     assert handler.handled == [signal, signal]
+
+
+def test_the_classification_note_reaches_the_forward_also_after_a_park(world: _World) -> None:
+    number, signal = world.new("E1")
+    wake_at = NOW + timedelta(hours=1)
+    note = "model-written: install ripgrep"
+    handler = _Handler(WaitUntil(wake_at, "waiting"), Forward("action refused"))
+    router = world.router(_Classifier(note=note), infrastructure=handler)
+
+    async def park_then_wake() -> None:
+        await _route(router, number, signal)
+        parked = schedule_log(world.database).due_parked(wake_at)[0]
+        assert schedule_log(world.database).claim(parked.number, wake_at)
+        await router.wake(parked)
+        await router.join()
+
+    asyncio.run(park_then_wake())
+
+    assert world.stored(number).classification_note == note
+    assert world.stored(number).classified_by == "reasoner"
+    assert world.fallback.suggestions == [note]

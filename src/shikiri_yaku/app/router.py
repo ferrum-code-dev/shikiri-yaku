@@ -68,7 +68,7 @@ class Router:
             outcome = Forward(failure or _unknown(classification))
         else:
             outcome = await self._run(handler, signal)
-        await self._settle(number, signal, outcome)
+        await self._settle(number, signal, outcome, classification.note if classification else "")
 
     async def _resume(self, parked: Parked) -> None:
         handler = self._handlers.get(Category(parked.handler))
@@ -76,7 +76,8 @@ class Router:
             outcome: Outcome = Forward(f"no handler '{parked.handler}' to wake the signal")
         else:
             outcome = await self._run(handler, parked.signal)
-        await self._settle(parked.number, parked.signal, outcome)
+        suggestion = self._log.suggestion(parked.number)
+        await self._settle(parked.number, parked.signal, outcome, suggestion)
 
     def _spawn(self, work: Coroutine[None, None, None]) -> asyncio.Task[None]:
         task = asyncio.ensure_future(work)
@@ -100,12 +101,12 @@ class Router:
                 return Forward(f"handler timed out after {self._timeout_s:g} s")
             return Forward(f"handler failed: {_describe(error)}")
 
-    async def _settle(self, number: int, signal: Signal, outcome: Outcome) -> None:
+    async def _settle(self, number: int, signal: Signal, outcome: Outcome, suggestion: str) -> None:
         match outcome:
             case Resolved(note):
                 self._log.resolve(number, note, self._clock.now())
             case Forward(note):
-                await self._fallback.forward(signal, note)
+                await self._fallback.forward(signal, note, suggestion)
                 self._log.forwarded(number, note, self._clock.now())
             case WaitUntil(wake_at, note):
                 self._log.park(number, wake_at, note, self._clock.now())

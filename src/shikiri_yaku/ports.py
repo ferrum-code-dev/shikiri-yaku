@@ -340,6 +340,10 @@ class RoutingLog(Protocol):
         """
         ...
 
+    def suggestion(self, number: int) -> str:
+        """Return the note stored with the signal's classification, or an empty text."""
+        ...
+
     def resolve(self, number: int, note: str, now: datetime) -> None: ...
 
     def forwarded(self, number: int, note: str, now: datetime) -> None: ...
@@ -348,9 +352,13 @@ class RoutingLog(Protocol):
 
 
 class Forwarder(Protocol):
-    """The product fallback: puts a signal in front of the PO with the note of what was tried."""
+    """The product fallback: puts a signal in front of the PO.
 
-    async def forward(self, signal: Signal, note: str) -> None: ...
+    `note` says what was tried and why it stopped. `suggestion` is the note of the classification,
+    the Reasoner's suggestion or its failure, which is model-written and shown as such.
+    """
+
+    async def forward(self, signal: Signal, note: str, suggestion: str) -> None: ...
 
 
 class WakeTarget(Protocol):

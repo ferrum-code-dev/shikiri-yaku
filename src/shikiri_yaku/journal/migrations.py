@@ -4,6 +4,8 @@ Migration 2 makes a notice unique per key and chat, not per key: the key names t
 owner's chat gets its own copy of it (design §7).
 Migration 3 keeps the time of the newest lifecycle event: the liveness rule needs to know whether
 a clean stop happened before this run of the Operator (design §4).
+Migration 4 keeps the note that came with a signal's classification: the Reasoner's suggestion or
+its failure, which the message to the PO must carry (design §5).
 """
 
 from __future__ import annotations
@@ -113,4 +115,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         WHERE lifecycle_event_id IS NOT NULL
         """,
     ),
+    ("ALTER TABLE signals ADD COLUMN classification_note TEXT",),
 )

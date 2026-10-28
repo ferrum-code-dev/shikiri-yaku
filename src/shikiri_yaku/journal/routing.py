@@ -36,10 +36,15 @@ class JournalRouting:
                     category=classification.category,
                     classified_by=classification.source,
                     verdict=classification.verdict,
+                    note=classification.note,
                     handler=handler,
                     now=now,
                 )
             return True
+
+    def suggestion(self, number: int) -> str:
+        stored = self._signals.get(number)
+        return "" if stored is None else stored.classification_note or ""
 
     def resolve(self, number: int, note: str, now: datetime) -> None:
         self._signals.transition(number, SignalState.HANDLING, SignalState.RESOLVED, now, note=note)
