@@ -219,6 +219,14 @@ class SignalStore:
         )
         return [_signal(row) for row in rows]
 
+    def forwarded_escalations(self) -> list[StoredSignal]:
+        """Return the forwarded signals that have an escalation, oldest first."""
+        rows = self._database.connection.execute(
+            "SELECT * FROM signals WHERE state = ? AND escalation_id IS NOT NULL ORDER BY number",
+            (SignalState.FORWARDED,),
+        )
+        return [_signal(row) for row in rows]
+
     def new(self) -> list[StoredSignal]:
         """Return the signals waiting for the Router, oldest first."""
         rows = self._database.connection.execute(

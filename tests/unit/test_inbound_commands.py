@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from shikiri_yaku.app.commands import Commands
+from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -21,6 +23,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import EngineStatus
 
@@ -31,7 +34,7 @@ if TYPE_CHECKING:
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
-COMMANDS = ("/status", "/help")
+COMMANDS = ("/status", "/open", "/help")
 
 
 class _Clock:
@@ -67,8 +70,18 @@ class Harness:
 
     def send(self, text: str | None, update: int = 700) -> None:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
+        reshower = ProductForwarder("product", self.clients, self.outbox, _Clock(), [OWNER])
+        opened = OpenCommand(
+            JournalOpen(self.database, self.signals),
+            self.clients,
+            reshower,
+            self.outbox,
+            _Clock(),
+            destinations=[OWNER],
+            channel="telegram",
+        )
         commands = Commands(
-            self.outbox, _Clock(), Status(self.clients, sources), channel="telegram"
+            self.outbox, _Clock(), Status(self.clients, sources), opened, channel="telegram"
         )
         replies = Replies(
             JournalReplies(self.database, self.signals, OpStore(self.database)),

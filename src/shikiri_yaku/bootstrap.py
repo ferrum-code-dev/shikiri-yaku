@@ -27,6 +27,7 @@ from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
+from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.reconciler import ResolveReconciler
@@ -56,6 +57,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import CompositionError
@@ -154,7 +156,17 @@ def compose(
     bot_api = bot(settings)
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
-    jobs.append(inbound_job(settings, journal, outbox, clock, clients=clients, bot_api=bot_api))
+    jobs.append(
+        inbound_job(
+            settings,
+            journal,
+            outbox,
+            clock,
+            clients=clients,
+            reshower=forwarder,
+            bot_api=bot_api,
+        )
+    )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
@@ -270,6 +282,7 @@ def inbound_job(
     clock: Clock,
     *,
     clients: Mapping[str, ShikiruClient],
+    reshower: Reshower,
     bot_api: BotApi,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
@@ -285,7 +298,16 @@ def inbound_job(
         wait_s=operator.telegram_poll_wait_s,
     )
     sources = JournalSources(CursorStore(journal, signals), signals)
-    commands = Commands(outbox, clock, Status(clients, sources), channel=TELEGRAM_CHANNEL)
+    opened = OpenCommand(
+        JournalOpen(journal, signals),
+        clients,
+        reshower,
+        outbox,
+        clock,
+        destinations=_owner_destinations(settings),
+        channel=TELEGRAM_CHANNEL,
+    )
+    commands = Commands(outbox, clock, Status(clients, sources), opened, channel=TELEGRAM_CHANNEL)
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal)),
         outbox,

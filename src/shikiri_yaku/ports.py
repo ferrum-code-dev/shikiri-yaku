@@ -806,3 +806,26 @@ class Reshower(Protocol):
     """Shows a signal's question again as a new message, once per key."""
 
     async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PendingApproval:
+    """An accept or cancel the PO has not confirmed yet; `kind` is the resolution it would issue."""
+
+    op_id: int
+    number: int
+    project: str
+    escalation_id: str
+    kind: str
+
+
+class OpenLog(Protocol):
+    """What /open shows again: the forwarded questions and the approvals awaiting Confirm."""
+
+    def forwarded(self) -> list[tuple[int, Signal]]:
+        """Return the forwarded signals with an escalation and their numbers, oldest first."""
+        ...
+
+    def pending_approvals(self) -> list[PendingApproval]:
+        """Return the accept and cancel ops still intended, oldest first."""
+        ...

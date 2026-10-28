@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import PositiveInt, TypeAdapter, ValidationError
 
@@ -39,8 +39,36 @@ if TYPE_CHECKING:
 _ANSWER: Final = "a"
 _DETAILS: Final = "d"
 _ACKNOWLEDGE: Final = "k"
-_CONFIRM: Final = "confirm:"
-_OP_ID = TypeAdapter[int](PositiveInt)
+_CONFIRM: Final = "confirm"
+type ConfirmKey = (
+    tuple[Literal["confirm"], PositiveInt] | tuple[Literal["confirm"], PositiveInt, PositiveInt]
+)
+_CONFIRM_KEY = TypeAdapter[ConfirmKey](ConfirmKey)
+
+
+def answer_data(number: int, option: int) -> str:
+    """Return the callback data of the button that answers the signal with the option."""
+    return f"{_ANSWER}:{number}:{option}"
+
+
+def confirm_message(number: int, kind: str, data: str) -> Message:
+    """Return the approval that asks the PO to Confirm a stored accept or cancel."""
+    return Message(f"S{number} · Confirm {kind}?", (Button("Confirm", data),))
+
+
+def confirm_key(op_id: int, update_id: int | None = None) -> str:
+    """Return the notice key of an approval; a copy /open shows again also names its update."""
+    if update_id is None:
+        return f"{_CONFIRM}:{op_id}"
+    return f"{_CONFIRM}:{op_id}:{update_id}"
+
+
+def _confirm_op(key: str) -> int | None:
+    try:
+        parts = _CONFIRM_KEY.validate_python(key.split(":"))
+    except ValidationError:
+        return None
+    return parts[1]
 
 
 class Replies:
@@ -167,12 +195,9 @@ class Replies:
         if payload.kind in {ResolutionKind.ACCEPT, ResolutionKind.CANCEL}:
             self._queue(
                 origin,
-                Message(
-                    f"S{origin.number} · Confirm {payload.kind}?",
-                    (Button("Confirm", item.data or ""),),
-                ),
+                confirm_message(origin.number, payload.kind, item.data or ""),
                 Purpose.APPROVAL,
-                key=f"{_CONFIRM}{op_id}",
+                key=confirm_key(op_id),
             )
         else:
             await self._issue(op_id, origin)
@@ -207,11 +232,11 @@ class Replies:
         )
 
     async def _confirm(self, item: Inbound, origin: ReplyOrigin) -> None:
-        if origin.key is None or not origin.key.startswith(_CONFIRM):
+        op_id = None if origin.key is None else _confirm_op(origin.key)
+        if op_id is None:
             return
         if await self._open_escalation(item, origin) is None:
             return
-        op_id = _OP_ID.validate_python(origin.key.removeprefix(_CONFIRM))
         if self._log.approve_resolve(op_id, origin.number, self._clock.now()):
             await self._issue(op_id, origin)
 

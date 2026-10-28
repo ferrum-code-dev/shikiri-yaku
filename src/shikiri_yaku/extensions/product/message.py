@@ -146,8 +146,9 @@ def _header(number: int, signal: Signal, product: str, title: str) -> str:
 
 
 def _notes(note: str, suggestion: str) -> str:
+    tried = f"What I tried: {note}" if note else ""
     model_note = f"Model note: {suggestion}" if suggestion else ""
-    return _text(f"What I tried: {note}", model_note)
+    return _text(tried, model_note)
 
 
 def _text(*blocks: str) -> str:

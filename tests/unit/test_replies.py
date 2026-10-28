@@ -10,10 +10,13 @@ import pytest
 
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
+from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -25,6 +28,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
@@ -45,6 +49,7 @@ if TYPE_CHECKING:
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
 ANSWERED_AT = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
 LATER_AT = datetime(2026, 10, 28, 13, 30, tzinfo=UTC)
+OWNER = Destination("telegram", "1001")
 
 
 class Client:
@@ -58,6 +63,9 @@ class Client:
     async def get_escalation(self, escalation_id: str) -> EscalationView:
         assert escalation_id == "E-1"
         return self.view
+
+    async def list_escalations(self) -> list[EscalationView]:
+        return [self.view]
 
     async def resolve_escalation(self, escalation_id: str, kind: str, text: str | None) -> Ack:
         self.calls.append((escalation_id, kind, text))
@@ -132,7 +140,17 @@ class Harness:
     def commands(self, at: datetime) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources)
-        return Commands(self.outbox, Clock(at), status, channel="telegram")
+        reshower = ProductForwarder("product", self.clients, self.outbox, Clock(at), [OWNER])
+        opened = OpenCommand(
+            JournalOpen(self.database, self.signals),
+            self.clients,
+            reshower,
+            self.outbox,
+            Clock(at),
+            destinations=[OWNER],
+            channel="telegram",
+        )
+        return Commands(self.outbox, Clock(at), status, opened, channel="telegram")
 
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})
