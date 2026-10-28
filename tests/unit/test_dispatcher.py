@@ -73,8 +73,8 @@ class _Fallback:
         self.failures = failures
         self.forwarded: list[str] = []
 
-    async def forward(self, signal: Signal, note: str, suggestion: str) -> None:
-        del note, suggestion
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+        del number, note, suggestion
         if self.failures:
             self.failures -= 1
             message = "chat is down"

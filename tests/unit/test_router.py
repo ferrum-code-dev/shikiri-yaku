@@ -93,7 +93,8 @@ class _Fallback:
         self.forwarded: list[tuple[str, str]] = []
         self.suggestions: list[str] = []
 
-    async def forward(self, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+        del number
         self.forwarded.append((signal.id, note))
         self.suggestions.append(suggestion)
 

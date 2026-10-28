@@ -24,10 +24,13 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
 
 __all__ = [
+    "CALLBACK_DATA_LIMIT",
+    "MESSAGE_TEXT_LIMIT",
     "Ack",
     "AckStatus",
     "ActionLog",
     "AgentOption",
+    "Button",
     "Channel",
     "ChannelError",
     "Classifier",
@@ -47,6 +50,7 @@ __all__ = [
     "Forwarder",
     "LifecycleJournal",
     "LivenessJournal",
+    "Message",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -371,11 +375,12 @@ class DispatchLog(Protocol):
 class Forwarder(Protocol):
     """The product fallback: puts a signal in front of the PO.
 
-    `note` says what was tried and why it stopped. `suggestion` is the note of the classification,
-    the Reasoner's suggestion or its failure, which is model-written and shown as such.
+    `number` is the signal's journal number, its reference `S<number>`. `note` says what was tried
+    and why it stopped. `suggestion` is the note of the classification, the Reasoner's suggestion
+    or its failure, which is model-written and shown as such.
     """
 
-    async def forward(self, signal: Signal, note: str, suggestion: str) -> None: ...
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None: ...
 
 
 class WakeTarget(Protocol):
@@ -388,6 +393,27 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
     """Everything the liveness source needs of the journal."""
 
 
+# keep: Telegram's limits (design §7), named here because the Channel is the only user of them
+MESSAGE_TEXT_LIMIT: Final = 4096
+CALLBACK_DATA_LIMIT: Final = 64
+
+
+@dataclass(frozen=True, slots=True)
+class Button:
+    """An inline button. Its `data` comes back in the tap, so it carries numbers (design §7)."""
+
+    label: str
+    data: str
+
+
+@dataclass(frozen=True, slots=True)
+class Message:
+    """What the Channel shows: a text and the buttons under it."""
+
+    text: str
+    buttons: tuple[Button, ...] = ()
+
+
 class Channel(Protocol):
     """The PO's chat (design §7), Telegram first.
 
@@ -395,9 +421,9 @@ class Channel(Protocol):
     inbound stream of taps, replies and commands arrives with the inbound adapter.
     """
 
-    async def send(self, destination: str, text: str) -> str: ...
+    async def send(self, destination: str, message: Message) -> str: ...
 
-    async def edit(self, message_ref: str, text: str) -> None: ...
+    async def edit(self, message_ref: str, message: Message) -> None: ...
 
 
 class Reasoner(Protocol):

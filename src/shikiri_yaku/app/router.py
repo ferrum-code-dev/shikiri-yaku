@@ -113,7 +113,7 @@ class Router:
                 self._log.resolve(number, note, self._clock.now())
             case Forward(note):
                 try:
-                    await self._fallback.forward(signal, note, suggestion)
+                    await self._fallback.forward(number, signal, note, suggestion)
                 except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
                     await self._retry_later(number, error)
                     return

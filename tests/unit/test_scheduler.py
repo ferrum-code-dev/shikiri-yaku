@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from shikiri_yaku.domain.schedule import Parked
+    from shikiri_yaku.ports import Message
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 FIRST_H = 4
@@ -57,13 +58,14 @@ class _Channel:
         self.sent: list[tuple[str, str]] = []
         self.failing = False
 
-    async def send(self, destination: str, text: str) -> str:
+    async def send(self, destination: str, message: Message) -> str:
         if self.failing:
             raise ChannelError
-        self.sent.append((destination, text))
+        self.sent.append((destination, message.text))
         return str(len(self.sent))
 
-    async def edit(self, message_ref: str, text: str) -> None:
+    async def edit(self, message_ref: str, message: Message) -> None:
+        del message_ref, message
         raise NotImplementedError
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.schedule import due_occurrence
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import ChannelError, Message
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Awaiting
@@ -64,7 +64,7 @@ class Scheduler:
         text = _reminder_text(awaiting)
         for outgoing in self._log.schedule_reminder(awaiting, occurrence, self._clock.now()):
             try:
-                ref = await self._channel.send(outgoing.destination.chat, text)
+                ref = await self._channel.send(outgoing.destination.chat, Message(text))
             except ChannelError:
                 continue
             self._log.delivered(outgoing, ref)
