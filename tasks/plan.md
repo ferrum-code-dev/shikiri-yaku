@@ -297,7 +297,7 @@ Decisions (consultation 04-consult-i2; clarification to §7, `docs/design.md` no
 * Option labels are numbers 1..n; Details appears only on truncation.
 * A9 has no inbound handling and no production sender: `ProductForwarder` is not wired into `compose()`. A10 journals each outbound message before sending and tracks delivery per destination.
 
-### A10. Telegram send and edit (split into A10a to A10c)
+### A10. Telegram send and edit (split into A10a to A10d)
 
 §7, §12. One task was too large (about 800 lines with tests); the Leader's split was approved. Do one
 letter per change. Each ends with `uv run poe check` and its own todo line; `docs/design.md` stays unchanged.
@@ -343,6 +343,14 @@ Acceptance:
 * A source-created escalation ends as a sent message with buttons, through the composed jobs.
 
 ### A10d. Bot API transport (normal)
+
+Integration scope decision (A10c review): A10c includes a provisional `HttpBotApi` using stdlib
+`urllib`, its bootstrap registration and `operator.telegram_call_timeout_s` (default 30 seconds).
+A10d replaces that transport with the `httpx` implementation specified below, changes token loading
+from once per call to once in the constructor, and replaces the loopback HTTP tests with
+`httpx.MockTransport` tests so the gate needs no sockets. Reuse the existing timeout setting and
+Channel wiring, and add the `getMe` doctor probe. A10d remains unfinished; its requirements and
+acceptance criteria below still apply in full.
 
 The real `BotApi` adapter: `call(method, payload)` posts JSON to
 `https://api.telegram.org/bot<token>/<method>` and returns the decoded reply whatever its `ok` says;
