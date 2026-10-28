@@ -28,8 +28,6 @@ class Tap:
     """The verb at the start of a button's data, the rest being numbers (design §7)."""
 
     ANSWER: Final = "a"
-    CONFIRM: Final = "c"
-    REPLY: Final = "r"
     DETAILS: Final = "d"
     ACKNOWLEDGE: Final = "k"
 
@@ -40,17 +38,16 @@ REASON_HINTS: Final[Mapping[str, str]] = {
     "off_task_branch": "Move the work onto the task branch, then tap Retry.",
 }
 
-_RESOLUTIONS: Final[Mapping[str, tuple[str, str]]] = {
-    ResolutionKind.ANSWER: (Tap.REPLY, "Reply with text"),
-    ResolutionKind.RETRY: (Tap.ANSWER, "Retry"),
-    ResolutionKind.ACCEPT: (Tap.CONFIRM, "Accept"),
-    ResolutionKind.CANCEL: (Tap.CONFIRM, "Cancel task"),
+_RESOLUTION_LABELS: Final[Mapping[str, str]] = {
+    ResolutionKind.ANSWER: "Reply with text",
+    ResolutionKind.RETRY: "Retry",
+    ResolutionKind.ACCEPT: "Accept",
+    ResolutionKind.CANCEL: "Cancel task",
 }
 
 
 @dataclass(frozen=True, slots=True)
 class _Choice:
-    tap: str
     option: int
     button: str
     line: str
@@ -67,14 +64,14 @@ def escalation_message(
 ) -> Message:
     choices = _choices(view)
     buttons = tuple(
-        Button(choice.button, f"{choice.tap}:{number}:{choice.option}") for choice in choices
+        Button(choice.button, f"{Tap.ANSWER}:{number}:{choice.option}") for choice in choices
     )
     text = _text(
         _header(number, signal, product, TITLE_DECISION),
         view.question or view.escalation.headline,
         "\n".join(choice.line for choice in choices),
         _notes(note, suggestion),
-        REASON_HINTS.get(signal.reason, ""),
+        _hint(signal, view),
     )
     if len(text) <= MESSAGE_TEXT_LIMIT:
         return Message(text, buttons)
@@ -99,28 +96,37 @@ def information_message(
     return Message(_cut(text), (acknowledge,))
 
 
+def _hint(signal: Signal, view: EscalationView) -> str:
+    offers_retry = any(resolution.kind == ResolutionKind.RETRY for resolution in view.resolutions)
+    return REASON_HINTS.get(signal.reason, "") if offers_retry else ""
+
+
 def _choices(view: EscalationView) -> list[_Choice]:
     options = [
         _option_choice(option_no, option)
         for option_no, option in enumerate(view.agent_options, start=1)
     ]
     resolutions = [
-        _resolution_choice(option_no, resolution)
+        _resolution_choice(option_no, resolution, marked=not view.agent_options)
         for option_no, resolution in enumerate(view.resolutions, start=len(options) + 1)
+        if resolution.kind in _RESOLUTION_LABELS
     ]
     return [*options, *resolutions]
 
 
 def _option_choice(option_no: int, option: AgentOption) -> _Choice:
-    tap = Tap.REPLY if option.needs_input else Tap.ANSWER
     mark = f"{RECOMMENDED} " if option.recommended else ""
     line = _with_consequences(f"{mark}{option_no}. {option.label}", option.consequences)
-    return _Choice(tap, option_no, str(option_no), line)
+    return _Choice(option_no, str(option_no), line)
 
 
-def _resolution_choice(option_no: int, resolution: EscalationResolution) -> _Choice:
-    tap, label = _RESOLUTIONS.get(resolution.kind, (Tap.CONFIRM, resolution.kind))
-    return _Choice(tap, option_no, label, _with_consequences(label, resolution.consequences))
+def _resolution_choice(
+    option_no: int, resolution: EscalationResolution, *, marked: bool
+) -> _Choice:
+    label = _RESOLUTION_LABELS[resolution.kind]
+    mark = f"{RECOMMENDED} " if marked and resolution.recommended else ""
+    line = _with_consequences(f"{mark}{label}", resolution.consequences)
+    return _Choice(option_no, label, line)
 
 
 def _with_consequences(text: str, consequences: str) -> str:

@@ -64,12 +64,12 @@ def _view(
     )
 
 
-def _option(label: str) -> dict[str, object]:
-    return {"label": label, "consequences": "", "recommended": False, "needs_input": False}
+def _option(label: str, *, needs_input: bool = False) -> dict[str, object]:
+    return {"label": label, "consequences": "", "recommended": False, "needs_input": needs_input}
 
 
-def _resolution(kind: str) -> dict[str, object]:
-    return {"kind": kind, "consequences": "", "recommended": False}
+def _resolution(kind: str, *, recommended: bool = False) -> dict[str, object]:
+    return {"kind": kind, "consequences": "", "recommended": recommended}
 
 
 class _Client:
@@ -118,22 +118,25 @@ def test_fixture_view_offers_options_then_resolutions_with_numbered_callback_dat
     assert message.buttons == (
         Button("1", "a:41:1"),
         Button("2", "a:41:2"),
-        Button("Reply with text", "r:41:3"),
-        Button("Cancel task", "c:41:4"),
+        Button("Reply with text", "a:41:3"),
+        Button("Cancel task", "a:41:4"),
     )
 
 
 @pytest.mark.parametrize(
     ("kinds", "expected"),
     [
+        (("answer",), [Button("Reply with text", "a:41:1")]),
+        (("retry",), [Button("Retry", "a:41:1")]),
+        (("accept",), [Button("Accept", "a:41:1")]),
+        (("cancel",), [Button("Cancel task", "a:41:1")]),
         (
             ("retry", "cancel"),
-            [Button("Retry", "a:41:1"), Button("Cancel task", "c:41:2")],
+            [Button("Retry", "a:41:1"), Button("Cancel task", "a:41:2")],
         ),
-        (("answer",), [Button("Reply with text", "r:41:1")]),
         (
             ("accept", "cancel"),
-            [Button("Accept", "c:41:1"), Button("Cancel task", "c:41:2")],
+            [Button("Accept", "a:41:1"), Button("Cancel task", "a:41:2")],
         ),
     ],
 )
@@ -145,6 +148,44 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
         NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
     )
     assert list(message.buttons) == expected
+
+
+@pytest.mark.parametrize("needs_input", [False, True])
+def test_option_that_needs_input_uses_the_same_callback_as_the_others(*, needs_input: bool) -> None:
+    view = _view(options=[_option("Keep", needs_input=needs_input)])
+    message = escalation_message(
+        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+    )
+    assert message.buttons == (Button("1", "a:41:1"),)
+
+
+def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its_number() -> None:
+    view = _view(resolutions=[_resolution("skip"), _resolution("retry")])
+    message = escalation_message(
+        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+    )
+    assert message.buttons == (Button("Retry", "a:41:2"),)
+
+
+def test_recommended_resolution_is_marked_only_when_there_are_no_agent_options() -> None:
+    view = _view(resolutions=[_resolution("retry", recommended=True)])
+    message = escalation_message(
+        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+    )
+    assert message.text.count(RECOMMENDED) == 1
+
+
+@pytest.mark.parametrize(
+    ("kinds", "hinted"),
+    [(("retry", "cancel"), True), (("cancel",), False)],
+)
+def test_reason_hint_is_shown_only_where_retry_is_offered(
+    *, kinds: tuple[str, ...], hinted: bool
+) -> None:
+    signal = Signal("api", Kind.ESCALATION, "E-1", "agent_auth", "text", "T-1", "E-1")
+    view = _view(resolutions=[_resolution(kind) for kind in kinds])
+    message = escalation_message(NUMBER, signal, view, product=PRODUCT, note=NOTE, suggestion="")
+    assert ("Log in to the agent again" in message.text) is hinted
 
 
 def test_message_over_the_limit_is_cut_with_a_details_button() -> None:
