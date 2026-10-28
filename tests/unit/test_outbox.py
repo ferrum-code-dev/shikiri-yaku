@@ -23,6 +23,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
+from tests.support.secrets import SECRETS, secret_cases
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,8 +32,10 @@ if TYPE_CHECKING:
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
+OTHER = Destination("telegram", "1002")
 QUESTION = Message("S1 · Which way?", (Button("1", "a:1:1"),))
-TOKEN = "123456789:" + "A" * 35
+SENT = "1001/42"
+TOKEN = SECRETS["telegram_bot_token"]
 
 
 class _Clock:
@@ -110,6 +113,20 @@ def _sender(
     return OutboxSender(_outbox(database, reporter), channel, _Clock(), interval_s=1)
 
 
+def _sent(database: Database) -> int:
+    """Queue the question, record it as sent under the reference SENT, and return its signal."""
+    number = _signal(database)
+    _outbox(database).queue(number, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    [pending] = _outbox(database).pending()
+    _outbox(database).confirm(pending.message_id, SENT)
+    return number
+
+
+def _stored_values(database: Database) -> list[object]:
+    """Every value of every journal row as it is stored, for what must never be kept."""
+    return [value for row in database.connection.execute("SELECT * FROM messages") for value in row]
+
+
 def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_confirmed(
     memory: Database,
 ) -> None:
@@ -162,7 +179,9 @@ def test_a_failed_send_stays_pending_and_is_sent_when_the_channel_recovers(
     assert len(channel.sent) == 1
 
 
-def test_a_message_the_platform_refuses_for_good_is_never_offered_again(memory: Database) -> None:
+def test_a_message_the_platform_refuses_for_good_is_never_offered_again_and_the_po_gets_a_notice(
+    memory: Database,
+) -> None:
     number = _signal(memory)
     _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
     channel = _Channel()
@@ -171,11 +190,13 @@ def test_a_message_the_platform_refuses_for_good_is_never_offered_again(memory: 
     asyncio.run(_sender(memory, channel).tick())
     channel.refusal = None
     asyncio.run(_sender(memory, channel).tick())
+    asyncio.run(_sender(memory, channel).tick())
 
-    assert channel.attempts == 1
-    assert channel.sent == []
+    assert channel.attempts == 2
+    [(_, notice)] = channel.sent
+    assert f"S{number}" in notice.text
     assert _outbox(memory).pending() == []
-    [stored] = MessageStore(memory, _Reporter()).for_signal(number)
+    [stored, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (stored.delivery, stored.body, stored.refusal) == (Delivery.REFUSED, None, "too_long")
 
 
@@ -204,26 +225,37 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
     assert "Still waiting" in channel.sent[1][1].text
 
 
-def test_a_secret_is_never_kept_or_sent_and_the_po_gets_a_notice_without_it(
-    memory: Database,
+@pytest.mark.parametrize(("form", "message"), secret_cases())
+def test_a_secret_in_any_place_is_refused_when_queued_and_the_po_gets_a_notice_without_it(
+    memory: Database, form: str, message: Message
 ) -> None:
     number = _signal(memory)
-    secret = Message(f"S1 · token {TOKEN}", (Button("1", "a:1:1"),))
-    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], secret, key="forward:1", now=START)
+    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], message, key="forward:1", now=START)
+    reporter = _Reporter()
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel, reporter).tick())
+
+    [(_, notice)] = channel.sent
+    assert f"S{number}" in notice.text
+    assert not any(SECRETS[form] in text for text in notice.texts())
+    assert not any(SECRETS[form] in str(value) for value in _stored_values(memory))
+    assert reporter.lines == []
+    [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (refused.delivery, refused.body, refused.refusal) == (Delivery.REFUSED, None, form)
+
+
+def test_a_refused_message_gets_one_notice_in_each_chat_it_was_queued_for(memory: Database) -> None:
+    number = _signal(memory)
+    secret = Message(f"S1 {TOKEN}")
+    _outbox(memory).queue(
+        number, Purpose.QUESTION, [OWNER, OTHER], secret, key="forward:1", now=START
+    )
     channel = _Channel()
 
     asyncio.run(_sender(memory, channel).tick())
 
-    [(_, notice)] = channel.sent
-    assert f"S{number}" in notice.text
-    journal = repr(memory.connection.execute("SELECT * FROM messages").fetchall())
-    assert TOKEN not in journal
-    [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
-    assert (refused.delivery, refused.body, refused.refusal) == (
-        Delivery.REFUSED,
-        None,
-        "telegram_bot_token",
-    )
+    assert [destination for destination, _ in channel.sent] == ["1001", "1002"]
 
 
 def test_a_notice_the_platform_refuses_is_reported_and_gets_no_notice_of_its_own(
@@ -242,6 +274,7 @@ def test_a_notice_the_platform_refuses_is_reported_and_gets_no_notice_of_its_own
     assert channel.attempts == 1
     assert _outbox(memory, reporter).pending() == []
     assert len(reporter.lines) == 1
+    assert f"S{number}" in reporter.lines[0]
     assert TOKEN not in reporter.lines[0]
 
 
@@ -264,3 +297,43 @@ def test_a_notice_that_cannot_be_journaled_is_reported_as_metadata_and_the_refus
     [line] = reporter.lines
     assert f"S{number}" in line
     assert TOKEN not in line
+
+
+def test_a_refused_edit_keeps_its_reason_on_the_copy_and_notices_the_po(memory: Database) -> None:
+    number = _sent(memory)
+    channel = _Channel()
+
+    _outbox(memory).record_refused_edit(SENT, "text_too_long", now=START)
+    asyncio.run(_sender(memory, channel).tick())
+
+    [(_, notice)] = channel.sent
+    assert f"S{number}" in notice.text
+    [copy, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (copy.delivery, copy.refusal) == (Delivery.SENT, "text_too_long")
+
+
+def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platform_deleted(
+    memory: Database,
+) -> None:
+    number = _sent(memory)
+    outbox = _outbox(memory)
+
+    assert outbox.record_deletion(SENT, "telegram_bot_token", now=START)
+    [attempted, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (attempted.delivery, attempted.body, attempted.refusal) == (
+        Delivery.DELETE_ATTEMPTED,
+        None,
+        "telegram_bot_token",
+    )
+    assert not any(TOKEN in str(value) for value in _stored_values(memory))
+
+    outbox.confirm_deletion(SENT)
+    [deleted, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert deleted.delivery == Delivery.DELETED
+
+
+def test_a_deletion_of_a_copy_the_journal_does_not_know_journals_nothing(memory: Database) -> None:
+    number = _signal(memory)
+
+    assert _outbox(memory).record_deletion("9/9", "telegram_bot_token", now=START) is False
+    assert MessageStore(memory, _Reporter()).for_signal(number) == []

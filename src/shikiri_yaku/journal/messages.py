@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.secrets import FORMS, refusal_notice, secret_form
+from shikiri_yaku.domain.outbound import Purpose, refusal_notice
+from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import Inserted, stamp
 from shikiri_yaku.ports import Message
 
@@ -109,7 +109,7 @@ class MessageStore:
                     channel=channel,
                     chat=chat,
                     refused_id=inserted.row_id,
-                    form=form,
+                    reason=form,
                     now=now,
                 )
         return inserted
@@ -164,13 +164,13 @@ class MessageStore:
         channel: str,
         chat: str,
         refused_id: int,
-        form: str,
+        reason: str,
         now: datetime,
     ) -> None:
         """Queue the PO's notice of a refusal; if it cannot be journaled, report its metadata only.
 
-        The notice is a fixed text with the S-number and no refused content, and a refusal of the
-        notice itself queues nothing: that case is reported too.
+        The notice is a fixed text with the S-number and no refused content. It is keyed by the
+        refused row, so a refusal is noticed once per chat.
         """
         notice = Message(refusal_notice(signal_number))
         try:
@@ -186,8 +186,22 @@ class MessageStore:
             )
         except sqlite3.Error:
             self._reporter.report(
-                f"S{signal_number} refused ({form}); its notice was not journaled"
+                f"S{signal_number} refused ({reason}); its notice was not journaled"
             )
+
+    def _notify_refusal(self, row: sqlite3.Row, reason: str, now: datetime) -> None:
+        """Notify the PO of a refused row; a refused notice is reported instead, never noticed."""
+        if _is_notice_of_refusal(row["notice_key"]):
+            self._reporter.report(f"S{row['signal_number']} notice refused ({reason})")
+            return
+        self._notify(
+            signal_number=row["signal_number"],
+            channel=row["channel"],
+            chat=row["chat"],
+            refused_id=row["id"],
+            reason=reason,
+            now=now,
+        )
 
     def confirm_delivery(self, message_id: int, platform_message_id: str) -> None:
         self._database.connection.execute(
@@ -196,15 +210,12 @@ class MessageStore:
         )
 
     def refuse_delivery(self, message_id: int, reason: str, now: datetime) -> None:
-        """Drop the body of a message the platform refused for good; only the reason stays.
-
-        A refused secret queues the PO a notice. A refused notice is reported instead.
-        """
+        """Drop the body of a message the platform refused for good; only the reason stays."""
         connection = self._database.connection
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT signal_number, channel, chat, notice_key FROM messages
+                SELECT id, signal_number, channel, chat, notice_key FROM messages
                 WHERE id = ? AND delivery = ?
                 """,
                 (message_id, Delivery.PENDING),
@@ -215,31 +226,43 @@ class MessageStore:
                 "UPDATE messages SET delivery = ?, body = NULL, refusal = ? WHERE id = ?",
                 (Delivery.REFUSED, reason, message_id),
             )
-            if _is_notice_of_refusal(row["notice_key"]):
-                self._reporter.report(f"S{row['signal_number']} notice refused ({reason})")
-            elif reason in FORMS:
-                self._notify(
-                    signal_number=row["signal_number"],
-                    channel=row["channel"],
-                    chat=row["chat"],
-                    refused_id=message_id,
-                    form=reason,
-                    now=now,
-                )
+            self._notify_refusal(row, reason, now)
 
-    def record_deletion(self, message_ref: str, reason: str) -> bool:
+    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+        """Keep the reason of a refused edit on the copy it targeted, and notify the PO of it."""
+        self._refuse_copy(message_ref, reason, now=now, delete=False)
+
+    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
         """Journal an attempt to delete the copy at this reference, before it is invoked.
 
         The body of the copy is dropped. False means the journal has no sent copy at the reference.
         """
-        deleted = self._database.connection.execute(
-            """
-            UPDATE messages SET delivery = ?, body = NULL, refusal = ?
-            WHERE platform_message_id = ? AND direction = ? AND delivery = ?
-            """,
-            (Delivery.DELETE_ATTEMPTED, reason, message_ref, Direction.OUT, Delivery.SENT),
-        )
-        return deleted.rowcount == 1
+        return self._refuse_copy(message_ref, reason, now=now, delete=True)
+
+    def _refuse_copy(self, message_ref: str, reason: str, *, now: datetime, delete: bool) -> bool:
+        """Mark the sent copy at this reference as refused, and notify the PO; False if unknown."""
+        connection = self._database.connection
+        with self._database.transaction():
+            row = connection.execute(
+                """
+                SELECT id, signal_number, channel, chat, notice_key FROM messages
+                WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+                """,
+                (message_ref, Direction.OUT, Delivery.SENT),
+            ).fetchone()
+            if row is None:
+                return False
+            if delete:
+                connection.execute(
+                    "UPDATE messages SET delivery = ?, body = NULL, refusal = ? WHERE id = ?",
+                    (Delivery.DELETE_ATTEMPTED, reason, row["id"]),
+                )
+            else:
+                connection.execute(
+                    "UPDATE messages SET refusal = ? WHERE id = ?", (reason, row["id"])
+                )
+            self._notify_refusal(row, reason, now)
+        return True
 
     def confirm_deletion(self, message_ref: str) -> None:
         self._database.connection.execute(

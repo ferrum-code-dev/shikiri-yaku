@@ -21,11 +21,6 @@ FORMS: Final[dict[str, re.Pattern[str]]] = {
     "aws_access_key_id": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
 }
 
-REFUSAL_NOTICE: Final = (
-    "S{number} · A message was refused because it looked like a secret. "
-    "It was not sent, and its text was not kept."
-)
-
 
 def secret_form(texts: Iterable[str]) -> str | None:
     """Return the key of the first secret form in any of the texts, or None."""
@@ -34,8 +29,3 @@ def secret_form(texts: Iterable[str]) -> str | None:
             if pattern.search(text):
                 return key
     return None
-
-
-def refusal_notice(number: int) -> str:
-    """Return the notice of a refusal: its signal number and nothing it contained."""
-    return REFUSAL_NOTICE.format(number=number)

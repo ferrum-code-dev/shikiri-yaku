@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 class JournalOutbox:
     """The outbound rows of the messages table: body and destination are stored before any send.
 
-    It is also the Deletions of the Channel: a deletion is journaled on the same rows.
+    It is also the Copies of the Channel: refused edits and deletions are journaled on the same
+    rows.
     """
 
     def __init__(self, database: Database, messages: MessageStore) -> None:
@@ -61,8 +62,11 @@ class JournalOutbox:
     def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
         self._messages.refuse_delivery(message_id, reason, now)
 
-    def record_deletion(self, message_ref: str, reason: str) -> bool:
-        return self._messages.record_deletion(message_ref, reason)
+    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+        self._messages.record_refused_edit(message_ref, reason, now=now)
+
+    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
+        return self._messages.record_deletion(message_ref, reason, now=now)
 
     def confirm_deletion(self, message_ref: str) -> None:
         self._messages.confirm_deletion(message_ref)

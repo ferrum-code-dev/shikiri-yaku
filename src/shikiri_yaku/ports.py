@@ -41,7 +41,7 @@ __all__ = [
     "CommandResult",
     "CommandRunner",
     "CompositionError",
-    "Deletions",
+    "Copies",
     "DispatchLog",
     "EngineStatus",
     "EscalationRecord",
@@ -475,16 +475,24 @@ class Outbox(Protocol):
     def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
         """Record a refusal for good: the body is dropped and only the reason stays.
 
-        A refused message is never offered again. A refused secret queues the PO a notice.
+        A refused message is never offered again. The PO gets a notice of it, with no content.
         """
         ...
 
 
-class Deletions(Protocol):
-    """Deletes a sent copy of a secret. The attempt is journaled before the platform is asked."""
+class Copies(Protocol):
+    """The journal's record of a sent message, which an edit of it can be refused for (design §7).
 
-    def record_deletion(self, message_ref: str, reason: str) -> bool:
-        """Journal the attempt and drop the body; False when the journal does not know the copy."""
+    Each call is journaled before the platform is asked. False means the journal does not know a
+    sent copy at that reference: then nothing is journaled and nothing is deleted.
+    """
+
+    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+        """Keep the reason on the copy and queue the PO a notice; the copy itself stays."""
+        ...
+
+    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
+        """Drop the copy's body, mark its deletion as attempted, and queue the PO a notice."""
         ...
 
     def confirm_deletion(self, message_ref: str) -> None: ...

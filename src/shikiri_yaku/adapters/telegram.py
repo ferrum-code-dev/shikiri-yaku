@@ -18,7 +18,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.ports import Clock, Deletions, Message
+    from shikiri_yaku.ports import Clock, Copies, Message
 
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
@@ -92,14 +92,14 @@ class TelegramChannel:
 
     A message reference is `<chat id>/<message id>`, so `edit` can name the chat without being
     given the destination again. A rate limit is waited out once; a second one is a ChannelError,
-    which the sender tries again on its next tick. A secret is refused before any call. When the
-    secret is an edit of a copy the journal knows, that copy is deleted first.
+    which the sender tries again on its next tick. A secret is refused before any call. A refused
+    edit is journaled on its copy, and a secret edit also deletes that copy first.
     """
 
-    def __init__(self, api: BotApi, clock: Clock, deletions: Deletions) -> None:
+    def __init__(self, api: BotApi, clock: Clock, copies: Copies) -> None:
         self._api = api
         self._clock = clock
-        self._deletions = deletions
+        self._copies = copies
 
     async def send(self, destination: str, message: Message) -> str:
         _refuse_secret(message)
@@ -109,31 +109,26 @@ class TelegramChannel:
         return f"{reply.result.chat.id}{REF_SEPARATOR}{reply.result.message_id}"
 
     async def edit(self, message_ref: str, message: Message) -> None:
+        if (form := secret_form(message.texts())) is not None:
+            await self._delete_copy(message_ref, form)
+            raise ChannelRefusedError(form)
         try:
-            _refuse_secret(message)
+            await self._request(EDIT_MESSAGE_TEXT, {**_target(message_ref), **_content(message)})
         except ChannelRefusedError as refusal:
-            await self._delete_copy(message_ref, str(refusal))
+            self._copies.record_refused_edit(message_ref, str(refusal), now=self._clock.now())
             raise
-        chat, _, message_id = message_ref.partition(REF_SEPARATOR)
-        payload: dict[str, object] = {
-            "chat_id": chat,
-            "message_id": int(message_id),
-            **_content(message),
-        }
-        await self._request(EDIT_MESSAGE_TEXT, payload)
 
     async def _delete_copy(self, message_ref: str, reason: str) -> None:
         """Delete the copy a secret was edited into, when the journal knows it (design §7).
 
-        The attempt is journaled before the platform is asked. A failed deletion stays journaled and
-        is not retried; the refusal stands either way.
+        The attempt is journaled, and the PO's notice queued, before the platform is asked. A failed
+        deletion stays journaled and is not retried; the refusal stands either way.
         """
-        if not self._deletions.record_deletion(message_ref, reason):
+        if not self._copies.record_deletion(message_ref, reason, now=self._clock.now()):
             return
-        chat, _, message_id = message_ref.partition(REF_SEPARATOR)
         with contextlib.suppress(ChannelError, ChannelRefusedError):
-            await self._request(DELETE_MESSAGE, {"chat_id": chat, "message_id": int(message_id)})
-            self._deletions.confirm_deletion(message_ref)
+            await self._request(DELETE_MESSAGE, _target(message_ref))
+            self._copies.confirm_deletion(message_ref)
 
     async def _request(self, method: str, payload: Mapping[str, object]) -> _Ok:
         reply = await self._post(method, payload)
@@ -156,6 +151,12 @@ class TelegramChannel:
             return _REPLY.validate_python(body)
         except ValidationError as error:
             raise ChannelError(UNEXPECTED_REPLY) from error
+
+
+def _target(message_ref: str) -> dict[str, object]:
+    """Return the chat and the message a reference names, as the Bot API takes them."""
+    chat, _, message_id = message_ref.partition(REF_SEPARATOR)
+    return {"chat_id": chat, "message_id": int(message_id)}
 
 
 def _refuse_secret(message: Message) -> None:
