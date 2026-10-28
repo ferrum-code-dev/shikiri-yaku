@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from shikiri_yaku.domain.classification import Assessment, Classification
+    from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
     from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
@@ -51,6 +52,7 @@ __all__ = [
     "EventJournal",
     "EventKinds",
     "Forwarder",
+    "InboundLog",
     "LifecycleJournal",
     "LivenessJournal",
     "Message",
@@ -73,6 +75,7 @@ __all__ = [
     "SignalLog",
     "TaskDetail",
     "TaskStatus",
+    "Updates",
     "WakeTarget",
 ]
 
@@ -429,13 +432,46 @@ class Channel(Protocol):
 
     `send` returns the reference the platform gives the message, and `edit` takes it back. A
     message the platform refuses for good raises ChannelRefusedError; any other failure raises
-    ChannelError and is tried again. The inbound stream of taps, replies and commands arrives with
-    the inbound adapter.
+    ChannelError and is tried again. What the PO sends comes through `Updates`.
     """
 
     async def send(self, destination: str, message: Message) -> str: ...
 
     async def edit(self, message_ref: str, message: Message) -> None: ...
+
+
+class Updates(Protocol):
+    """The PO's side of the chat: long polling for taps, replies and texts (design §7).
+
+    `fetch` asks for what came after `offset`, waiting up to `wait_s` for something new. It raises
+    ChannelError when the platform cannot be reached or answers in a shape it does not read.
+    """
+
+    async def fetch(self, offset: int, wait_s: float) -> Batch: ...
+
+
+class InboundLog(Protocol):
+    """Inbound items in the journal, kept until Replies has handled them (design §7, §9)."""
+
+    def next_offset(self, channel: str) -> int:
+        """Return the offset to poll from: past the last batch that was journaled, 0 at first."""
+        ...
+
+    def record_batch(
+        self, channel: str, items: Sequence[Inbound], next_offset: int, now: datetime
+    ) -> None:
+        """Store the new items and move the offset, in one transaction.
+
+        An item whose update id is known is not stored again. Text that carries a secret form is
+        stored as refused, without its text.
+        """
+        ...
+
+    def pending(self) -> list[Inbound]:
+        """Return the stored items not yet handled, oldest first."""
+        ...
+
+    def mark_handled(self, update_id: int) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)

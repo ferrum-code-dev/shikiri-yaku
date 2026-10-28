@@ -365,17 +365,50 @@ Acceptance:
 * With `httpx.MockTransport`: a documented success reply, a 429 reply with `retry_after`, a 400 reply and a connection error each come back as the Channel expects; the token appears in the request URL only.
 * No test reads a real token file; the gate makes no network call.
 
-### A11. Telegram inbound and replies (high)
+### A11. Telegram inbound and replies (split into A11a to A11c)
 
-§7. Long polling with the offset saved only after the update is journaled; dedupe by update id;
-allow-listed user ids only; reply and button routing by message purpose (`question`, `approval`,
-`notice`) to a `Replies` service that issues `resolve_escalation` through the client (journaled as
-an `ops` row first). Later answers to a resolved question get "Already resolved: … at …".
+§7. One task was too large (700 to 900 lines with tests); the Leader's split was approved. Do one
+letter per change. Each ends with `uv run poe check` and its own todo line; `docs/design.md` stays
+unchanged. The design does not specify `answerCallbackQuery` (acknowledging a tap); no change invents it.
+
+### A11a. Inbound transport and journal (high)
+
+`getUpdates` on the same Bot API adapter, with typed inbound items (tap, reply, text) that keep the
+sender and the message references. The owners allow-list, dedupe by update id, and a durable polling
+offset saved in the same transaction as the allowed updates. Pending items are readable, so a crash
+before Replies handles one loses nothing. Text that looks like a secret is not stored. Polling is not
+wired until A11c.
 
 Acceptance:
-* The same update delivered twice causes one resolve.
-* A message from a user id not in `owners` is ignored and not stored.
+* The same update delivered twice is stored once.
+* An update from a user id not in `owners` is not stored, and the offset still moves past it.
+* A crash before the batch is journaled leaves the offset behind; a recorded item stays pending until handled.
+
+### A11b. Replies (high)
+
+Routing by the journaled originating message and its purpose (`question`, `approval`, `notice`):
+`a:`, `d:` and `k:` data decoded separately, free text matched by `reply_to_message`, `needs_input`,
+and the confirming tap for accept and cancel (§6.1). An approval message accepts only its own buttons.
+Choices are resolved by re-reading the escalation view, with the numbering rule shared with the product
+renderer through an inward-facing helper. The typed resolve payload is journaled as an `ops` row with an
+update-based identity before `resolve_escalation`, and the acknowledgement and command id are saved.
+
+Acceptance:
+* The same update delivered twice issues one resolve, also after a restart.
 * A tap on an approval message accepts only its own buttons; a free-text reply is matched by `reply_to_message`.
+* An issued or uncertain op is left for A12; an acknowledgement alone never confirms a resolve.
+
+### A11c. Polling, answers and composition (high)
+
+Polling and delivery of pending items registered in `bootstrap.py` with the shared Bot API and Shikiru
+clients. "Already resolved: … at …" from the journal for a later answer; journaled edits that remove
+the buttons from every copy once a resolution is observed. A12 keeps command-event correlation, start-up
+reconciliation, lost commands and resolutions made elsewhere. `/status`, `/open`, `/help`, free-text help
+and `/goal` stay with A13 and A14.
+
+Acceptance:
+* An offline composition test runs an inbound tap through Replies to a journaled resolve.
+* A later answer to a resolved question gets the recorded resolution and time.
 
 ### A12. Command confirmation and resolved elsewhere (high)
 

@@ -10,6 +10,8 @@ Migration 5 keeps the body of an outbound message, so a restart can send what wa
 (design §7, §10).
 Migration 6 keeps the reason of a refused outbound message, the only thing a refusal leaves
 behind (design §7).
+Migration 7 keeps what the PO sent until it is handled, and the offset the polling resumes from
+(design §7, §9).
 """
 
 from __future__ import annotations
@@ -122,4 +124,21 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE signals ADD COLUMN classification_note TEXT",),
     ("ALTER TABLE messages ADD COLUMN body TEXT",),
     ("ALTER TABLE messages ADD COLUMN refusal TEXT",),
+    (
+        """
+        CREATE TABLE inbound (
+            update_id INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL,
+            sender INTEGER NOT NULL,
+            message_ref TEXT NOT NULL,
+            reply_to_ref TEXT,
+            text TEXT,
+            data TEXT,
+            state TEXT NOT NULL,
+            refusal TEXT,
+            created_at TEXT NOT NULL
+        )
+        """,
+        "CREATE TABLE polling (channel TEXT PRIMARY KEY, next_offset INTEGER NOT NULL)",
+    ),
 )
