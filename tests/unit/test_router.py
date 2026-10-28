@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
@@ -238,7 +239,7 @@ def test_a_parked_signal_keeps_its_due_time_and_wakes_its_handler(world: _World)
 
     async def wake() -> None:
         scheduler = Scheduler(
-            schedule_log(world.database),
+            schedule_log(world.database, StderrReporter()),
             restarted,
             _Later(),
             interval_s=1,
@@ -263,8 +264,8 @@ def test_the_classification_note_reaches_the_forward_also_after_a_park(world: _W
 
     async def park_then_wake() -> None:
         await _route(router, number, signal)
-        parked = schedule_log(world.database).due_parked(wake_at)[0]
-        assert schedule_log(world.database).claim(parked.number, wake_at)
+        parked = schedule_log(world.database, StderrReporter()).due_parked(wake_at)[0]
+        assert schedule_log(world.database, StderrReporter()).claim(parked.number, wake_at)
         await router.wake(parked)
         await router.join()
 

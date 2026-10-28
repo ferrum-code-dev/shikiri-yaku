@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
+from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
@@ -16,19 +18,22 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.ports import Clock, Message
+    from shikiri_yaku.ports import Clock, Deletions, Message
 
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
+DELETE_MESSAGE: Final = "deleteMessage"
 REF_SEPARATOR: Final = "/"
 
 # keep: Telegram's error codes (Bot API, "Making requests"); the rest are transient
 BAD_REQUEST: Final = 400
 TOO_MANY_REQUESTS: Final = 429
 
-# keep: reasons the Operator writes for a refusal it decides itself, before any call
+# keep: the Channel's own reasons; platform text is never kept, since it could repeat a secret
 TEXT_TOO_LONG: Final = "text_too_long"
 BUTTON_DATA_TOO_LONG: Final = "button_data_too_long"
+PLATFORM_REFUSED: Final = "platform_refused"
+NOT_ACCEPTED: Final = "the Bot API did not accept the request"
 UNEXPECTED_REPLY: Final = "the Bot API replied in a shape the Channel does not read"
 
 
@@ -57,10 +62,12 @@ class _Sent(BaseModel):
 
 
 class _Ok(BaseModel):
+    """A successful reply: a sent message, or `true` for a method that returns nothing else."""
+
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     ok: Literal[True]
-    result: _Sent
+    result: _Sent | Literal[True]
 
 
 class _RetryAfter(BaseModel):
@@ -74,7 +81,6 @@ class _Failed(BaseModel):
 
     ok: Literal[False]
     error_code: int
-    description: str
     parameters: _RetryAfter | None = None
 
 
@@ -82,31 +88,54 @@ _REPLY: Final[TypeAdapter[_Ok | _Failed]] = TypeAdapter(_Ok | _Failed)
 
 
 class TelegramChannel:
-    """Sends and edits messages in one chat per destination.
+    """Sends, edits and deletes messages in one chat per destination.
 
     A message reference is `<chat id>/<message id>`, so `edit` can name the chat without being
     given the destination again. A rate limit is waited out once; a second one is a ChannelError,
-    which the sender tries again on its next tick.
+    which the sender tries again on its next tick. A secret is refused before any call. When the
+    secret is an edit of a copy the journal knows, that copy is deleted first.
     """
 
-    def __init__(self, api: BotApi, clock: Clock) -> None:
+    def __init__(self, api: BotApi, clock: Clock, deletions: Deletions) -> None:
         self._api = api
         self._clock = clock
+        self._deletions = deletions
 
     async def send(self, destination: str, message: Message) -> str:
-        sent = await self._call(SEND_MESSAGE, {"chat_id": destination, **_content(message)})
-        return f"{sent.chat.id}{REF_SEPARATOR}{sent.message_id}"
+        _refuse_secret(message)
+        reply = await self._request(SEND_MESSAGE, {"chat_id": destination, **_content(message)})
+        if not isinstance(reply.result, _Sent):
+            raise ChannelError(UNEXPECTED_REPLY)
+        return f"{reply.result.chat.id}{REF_SEPARATOR}{reply.result.message_id}"
 
     async def edit(self, message_ref: str, message: Message) -> None:
+        try:
+            _refuse_secret(message)
+        except ChannelRefusedError as refusal:
+            await self._delete_copy(message_ref, str(refusal))
+            raise
         chat, _, message_id = message_ref.partition(REF_SEPARATOR)
         payload: dict[str, object] = {
             "chat_id": chat,
             "message_id": int(message_id),
             **_content(message),
         }
-        await self._call(EDIT_MESSAGE_TEXT, payload)
+        await self._request(EDIT_MESSAGE_TEXT, payload)
 
-    async def _call(self, method: str, payload: Mapping[str, object]) -> _Sent:
+    async def _delete_copy(self, message_ref: str, reason: str) -> None:
+        """Delete the copy a secret was edited into, when the journal knows it (design §7).
+
+        The attempt is journaled before the platform is asked. A failed deletion stays journaled and
+        is not retried; the refusal stands either way.
+        """
+        if not self._deletions.record_deletion(message_ref, reason):
+            return
+        chat, _, message_id = message_ref.partition(REF_SEPARATOR)
+        with contextlib.suppress(ChannelError, ChannelRefusedError):
+            await self._request(DELETE_MESSAGE, {"chat_id": chat, "message_id": int(message_id)})
+            self._deletions.confirm_deletion(message_ref)
+
+    async def _request(self, method: str, payload: Mapping[str, object]) -> _Ok:
         reply = await self._post(method, payload)
         if (
             isinstance(reply, _Failed)
@@ -116,10 +145,10 @@ class TelegramChannel:
             await self._clock.sleep(reply.parameters.retry_after)
             reply = await self._post(method, payload)
         if isinstance(reply, _Ok):
-            return reply.result
+            return reply
         if reply.error_code == BAD_REQUEST:
-            raise ChannelRefusedError(reply.description)
-        raise ChannelError(reply.description)
+            raise ChannelRefusedError(PLATFORM_REFUSED)
+        raise ChannelError(NOT_ACCEPTED)
 
     async def _post(self, method: str, payload: Mapping[str, object]) -> _Ok | _Failed:
         body = await self._api.call(method, payload)
@@ -127,6 +156,12 @@ class TelegramChannel:
             return _REPLY.validate_python(body)
         except ValidationError as error:
             raise ChannelError(UNEXPECTED_REPLY) from error
+
+
+def _refuse_secret(message: Message) -> None:
+    """Refuse a message whose texts carry a secret form; the form is the reason (design §7)."""
+    if (form := secret_form(message.texts())) is not None:
+        raise ChannelRefusedError(form)
 
 
 def _content(message: Message) -> dict[str, object]:

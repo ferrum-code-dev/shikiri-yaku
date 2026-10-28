@@ -41,6 +41,7 @@ __all__ = [
     "CommandResult",
     "CommandRunner",
     "CompositionError",
+    "Deletions",
     "DispatchLog",
     "EngineStatus",
     "EscalationRecord",
@@ -58,6 +59,7 @@ __all__ = [
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
+    "Reporter",
     "ResolutionKind",
     "RoutingLog",
     "ScheduleLog",
@@ -415,6 +417,12 @@ class Message:
     text: str
     buttons: tuple[Button, ...] = ()
 
+    def texts(self) -> tuple[str, ...]:
+        """Every text the message puts in front of the PO or sends back in a tap."""
+        labels = [button.label for button in self.buttons]
+        data = [button.data for button in self.buttons]
+        return (self.text, *labels, *data)
+
 
 class Channel(Protocol):
     """The PO's chat (design §7), Telegram first.
@@ -464,12 +472,28 @@ class Outbox(Protocol):
 
     def confirm(self, message_id: int, message_ref: str) -> None: ...
 
-    def refuse(self, message_id: int, reason: str) -> None:
+    def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
         """Record a refusal for good: the body is dropped and only the reason stays.
 
-        A refused message is never offered again.
+        A refused message is never offered again. A refused secret queues the PO a notice.
         """
         ...
+
+
+class Deletions(Protocol):
+    """Deletes a sent copy of a secret. The attempt is journaled before the platform is asked."""
+
+    def record_deletion(self, message_ref: str, reason: str) -> bool:
+        """Journal the attempt and drop the body; False when the journal does not know the copy."""
+        ...
+
+    def confirm_deletion(self, message_ref: str) -> None: ...
+
+
+class Reporter(Protocol):
+    """Where a fault the journal cannot keep is reported: one line of metadata, never content."""
+
+    def report(self, line: str) -> None: ...
 
 
 class Reasoner(Protocol):

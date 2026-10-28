@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
 QUESTION = Message("S1 · Which way?", (Button("1", "a:1:1"),))
+TOKEN = "123456789:" + "A" * 35
 
 
 class _Clock:
@@ -65,6 +66,14 @@ class _Channel:
         raise NotImplementedError
 
 
+class _Reporter:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def report(self, line: str) -> None:
+        self.lines.append(line)
+
+
 class _Target:
     async def wake(self, parked: Parked) -> None:
         raise NotImplementedError
@@ -90,13 +99,15 @@ def _signal(database: Database, kind: str = "escalation") -> int:
     return number
 
 
-def _outbox(database: Database) -> JournalOutbox:
-    return JournalOutbox(database, MessageStore(database))
+def _outbox(database: Database, reporter: _Reporter | None = None) -> JournalOutbox:
+    return JournalOutbox(database, MessageStore(database, reporter or _Reporter()))
 
 
-def _sender(database: Database, channel: _Channel) -> OutboxSender:
+def _sender(
+    database: Database, channel: _Channel, reporter: _Reporter | None = None
+) -> OutboxSender:
     """A new sender over the same journal: what an Operator restart gives."""
-    return OutboxSender(_outbox(database), channel, _Clock(), interval_s=1)
+    return OutboxSender(_outbox(database, reporter), channel, _Clock(), interval_s=1)
 
 
 def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_confirmed(
@@ -164,7 +175,7 @@ def test_a_message_the_platform_refuses_for_good_is_never_offered_again(memory: 
     assert channel.attempts == 1
     assert channel.sent == []
     assert _outbox(memory).pending() == []
-    [stored] = MessageStore(memory).for_signal(number)
+    [stored] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (stored.delivery, stored.body, stored.refusal) == (Delivery.REFUSED, None, "too_long")
 
 
@@ -180,7 +191,7 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
 
     clock.moment = START + timedelta(hours=4)
     scheduler = Scheduler(
-        schedule_log(memory),
+        schedule_log(memory, _Reporter()),
         _Target(),
         clock,
         interval_s=1,
@@ -191,3 +202,65 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
     assert channel.sent[1:] == []
     asyncio.run(_sender(memory, channel).tick())
     assert "Still waiting" in channel.sent[1][1].text
+
+
+def test_a_secret_is_never_kept_or_sent_and_the_po_gets_a_notice_without_it(
+    memory: Database,
+) -> None:
+    number = _signal(memory)
+    secret = Message(f"S1 · token {TOKEN}", (Button("1", "a:1:1"),))
+    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], secret, key="forward:1", now=START)
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel).tick())
+
+    [(_, notice)] = channel.sent
+    assert f"S{number}" in notice.text
+    journal = repr(memory.connection.execute("SELECT * FROM messages").fetchall())
+    assert TOKEN not in journal
+    [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (refused.delivery, refused.body, refused.refusal) == (
+        Delivery.REFUSED,
+        None,
+        "telegram_bot_token",
+    )
+
+
+def test_a_notice_the_platform_refuses_is_reported_and_gets_no_notice_of_its_own(
+    memory: Database,
+) -> None:
+    number = _signal(memory)
+    secret = Message(f"S1 {TOKEN}")
+    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], secret, key="forward:1", now=START)
+    reporter = _Reporter()
+    channel = _Channel()
+    channel.refusal = "platform_refused"
+
+    asyncio.run(_sender(memory, channel, reporter).tick())
+    asyncio.run(_sender(memory, channel, reporter).tick())
+
+    assert channel.attempts == 1
+    assert _outbox(memory, reporter).pending() == []
+    assert len(reporter.lines) == 1
+    assert TOKEN not in reporter.lines[0]
+
+
+def test_a_notice_that_cannot_be_journaled_is_reported_as_metadata_and_the_refusal_is_kept(
+    memory: Database,
+) -> None:
+    memory.connection.execute(
+        "CREATE TRIGGER no_notice BEFORE INSERT ON messages WHEN NEW.notice_key LIKE 'refused:%' "
+        "BEGIN SELECT RAISE(ABORT, 'no notice'); END"
+    )
+    number = _signal(memory)
+    reporter = _Reporter()
+    secret = Message(f"S1 {TOKEN}")
+    _outbox(memory, reporter).queue(
+        number, Purpose.QUESTION, [OWNER], secret, key="forward:1", now=START
+    )
+
+    [stored] = MessageStore(memory, reporter).for_signal(number)
+    assert (stored.delivery, stored.refusal) == (Delivery.REFUSED, "telegram_bot_token")
+    [line] = reporter.lines
+    assert f"S{number}" in line
+    assert TOKEN not in line

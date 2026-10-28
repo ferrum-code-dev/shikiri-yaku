@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import BUTTON_DATA_TOO_LONG, TEXT_TOO_LONG, TelegramChannel
+from shikiri_yaku.adapters.telegram import (
+    BUTTON_DATA_TOO_LONG,
+    PLATFORM_REFUSED,
+    TEXT_TOO_LONG,
+    TelegramChannel,
+)
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
@@ -26,6 +31,7 @@ if TYPE_CHECKING:
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 SENT: Final = "1001/42"
 MESSAGE: Final = Message("S1 · Which way?", (Button("1", "a:1:1"),))
+TOKEN: Final = "123456789:" + "A" * 35
 
 
 def _recorded(name: str) -> dict[str, Any]:
@@ -56,8 +62,27 @@ class _Clock:
         self.slept.append(seconds)
 
 
+class _Deletions:
+    """The journal's side of a deletion. It must hear of the attempt before the platform does."""
+
+    def __init__(self, api: _Api, *, known: bool = True) -> None:
+        self._api = api
+        self._known = known
+        self.recorded: list[str] = []
+        self.confirmed: list[str] = []
+
+    def record_deletion(self, message_ref: str, reason: str) -> bool:
+        del message_ref
+        assert not self._api.calls, "the attempt is journaled before the platform is asked"
+        self.recorded.append(reason)
+        return self._known
+
+    def confirm_deletion(self, message_ref: str) -> None:
+        self.confirmed.append(message_ref)
+
+
 def _send(api: _Api, clock: _Clock, message: Message = MESSAGE) -> str:
-    return asyncio.run(TelegramChannel(api, clock).send("1001", message))
+    return asyncio.run(TelegramChannel(api, clock, _Deletions(api)).send("1001", message))
 
 
 def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> None:
@@ -79,7 +104,8 @@ def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> 
 def test_edit_targets_the_ref_and_clears_buttons_with_an_empty_keyboard() -> None:
     api = _Api([_recorded("edit_ok.json")])
 
-    asyncio.run(TelegramChannel(api, _Clock()).edit(SENT, Message("S1 · Answered: option 1")))
+    channel = TelegramChannel(api, _Clock(), _Deletions(api))
+    asyncio.run(channel.edit(SENT, Message("S1 · Answered: option 1")))
 
     assert api.calls == [
         (
@@ -110,14 +136,13 @@ def test_a_second_rate_limit_is_transient_and_not_a_refusal() -> None:
         _send(api, _Clock())
 
 
-def test_a_bad_request_is_refused_for_good_and_the_reply_says_why() -> None:
-    reply = _recorded("message_too_long.json")
-    api = _Api([reply])
+def test_a_bad_request_is_refused_for_good_and_keeps_no_platform_text() -> None:
+    api = _Api([_recorded("message_too_long.json")])
 
     with pytest.raises(ChannelRefusedError) as refused:
         _send(api, _Clock())
 
-    assert str(refused.value) == reply["description"]
+    assert str(refused.value) == PLATFORM_REFUSED
 
 
 @pytest.mark.parametrize("error_code", [500, 502])
@@ -130,8 +155,9 @@ def test_a_server_failure_is_transient_so_the_sender_tries_again(error_code: int
     assert not isinstance(failed.value, ChannelRefusedError)
 
 
-def test_a_reply_without_the_message_it_names_is_transient() -> None:
-    api = _Api([{"ok": True, "result": {"message_id": 42}}])
+@pytest.mark.parametrize("result", [{"message_id": 42}, True])
+def test_a_send_reply_without_the_message_it_names_is_transient(result: object) -> None:
+    api = _Api([{"ok": True, "result": result}])
 
     with pytest.raises(ChannelError):
         _send(api, _Clock())
@@ -167,3 +193,52 @@ def test_size_limits_are_refused_before_anything_is_posted(
     message: Message, outcome: str, posts: int
 ) -> None:
     assert _sent_or_refused(message) == (outcome, posts)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        Message(f"S1 · token {TOKEN}"),
+        Message("S1", (Button(TOKEN, "a:1:1"),)),
+        Message("S1", (Button("1", TOKEN),)),
+    ],
+)
+def test_a_secret_in_any_text_of_a_message_is_refused_before_anything_is_posted(
+    message: Message,
+) -> None:
+    assert _sent_or_refused(message) == ("telegram_bot_token", 0)
+
+
+def test_an_edit_with_a_secret_journals_the_deletion_then_deletes_the_copy_and_is_refused() -> None:
+    api = _Api([_recorded("delete_ok.json")])
+    deletions = _Deletions(api)
+
+    with pytest.raises(ChannelRefusedError) as refused:
+        asyncio.run(TelegramChannel(api, _Clock(), deletions).edit(SENT, Message(f"S1 {TOKEN}")))
+
+    assert str(refused.value) == "telegram_bot_token"
+    assert deletions.recorded == ["telegram_bot_token"]
+    assert api.calls == [("deleteMessage", {"chat_id": "1001", "message_id": 42})]
+    assert deletions.confirmed == [SENT]
+
+
+def test_an_edit_with_a_secret_deletes_nothing_when_the_journal_does_not_know_the_copy() -> None:
+    api = _Api([])
+    deletions = _Deletions(api, known=False)
+
+    with pytest.raises(ChannelRefusedError):
+        asyncio.run(TelegramChannel(api, _Clock(), deletions).edit(SENT, Message(f"S1 {TOKEN}")))
+
+    assert api.calls == []
+    assert deletions.confirmed == []
+
+
+def test_a_failed_deletion_stays_journaled_and_the_refusal_stands() -> None:
+    api = _Api([{"ok": False, "error_code": 400, "description": "Bad Request: can't delete"}])
+    deletions = _Deletions(api)
+
+    with pytest.raises(ChannelRefusedError):
+        asyncio.run(TelegramChannel(api, _Clock(), deletions).edit(SENT, Message(f"S1 {TOKEN}")))
+
+    assert deletions.recorded == ["telegram_bot_token"]
+    assert deletions.confirmed == []

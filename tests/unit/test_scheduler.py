@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
@@ -66,12 +67,12 @@ class _World:
         self.clock = _Clock()
         self.target = _Target()
         self.signals = SignalStore(database)
-        self.messages = MessageStore(database)
+        self.messages = MessageStore(database, StderrReporter())
 
     def scheduler(self, log: JournalSchedule | None = None) -> Scheduler:
         """A new Scheduler over the same journal: what an Operator restart gives."""
         return Scheduler(
-            schedule_log(self.database) if log is None else log,
+            schedule_log(self.database, StderrReporter()) if log is None else log,
             self.target,
             self.clock,
             interval_s=1,

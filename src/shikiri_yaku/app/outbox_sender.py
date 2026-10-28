@@ -37,7 +37,7 @@ class OutboxSender:
             try:
                 ref = await self._channel.send(pending.destination.chat, pending.message)
             except ChannelRefusedError as error:
-                self._outbox.refuse(pending.message_id, str(error))
+                self._outbox.refuse(pending.message_id, str(error), now=self._clock.now())
                 continue
             except ChannelError:
                 continue

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.domain.loop_guard import Cause
 from shikiri_yaku.journal import (
     CursorStore,
@@ -214,7 +215,7 @@ def test_process_killed_after_signal_insert_leaves_cursor_and_signals_unchanged(
 
 def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
     signal = SignalStore(memory).insert_if_absent(_signal("E1"), NOW).row_id
-    messages = MessageStore(memory)
+    messages = MessageStore(memory, StderrReporter())
 
     def queue(chat: str) -> Inserted:
         return messages.record_outbound(

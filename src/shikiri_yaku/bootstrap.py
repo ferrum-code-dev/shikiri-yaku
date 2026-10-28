@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
     from shikiri_yaku.domain.extension import Handler
-    from shikiri_yaku.ports import Channel, Clock, Forwarder
+    from shikiri_yaku.ports import Channel, Clock, Forwarder, Reporter
     from shikiri_yaku.settings import Component, Settings
 
 
@@ -143,6 +143,7 @@ def routing_jobs(
     classifier: Classifier,
     handlers: Mapping[Category, Handler],
     fallback: Forwarder,
+    reporter: Reporter,
 ) -> list[Job]:
     """Return the Dispatcher and the Scheduler, which share one Router."""
     operator = settings.operator
@@ -159,7 +160,7 @@ def routing_jobs(
     )
     dispatcher = Dispatcher(routing, router, clock, interval_s=operator.dispatch_interval_s)
     scheduler = Scheduler(
-        schedule_log(journal),
+        schedule_log(journal, reporter),
         router,
         clock,
         interval_s=operator.scheduler_interval_s,
@@ -169,10 +170,12 @@ def routing_jobs(
     return [dispatcher.run, scheduler.run]
 
 
-def outbox_job(settings: Settings, journal: Database, clock: Clock, channel: Channel) -> Job:
+def outbox_job(
+    settings: Settings, journal: Database, clock: Clock, channel: Channel, reporter: Reporter
+) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(
-        JournalOutbox(journal, MessageStore(journal)),
+        JournalOutbox(journal, MessageStore(journal, reporter)),
         channel,
         clock,
         interval_s=settings.operator.outbox_interval_s,
@@ -185,12 +188,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return cli.main(argv, compose)
 
 
-def schedule_log(journal: Database) -> JournalSchedule:
+def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
     """Register notice kinds that need reminders until acknowledged (design §6.4)."""
     return JournalSchedule(
         journal,
         SignalStore(journal),
-        MessageStore(journal),
+        MessageStore(journal, reporter),
         OpStore(journal),
         reminder_notice_kinds=frozenset({Kind.PR_REVIEW}),
     )

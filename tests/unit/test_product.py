@@ -115,7 +115,7 @@ class _Outbox:
     def confirm(self, message_id: int, message_ref: str) -> None:
         raise NotImplementedError
 
-    def refuse(self, message_id: int, reason: str) -> None:
+    def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
         raise NotImplementedError
 
 

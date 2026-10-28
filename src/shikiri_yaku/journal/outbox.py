@@ -16,7 +16,10 @@ if TYPE_CHECKING:
 
 
 class JournalOutbox:
-    """The outbound rows of the messages table: body and destination are stored before any send."""
+    """The outbound rows of the messages table: body and destination are stored before any send.
+
+    It is also the Deletions of the Channel: a deletion is journaled on the same rows.
+    """
 
     def __init__(self, database: Database, messages: MessageStore) -> None:
         self._database = database
@@ -55,5 +58,11 @@ class JournalOutbox:
     def confirm(self, message_id: int, message_ref: str) -> None:
         self._messages.confirm_delivery(message_id, message_ref)
 
-    def refuse(self, message_id: int, reason: str) -> None:
-        self._messages.refuse_delivery(message_id, reason)
+    def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
+        self._messages.refuse_delivery(message_id, reason, now)
+
+    def record_deletion(self, message_ref: str, reason: str) -> bool:
+        return self._messages.record_deletion(message_ref, reason)
+
+    def confirm_deletion(self, message_ref: str) -> None:
+        self._messages.confirm_deletion(message_ref)
