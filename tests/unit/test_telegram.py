@@ -24,7 +24,7 @@ from shikiri_yaku.ports import (
     ChannelRefusedError,
     Message,
 )
-from tests.support.secrets import SECRETS, secret_cases
+from tests.support.secrets import SECRETS, secret_messages
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -201,14 +201,14 @@ def test_size_limits_are_refused_before_anything_is_posted(
     assert _sent_or_refused(message) == (outcome, posts)
 
 
-@pytest.mark.parametrize(("form", "message"), secret_cases())
+@pytest.mark.parametrize(("form", "message"), secret_messages())
 def test_a_secret_in_any_place_of_a_message_is_refused_before_anything_is_posted(
     form: str, message: Message
 ) -> None:
     assert _sent_or_refused(message) == (form, 0)
 
 
-@pytest.mark.parametrize(("form", "message"), secret_cases())
+@pytest.mark.parametrize(("form", "message"), secret_messages())
 def test_an_edit_with_a_secret_journals_the_deletion_then_deletes_the_copy_and_is_refused(
     form: str, message: Message
 ) -> None:

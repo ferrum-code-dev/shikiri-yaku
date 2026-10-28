@@ -225,9 +225,9 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
     assert "Still waiting" in channel.sent[1][1].text
 
 
-@pytest.mark.parametrize(("form", "message"), secret_cases())
+@pytest.mark.parametrize(("form", "secret", "message"), secret_cases())
 def test_a_secret_in_any_place_is_refused_when_queued_and_the_po_gets_a_notice_without_it(
-    memory: Database, form: str, message: Message
+    memory: Database, form: str, secret: str, message: Message
 ) -> None:
     number = _signal(memory)
     _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], message, key="forward:1", now=START)
@@ -238,8 +238,8 @@ def test_a_secret_in_any_place_is_refused_when_queued_and_the_po_gets_a_notice_w
 
     [(_, notice)] = channel.sent
     assert f"S{number}" in notice.text
-    assert not any(SECRETS[form] in text for text in notice.texts())
-    assert not any(SECRETS[form] in str(value) for value in _stored_values(memory))
+    assert not any(secret in text for text in notice.texts())
+    assert not any(secret in str(value) for value in _stored_values(memory))
     assert reporter.lines == []
     [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (refused.delivery, refused.body, refused.refusal) == (Delivery.REFUSED, None, form)
