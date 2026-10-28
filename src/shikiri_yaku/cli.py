@@ -2,20 +2,32 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import re
+import shutil
 import signal
 import stat
 import sys
+from dataclasses import dataclass
+from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.instance import InstanceLockError, instance_dir, instance_lock
+from shikiri_yaku.instance import (
+    InstanceLockedError,
+    InstanceLockError,
+    instance_dir,
+    instance_lock,
+)
 from shikiri_yaku.ports import CompositionError
-from shikiri_yaku.settings import SettingsError, load_settings
+from shikiri_yaku.service import ServiceError, service_file, write_service_file
+from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
 
 _PROGRAM = "shikiri-yaku"
@@ -31,6 +43,15 @@ class Lifecycle(Protocol):
 type Compose = Callable[[Settings, Path], Lifecycle]
 
 
+@dataclass(frozen=True, slots=True)
+class _Check:
+    """One line of the doctor report: a failure names its problem; a pass may say more than ok."""
+
+    name: str
+    problem: str | None = None
+    status: str = "ok"
+
+
 def main(argv: Sequence[str] | None, compose: Compose) -> int:
     """Run one command. The caller passes the composition, so this module builds nothing."""
     parser = argparse.ArgumentParser(prog=_PROGRAM)
@@ -38,20 +59,31 @@ def main(argv: Sequence[str] | None, compose: Compose) -> int:
     commands = parser.add_subparsers(required=True)
     run = commands.add_parser("run", help="serve one product until SIGTERM")
     _add_product(run)
-    run.set_defaults(command=_run)
+    run.set_defaults(command=partial(_run, compose=compose))
     doctor = commands.add_parser("doctor", help="check one product's instance")
     _add_product(doctor)
-    doctor.set_defaults(command=_doctor)
+    doctor.set_defaults(command=partial(_doctor, compose=compose))
+    install = commands.add_parser("install-service", help="write the service unit of one product")
+    _add_product(install)
+    install.set_defaults(command=_install_service)
     arguments = parser.parse_args(argv)
-    return arguments.command(instance_dir(arguments.product, arguments.home), compose)
+    return arguments.command(arguments)
 
 
 def _add_product(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("product")
+    parser.add_argument("product", type=_product_name)
     parser.add_argument("--home", type=Path, help="parent of the instance directory")
 
 
-def _run(directory: Path, compose: Compose) -> int:
+def _product_name(value: str) -> str:
+    if re.fullmatch(NAME_PATTERN, value) is None:
+        message = f"invalid product name {value!r}: use letters, digits, '-' and '_'"
+        raise argparse.ArgumentTypeError(message)
+    return value
+
+
+def _run(arguments: argparse.Namespace, compose: Compose) -> int:
+    directory = instance_dir(arguments.product, arguments.home)
     try:
         settings = load_settings(directory)
         with instance_lock(directory):
@@ -74,25 +106,29 @@ async def _serve() -> None:
     await stop.wait()
 
 
-def _doctor(directory: Path, compose: Compose) -> int:
+def _doctor(arguments: argparse.Namespace, compose: Compose) -> int:
+    directory = instance_dir(arguments.product, arguments.home)
     try:
         settings = load_settings(directory)
     except SettingsError as error:
-        return _report([("config", str(error))])
+        return _report([_Check("config", str(error))])
     return _report(
         [
-            ("components", _components_problem(settings)),
-            ("token file", _token_problem(settings.telegram.token_file)),
-            ("instance lock", _lock_problem(directory)),
-            ("journal", _journal_problem(settings, directory, compose)),
+            _Check("components", _components_problem(settings)),
+            _Check("token file", _token_problem(settings.telegram.token_file)),
+            _lock_check(directory),
+            _Check("journal", _journal_problem(settings, directory, compose)),
         ]
     )
 
 
-def _report(results: Sequence[tuple[str, str | None]]) -> int:
-    for name, problem in results:
-        sys.stdout.write(f"{name}: ok\n" if problem is None else f"{name}: FAILED: {problem}\n")
-    return 1 if any(problem is not None for _, problem in results) else 0
+def _report(checks: Sequence[_Check]) -> int:
+    for check in checks:
+        if check.problem is None:
+            sys.stdout.write(f"{check.name}: {check.status}\n")
+        else:
+            sys.stdout.write(f"{check.name}: FAILED: {check.problem}\n")
+    return 1 if any(check.problem is not None for check in checks) else 0
 
 
 def _components_problem(settings: Settings) -> str | None:
@@ -124,12 +160,14 @@ def _token_problem(token: Path) -> str | None:
     return None if mode == TOKEN_MODE else f"{token} has mode {mode:04o}, must be {TOKEN_MODE:04o}"
 
 
-def _lock_problem(directory: Path) -> str | None:
+def _lock_check(directory: Path) -> _Check:
     try:
         with instance_lock(directory):
-            return None
+            return _Check("instance lock")
+    except InstanceLockedError:
+        return _Check("instance lock", status="running")
     except InstanceLockError as error:
-        return str(error)
+        return _Check("instance lock", str(error))
 
 
 def _journal_problem(settings: Settings, directory: Path, compose: Compose) -> str | None:
@@ -139,3 +177,27 @@ def _journal_problem(settings: Settings, directory: Path, compose: Compose) -> s
         return str(error)
     composition.close()
     return None
+
+
+def _install_service(arguments: argparse.Namespace) -> int:
+    directory = instance_dir(arguments.product, arguments.home)
+    login_path = os.environ.get("PATH", "")
+    try:
+        load_settings(directory)
+        service = _service(arguments, login_path)
+        write_service_file(service)
+    except (SettingsError, ServiceError) as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
+    sys.stdout.write(f"wrote {service.path}\nstart it with: {service.start}\n")
+    return 0
+
+
+def _service(arguments: argparse.Namespace, login_path: str) -> ServiceFile:
+    executable = shutil.which(_PROGRAM, path=login_path)
+    if executable is None:
+        message = f"{_PROGRAM} is not on PATH, so a service could not find it"
+        raise ServiceError(message)
+    home_arguments = [] if arguments.home is None else ["--home", str(arguments.home.absolute())]
+    program = [executable, "run", arguments.product, *home_arguments]
+    return service_file(sys.platform, Path.home(), arguments.product, program, login_path)

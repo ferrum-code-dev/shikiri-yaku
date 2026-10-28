@@ -12,7 +12,8 @@ merged and `uv run poe check` passes.
 - [x] A1. Settings and instance directory
 - [x] A2. Journal
 - [x] A3. Signals, classification and extensions
-- [ ] A4. Ports, composition root and CLI (ports, Clock, bootstrap entry point, run and doctor in; lint-imports green; install-service is A4b)
+- [x] A4. Ports, composition root and CLI (ports, Clock, bootstrap entry point, run and doctor in; lint-imports green)
+- [x] A4b. Install service (install-service writes the launchd plist or systemd unit; doctor shows a held lock as running)
 - [ ] A5. Shikiru MCP adapter
 - [ ] A6. Event source
 - [ ] A7. Liveness and health sources

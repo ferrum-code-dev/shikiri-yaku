@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import signal
 import sys
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -14,6 +15,7 @@ from shikiri_yaku.bootstrap import main
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
+from shikiri_yaku.service import service_file
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,6 +26,12 @@ _ATTEMPTS: Final = 100
 _ATTEMPT_WAIT_S: Final = 0.1
 
 type _Breakage = Callable[[Path], None]
+
+
+@dataclass(frozen=True, slots=True)
+class _UserEnvironment:
+    home: Path
+    executable: Path
 
 
 def _directory(home: Path) -> Path:
@@ -150,13 +158,15 @@ def test_doctor_names_each_failed_check_and_exits_non_zero(
     assert _failed(capsys.readouterr().out) == failed
 
 
-def test_doctor_names_the_instance_lock_while_another_holder_runs(
+def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with instance_lock(_instance(tmp_path)):
-        assert _run_doctor(tmp_path) == 1
+        assert _run_doctor(tmp_path) == 0
 
-    assert _failed(capsys.readouterr().out) == {"instance lock"}
+    output = capsys.readouterr().out
+    assert _failed(output) == set()
+    assert "instance lock: running" in output
 
 
 def test_run_is_refused_while_another_holder_has_the_instance_lock(tmp_path: Path) -> None:
@@ -203,3 +213,67 @@ def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path
     assert process.exitcode == 0
     with instance_lock(directory):
         pass
+
+
+@pytest.fixture
+def user_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _UserEnvironment:
+    home = tmp_path / "user"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    executable = bin_dir / "shikiri-yaku"
+    executable.write_text("", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    return _UserEnvironment(home, executable)
+
+
+def test_install_service_writes_the_unit_of_the_run_command_under_home(
+    tmp_path: Path, user_environment: _UserEnvironment
+) -> None:
+    instances = tmp_path / "instances"
+    _instance(instances)
+
+    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 0
+
+    program = [str(user_environment.executable), "run", _PRODUCT, "--home", str(instances)]
+    expected = service_file(
+        sys.platform,
+        user_environment.home,
+        _PRODUCT,
+        program,
+        str(user_environment.executable.parent),
+    )
+    assert expected.path.is_relative_to(user_environment.home)
+    assert expected.path.read_bytes() == expected.content
+
+
+def test_install_service_refuses_an_instance_that_cannot_run(
+    tmp_path: Path, user_environment: _UserEnvironment
+) -> None:
+    assert main(["install-service", _PRODUCT, "--home", str(tmp_path)]) == 1
+    assert list(user_environment.home.iterdir()) == []
+
+
+def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
+    tmp_path: Path,
+    user_environment: _UserEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances = tmp_path / "instances"
+    _instance(instances)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 1
+    assert list(user_environment.home.iterdir()) == []
+
+
+@pytest.mark.parametrize("name", ["../escape", "a/b", "-shop", "sh op", ""])
+def test_a_product_name_that_is_not_a_plain_name_is_refused_before_anything_is_written(
+    tmp_path: Path, user_environment: _UserEnvironment, name: str
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["install-service", name, "--home", str(tmp_path)])
+
+    assert list(user_environment.home.iterdir()) == []
