@@ -664,12 +664,16 @@ class ReplyLog(Protocol):
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
 
-    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int:
-        """Keep the first payload for this update and return its op id."""
+    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
+        """Keep the first payload; a secret is refused with sanitized metadata and returns None."""
+        ...
+
+    def approve_resolve(self, op_id: int, number: int, now: datetime) -> bool:
+        """Approve a stored accept/cancel for the originating signal before it can be claimed."""
         ...
 
     def claim_resolve(self, op_id: int, now: datetime) -> ResolvePayload | None:
-        """Move intended to issued once and return the stored payload to the winner."""
+        """Claim the stored payload once; accept/cancel require durable approval."""
         ...
 
     def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:

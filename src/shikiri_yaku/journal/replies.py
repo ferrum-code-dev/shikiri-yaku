@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
 from shikiri_yaku.journal.signals import SignalState
-from shikiri_yaku.ports import Message, ReplyOrigin, ResolvePayload
+from shikiri_yaku.ports import Message, ReplyOrigin, ResolutionKind, ResolvePayload
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -52,26 +54,61 @@ class JournalReplies:
             Destination(row["channel"], row["chat"]),
         )
 
-    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int:
-        return self._ops.intend(
+    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
+        form = secret_form([payload.text or ""])
+        inserted = self._ops.intend(
             NewOp(
                 identity=f"telegram:resolve:{update_id}",
                 kind=_RESOLVE,
                 project=payload.project,
                 task_id=payload.task_id,
                 reason=payload.reason,
-                payload=payload.model_dump_json(),
+                payload=payload.model_dump_json()
+                if form is None
+                else json.dumps({"refusal": form}),
+                state=OpState.INTENDED if form is None else OpState.FAILED,
             ),
             now,
-        ).row_id
+        )
+        return inserted.row_id if form is None else None
+
+    def approve_resolve(self, op_id: int, number: int, now: datetime) -> bool:
+        with self._database.transaction():
+            op = self._ops.get(op_id)
+            if (
+                op is None
+                or op.kind != _RESOLVE
+                or op.state not in {OpState.INTENDED, OpState.APPROVED}
+                or op.payload is None
+            ):
+                return False
+            payload = ResolvePayload.model_validate_json(op.payload)
+            if payload.number != number or payload.kind not in {
+                ResolutionKind.ACCEPT,
+                ResolutionKind.CANCEL,
+            }:
+                return False
+            return op.state == OpState.APPROVED or self._ops.transition(
+                op_id, OpState.INTENDED, OpState.APPROVED, now
+            )
 
     def claim_resolve(self, op_id: int, now: datetime) -> ResolvePayload | None:
         with self._database.transaction():
             op = self._ops.get(op_id)
-            if op is None or op.kind != _RESOLVE or op.payload is None:
+            if (
+                op is None
+                or op.kind != _RESOLVE
+                or op.state not in {OpState.INTENDED, OpState.APPROVED}
+                or op.payload is None
+            ):
                 return None
             payload = ResolvePayload.model_validate_json(op.payload)
-            if not self._ops.transition(op_id, OpState.INTENDED, OpState.ISSUED, now):
+            expected = (
+                OpState.APPROVED
+                if payload.kind in {ResolutionKind.ACCEPT, ResolutionKind.CANCEL}
+                else OpState.INTENDED
+            )
+            if not self._ops.transition(op_id, expected, OpState.ISSUED, now):
                 return None
             self._signals.transition(
                 payload.number, SignalState.FORWARDED, SignalState.ANSWERED, now

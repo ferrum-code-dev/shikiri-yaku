@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
 
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.secrets import secret_form
+from shikiri_yaku.extensions.product.message import escalation_message
 from shikiri_yaku.journal import NewSignal, OpState, SignalState
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT
 from tests.support.secrets import SECRETS
@@ -118,3 +121,83 @@ def test_secret_crossing_a_details_part_boundary_is_refused_before_splitting(
         message.body is None or secret not in message.body.text
         for message in h.messages.for_signal(h.number)
     )
+
+
+@pytest.mark.parametrize("kind", ["accept", "cancel"])
+def test_replayed_selection_cannot_issue_stored_confirmation_before_approval(
+    h: Harness,
+    kind: str,
+) -> None:
+    value = h.client.view.resolutions[-1].model_copy(update={"kind": kind})
+    h.client.view = h.client.view.model_copy(
+        update={"resolutions": [h.client.view.resolutions[0], value]}
+    )
+    h.handle(data="a:1:4")
+    (pending,) = h.outbox.pending()
+    retry = value.model_copy(update={"kind": "retry"})
+    h.client.view = h.client.view.model_copy(
+        update={"resolutions": [h.client.view.resolutions[0], retry]}
+    )
+    h.handle(data="a:1:4")
+    assert len(h.client.calls) == 0
+    (op,) = h.ops.non_final()
+    assert op.state == OpState.INTENDED
+    h.outbox.confirm(pending.message_id, "1001/43")
+    h.handle(update=701, ref="1001/43", text="yes")
+    h.handle(update=702, ref="1001/43", data="a:1:3")
+    assert len(h.client.calls) == 0
+    h.handle(update=703, ref="1001/43", data="a:1:4")
+    h.handle(data="a:1:4")
+    assert h.client.calls == [("E-1", kind, None)]
+
+
+@pytest.mark.parametrize("form", list(SECRETS))
+@pytest.mark.parametrize("field", ["label", "consequences"])
+def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving(
+    h: Harness,
+    form: str,
+    field: str,
+) -> None:
+    option = h.client.view.agent_options[0]
+    hidden = option.model_copy(update={field: SECRETS[form]})
+    h.client.view = h.client.view.model_copy(
+        update={
+            "question": "Q" * MESSAGE_TEXT_LIMIT,
+            "agent_options": [hidden, h.client.view.agent_options[1]],
+        }
+    )
+    stored_signal = h.signals.get(h.number)
+    assert stored_signal is not None
+    rendered = escalation_message(
+        h.number,
+        stored_signal.to_signal(),
+        h.client.view,
+        product="Shop",
+        note="",
+        suggestion="",
+    )
+    assert secret_form(rendered.texts()) is None
+    row = h.messages.record_outbound(
+        signal_number=h.number,
+        channel="telegram",
+        chat="1001",
+        purpose=Purpose.QUESTION,
+        body=rendered,
+        notice_key=None,
+        now=NOW,
+    )
+    h.messages.confirm_delivery(row.row_id, "1001/46")
+    h.handle(ref="1001/46", data="a:1:1")
+    h.handle(ref="1001/46", data="a:1:1")
+    assert len(h.client.calls) == 0
+    op = h.ops.get(1)
+    assert op is not None
+    assert op.state == OpState.FAILED
+    assert json.loads(op.payload or "null") == {"refusal": form}
+    assert secret_form(h.database.connection.iterdump()) is None
+    (notice,) = h.outbox.pending()
+    assert notice.message.buttons == ()
+    assert secret_form(notice.message.texts()) is None
+    h.client.view = h.client.view.model_copy(update={"agent_options": [option]})
+    h.handle(ref="1001/46", data="a:1:1")
+    assert len(h.client.calls) == 0

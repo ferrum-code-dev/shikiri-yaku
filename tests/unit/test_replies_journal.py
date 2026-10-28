@@ -109,6 +109,7 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
     ops = OpStore(database)
     replies = JournalReplies(database, SignalStore(database), ops)
     op_id = replies.intend_resolve(700, PAYLOAD, NOW)
+    assert op_id is not None
     changed = PAYLOAD.model_copy(update={"text": "a different answer"})
     assert replies.intend_resolve(700, changed, NOW) == op_id
     assert replies.claim_resolve(op_id, NOW) == PAYLOAD
@@ -120,5 +121,22 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
     assert stored is not None
     assert (stored.state, stored.command_id, stored.acknowledgement) == (OpState.ISSUED, "12", ack)
     assert ops.non_final() == [stored]
+    assert restarted.claim_resolve(op_id, NOW) is None
+    database.close()
+
+
+@pytest.mark.parametrize("kind", ["accept", "cancel"])
+def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) -> None:
+    database = Database.open(":memory:")
+    replies = JournalReplies(database, SignalStore(database), OpStore(database))
+    payload = PAYLOAD.model_copy(update={"kind": kind, "text": None})
+    op_id = replies.intend_resolve(700, payload, NOW)
+    assert op_id is not None
+    assert replies.claim_resolve(op_id, NOW) is None
+    assert not replies.approve_resolve(op_id, payload.number + 1, NOW)
+    assert replies.claim_resolve(op_id, NOW) is None
+    assert replies.approve_resolve(op_id, payload.number, NOW)
+    restarted = JournalReplies(database, SignalStore(database), OpStore(database))
+    assert restarted.claim_resolve(op_id, NOW) == payload
     assert restarted.claim_resolve(op_id, NOW) is None
     database.close()

@@ -127,12 +127,24 @@ class Replies:
             kind=kind,
             text=text,
         )
+        await self._resolve(item, origin, payload)
+
+    async def _resolve(self, item: Inbound, origin: ReplyOrigin, payload: ResolvePayload) -> None:
         op_id = self._log.intend_resolve(item.update_id, payload, self._clock.now())
-        if kind in {ResolutionKind.ACCEPT, ResolutionKind.CANCEL}:
+        if op_id is None:
+            self._queue(
+                origin,
+                Message(refusal_notice(origin.number)),
+                Purpose.NOTICE,
+                key=f"resolve:{item.update_id}:refused",
+            )
+            return
+        if payload.kind in {ResolutionKind.ACCEPT, ResolutionKind.CANCEL}:
             self._queue(
                 origin,
                 Message(
-                    f"S{origin.number} · Confirm {kind}?", (Button("Confirm", item.data or ""),)
+                    f"S{origin.number} · Confirm {payload.kind}?",
+                    (Button("Confirm", item.data or ""),),
                 ),
                 Purpose.APPROVAL,
                 key=f"{_CONFIRM}{op_id}",
@@ -170,7 +182,9 @@ class Replies:
             origin.signal.escalation_id
         )
         if view is not None and view.escalation.status == EscalationStatus.OPEN:
-            await self._issue(_OP_ID.validate_python(origin.key.removeprefix(_CONFIRM)))
+            op_id = _OP_ID.validate_python(origin.key.removeprefix(_CONFIRM))
+            if self._log.approve_resolve(op_id, origin.number, self._clock.now()):
+                await self._issue(op_id)
 
     async def _details(self, item: Inbound, origin: ReplyOrigin) -> None:
         if origin.signal.escalation_id is None:
