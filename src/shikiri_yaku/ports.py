@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.classification import Assessment
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
+    from shikiri_yaku.domain.schedule import Awaiting, Outgoing, Parked
     from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "Reasoner",
     "ReasonerError",
     "ResolutionKind",
+    "ScheduleLog",
     "ShikiruClient",
     "ShikiruError",
     "ShikiruEvent",
@@ -58,6 +60,7 @@ __all__ = [
     "SignalLog",
     "TaskDetail",
     "TaskStatus",
+    "WakeTarget",
 ]
 
 
@@ -293,6 +296,32 @@ class ActionLog(Protocol):
     def record(self, op: AutoOp, now: datetime) -> int:
         """Journal the op before it happens and return its id; the identity must be new."""
         ...
+
+
+class ScheduleLog(Protocol):
+    """What the Scheduler reads and writes in the journal (design §6, §9)."""
+
+    def due_parked(self, now: datetime) -> list[Parked]: ...
+
+    def claim(self, number: int, now: datetime) -> bool:
+        """Take a parked signal for dispatch; exactly one caller gets True."""
+        ...
+
+    def awaiting_answer(self) -> list[Awaiting]: ...
+
+    def schedule_reminder(
+        self, awaiting: Awaiting, occurrence: int, now: datetime
+    ) -> list[Outgoing]:
+        """Journal one reminder per signal and occurrence; an occurrence seen before gives none."""
+        ...
+
+    def delivered(self, outgoing: Outgoing, message_ref: str) -> None: ...
+
+
+class WakeTarget(Protocol):
+    """Where a woken signal goes: the Router runs the handler that parked it."""
+
+    async def wake(self, parked: Parked) -> None: ...
 
 
 class LivenessJournal(LifecycleJournal, SignalLog, Protocol):

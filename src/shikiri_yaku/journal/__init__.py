@@ -11,6 +11,7 @@ from shikiri_yaku.journal.messages import (
     StoredMessage,
 )
 from shikiri_yaku.journal.ops import JournalActions, NewOp, OpState, OpStore, StoredOp
+from shikiri_yaku.journal.schedule import JournalSchedule
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore, StoredSignal
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "JournalActions",
     "JournalError",
     "JournalEvents",
+    "JournalSchedule",
     "JournalSources",
     "JournalTooNewError",
     "Lifecycle",

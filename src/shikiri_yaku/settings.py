@@ -33,6 +33,7 @@ NAME_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 
 EVENT_WAIT_S: Final = 30
 LIVENESS_INTERVAL_S: Final = 60
+SCHEDULER_INTERVAL_S: Final = 30
 STOP_GRACE_MIN: Final = 2
 LOST_COMMAND_MIN: Final = 2
 LINK_UNREACHABLE_MIN: Final = 10
@@ -118,6 +119,7 @@ class TelegramSettings(_FrozenModel):
 class OperatorSettings(_FrozenModel):
     event_wait_s: PositiveInt = EVENT_WAIT_S
     liveness_interval_s: PositiveInt = LIVENESS_INTERVAL_S
+    scheduler_interval_s: PositiveInt = SCHEDULER_INTERVAL_S
     stop_grace_min: PositiveInt = STOP_GRACE_MIN
     lost_command_min: PositiveInt = LOST_COMMAND_MIN
     link_unreachable_min: PositiveInt = LINK_UNREACHABLE_MIN
