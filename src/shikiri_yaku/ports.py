@@ -679,7 +679,8 @@ def escalation_choices(view: EscalationView) -> list[Choice]:
 class ResolvePayload(BaseModel):
     """The stored command arguments; issuance reads these rather than rebuilding a choice.
 
-    `label` is what the PO chose, as the Operator says it again to a later answer.
+    `label` is what the PO chose, as the Operator says it again to a later answer; rows journaled
+    before it existed have none.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -690,7 +691,7 @@ class ResolvePayload(BaseModel):
     escalation_id: str
     kind: str
     text: str | None
-    label: str
+    label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -705,7 +706,7 @@ class ReplyOrigin:
 
 @dataclass(frozen=True, slots=True)
 class RecordedResolution:
-    """A resolution the journal recorded: the label the PO chose and when its op last changed."""
+    """A resolution Shikiru confirmed: the label the PO chose and when that was journaled."""
 
     label: str
     at: datetime
@@ -717,7 +718,7 @@ class ReplyLog(Protocol):
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
 
     def recorded_resolution(self, number: int) -> RecordedResolution | None:
-        """Return the resolution of the signal that Shikiru took, or None when there is none."""
+        """Return the resolution Shikiru confirmed for the signal, or None when there is none."""
         ...
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:

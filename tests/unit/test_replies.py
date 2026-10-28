@@ -22,6 +22,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
+    MESSAGE_TEXT_LIMIT,
     Ack,
     Button,
     EscalationView,
@@ -125,6 +126,9 @@ class Harness:
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})
         self.client.view = self.client.view.model_copy(update={"escalation": record})
+
+    def confirm_in_shikiru(self, at: datetime = NOW) -> None:
+        self.ops.confirm_command("api", "12", at)
 
     def handle(
         self,
@@ -275,6 +279,7 @@ def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
 ) -> None:
     h.handle(data="a:1:1", at=ANSWERED_AT)
     h.resolve_in_shikiru()
+    h.confirm_in_shikiru(ANSWERED_AT)
     h.handle(update=701, data=data, text=text, at=LATER_AT)
     h.handle(update=701, data=data, text=text, at=LATER_AT)
     (notice,) = h.outbox.pending()
@@ -284,6 +289,17 @@ def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
     assert h.client.calls == [
         ("E-1", "answer", "Keep existing behavior (Preserve the current call pattern.)")
     ]
+
+
+def test_recorded_answer_longer_than_a_message_is_cut_so_its_notice_still_goes(h: Harness) -> None:
+    h.handle(text="A" * MESSAGE_TEXT_LIMIT, at=ANSWERED_AT)
+    h.resolve_in_shikiru()
+    h.confirm_in_shikiru(ANSWERED_AT)
+    h.handle(update=701, text="Another answer", at=LATER_AT)
+    (notice,) = h.outbox.pending()
+    assert len(notice.message.text) <= MESSAGE_TEXT_LIMIT
+    assert notice.message.text.startswith(f"S{h.number} · Already resolved: AAA")
+    assert notice.message.text.endswith("… at 12:03 UTC")
 
 
 def test_later_answer_to_a_question_resolved_elsewhere_gets_no_recorded_answer(h: Harness) -> None:

@@ -63,15 +63,17 @@ class JournalReplies:
         row = self._database.connection.execute(
             """
             SELECT payload, updated_at FROM ops
-            WHERE kind = ? AND state IN (?, ?) AND json_extract(payload, '$.number') = ?
+            WHERE kind = ? AND state = ? AND json_extract(payload, '$.number') = ?
             ORDER BY id DESC LIMIT 1
             """,
-            (_RESOLVE, OpState.ISSUED, OpState.CONFIRMED, number),
+            (_RESOLVE, OpState.CONFIRMED, number),
         ).fetchone()
         if row is None:
             return None
         payload = ResolvePayload.model_validate_json(row["payload"])
-        return RecordedResolution(payload.label, datetime.fromisoformat(row["updated_at"]))
+        # keep: rows journaled before the label existed are named by their text, or else their kind
+        label = payload.label or payload.text or payload.kind
+        return RecordedResolution(label, datetime.fromisoformat(row["updated_at"]))
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         form = secret_form([payload.text or ""])

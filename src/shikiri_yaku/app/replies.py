@@ -41,6 +41,13 @@ _ACKNOWLEDGE: Final = "k"
 _CONFIRM: Final = "confirm:"
 _OP_ID = TypeAdapter[int](PositiveInt)
 _TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
+_CUT_MARK: Final = "…"
+
+
+def _fit(text: str, room: int) -> str:
+    if len(text) <= room:
+        return text
+    return text[: room - len(_CUT_MARK)] + _CUT_MARK
 
 
 class Replies:
@@ -214,10 +221,12 @@ class Replies:
         recorded = self._log.recorded_resolution(origin.number)
         if recorded is None:
             return
-        when = recorded.at.astimezone(UTC).strftime(_TIME_FORMAT)
+        head = f"S{origin.number} · Already resolved: "
+        tail = f" at {recorded.at.astimezone(UTC).strftime(_TIME_FORMAT)}"
+        label = _fit(recorded.label, MESSAGE_TEXT_LIMIT - len(head) - len(tail))
         self._queue(
             origin,
-            Message(f"S{origin.number} · Already resolved: {recorded.label} at {when}"),
+            Message(f"{head}{label}{tail}"),
             Purpose.NOTICE,
             key=f"already:{item.update_id}",
         )

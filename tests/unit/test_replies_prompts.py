@@ -85,6 +85,7 @@ def test_confirmation_after_the_operator_resolved_gets_the_recorded_choice(h: Ha
     h.outbox.confirm(pending.message_id, "1001/43")
     h.handle(update=701, ref="1001/43", data="a:1:1", at=ANSWERED_AT)
     h.resolve_in_shikiru()
+    h.confirm_in_shikiru(ANSWERED_AT)
     h.handle(update=702, ref="1001/43", data="a:1:1", at=LATER_AT)
     (notice,) = h.outbox.pending()
     assert "accept" in notice.message.text
