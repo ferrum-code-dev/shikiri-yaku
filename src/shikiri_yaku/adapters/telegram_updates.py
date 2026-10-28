@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, ValidationError
 
@@ -15,20 +15,13 @@ if TYPE_CHECKING:
 
 GET_UPDATES: Final = "getUpdates"
 ALLOWED_UPDATES: Final = ("message", "callback_query")
-NOT_ACCEPTED: Final = "the Bot API did not accept getUpdates"
 
 
 class _Payload(BaseModel):
-    """Only the fields the Operator reads; a field Telegram adds is ignored."""
-
     model_config = ConfigDict(extra="ignore", frozen=True)
 
 
-class _Sender(_Payload):
-    id: int
-
-
-class _Chat(_Payload):
+class _Identity(_Payload):
     id: int
 
 
@@ -38,55 +31,42 @@ class _Replied(_Payload):
 
 class _Message(_Payload):
     message_id: int
-    sender: Annotated[_Sender, Field(alias="from")]
-    chat: _Chat
+    sender: Annotated[_Identity, Field(alias="from")]
+    chat: _Identity
     text: str | None = None
     reply_to_message: _Replied | None = None
 
 
 class _Tapped(_Payload):
     message_id: int
-    chat: _Chat
+    chat: _Identity
 
 
 class _Callback(_Payload):
-    sender: Annotated[_Sender, Field(alias="from")]
+    sender: Annotated[_Identity, Field(alias="from")]
     message: _Tapped
     data: str
 
 
-class _Identified(_Payload):
+class _Update(_Payload):
     update_id: StrictInt
-
-
-class _Update(_Identified):
     message: _Message | None = None
     callback_query: _Callback | None = None
 
 
-class _Failed(_Payload):
-    ok: Literal[False]
-
-
 class _Result(_Payload):
     ok: Literal[True]
-    result: list[Any]
+    result: list[_Update]
 
 
 _RESULT: Final[TypeAdapter[_Result]] = TypeAdapter(_Result)
-_UPDATE: Final[TypeAdapter[_Update]] = TypeAdapter(_Update)
-_FAILED: Final[TypeAdapter[_Failed]] = TypeAdapter(_Failed)
-_IDENTIFIED: Final[TypeAdapter[_Identified]] = TypeAdapter(_Identified)
 
 
 class TelegramUpdates:
     """Long-polls `getUpdates` and reads each update into an Inbound item.
 
-    An update of a kind it does not read, or a message without text, moves the batch's last
-    update id and gives no item. A text message or a tap that lacks a field the adapter reads, an
-    update without an integer id, and a reply that is not ok are a ChannelError: the batch is not
-    journaled and the offset does not move past them. The error never carries the payload, which
-    could hold a secret.
+    Unsupported kinds and messages without text give no item but retain their update id.
+    Invalid supported updates fail the whole batch without exposing their payload in errors.
     """
 
     def __init__(self, api: BotApi) -> None:
@@ -100,36 +80,17 @@ class TelegramUpdates:
         try:
             reply = _RESULT.validate_python(body)
         except ValidationError:
-            raise ChannelError(NOT_ACCEPTED if _is_failed(body) else UNEXPECTED_REPLY) from None
+            raise ChannelError(UNEXPECTED_REPLY) from None
         items: list[Inbound] = []
         last: int | None = None
-        for raw in reply.result:
-            update_id = _update_id(raw)
-            last = update_id if last is None else max(last, update_id)
-            if (item := _item(raw)) is not None:
+        for update in reply.result:
+            last = update.update_id if last is None else max(last, update.update_id)
+            if (item := _item(update)) is not None:
                 items.append(item)
         return Batch(last, tuple(items))
 
 
-def _is_failed(body: object) -> bool:
-    try:
-        return _FAILED.validate_python(body).ok is False
-    except ValidationError:
-        return False
-
-
-def _update_id(raw: object) -> int:
-    try:
-        return _IDENTIFIED.validate_python(raw).update_id
-    except ValidationError:
-        raise ChannelError(UNEXPECTED_REPLY) from None
-
-
-def _item(raw: object) -> Inbound | None:
-    try:
-        update = _UPDATE.validate_python(raw)
-    except ValidationError:
-        raise ChannelError(UNEXPECTED_REPLY) from None
+def _item(update: _Update) -> Inbound | None:
     if update.callback_query is not None:
         tap = update.callback_query
         ref = _ref(tap.message.chat.id, tap.message.message_id)
@@ -149,5 +110,4 @@ def _item(raw: object) -> Inbound | None:
 
 
 def _ref(chat: int, message_id: int) -> str:
-    """Return the reference the Channel gives a sent message, so inbound and outbound match."""
     return f"{chat}{REF_SEPARATOR}{message_id}"

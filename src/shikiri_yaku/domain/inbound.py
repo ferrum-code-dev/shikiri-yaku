@@ -32,11 +32,7 @@ class Inbound:
 
 @dataclass(frozen=True, slots=True)
 class Batch:
-    """What one poll returned: the newest update id seen, and the items that could be read.
-
-    An update the channel does not read (another kind, or a shape it does not know) moves
-    `last_update_id` but gives no item.
-    """
+    """Newest update id and readable items; unsupported content advances the id only."""
 
     last_update_id: int | None
     items: tuple[Inbound, ...]

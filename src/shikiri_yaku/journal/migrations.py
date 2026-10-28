@@ -10,8 +10,6 @@ Migration 5 keeps the body of an outbound message, so a restart can send what wa
 (design §7, §10).
 Migration 6 keeps the reason of a refused outbound message, the only thing a refusal leaves
 behind (design §7).
-Migration 7 keeps what the PO sent in the messages table, one row per Telegram update id, and the
-offset the polling resumes from (design §7, §9). The body column holds an inbound item's text.
 """
 
 from __future__ import annotations
@@ -124,14 +122,4 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE signals ADD COLUMN classification_note TEXT",),
     ("ALTER TABLE messages ADD COLUMN body TEXT",),
     ("ALTER TABLE messages ADD COLUMN refusal TEXT",),
-    (
-        "ALTER TABLE messages ADD COLUMN update_id INTEGER",
-        "ALTER TABLE messages ADD COLUMN kind TEXT",
-        "ALTER TABLE messages ADD COLUMN sender INTEGER",
-        "ALTER TABLE messages ADD COLUMN message_ref TEXT",
-        "ALTER TABLE messages ADD COLUMN reply_to_ref TEXT",
-        "ALTER TABLE messages ADD COLUMN data TEXT",
-        "CREATE UNIQUE INDEX messages_update ON messages (update_id) WHERE update_id IS NOT NULL",
-        "CREATE TABLE polling (channel TEXT PRIMARY KEY, next_offset INTEGER NOT NULL)",
-    ),
 )

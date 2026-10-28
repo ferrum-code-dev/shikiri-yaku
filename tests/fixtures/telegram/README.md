@@ -9,7 +9,7 @@ the reply it stands for. A recording needs the bot token and the network, and th
 | `delete_ok.json` | the reply to `deleteMessage`: `true` | Bot API, "Available methods" (deleteMessage) |
 | `message_too_long.json` | a failed call with `error_code` 400; the description is hand-written | Bot API, "Making requests" (the error object) |
 | `rate_limited.json` | a failed call with `error_code` 429 and `parameters.retry_after` | Bot API, "Making requests" (ResponseParameters) |
-| `get_updates_ok.json` | the reply to `getUpdates`: a text, a reply, a button tap, a text from another user and an edited message (a kind the Operator does not read) | Bot API, "Getting updates" (getUpdates, Update), "Available types" (Message, CallbackQuery) |
+| `get_updates_ok.json` | the reply to `getUpdates`: a text, a reply and a button tap | Bot API, "Getting updates" (getUpdates, Update), "Available types" (Message, CallbackQuery) |
 | `get_me_ok.json` | the reply to `getMe`: the User object of the bot | Bot API, "Available methods" (getMe) and "User" |
 
 In A10d the official page was read in part: the getMe entry, the required User fields, the response

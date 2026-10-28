@@ -32,7 +32,6 @@ class Delivery(StrEnum):
     SENT = "sent"
     REFUSED = "refused"
     RECEIVED = "received"
-    HANDLED = "handled"
     DELETE_ATTEMPTED = "delete_attempted"
     DELETED = "deleted"
 
@@ -292,3 +291,18 @@ class MessageStore:
             (signal_number, Direction.OUT),
         )
         return [_message(row) for row in rows]
+
+    def record_inbound(
+        self, *, channel: str, chat: str, platform_message_id: str, now: datetime
+    ) -> bool:
+        """Remember an inbound item; False means it was seen before."""
+        created = self._database.connection.execute(
+            """
+            INSERT INTO messages (direction, channel, chat, platform_message_id, delivery,
+                                  created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            """,
+            (Direction.IN, channel, chat, platform_message_id, Delivery.RECEIVED, stamp(now)),
+        )
+        return created.rowcount == 1

@@ -31,27 +31,6 @@
         "chat_instance": "-3956374823",
         "data": "a:1:1"
       }
-    },
-    {
-      "update_id": 703,
-      "message": {
-        "message_id": 92,
-        "from": {"id": 2002, "is_bot": false, "first_name": "Stranger"},
-        "chat": {"id": 2002, "first_name": "Stranger", "type": "private"},
-        "date": 1793174520,
-        "text": "hello"
-      }
-    },
-    {
-      "update_id": 704,
-      "edited_message": {
-        "message_id": 90,
-        "from": {"id": 1001, "is_bot": false, "first_name": "Pavel"},
-        "chat": {"id": 1001, "first_name": "Pavel", "type": "private"},
-        "date": 1793174500,
-        "edit_date": 1793174530,
-        "text": "Use the first way"
-      }
     }
   ]
 }

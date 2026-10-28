@@ -365,24 +365,34 @@ Acceptance:
 * With `httpx.MockTransport`: a documented success reply, a 429 reply with `retry_after`, a 400 reply and a connection error each come back as the Channel expects; the token appears in the request URL only.
 * No test reads a real token file; the gate makes no network call.
 
-### A11. Telegram inbound and replies (split into A11a to A11c)
+### A11. Telegram inbound and replies (split into A11a, A11a2, A11b and A11c)
 
 §7. One task was too large (700 to 900 lines with tests); the Leader's split was approved. Do one
-letter per change. Each ends with `uv run poe check` and its own todo line; `docs/design.md` stays
-unchanged. The design does not specify `answerCallbackQuery` (acknowledging a tap); no change invents it.
+part per change, about 300 lines each. Each ends with `uv run poe check` and its own todo line;
+`docs/design.md` stays unchanged. The design does not specify `answerCallbackQuery` (acknowledging a tap); no change invents it.
 
-### A11a. Inbound transport and journal (high)
+### A11a. Inbound transport and parsing (high)
 
-`getUpdates` on the same Bot API adapter, with typed inbound items (tap, reply, text) that keep the
-sender and the message references. The owners allow-list, dedupe by update id, and a durable polling
-offset saved in the same transaction as the allowed updates. Pending items are readable, so a crash
-before Replies handles one loses nothing. Text that looks like a secret is not stored. Polling is not
-wired until A11c.
+`getUpdates` through the shared Bot API, with typed taps, replies and texts retaining sender and
+message references. No production polling or journal changes in this delivery (review 06-verify-i2).
 
 Acceptance:
-* The same update delivered twice is stored once.
-* An update from a user id not in `owners` is not stored, and the offset still moves past it.
-* A crash before the batch is journaled leaves the offset behind; a recorded item stays pending until handled.
+* Documentation-shaped fixtures cover text, reply and tap references and polling arguments.
+* Unsupported kinds can be skipped; malformed supported updates fail the whole batch.
+* Protocol errors never expose inbound secrets in formatted tracebacks.
+
+### A11a2. Durable inbound ingestion (high; deferred)
+
+Reuse `messages` for update-id dedupe, sanitized content, source/reply references and pending/handled
+state. Save allowed items and durable polling offset transactionally; filter non-owners before storage
+without blocking progress. Apply the existing secret-refusal policy. Add the poller and timeout
+settings (HTTP timeout must outlast polling). Production polling stays unwired until A11c.
+
+Acceptance:
+* Duplicate delivery stores one item; non-owner content is excluded while its offset advances.
+* Rollback preserves both rows and offset; pending items survive a restart until handled.
+* Secret text is never persisted. In-memory SQLite tests cover these guarantees.
+* Keep this change about 300 lines; stop and propose a further split if it exceeds that scope.
 
 ### A11b. Replies (high)
 
