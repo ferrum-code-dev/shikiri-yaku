@@ -36,11 +36,14 @@ class _Clock:
 
 
 class _Channel:
-    """Records each deletion with the journal's state of that message when the platform is asked."""
+    """Records each deletion with the journal's state of that message when the platform is asked.
 
-    def __init__(self, database: Database, *, failure: Exception | None = None) -> None:
+    Each failure is raised by one call, in order; the calls after them succeed.
+    """
+
+    def __init__(self, database: Database, *, failures: tuple[Exception, ...] = ()) -> None:
         self._database = database
-        self._failure = failure
+        self._failures = list(failures)
         self.deleted: list[str] = []
         self.states: list[str] = []
 
@@ -56,8 +59,8 @@ class _Channel:
             "SELECT delivery FROM messages WHERE message_ref = ?", (message_ref,)
         ).fetchone()
         self.states.append(row["delivery"])
-        if self._failure is not None:
-            raise self._failure
+        if self._failures:
+            raise self._failures.pop(0)
 
 
 @pytest.fixture
@@ -130,14 +133,24 @@ def test_a_tap_with_a_secret_in_its_data_is_refused_but_the_bots_message_is_kept
     assert _delivery(database, TAP) == Delivery.REFUSED
 
 
-@pytest.mark.parametrize(
-    "failure", [ChannelError("offline"), ChannelRefusedError("platform_refused")]
-)
-def test_a_deletion_that_fails_stays_attempted_and_is_not_repeated(
-    database: Database, failure: Exception
+def test_a_transient_failure_is_attempted_on_each_later_tick_until_the_platform_answers(
+    database: Database,
 ) -> None:
     _store(database, _message(InboundKind.TEXT, SECRETS["sk_key"]))
-    channel = _Channel(database, failure=failure)
+    channel = _Channel(database, failures=(ChannelError("offline"), ChannelError("offline")))
+    cleanup = _cleanup(database, channel)
+
+    for _ in range(3):
+        _tick(cleanup)
+
+    assert channel.deleted == [TEXT_REF] * 3
+    assert channel.states == [Delivery.DELETE_ATTEMPTED] * 3
+    assert _delivery(database, TEXT) == Delivery.DELETED
+
+
+def test_a_refusal_by_the_platform_is_not_repeated(database: Database) -> None:
+    _store(database, _message(InboundKind.TEXT, SECRETS["sk_key"]))
+    channel = _Channel(database, failures=(ChannelRefusedError("platform_refused"),))
     cleanup = _cleanup(database, channel)
 
     _tick(cleanup)
@@ -145,6 +158,25 @@ def test_a_deletion_that_fails_stays_attempted_and_is_not_repeated(
 
     assert channel.deleted == [TEXT_REF]
     assert _delivery(database, TEXT) == Delivery.DELETE_ATTEMPTED
+
+
+def test_a_transient_failure_is_tried_again_after_a_restart(tmp_path: Path) -> None:
+    path = tmp_path / "journal.db"
+    first = Database.open(path)
+    _store(first, _message(InboundKind.TEXT, SECRETS["sk_key"]))
+    _tick(_cleanup(first, _Channel(first, failures=(ChannelError("offline"),))))
+    state = _delivery(first, TEXT)
+    first.close()
+
+    restarted = Database.open(path)
+    channel = _Channel(restarted)
+    _tick(_cleanup(restarted, channel))
+    final = _delivery(restarted, TEXT)
+    restarted.close()
+
+    assert state == Delivery.REFUSED
+    assert channel.deleted == [TEXT_REF]
+    assert final == Delivery.DELETED
 
 
 def test_a_refused_message_not_yet_deleted_is_deleted_after_a_restart(tmp_path: Path) -> None:
@@ -165,7 +197,7 @@ def test_an_attempt_cut_short_by_a_crash_is_not_repeated_after_a_restart(tmp_pat
     path = tmp_path / "journal.db"
     first = Database.open(path)
     _store(first, _message(InboundKind.TEXT, SECRETS["sk_key"]))
-    crashing = _Channel(first, failure=RuntimeError("crash before the platform answered"))
+    crashing = _Channel(first, failures=(RuntimeError("crash before the platform answered"),))
     with pytest.raises(RuntimeError, match="crash before"):
         _tick(_cleanup(first, crashing))
     first.close()

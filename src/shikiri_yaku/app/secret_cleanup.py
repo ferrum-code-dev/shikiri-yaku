@@ -11,10 +11,13 @@ if TYPE_CHECKING:
 
 
 class SecretCleanup:
-    """Asks the platform to delete each refused message once; the attempt is journaled first.
+    """Asks the platform to delete each refused message; the attempt is journaled first.
 
-    An attempt that fails, refused or not, is not repeated: the journal keeps it as attempted. The
-    refusal of the item already stands, and the item's text was never kept.
+    A failure the platform may not repeat (ChannelRefusedError) is final: the journal keeps the
+    attempt, and it is not repeated. A transient failure (ChannelError) puts the message back, and
+    the next tick tries again. An attempt cut short by a crash stays attempted and is not repeated,
+    because its outcome is unknown. The refusal of the item already stands, and its text was never
+    kept.
     """
 
     def __init__(
@@ -35,6 +38,9 @@ class SecretCleanup:
             self._log.record_deletion(item.update_id)
             try:
                 await self._channel.delete(item.message_ref)
-            except ChannelError, ChannelRefusedError:
+            except ChannelRefusedError:
+                continue
+            except ChannelError:
+                self._log.defer_deletion(item.update_id)
                 continue
             self._log.confirm_deletion(item.update_id)

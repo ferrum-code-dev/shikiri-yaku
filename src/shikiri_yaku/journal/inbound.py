@@ -92,6 +92,12 @@ class JournalInbound:
             (Delivery.DELETE_ATTEMPTED, update_id, Delivery.REFUSED),
         )
 
+    def defer_deletion(self, update_id: int) -> None:
+        self._database.connection.execute(
+            "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
+            (Delivery.REFUSED, update_id, Delivery.DELETE_ATTEMPTED),
+        )
+
     def confirm_deletion(self, update_id: int) -> None:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",

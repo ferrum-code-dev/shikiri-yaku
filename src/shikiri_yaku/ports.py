@@ -555,14 +555,17 @@ class Copies(Protocol):
 class SecretLog(Protocol):
     """Inbound messages that carried a secret, and the attempt to delete each (design §7).
 
-    The attempt is journaled before the platform is asked, and is never repeated.
+    The attempt is journaled before the platform is asked. An attempt the platform refuses is never
+    repeated; one that fails for a transient reason goes back to be tried again.
     """
 
     def to_delete(self) -> list[Inbound]:
-        """Return the refused messages whose deletion was not attempted yet, oldest first."""
+        """Return the messages still to delete, oldest first."""
         ...
 
     def record_deletion(self, update_id: int) -> None: ...
+
+    def defer_deletion(self, update_id: int) -> None: ...
 
     def confirm_deletion(self, update_id: int) -> None: ...
 
