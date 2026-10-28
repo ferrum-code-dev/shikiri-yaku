@@ -297,27 +297,50 @@ Decisions (consultation 04-consult-i2; clarification to §7, `docs/design.md` no
 * Option labels are numbers 1..n; Details appears only on truncation.
 * A9 has no inbound handling and no production sender: `ProductForwarder` is not wired into `compose()`. A10 journals each outbound message before sending and tracks delivery per destination.
 
-### A10. Telegram send and edit (normal)
+### A10. Telegram send and edit (split into A10a to A10c)
 
-Complete the deferred A8e integration: register the real extensions and classifier in `bootstrap.py`
-and append `routing_jobs(...)` to `Composition.jobs`, using A9's Product fallback and this task's
-outbound Channel. Verify that a source-created signal reaches the routing pipeline through the
-composed jobs, with fake external ports and no live network.
+§7, §12. One task was too large (about 800 lines with tests); the Leader's split was approved. Do one
+letter per change. Each ends with `uv run poe check` and its own todo line; `docs/design.md` stays unchanged.
 
-§7. The `Channel` adapter outbound: `send(destination, message)`, `edit(message_ref, message)`,
-destinations as the private chat of each owner, an outbox in the journal (a message is recorded
-before sending and its delivery state after), size limits, retry on rate limit with the server's wait
-time, refusal and deletion of messages that look like secrets (inbound check lives in A11).
+### A10a. Recoverable outbox (high)
 
-Note from the A8c review: the Scheduler books a reminder as an outbound `notice` row (key
-`remind:<signal>:<occurrence>`) and sends it itself through `Channel.send`; a `ChannelError` leaves
-the row `pending` and the occurrence is never booked again. The outbox sender written here must pick
-up every pending outbound row, reminders included, and the Scheduler must stop calling `send` itself
-(it only books); otherwise a message can go out twice or never.
+An `Outbox` port and a journal outbox: a message body is serialized and stored with its signal and
+destination before anything is sent; delivery is tracked per destination; a restart sends what was
+pending. `ProductForwarder` only queues; the Scheduler only books reminders (it stops calling
+`Channel.send`); one sender drains every pending outbound row, reminders included. A crash between
+recording and sending leads to one resend carrying the signal reference (`S41`).
+
+Acceptance:
+* A crash after recording and before sending resends once; a confirmed row is never sent again.
+* A reminder row and a question row are sent by the same sender; a failed send stays pending.
+
+### A10b. Telegram send and edit (normal)
+
+The `Channel` adapter outbound with an injected transport: `send`, `edit`, destinations as the private
+chat of each owner, size checks (4096 characters, 64 bytes of button data), retry on rate limit with
+the server's `retry_after` waited through `Clock`, and refusal of messages that look like secrets.
+Decisions: secret patterns are, to start with, Telegram bot tokens, `sk-` keys, PEM private-key
+headers, GitHub tokens and AWS access-key IDs (the exact forms are documented and tested; the list is
+not exhaustive). The scan runs before a body is persisted and again at the adapter, so a secret never
+enters the outbox. A refusal is terminal: it records safe metadata only, stops retries, and produces a
+generic notice with the S-number and without the content; when even that cannot be delivered it is
+reported on stderr as metadata only. Where an existing Telegram copy of a secret is identifiable, an
+attempted deletion is journaled before it is invoked. Transient failures stay pending; a permanent
+refusal is never treated as a delivery.
 
 Acceptance:
 * Tests against recorded Telegram payloads (kept under `tests/fixtures/telegram/`): send, edit, rate limit, message too long, button data length.
-* A crash between recording and sending leads to one resend carrying the signal reference (`S41`).
+* Each secret form is refused and never reaches the journal or the transport.
+
+### A10c. Composition and the source-to-delivery test (normal)
+
+Shared Shikiru clients per project, the Product extension and the classifier registered in
+`bootstrap.py`, `routing_jobs(...)` and the sender appended to `Composition.jobs`, using A9's fallback
+and A10a/A10b's outbox and Channel. An integration test with fake external ports and no live network
+shows that a signal created by a source is classified, forwarded, queued in the outbox and sent.
+
+Acceptance:
+* A source-created escalation ends as a sent message with buttons, through the composed jobs.
 
 ### A11. Telegram inbound and replies (high)
 
