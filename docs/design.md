@@ -380,7 +380,7 @@ Not stored: tasks, escalation packets, logs, agent usage. They stay in Shikiru a
 On start the Operator takes `instance.lock` ([§3.1](#31-one-instance-per-product)), then:
 
 1. **Ops.** Every op that is not final is reconciled by observation ([§10.1](#101-commands-to-shikiru)): a `resolve` by the escalation's state and events, a `start` by `status.engine_up`, an `install` by its check, a `submit` by asking the PO.
-2. **Signals.** Parked signals whose wake-up time has passed are dispatched. Open forwarded messages are re-sent only if their delivery was not confirmed, carrying their stable reference (`S41`), so a duplicate is recognizable.
+2. **Signals.** Signals that were `new` or `handling` when the Operator stopped are handled again: a handler may run twice for one signal, so its effects are keyed by the signal (an op identity, a message per signal). Parked signals whose wake-up time has passed are dispatched. Open forwarded messages are re-sent only if their delivery was not confirmed, carrying their stable reference (`S41`), so a duplicate is recognizable.
 3. **Sources.** The liveness rule of [§4](#4-signals) runs at once.
 
 **Other failures.** A broken MCP link is restarted with backoff, and the PO is told through a `health` signal if a project stays unreachable for `link_unreachable_min`. With the Reasoner down everything that needs it is forwarded, and one `health` signal says so ([§8](#8-reasoner)). The service manager restarts the Operator.

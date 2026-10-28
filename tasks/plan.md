@@ -256,6 +256,21 @@ Acceptance:
 * A malformed event opens one `health` signal, is retried, and does not crash the service; a later good batch closes the signal.
 * No `engine_down` is opened while the event sync is failing.
 
+### A8e. Dispatcher and start-up recovery (high)
+
+§10 step 2. Nothing yet hands a new signal to the Router. Write the dispatcher: it takes the signals
+in state `new` from the journal (oldest first) and gives each to `Router.submit`, and at start-up it
+first puts every signal left in `handling` back to `new`, so a crash loses none. The Router no longer
+lets a failing forward vanish: if `fallback.forward` raises (the Channel is down), the signal goes back
+to `new` and is tried again after a delay setting (`forward_retry_s`), and the failure is visible in a
+log line, not in an unobserved task. `Router.join` is for tests only.
+
+Acceptance:
+* A signal inserted by a source reaches its handler without any other call; two signals run concurrently.
+* After a simulated crash a `handling` signal is handled again; a `resolved`, `forwarded` or `parked` one is not.
+* A forward that fails once is retried and ends `forwarded`; the failure does not end the service.
+* The dispatcher, the Router and the Scheduler are composed in `bootstrap.py` and run as jobs.
+
 ### A9. Product handler (normal; needs S1)
 
 §6.1. The message template over the structured escalation view: question, agent options with
