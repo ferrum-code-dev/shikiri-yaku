@@ -238,7 +238,7 @@ def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
 
 def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> None:
     connection = memory.connection
-    for table in ("messages", "ops", "signals", "cursors"):
+    for table in ("messages", "ops", "signals", "cursors", "polling"):
         connection.execute(f"DROP TABLE {table}")
     for statement in MIGRATIONS[0]:
         connection.execute(statement)

@@ -30,7 +30,7 @@ merged and `uv run poe check` passes.
 - [x] A10c. Composition and the source-to-delivery test
 - [x] A10d. Bot API transport
 - [x] A11a. Inbound transport and parsing
-- [ ] A11a2. Durable inbound ingestion
+- [x] A11a2. Durable inbound ingestion
 - [ ] A11b. Replies
 - [ ] A11c. Polling, answers and composition
 - [ ] A12. Command confirmation and resolved elsewhere

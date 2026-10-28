@@ -240,3 +240,13 @@ def test_a_name_of_letters_digits_hyphens_and_underscores_is_accepted(
     settings = load_settings(_write(tmp_path, _edit('product = "shop"', f'product = "{name}"')))
 
     assert settings.product == name
+
+
+def test_a_long_poll_that_outlasts_the_call_timeout_is_rejected(tmp_path: Path) -> None:
+    config = _edit(
+        "[operator]", "[operator]\ntelegram_call_timeout_s = 20\ntelegram_poll_wait_s = 20"
+    )
+    with pytest.raises(SettingsError) as raised:
+        load_settings(_write(tmp_path, config))
+
+    assert "'telegram_poll_wait_s'" in str(raised.value)
