@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import TIME_FORMAT, fit
+from shikiri_yaku.domain.outbound import TIME_FORMAT
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
     from shikiri_yaku.ports import Channel, Clock, FinalEdits, RecordedResolution
-
-# keep: room for the label in the line, so the question above it keeps most of the message
-_LABEL_ROOM: Final = 200
 
 
 class CopyEditor:
@@ -52,5 +49,4 @@ class CopyEditor:
 
 
 def _line(resolution: RecordedResolution) -> str:
-    label = fit(resolution.label, _LABEL_ROOM)
-    return f"Resolved: {label} at {resolution.at.astimezone(UTC).strftime(TIME_FORMAT)}"
+    return f"Resolved: {resolution.label} at {resolution.at.astimezone(UTC).strftime(TIME_FORMAT)}"

@@ -26,8 +26,8 @@ _SHOWS_BUTTONS = """
 class JournalFinalEdits:
     """The final state of each sent copy lives on its messages row until the edit is confirmed.
 
-    The old body stays until then, so a tap on a copy that still shows its buttons is still
-    answered from the journal.
+    The body keeps the buttons the copy was sent with, also after the edit: a tap made before it
+    may be processed after it, and is answered from the journal as "Already resolved".
     """
 
     def __init__(self, database: Database, replies: JournalReplies) -> None:
@@ -64,8 +64,10 @@ class JournalFinalEdits:
             ).fetchall()
             for row in rows:
                 text = _BODY.validate_json(row["body"]).text
-                room = MESSAGE_TEXT_LIMIT - len(_SEPARATOR) - len(line)
-                final = Message(f"{fit(text, room)}{_SEPARATOR}{line}")
+                shown = fit(line, MESSAGE_TEXT_LIMIT)
+                room = MESSAGE_TEXT_LIMIT - len(_SEPARATOR) - len(shown)
+                head = f"{fit(text, room)}{_SEPARATOR}" if room > len(_SEPARATOR) else ""
+                final = Message(f"{head}{shown}")
                 connection.execute(
                     "UPDATE messages SET final_body = ? WHERE id = ?",
                     (_BODY.dump_json(final).decode(), row["id"]),
@@ -75,7 +77,8 @@ class JournalFinalEdits:
         rows = self._database.connection.execute(
             """
             SELECT platform_message_id, final_body FROM messages
-            WHERE direction = ? AND delivery = ? AND final_body IS NOT NULL ORDER BY id
+            WHERE direction = ? AND delivery = ? AND final_body IS NOT NULL
+              AND final_edited = 0 ORDER BY id
             """,
             (Direction.OUT, Delivery.SENT),
         )
@@ -87,7 +90,7 @@ class JournalFinalEdits:
     def confirm_edit(self, message_ref: str) -> None:
         self._database.connection.execute(
             """
-            UPDATE messages SET body = final_body, final_body = NULL
+            UPDATE messages SET final_edited = 1
             WHERE platform_message_id = ? AND direction = ? AND final_body IS NOT NULL
             """,
             (message_ref, Direction.OUT),

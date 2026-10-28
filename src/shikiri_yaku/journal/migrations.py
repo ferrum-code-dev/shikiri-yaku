@@ -15,6 +15,8 @@ offset the polling resumes from (design §7, §9). The body column holds an inbo
 Migration 8 keeps the acknowledgement of a resolve op (design §10.1).
 Migration 9 keeps the final body of a sent copy whose edit is journaled and not yet confirmed, so a
 restart finishes the edit (design §7).
+Migration 10 marks that edit confirmed without replacing the body: the body keeps the buttons the
+copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
 """
 
 from __future__ import annotations
@@ -139,4 +141,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE ops ADD COLUMN acknowledgement TEXT",),
     ("ALTER TABLE messages ADD COLUMN final_body TEXT",),
+    ("ALTER TABLE messages ADD COLUMN final_edited INTEGER NOT NULL DEFAULT 0",),
 )

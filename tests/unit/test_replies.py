@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import (
     Database,
+    JournalFinalEdits,
     JournalOutbox,
     MessageStore,
     OpState,
@@ -289,6 +291,32 @@ def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
     assert h.client.calls == [
         ("E-1", "answer", "Keep existing behavior (Preserve the current call pattern.)")
     ]
+
+
+class EditChannel:
+    async def send(self, destination: str, message: Message) -> str:
+        raise NotImplementedError
+
+    async def edit(self, message_ref: str, message: Message) -> None:
+        pass
+
+    async def delete(self, message_ref: str) -> None:
+        raise NotImplementedError
+
+
+def test_a_tap_processed_after_the_buttons_were_removed_still_gets_the_recorded_resolution(
+    h: Harness,
+) -> None:
+    h.handle(data="a:1:1", at=ANSWERED_AT)
+    h.resolve_in_shikiru()
+    h.confirm_in_shikiru(ANSWERED_AT)
+    editor = CopyEditor(
+        JournalFinalEdits(h.database, h.log()), EditChannel(), Clock(LATER_AT), interval_s=1
+    )
+    asyncio.run(editor.tick())
+    h.handle(update=701, data="a:1:2", at=LATER_AT)
+    (notice,) = h.outbox.pending()
+    assert "Keep existing behavior" in notice.message.text
 
 
 def test_recorded_answer_longer_than_a_message_is_cut_so_its_notice_still_goes(h: Harness) -> None:

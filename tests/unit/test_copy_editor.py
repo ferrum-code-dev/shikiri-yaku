@@ -119,6 +119,12 @@ class _Harness:
             JournalFinalEdits(self.database, self.replies), channel, _Clock(), interval_s=1
         )
 
+    def edited(self, ref: str) -> bool:
+        row = self.database.connection.execute(
+            "SELECT final_edited FROM messages WHERE platform_message_id = ?", (ref,)
+        ).fetchone()
+        return bool(row["final_edited"])
+
     def body(self, ref: str) -> Message:
         origin = self.replies.origin("telegram", ref)
         assert origin is not None
@@ -150,7 +156,8 @@ def test_resolution_edits_every_copy_without_buttons_after_journaling_it(h: _Har
         assert message.buttons == ()
         assert message.text.startswith(QUESTION.text)
         assert "Keep at 12:03 UTC" in message.text
-        assert h.body(ref) == message
+        assert h.edited(ref)
+        assert h.body(ref) == QUESTION
 
 
 def test_a_question_nobody_resolved_keeps_its_buttons(h: _Harness) -> None:
@@ -164,12 +171,12 @@ def test_a_failed_edit_is_finished_by_a_later_tick_or_a_restart(h: _Harness) -> 
     h.resolve()
     channel = _Channel(h.database, failures={REFS[0]: ChannelError("down")})
     asyncio.run(h.editor(channel).tick())
-    assert h.body(REFS[0]) == QUESTION
-    assert h.body(REFS[1]).buttons == ()
+    assert not h.edited(REFS[0])
+    assert h.edited(REFS[1])
     restarted = _Channel(h.database)
     asyncio.run(h.editor(restarted).tick())
     assert [ref for ref, _, _ in restarted.edits] == [REFS[0]]
-    assert h.body(REFS[0]).buttons == ()
+    assert h.edited(REFS[0])
 
 
 def test_an_edit_the_platform_refuses_is_not_repeated(h: _Harness) -> None:
