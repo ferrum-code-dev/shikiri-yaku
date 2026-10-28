@@ -64,3 +64,11 @@ class Closing:
     escalation_id: str | None = None
     task_id: str | None = None
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Confirmation:
+    """Shikiru's event log shows the command with this id as carried out."""
+
+    project: str
+    command_id: str

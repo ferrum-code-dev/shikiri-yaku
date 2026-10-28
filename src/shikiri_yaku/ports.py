@@ -23,7 +23,14 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
     from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
-    from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
+    from shikiri_yaku.domain.signal import (
+        Closing,
+        Confirmation,
+        Kind,
+        Lifecycle,
+        LifecycleState,
+        Signal,
+    )
 
 __all__ = [
     "CALLBACK_DATA_LIMIT",
@@ -270,7 +277,7 @@ class EventJournal(Protocol):
     def record_batch(
         self,
         project: str,
-        changes: Sequence[Signal | Closing],
+        changes: Sequence[Signal | Closing | Confirmation],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
@@ -686,6 +693,10 @@ class ReplyLog(Protocol):
 
     def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
         """Save the acknowledgement and command id without confirming the op."""
+        ...
+
+    def reject_resolve(self, op_id: int, now: datetime) -> bool:
+        """Fail an issued op that Shikiru refused; return whether it was still issued."""
         ...
 
     def acknowledge_notice(self, number: int, now: datetime) -> None:

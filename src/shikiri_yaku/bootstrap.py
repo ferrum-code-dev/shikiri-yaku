@@ -179,7 +179,11 @@ def project_jobs(
     sources = JournalSources(cursors, signals)
     health = HealthSource(component.name, sources, clock, operator.link_unreachable_min)
     events = EventSource(
-        component.name, client, JournalEvents(cursors), clock, operator.event_wait_s
+        component.name,
+        client,
+        JournalEvents(journal, cursors, OpStore(journal)),
+        clock,
+        operator.event_wait_s,
     )
     liveness = LivenessSource(
         component.name,

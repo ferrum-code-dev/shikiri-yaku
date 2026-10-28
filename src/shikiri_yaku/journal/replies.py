@@ -124,5 +124,8 @@ class JournalReplies:
             (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
         )
 
+    def reject_resolve(self, op_id: int, now: datetime) -> bool:
+        return self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now)
+
     def acknowledge_notice(self, number: int, now: datetime) -> None:
         self._signals.transition(number, SignalState.FORWARDED, SignalState.CLOSED, now)

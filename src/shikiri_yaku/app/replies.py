@@ -16,6 +16,7 @@ from shikiri_yaku.ports import (
     Message,
     ResolutionKind,
     ResolvePayload,
+    ShikiruRejectedError,
     escalation_choices,
 )
 
@@ -150,17 +151,27 @@ class Replies:
                 key=f"{_CONFIRM}{op_id}",
             )
         else:
-            await self._issue(op_id)
+            await self._issue(op_id, origin)
 
-    async def _issue(self, op_id: int) -> None:
+    async def _issue(self, op_id: int, origin: ReplyOrigin) -> None:
         payload = self._log.claim_resolve(op_id, self._clock.now())
         if payload is None:
             return
-        ack = await self._clients[payload.project].resolve_escalation(
-            payload.escalation_id,
-            payload.kind,
-            payload.text,
-        )
+        try:
+            ack = await self._clients[payload.project].resolve_escalation(
+                payload.escalation_id,
+                payload.kind,
+                payload.text,
+            )
+        except ShikiruRejectedError as error:
+            if self._log.reject_resolve(op_id, self._clock.now()):
+                self._queue(
+                    origin,
+                    Message(f"S{origin.number} · Shikiru rejected this: {error}"),
+                    Purpose.NOTICE,
+                    key=f"resolve:{op_id}:rejected",
+                )
+            return
         self._log.acknowledge_resolve(op_id, ack, self._clock.now())
 
     def _input(self, item: Inbound, origin: ReplyOrigin) -> None:
@@ -184,7 +195,7 @@ class Replies:
         if view is not None and view.escalation.status == EscalationStatus.OPEN:
             op_id = _OP_ID.validate_python(origin.key.removeprefix(_CONFIRM))
             if self._log.approve_resolve(op_id, origin.number, self._clock.now()):
-                await self._issue(op_id)
+                await self._issue(op_id, origin)
 
     async def _details(self, item: Inbound, origin: ReplyOrigin) -> None:
         if origin.signal.escalation_id is None:

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, Signal
+from shikiri_yaku.domain.signal import Closing, Confirmation, Kind, Lifecycle, Signal
 from shikiri_yaku.ports import (
     EscalationStatus,
     EscalationView,
@@ -22,16 +22,20 @@ STOP_REASON_KEY = "reason"
 PR_CLOSED_REASON = "pr_closed"
 NO_EVENTS = 0
 
-type Change = Signal | Closing
+type Change = Signal | Closing | Confirmation
 
 
-class _ResolvedData(BaseModel):
+class _EscalationId(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     escalation_id: str
 
 
-class _EscalationData(_ResolvedData):
+class _ResolvedData(_EscalationId):
+    command_id: int | str | None = None
+
+
+class _EscalationData(_EscalationId):
     reason: str
 
 
@@ -145,7 +149,10 @@ class EventSource:
                 return await self._escalation(event)
             case EventKinds.ESCALATION_RESOLVED:
                 data = _event_data(event, _ResolvedData)
-                return [Closing(self._project, escalation_id=data.escalation_id)]
+                changes: list[Change] = [Closing(self._project, escalation_id=data.escalation_id)]
+                if data.command_id is not None:
+                    changes.append(Confirmation(self._project, str(data.command_id)))
+                return changes
             case EventKinds.ENGINE_STOPPED if STOP_REASON_KEY in event.data:
                 return [self._signal(event, Kind.ENGINE_FAULT, str(event.data[STOP_REASON_KEY]))]
             case _:
@@ -186,7 +193,7 @@ class EventSource:
         )
 
 
-def _event_data[T: _ResolvedData](event: ShikiruEvent, model: type[T]) -> T:
+def _event_data[T: _EscalationId](event: ShikiruEvent, model: type[T]) -> T:
     try:
         return model.model_validate(event.data)
     except ValidationError as error:

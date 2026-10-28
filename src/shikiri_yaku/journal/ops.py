@@ -135,6 +135,17 @@ class OpStore:
         ).rowcount
         return moved == 1
 
+    def confirm_command(self, project: str, command_id: str, now: datetime) -> bool:
+        """Confirm the issued resolve that Shikiru's event names; an unknown id changes nothing."""
+        confirmed = self._database.connection.execute(
+            """
+            UPDATE ops SET state = ?, updated_at = ?
+            WHERE kind = 'resolve' AND project = ? AND command_id = ? AND state = ?
+            """,
+            (OpState.CONFIRMED, stamp(now), project, command_id, OpState.ISSUED),
+        ).rowcount
+        return confirmed == 1
+
     def non_final(self) -> list[StoredOp]:
         """Ops to reconcile at start: everything but `confirmed` and `failed`."""
         rows = self._database.connection.execute(

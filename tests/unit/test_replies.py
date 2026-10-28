@@ -29,6 +29,7 @@ from shikiri_yaku.ports import (
     ResolvePayload,
     ShikiruClient,
     ShikiruLinkDownError,
+    ShikiruRejectedError,
 )
 
 if TYPE_CHECKING:
@@ -43,6 +44,7 @@ class Client:
         self.view = EscalationView.model_validate(json.loads(fixture.read_text())["result"])
         self.calls: list[tuple[str, str, str | None]] = []
         self.fail = False
+        self.reject = False
 
     async def get_escalation(self, escalation_id: str) -> EscalationView:
         assert escalation_id == "E-1"
@@ -53,6 +55,9 @@ class Client:
         if self.fail:
             message = "link lost before acknowledgement"
             raise ShikiruLinkDownError(message)
+        if self.reject:
+            message = "escalation already resolved"
+            raise ShikiruRejectedError(message)
         return Ack(id=12, status="queued", result=None, message=None)
 
 
@@ -217,6 +222,22 @@ def test_claimed_failure_is_left_for_reconciliation(h: Harness) -> None:
     (op,) = h.ops.non_final()
     assert op.state == OpState.ISSUED
     assert op.acknowledgement is None
+
+
+def test_rejection_fails_the_op_and_shows_shikirus_message(h: Harness) -> None:
+    h.client.reject = True
+    h.handle(data="a:1:1")
+    assert h.ops.non_final() == []
+    (pending,) = h.outbox.pending()
+    assert "escalation already resolved" in pending.message.text
+    h.handle(data="a:1:1")
+    assert len(h.client.calls) == 1
+
+
+def test_queued_acknowledgement_keeps_the_op_issued_with_its_command_id(h: Harness) -> None:
+    h.handle(data="a:1:1")
+    (op,) = h.ops.non_final()
+    assert (op.state, op.command_id) == (OpState.ISSUED, "12")
 
 
 def test_issuance_uses_all_stored_fields_including_project(h: Harness) -> None:

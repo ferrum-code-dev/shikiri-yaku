@@ -12,7 +12,10 @@ from shikiri_yaku.journal import (
     Database,
     Inserted,
     JournalEvents,
+    NewOp,
     NewSignal,
+    OpState,
+    OpStore,
     SignalState,
     SignalStore,
 )
@@ -103,7 +106,9 @@ def database() -> Generator[Database]:
 def _source(
     database: Database, client: _FakeClient, signals: SignalStore | None = None
 ) -> tuple[EventSource, JournalEvents]:
-    journal = JournalEvents(CursorStore(database, signals or SignalStore(database)))
+    journal = JournalEvents(
+        database, CursorStore(database, signals or SignalStore(database)), OpStore(database)
+    )
     return EventSource(
         PROJECT, cast("ShikiruClient", client), journal, _FixedClock(), WAIT_S
     ), journal
@@ -194,6 +199,33 @@ def test_resolved_escalation_and_pr_lifecycle_close_the_matching_signals(
         "api:pr_review:6": SignalState.CLOSED,
         "api:task_done:7": SignalState.NEW,
     }
+
+
+def test_resolved_event_confirms_only_the_issued_op_with_its_command_id(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    ops = OpStore(database)
+    ids: dict[str, int] = {}
+    for command_id in ("12", "13"):
+        op = NewOp(f"op-{command_id}", "resolve", PROJECT, state=OpState.INTENDED)
+        ids[command_id] = ops.intend(op, NOW).row_id
+        assert ops.transition(
+            ids[command_id], OpState.INTENDED, OpState.ISSUED, NOW, command_id=command_id
+        )
+    client.views = {"E1": _view("E1")}
+    client.events = [
+        _raised(1, "E1"),
+        _event(2, "escalation_resolved", escalation_id="E1", command_id=12, resolution="answer"),
+    ]
+    asyncio.run(source.poll())
+    states = {op.command_id: op.state for op in ops.non_final()}
+    assert states == {"13": OpState.ISSUED}
+    confirmed = ops.get(ids["12"])
+    assert confirmed is not None
+    assert confirmed.state == OpState.CONFIRMED
 
 
 def test_cursor_behind_retention_repeats_the_first_sync(database: Database) -> None:
