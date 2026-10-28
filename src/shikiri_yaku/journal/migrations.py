@@ -12,6 +12,9 @@ Migration 6 keeps the reason of a refused outbound message, the only thing a ref
 behind (design §7).
 Migration 7 keeps what the PO sent in the messages table, one row per Telegram update id, and the
 offset the polling resumes from (design §7, §9). The body column holds an inbound item's text.
+Migration 8 keeps the acknowledgement of a resolve op (design §10.1).
+Migration 9 keeps the final body of a sent copy whose edit is journaled and not yet confirmed, so a
+restart finishes the edit (design §7).
 """
 
 from __future__ import annotations
@@ -135,4 +138,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         "CREATE TABLE polling (channel TEXT PRIMARY KEY, next_offset INTEGER NOT NULL)",
     ),
     ("ALTER TABLE ops ADD COLUMN acknowledgement TEXT",),
+    ("ALTER TABLE messages ADD COLUMN final_body TEXT",),
 )

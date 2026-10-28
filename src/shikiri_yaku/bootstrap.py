@@ -19,6 +19,7 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import TelegramChannel, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
+from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
@@ -43,6 +44,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalError,
     JournalEvents,
+    JournalFinalEdits,
     JournalInbound,
     JournalOutbox,
     JournalRouting,
@@ -152,6 +154,7 @@ def compose(
     jobs.append(outbox_job(settings, outbox, clock, channel))
     jobs.append(inbound_job(settings, journal, outbox, clock, clients=clients, bot_api=bot_api))
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
+    jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
     return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
 
@@ -302,6 +305,19 @@ def secret_cleanup_job(
         JournalInbound(journal), channel, clock, interval_s=settings.operator.inbound_interval_s
     )
     return cleanup.run
+
+
+def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
+    """Return the job that removes the buttons from every copy of a resolved question."""
+    signals = SignalStore(journal)
+    replies = JournalReplies(journal, signals, OpStore(journal))
+    editor = CopyEditor(
+        JournalFinalEdits(journal, replies),
+        channel,
+        clock,
+        interval_s=settings.operator.inbound_interval_s,
+    )
+    return editor.run
 
 
 def reconcile_job(

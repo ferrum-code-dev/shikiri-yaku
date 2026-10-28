@@ -7,7 +7,7 @@ from pydantic import PositiveInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.inbound import InboundKind
-from shikiri_yaku.domain.outbound import Purpose, refusal_notice
+from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
@@ -40,14 +40,6 @@ _DETAILS: Final = "d"
 _ACKNOWLEDGE: Final = "k"
 _CONFIRM: Final = "confirm:"
 _OP_ID = TypeAdapter[int](PositiveInt)
-_TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
-_CUT_MARK: Final = "…"
-
-
-def _fit(text: str, room: int) -> str:
-    if len(text) <= room:
-        return text
-    return text[: room - len(_CUT_MARK)] + _CUT_MARK
 
 
 class Replies:
@@ -222,8 +214,8 @@ class Replies:
         if recorded is None:
             return
         head = f"S{origin.number} · Already resolved: "
-        tail = f" at {recorded.at.astimezone(UTC).strftime(_TIME_FORMAT)}"
-        label = _fit(recorded.label, MESSAGE_TEXT_LIMIT - len(head) - len(tail))
+        tail = f" at {recorded.at.astimezone(UTC).strftime(TIME_FORMAT)}"
+        label = fit(recorded.label, MESSAGE_TEXT_LIMIT - len(head) - len(tail))
         self._queue(
             origin,
             Message(f"{head}{label}{tail}"),

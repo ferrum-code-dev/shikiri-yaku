@@ -4,6 +4,7 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal.cursors import Cursor, CursorStore, Lifecycle
 from shikiri_yaku.journal.database import Database, Inserted, JournalError, JournalTooNewError
 from shikiri_yaku.journal.events import JournalEvents, JournalSources
+from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import (
     Delivery,
@@ -27,6 +28,7 @@ __all__ = [
     "JournalActions",
     "JournalError",
     "JournalEvents",
+    "JournalFinalEdits",
     "JournalInbound",
     "JournalOutbox",
     "JournalRouting",

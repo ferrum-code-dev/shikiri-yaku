@@ -553,6 +553,37 @@ class Copies(Protocol):
     def confirm_deletion(self, message_ref: str) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class FinalEdit:
+    """A journaled edit of one sent copy to its final state."""
+
+    message_ref: str
+    message: Message
+
+
+class FinalEdits(Protocol):
+    """Edits of every copy of a message to its final state, each journaled before the platform.
+
+    `settle` records the final state of all copies of a signal that still show buttons; `to_edit`
+    returns the recorded edits not yet confirmed, so a restart finishes them. An edit the platform
+    refuses for good is given up and never offered again.
+    """
+
+    def unsettled(self) -> list[tuple[int, RecordedResolution]]:
+        """Return the signals whose confirmed resolution is not yet shown on every copy."""
+        ...
+
+    def settle(self, number: int, line: str) -> None:
+        """Record, for each sent copy with buttons, its text with the line added and no buttons."""
+        ...
+
+    def to_edit(self) -> list[FinalEdit]: ...
+
+    def confirm_edit(self, message_ref: str) -> None: ...
+
+    def give_up(self, message_ref: str, reason: str) -> None: ...
+
+
 class SecretLog(Protocol):
     """Inbound messages that carried a secret, and the attempt to delete each (design §7).
 
