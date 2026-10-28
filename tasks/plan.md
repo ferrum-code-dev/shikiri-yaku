@@ -464,16 +464,76 @@ mechanism.
 Acceptance:
 * A resolve done in tmux edits all copies of the open message and closes the signal.
 
-### A13. Status, open, help and measures (normal)
+### A13. Status, open, help and measures (split into A13a, A13b and A13c)
 
-§7 commands, §15 measures. `/status` (per component: engine up/down/never started, running, queued
-and escalated tasks, quota blocks), `/open` (open escalations and pending approvals with their buttons
-again), `/help`; free text gets the command list. A `shikiri-yaku stats <product>` command prints
-PO wait time, handled-without-PO per category, the escalation mix and installs from journal timestamps.
+§7 commands, §15 measures. One task was too large; the split was approved in consultation 02-consult-i1.
+Build order: A13a, then A13b (it extends A13a's command handling and the confirmation notice key), and
+A13c, which is independent and reads the journal only. One part per change, each with
+`uv run poe check` and its own todo line; the A13 line is ticked only when all three parts pass.
+`docs/design.md` stays unchanged.
+
+Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
+for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.
+
+### A13a. Command intake, /help, free-text help and /status (normal)
+
+Commands from the PO's private chat. `/status` and `/help`; any text that is neither a reply nor a
+command, including `/start` and text-less messages, gets the command list. Replies and taps, sender
+allow-listing, secret refusal, durable inbound deduplication and journal-before-send are unchanged.
+Command replies have no signal: the outbound APIs take `None` for the signal number, and a refusal
+notice for one names no signal and never renders "None". `/status` per component: engine up, down or
+never started (never started: the engine is down and the lifecycle journal holds no engine event, design
+§4), running, queued and escalated tasks from `list_tasks`, and quota blocks (windows at `used_pct` 100
+or more, design §6.2). A component that does not answer is shown as unreachable; it does not stop the
+inbound batch. Wired through `bootstrap.py`.
 
 Acceptance:
-* `/status` and `/open` against a fake client and an in-memory journal produce the expected sections.
-* `stats` on a seeded journal prints the four measures.
+* A text reply to a question still answers and queues no command reply; `/status` and free text queue
+  one reply each to the sender's chat, with no signal.
+* The same update id delivered twice queues one reply.
+* `/status` gives the engine state (up; down and never started; down after an engine event), task counts
+  per status, quota blocks at 100 and not at 99, and an unreachable component does not hide the others.
+* A signal-less message that carries a secret is refused, and its notice names no signal.
+* Tests use fake clients and an in-memory journal and do not test exact wording.
+
+### A13b. /open (normal)
+
+`/open` shows the open escalations (Shikiru's `list_escalations`) and the pending approvals (journal),
+with their buttons again. Each copy is tied to its signal and, for an approval, its original op. A
+replayed update re-shows nothing new; a re-shown copy never creates, approves or issues a second resolve
+op. A minimal, validated extension of the confirmation notice-key parser is allowed; `confirm:<op id>`
+and the callback-data rules stay. The click-time Shikiru check and the conditional op transition are
+kept, and re-shown copies take part in final-state edits. Final or issued approvals and stale
+escalations are excluded. Install approval belongs to Phase D; only approvals that exist today are shown.
+
+Acceptance:
+* Replaying the same `/open` update re-shows nothing new.
+* Two copies of one approval confirm one op: one resolve is issued.
+* An escalation resolved elsewhere is not shown as open, and its tap does not resolve.
+
+### A13c. Stats command (normal)
+
+`shikiri-yaku stats <product>` reads the journal only, reached through the composition root (`cli.py`
+cannot import the journal). It starts no service job and touches no live Shikiru, Telegram or token file.
+SQL stays in `journal/`. It prints four sections:
+1. PO wait time, as labelled proxies. Lifetime: created to updated time of escalation signals in closed
+   or resolved state. Queue time: the earliest outbound question or approval, which is not proof the PO
+   received it. Unfinished signals are excluded; the share is summed queue time over summed lifetime,
+   and unavailable without a denominator.
+2. Handled without the PO, per category: resolved signals with no outbound question or approval. Closed
+   is not counted, since it includes external resolutions and cleanup. Zero until a handler returns
+   Resolved (Phase C); action attribution is unavailable until actions are recorded.
+3. Escalation mix: escalation signals by reason and by stored Reasoner verdict, an absent verdict shown
+   as absent.
+4. Installs: current-state install-op counts, labelled supplemental. The design's approved, declined and
+   checks-failed outcomes are reported unavailable until Phase D.
+
+Misroutes stay a manual review (design §15), not a fifth printed metric.
+
+Acceptance:
+* `stats` on a seeded in-memory journal prints the four sections with proxies and gaps labelled.
+* A closed signal with no question is not counted as handled without the PO; a copy is counted once;
+  an unfinished signal is excluded from durations.
 
 ### A14. `/goal` (normal)
 
