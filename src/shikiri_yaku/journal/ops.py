@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.loop_guard import Cause
 from shikiri_yaku.journal.database import Inserted, parse_stamp, stamp
+from shikiri_yaku.ports import Ack
 
 if TYPE_CHECKING:
     import sqlite3
@@ -49,6 +50,7 @@ class StoredOp:
     state: OpState
     command_id: str | None
     output_path: str | None
+    acknowledgement: Ack | None
 
 
 def _op(row: sqlite3.Row) -> StoredOp:
@@ -63,6 +65,9 @@ def _op(row: sqlite3.Row) -> StoredOp:
         state=OpState(row["state"]),
         command_id=row["command_id"],
         output_path=row["output_path"],
+        acknowledgement=None
+        if row["acknowledgement"] is None
+        else Ack.model_validate_json(row["acknowledgement"]),
     )
 
 

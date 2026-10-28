@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 -- pydantic reads the annotations at runtime
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from shikiri_yaku.domain.classification import Classifier
 
@@ -36,6 +36,7 @@ __all__ = [
     "Channel",
     "ChannelError",
     "ChannelRefusedError",
+    "Choice",
     "Classifier",
     "Clock",
     "CommandError",
@@ -61,8 +62,11 @@ __all__ = [
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
+    "ReplyLog",
+    "ReplyOrigin",
     "Reporter",
     "ResolutionKind",
+    "ResolvePayload",
     "RoutingLog",
     "ScheduleLog",
     "ShikiruClient",
@@ -77,6 +81,7 @@ __all__ = [
     "TaskStatus",
     "Updates",
     "WakeTarget",
+    "escalation_choices",
 ]
 
 
@@ -607,3 +612,65 @@ class CommandError(Exception):
 
 class CompositionError(Exception):
     """An instance cannot be wired, because its journal cannot be opened or used at startup."""
+
+
+@dataclass(frozen=True, slots=True)
+class Choice:
+    number: int
+    value: AgentOption | EscalationResolution
+
+
+def escalation_choices(view: EscalationView) -> list[Choice]:
+    """Assign numbers to options then resolutions, retaining gaps for unsupported kinds."""
+    options = [Choice(number, value) for number, value in enumerate(view.agent_options, start=1)]
+    known = {
+        ResolutionKind.ANSWER,
+        ResolutionKind.RETRY,
+        ResolutionKind.ACCEPT,
+        ResolutionKind.CANCEL,
+    }
+    return options + [
+        Choice(number, value)
+        for number, value in enumerate(view.resolutions, start=len(options) + 1)
+        if value.kind in known
+    ]
+
+
+class ResolvePayload(BaseModel):
+    """The stored command arguments; issuance reads these rather than rebuilding a choice."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    number: PositiveInt
+    project: str
+    task_id: str | None
+    reason: str
+    escalation_id: str
+    kind: str
+    text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyOrigin:
+    number: int
+    signal: Signal
+    purpose: Purpose
+    message: Message
+    key: str | None
+
+
+class ReplyLog(Protocol):
+    """Origin binding and once-only resolve issuance; issued ops await observation in A12."""
+
+    def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
+
+    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int:
+        """Keep the first payload for this update and return its op id."""
+        ...
+
+    def claim_resolve(self, op_id: int, now: datetime) -> ResolvePayload | None:
+        """Move intended to issued once and return the stored payload to the winner."""
+        ...
+
+    def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
+        """Save the acknowledgement and command id without confirming the op."""
+        ...

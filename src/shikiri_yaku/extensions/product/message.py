@@ -8,13 +8,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Button, Message, ResolutionKind
+from shikiri_yaku.ports import (
+    MESSAGE_TEXT_LIMIT,
+    AgentOption,
+    Button,
+    Message,
+    ResolutionKind,
+    escalation_choices,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import AgentOption, EscalationResolution, EscalationView
+    from shikiri_yaku.ports import EscalationResolution, EscalationView
 
 RECOMMENDED: Final = "★"
 CUT_MARK: Final = "…"
@@ -106,16 +113,12 @@ def _hint(signal: Signal, view: EscalationView) -> str:
 
 
 def _choices(view: EscalationView) -> list[_Choice]:
-    options = [
-        _option_choice(option_no, option)
-        for option_no, option in enumerate(view.agent_options, start=1)
+    return [
+        _option_choice(choice.number, choice.value)
+        if isinstance(choice.value, AgentOption)
+        else _resolution_choice(choice.number, choice.value, marked=not view.agent_options)
+        for choice in escalation_choices(view)
     ]
-    resolutions = [
-        _resolution_choice(option_no, resolution, marked=not view.agent_options)
-        for option_no, resolution in enumerate(view.resolutions, start=len(options) + 1)
-        if resolution.kind in _RESOLUTION_LABELS
-    ]
-    return [*options, *resolutions]
 
 
 def _option_choice(option_no: int, option: AgentOption) -> _Choice:

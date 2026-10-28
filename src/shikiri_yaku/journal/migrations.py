@@ -134,4 +134,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         "CREATE UNIQUE INDEX messages_update ON messages (update_id) WHERE update_id IS NOT NULL",
         "CREATE TABLE polling (channel TEXT PRIMARY KEY, next_offset INTEGER NOT NULL)",
     ),
+    ("ALTER TABLE ops ADD COLUMN acknowledgement TEXT",),
 )
