@@ -209,6 +209,13 @@ Note: `ops.identity` is unique, so every automatic action needs its own identity
 `retry:<project>:<task>:<reason>:<n>`), and the journal needs a query that counts the ops of a
 `(project, task, reason, kind)` since a given time; add it to `OpStore` with its test.
 
+Note from the A7 review: `LivenessSource.run` and the optional `events` argument are left over
+from before `ProjectSources`; production calls only `check`, and `ProjectSources` already drains the
+event source. Remove `run` (move its tests to `ProjectSources`) and make `events` required or drop it.
+A source that raises something other than a link failure (for example a malformed event, which is a
+`ShikiruProtocolError`) now ends the whole service and the service manager restarts it into the same
+event; decide here how a failing source becomes one visible `health` signal instead of a crash loop.
+
 Acceptance:
 * A handler that raises, one that times out and an unregistered category each end as a forward carrying the failure in the note.
 * A spent loop-guard budget returns a refusal; the same action for another task is allowed.
