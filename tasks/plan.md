@@ -265,11 +265,16 @@ lets a failing forward vanish: if `fallback.forward` raises (the Channel is down
 to `new` and is tried again after a delay setting (`forward_retry_s`), and the failure is visible in a
 log line, not in an unobserved task. `Router.join` is for tests only.
 
+Scope decision: `bootstrap.routing_jobs` composes the Dispatcher and Scheduler around a shared
+Router. Calling it from `compose()` is deferred until A9's Product fallback and A10's outbound
+Channel exist; A4 forbids placeholder adapters. Until then, real runs leave signals in `new`.
+
 Acceptance:
 * A signal inserted by a source reaches its handler without any other call; two signals run concurrently.
 * After a simulated crash a `handling` signal is handled again; a `resolved`, `forwarded` or `parked` one is not.
 * A forward that fails once is retried and ends `forwarded`; the failure does not end the service.
-* The dispatcher, the Router and the Scheduler are composed in `bootstrap.py` and run as jobs.
+* The dispatcher, the Router and the Scheduler are composed in `bootstrap.routing_jobs` as jobs;
+  registering those jobs in `compose()` follows in A10 under the scope decision above.
 
 ### A9. Product handler (normal; needs S1)
 
@@ -285,6 +290,11 @@ Acceptance:
 * A message over 4096 characters is cut with a *Details* button; callback data is at most 64 bytes.
 
 ### A10. Telegram send and edit (normal)
+
+Complete the deferred A8e integration: register the real extensions and classifier in `bootstrap.py`
+and append `routing_jobs(...)` to `Composition.jobs`, using A9's Product fallback and this task's
+outbound Channel. Verify that a source-created signal reaches the routing pipeline through the
+composed jobs, with fake external ports and no live network.
 
 §7. The `Channel` adapter outbound: `send(destination, message)`, `edit(message_ref, message)`,
 destinations as the private chat of each owner, an outbox in the journal (a message is recorded
