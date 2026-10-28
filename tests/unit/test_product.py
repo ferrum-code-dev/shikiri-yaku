@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.product.handler import NOTHING_TRIED, ProductHandler
@@ -22,9 +25,13 @@ from shikiri_yaku.ports import (
     Button,
     EscalationView,
     Message,
+    Pending,
     ShikiruClient,
     ShikiruLinkDownError,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 NUMBER: Final = 41
@@ -85,17 +92,46 @@ class _Client:
         return self.view
 
 
-class _Channel:
+class _Outbox:
     def __init__(self) -> None:
-        self.sent: list[tuple[str, Message]] = []
+        self.queued: list[tuple[Purpose, tuple[Destination, ...], Message, str]] = []
 
-    async def send(self, destination: str, message: Message) -> str:
-        self.sent.append((destination, message))
-        return str(len(self.sent))
+    def queue(
+        self,
+        number: int,
+        purpose: Purpose,
+        destinations: Sequence[Destination],
+        message: Message,
+        *,
+        key: str,
+        now: datetime,
+    ) -> None:
+        del number, now
+        self.queued.append((purpose, tuple(destinations), message, key))
 
-    async def edit(self, message_ref: str, message: Message) -> None:
-        del message_ref, message
+    def pending(self) -> list[Pending]:
         raise NotImplementedError
+
+    def confirm(self, message_id: int, message_ref: str) -> None:
+        raise NotImplementedError
+
+
+class _Clock:
+    def now(self) -> datetime:
+        return datetime(2026, 10, 28, tzinfo=UTC)
+
+    async def sleep(self, seconds: float) -> None:
+        raise NotImplementedError
+
+
+def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarder:
+    return ProductForwarder(
+        PRODUCT,
+        {"api": cast("ShikiruClient", client)},
+        outbox,
+        _Clock(),
+        [Destination("telegram", chat) for chat in chats],
+    )
 
 
 def test_fixture_view_message_has_question_options_and_one_recommended_mark() -> None:
@@ -209,46 +245,44 @@ def test_callback_data_fits_the_platform_limit() -> None:
     assert all(len(button.data.encode()) <= CALLBACK_DATA_LIMIT for button in message.buttons)
 
 
-def test_forwarder_sends_the_same_message_to_every_destination() -> None:
-    client = _Client(view=_fixture_view())
-    channel = _Channel()
-    forwarder = ProductForwarder(
-        PRODUCT, {"api": cast("ShikiruClient", client)}, channel, ["1001", "1002"]
-    )
+def test_forwarder_queues_one_message_for_every_destination_keyed_by_the_signal() -> None:
+    outbox = _Outbox()
+    forwarder = _forwarder(_Client(view=_fixture_view()), outbox, "1001", "1002")
     asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, SUGGESTION))
-    assert [destination for destination, _ in channel.sent] == ["1001", "1002"]
-    first, second = (message for _, message in channel.sent)
-    assert first == second
-    assert "S41" in first.text
-    assert "Which behavior should remain?" in first.text
-    assert SUGGESTION in first.text
+    ((purpose, destinations, message, key),) = outbox.queued
+    assert purpose is Purpose.QUESTION
+    assert [where.chat for where in destinations] == ["1001", "1002"]
+    assert key == "forward:41"
+    assert "S41" in message.text
+    assert "Which behavior should remain?" in message.text
+    assert SUGGESTION in message.text
 
 
 def test_escalation_that_shikiru_no_longer_returns_is_shown_as_information() -> None:
-    client = _Client(view=None)
-    channel = _Channel()
-    forwarder = ProductForwarder(PRODUCT, {"api": cast("ShikiruClient", client)}, channel, ["1001"])
-    asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
-    assert channel.sent[0][1].buttons == (Button("Acknowledge", "k:41"),)
+    outbox = _Outbox()
+    asyncio.run(
+        _forwarder(_Client(view=None), outbox, "1001").forward(NUMBER, ESCALATION, NOTE, "")
+    )
+    purpose, _, message, _ = outbox.queued[0]
+    assert purpose is Purpose.NOTICE
+    assert message.buttons == (Button("Acknowledge", "k:41"),)
 
 
 def test_signal_without_escalation_is_shown_as_information_without_asking_shikiru() -> None:
     client = _Client(error=ShikiruLinkDownError("link down"))
-    channel = _Channel()
-    forwarder = ProductForwarder(PRODUCT, {"api": cast("ShikiruClient", client)}, channel, ["1001"])
+    outbox = _Outbox()
     engine_down = Signal("api", Kind.ENGINE_DOWN, "7", "engine_stopped", "The engine stopped.")
-    asyncio.run(forwarder.forward(NUMBER, engine_down, NOTE, ""))
+    asyncio.run(_forwarder(client, outbox, "1001").forward(NUMBER, engine_down, NOTE, ""))
     assert client.asked == []
-    assert channel.sent[0][1].buttons == (Button("Acknowledge", "k:41"),)
+    assert outbox.queued[0][2].buttons == (Button("Acknowledge", "k:41"),)
 
 
 def test_link_down_while_reading_the_escalation_propagates_for_a_retry() -> None:
     client = _Client(error=ShikiruLinkDownError("link down"))
-    channel = _Channel()
-    forwarder = ProductForwarder(PRODUCT, {"api": cast("ShikiruClient", client)}, channel, ["1001"])
+    outbox = _Outbox()
     with pytest.raises(ShikiruLinkDownError):
-        asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
-    assert channel.sent == []
+        asyncio.run(_forwarder(client, outbox, "1001").forward(NUMBER, ESCALATION, NOTE, ""))
+    assert outbox.queued == []
 
 
 def test_product_handler_forwards_with_nothing_tried() -> None:

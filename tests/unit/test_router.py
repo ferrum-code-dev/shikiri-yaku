@@ -240,7 +240,6 @@ def test_a_parked_signal_keeps_its_due_time_and_wakes_its_handler(world: _World)
         scheduler = Scheduler(
             schedule_log(world.database),
             restarted,
-            None,  # type: ignore[arg-type]
             _Later(),
             interval_s=1,
             reminder_first_h=4,

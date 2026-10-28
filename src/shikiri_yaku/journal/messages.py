@@ -4,19 +4,17 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+
+from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal.database import Inserted, stamp
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     import sqlite3
     from datetime import datetime
 
     from shikiri_yaku.journal.database import Database
-
-
-class Purpose(StrEnum):
-    QUESTION = "question"
-    APPROVAL = "approval"
-    NOTICE = "notice"
 
 
 class Direction(StrEnum):
@@ -30,6 +28,9 @@ class Delivery(StrEnum):
     RECEIVED = "received"
 
 
+_BODY = TypeAdapter(Message)
+
+
 @dataclass(frozen=True)
 class StoredMessage:
     id: int
@@ -39,6 +40,7 @@ class StoredMessage:
     platform_message_id: str | None
     purpose: Purpose | None
     delivery: Delivery
+    body: Message | None
 
 
 def _message(row: sqlite3.Row) -> StoredMessage:
@@ -50,6 +52,7 @@ def _message(row: sqlite3.Row) -> StoredMessage:
         platform_message_id=row["platform_message_id"],
         purpose=None if row["purpose"] is None else Purpose(row["purpose"]),
         delivery=Delivery(row["delivery"]),
+        body=None if row["body"] is None else _BODY.validate_json(row["body"]),
     )
 
 
@@ -64,16 +67,17 @@ class MessageStore:
         channel: str,
         chat: str,
         purpose: Purpose,
+        body: Message,
         notice_key: str | None,
         now: datetime,
     ) -> Inserted:
-        """Journal a message before it is sent; a notice already queued for that chat is known."""
+        """Journal a message and its body before it is sent; a key queued for that chat is known."""
         with self._database.transaction() as connection:
             created = connection.execute(
                 """
                 INSERT INTO messages (signal_number, direction, channel, chat, purpose, notice_key,
-                                      delivery, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                      delivery, body, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (notice_key, channel, chat) DO NOTHING
                 """,
                 (
@@ -84,6 +88,7 @@ class MessageStore:
                     purpose,
                     notice_key,
                     Delivery.PENDING,
+                    _BODY.dump_json(body).decode(),
                     stamp(now),
                 ),
             )
@@ -102,8 +107,13 @@ class MessageStore:
         )
 
     def unconfirmed(self) -> list[StoredMessage]:
+        """Return what was recorded and not confirmed; a row without a body cannot be sent."""
         rows = self._database.connection.execute(
-            "SELECT * FROM messages WHERE direction = ? AND delivery = ? ORDER BY id",
+            """
+            SELECT * FROM messages
+            WHERE direction = ? AND delivery = ? AND body IS NOT NULL
+            ORDER BY id
+            """,
             (Direction.OUT, Delivery.PENDING),
         )
         return [_message(row) for row in rows]

@@ -12,6 +12,7 @@ from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.journal import (
     Database,
     Inserted,
+    JournalOutbox,
     JournalSchedule,
     MessageStore,
     NewSignal,
@@ -20,13 +21,12 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from shikiri_yaku.domain.schedule import Parked
-    from shikiri_yaku.ports import Message
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 FIRST_H = 4
@@ -53,22 +53,6 @@ class _Target:
         self.woken.append(parked)
 
 
-class _Channel:
-    def __init__(self) -> None:
-        self.sent: list[tuple[str, str]] = []
-        self.failing = False
-
-    async def send(self, destination: str, message: Message) -> str:
-        if self.failing:
-            raise ChannelError
-        self.sent.append((destination, message.text))
-        return str(len(self.sent))
-
-    async def edit(self, message_ref: str, message: Message) -> None:
-        del message_ref, message
-        raise NotImplementedError
-
-
 @pytest.fixture
 def memory() -> Generator[Database]:
     database = Database.open(":memory:")
@@ -81,7 +65,6 @@ class _World:
         self.database = database
         self.clock = _Clock()
         self.target = _Target()
-        self.channel = _Channel()
         self.signals = SignalStore(database)
         self.messages = MessageStore(database)
 
@@ -90,7 +73,6 @@ class _World:
         return Scheduler(
             schedule_log(self.database) if log is None else log,
             self.target,
-            self.channel,
             self.clock,
             interval_s=1,
             reminder_first_h=FIRST_H,
@@ -126,10 +108,18 @@ class _World:
             channel="telegram",
             chat=chat,
             purpose=purpose,
+            body=Message("asked"),
             notice_key=key,
             now=START,
         )
         self.messages.confirm_delivery(sent.row_id, f"m{sent.row_id}")
+
+
+def _queued(world: _World) -> list[tuple[str, str]]:
+    return [
+        (pending.destination.chat, pending.message.text)
+        for pending in JournalOutbox(world.database, world.messages).pending()
+    ]
 
 
 def _tick(world: _World) -> None:
@@ -172,30 +162,15 @@ def test_reminders_fire_at_the_configured_times_and_never_twice(world: _World) -
     for hours, sent in [(3, 0), (4, 1), (5, 1), (27, 1), (28, 2), (28, 2)]:
         world.clock.moment = START + timedelta(hours=hours)
         _tick(world)
-        assert len(world.channel.sent) == sent, hours
-    assert {destination for destination, _ in world.channel.sent} == {CHAT}
+        assert len(_queued(world)) == sent, hours
+    assert {destination for destination, _ in _queued(world)} == {CHAT}
 
 
 def test_answered_signal_gets_no_reminder(world: _World) -> None:
     world.ask(world.signal("e1", SignalState.ANSWERED))
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
-    assert world.channel.sent == []
-
-
-def test_a_failed_send_stays_booked_in_the_outbox_and_is_not_rescheduled(
-    world: _World,
-) -> None:
-    number = world.signal("e1", SignalState.FORWARDED)
-    world.ask(number)
-    world.clock.moment = START + timedelta(hours=FIRST_H)
-    world.channel.failing = True
-    _tick(world)
-    world.channel.failing = False
-    _tick(world)
-
-    assert world.channel.sent == []
-    assert len(MessageStore(world.database).unconfirmed()) == 1
+    assert _queued(world) == []
 
 
 def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_one(
@@ -207,6 +182,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
         channel="telegram",
         chat=CHAT,
         purpose=Purpose.QUESTION,
+        body=Message("asked"),
         notice_key="copy",
         now=START,
     )
@@ -217,7 +193,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
     _tick(world)
     _tick(world)
 
-    assert sorted(destination for destination, _ in world.channel.sent) == [CHAT, "1002"]
+    assert sorted(destination for destination, _ in _queued(world)) == [CHAT, "1002"]
 
 
 @pytest.mark.parametrize("final_state", [SignalState.ANSWERED, SignalState.CLOSED])
@@ -231,12 +207,12 @@ def test_unacknowledged_review_is_reminded_until_acknowledged_or_closed(
     _tick(world)
     world.clock.moment = START + timedelta(hours=FIRST_H + 1)
     _tick(world)
-    assert len(world.channel.sent) == 1
+    assert len(_queued(world)) == 1
 
     world.signals.transition(number, SignalState.FORWARDED, final_state, world.clock.now())
     world.clock.moment = START + timedelta(hours=FIRST_H + REPEAT_H)
     _tick(world)
-    assert len(world.channel.sent) == 1
+    assert len(_queued(world)) == 1
 
 
 @pytest.mark.parametrize("registered", [False, True])
@@ -257,7 +233,7 @@ def test_notice_reminders_follow_injected_registration(world: _World, *, registe
     asyncio.run(world.scheduler(log).tick())
     asyncio.run(world.scheduler(log).tick())
 
-    assert [chat for chat, _ in world.channel.sent] == ([CHAT] if registered else [])
+    assert [chat for chat, _ in _queued(world)] == ([CHAT] if registered else [])
 
 
 def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(
@@ -284,4 +260,4 @@ def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(
     assert world.messages.unconfirmed() == []
 
     _tick(world)
-    assert sorted(destination for destination, _ in world.channel.sent) == [CHAT, "1002"]
+    assert sorted(destination for destination, _ in _queued(world)) == [CHAT, "1002"]

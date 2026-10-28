@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.schedule import Awaiting, Destination, Outgoing, Parked
+from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
 from shikiri_yaku.journal.database import parse_stamp
-from shikiri_yaku.journal.messages import Delivery, Direction, Purpose
+from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState
 from shikiri_yaku.journal.signals import SignalState
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.journal.messages import MessageStore
     from shikiri_yaku.journal.ops import OpStore
     from shikiri_yaku.journal.signals import SignalStore, StoredSignal
+    from shikiri_yaku.ports import Message
 
 REMIND: Final = "remind"
 
@@ -94,28 +96,21 @@ class JournalSchedule:
         return list(grouped.values())
 
     def schedule_reminder(
-        self, awaiting: Awaiting, occurrence: int, now: datetime
-    ) -> list[Outgoing]:
+        self, awaiting: Awaiting, occurrence: int, message: Message, now: datetime
+    ) -> None:
         # keep: one transaction, so an interruption leaves neither the op nor a partial outbox
         identity = f"{REMIND}:{awaiting.number}:{occurrence}"
         op = NewOp(identity, REMIND, awaiting.project, awaiting.task_id, state=OpState.CONFIRMED)
         with self._database.transaction():
             if not self._ops.intend(op, now).is_new:
-                return []
-            return [
-                Outgoing(
-                    self._messages.record_outbound(
-                        signal_number=awaiting.number,
-                        channel=where.channel,
-                        chat=where.chat,
-                        purpose=Purpose.NOTICE,
-                        notice_key=identity,
-                        now=now,
-                    ).row_id,
-                    where,
+                return
+            for where in awaiting.destinations:
+                self._messages.record_outbound(
+                    signal_number=awaiting.number,
+                    channel=where.channel,
+                    chat=where.chat,
+                    purpose=Purpose.NOTICE,
+                    body=message,
+                    notice_key=identity,
+                    now=now,
                 )
-                for where in awaiting.destinations
-            ]
-
-    def delivered(self, outgoing: Outgoing, message_ref: str) -> None:
-        self._messages.confirm_delivery(outgoing.message_id, message_ref)

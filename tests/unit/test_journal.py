@@ -26,6 +26,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.journal.migrations import MIGRATIONS
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -221,6 +222,7 @@ def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
             channel="telegram",
             chat=chat,
             purpose=Purpose.NOTICE,
+            body=Message("done"),
             notice_key="done:api:T-1",
             now=NOW,
         )

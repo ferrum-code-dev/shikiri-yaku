@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.classification import Assessment, Classification
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
-    from shikiri_yaku.domain.schedule import Awaiting, Outgoing, Parked
+    from shikiri_yaku.domain.outbound import Purpose
+    from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
     from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
 
 __all__ = [
@@ -51,6 +52,8 @@ __all__ = [
     "LifecycleJournal",
     "LivenessJournal",
     "Message",
+    "Outbox",
+    "Pending",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -317,12 +320,10 @@ class ScheduleLog(Protocol):
     def awaiting_answer(self) -> list[Awaiting]: ...
 
     def schedule_reminder(
-        self, awaiting: Awaiting, occurrence: int, now: datetime
-    ) -> list[Outgoing]:
-        """Journal one reminder per signal and occurrence; an occurrence seen before gives none."""
+        self, awaiting: Awaiting, occurrence: int, message: Message, now: datetime
+    ) -> None:
+        """Queue one reminder per signal and occurrence; an occurrence seen before queues none."""
         ...
-
-    def delivered(self, outgoing: Outgoing, message_ref: str) -> None: ...
 
 
 class RoutingLog(Protocol):
@@ -424,6 +425,41 @@ class Channel(Protocol):
     async def send(self, destination: str, message: Message) -> str: ...
 
     async def edit(self, message_ref: str, message: Message) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Pending:
+    """A recorded message the sender has not yet seen confirmed."""
+
+    message_id: int
+    destination: Destination
+    message: Message
+
+
+class Outbox(Protocol):
+    """Every message to the PO is recorded here before it is sent (design §7, §10).
+
+    One sender drains it: a restart sends what was recorded and not confirmed, and a confirmed
+    message is never offered again. A recorded body carries its signal reference (`S41`), so a
+    resend after an unconfirmed send is recognizable.
+    """
+
+    def queue(
+        self,
+        number: int,
+        purpose: Purpose,
+        destinations: Sequence[Destination],
+        message: Message,
+        *,
+        key: str,
+        now: datetime,
+    ) -> None:
+        """Record the message once per key and destination; a key seen before records nothing."""
+        ...
+
+    def pending(self) -> list[Pending]: ...
+
+    def confirm(self, message_id: int, message_ref: str) -> None: ...
 
 
 class Reasoner(Protocol):

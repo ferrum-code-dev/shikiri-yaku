@@ -38,14 +38,6 @@ class Awaiting:
     destinations: tuple[Destination, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class Outgoing:
-    """A reminder journaled in the outbox and not yet sent."""
-
-    message_id: int
-    destination: Destination
-
-
 def due_occurrence(asked_at: datetime, now: datetime, first_h: int, repeat_h: int) -> int:
     """Return the newest reminder due at `now`: 1 after `first_h`, then one per `repeat_h`.
 

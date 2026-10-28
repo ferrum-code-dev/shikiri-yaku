@@ -6,6 +6,8 @@ Migration 3 keeps the time of the newest lifecycle event: the liveness rule need
 a clean stop happened before this run of the Operator (design §4).
 Migration 4 keeps the note that came with a signal's classification: the Reasoner's suggestion or
 its failure, which the message to the PO must carry (design §5).
+Migration 5 keeps the body of an outbound message, so a restart can send what was recorded
+(design §7, §10).
 """
 
 from __future__ import annotations
@@ -116,4 +118,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         """,
     ),
     ("ALTER TABLE signals ADD COLUMN classification_note TEXT",),
+    ("ALTER TABLE messages ADD COLUMN body TEXT",),
 )

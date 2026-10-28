@@ -25,7 +25,7 @@ merged and `uv run poe check` passes.
 - [x] A8d. Source cleanup and failing sources
 - [x] A8e. Dispatcher and start-up recovery
 - [x] A9. Product handler
-- [ ] A10a. Recoverable outbox
+- [x] A10a. Recoverable outbox
 - [ ] A10b. Telegram send and edit
 - [ ] A10c. Composition and the source-to-delivery test
 - [ ] A11. Telegram inbound and replies

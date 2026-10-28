@@ -19,6 +19,7 @@ from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.liveness_source import LivenessSource
+from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
@@ -29,6 +30,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalError,
     JournalEvents,
+    JournalOutbox,
     JournalRouting,
     JournalSchedule,
     JournalSources,
@@ -141,7 +143,6 @@ def routing_jobs(
     classifier: Classifier,
     handlers: Mapping[Category, Handler],
     fallback: Forwarder,
-    channel: Channel,
 ) -> list[Job]:
     """Return the Dispatcher and the Scheduler, which share one Router."""
     operator = settings.operator
@@ -160,13 +161,23 @@ def routing_jobs(
     scheduler = Scheduler(
         schedule_log(journal),
         router,
-        channel,
         clock,
         interval_s=operator.scheduler_interval_s,
         reminder_first_h=settings.handlers.product.reminder_first_h,
         reminder_repeat_h=settings.handlers.product.reminder_repeat_h,
     )
     return [dispatcher.run, scheduler.run]
+
+
+def outbox_job(settings: Settings, journal: Database, clock: Clock, channel: Channel) -> Job:
+    """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
+    sender = OutboxSender(
+        JournalOutbox(journal, MessageStore(journal)),
+        channel,
+        clock,
+        interval_s=settings.operator.outbox_interval_s,
+    )
+    return sender.run
 
 
 def main(argv: Sequence[str] | None = None) -> int:

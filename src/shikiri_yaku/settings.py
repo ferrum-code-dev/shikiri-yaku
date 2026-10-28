@@ -34,6 +34,7 @@ NAME_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 EVENT_WAIT_S: Final = 30
 LIVENESS_INTERVAL_S: Final = 60
 SCHEDULER_INTERVAL_S: Final = 30
+OUTBOX_INTERVAL_S: Final = 2
 HANDLER_TIMEOUT_S: Final = 900
 DISPATCH_INTERVAL_S: Final = 2
 FORWARD_RETRY_S: Final = 60
@@ -123,6 +124,7 @@ class OperatorSettings(_FrozenModel):
     event_wait_s: PositiveInt = EVENT_WAIT_S
     liveness_interval_s: PositiveInt = LIVENESS_INTERVAL_S
     scheduler_interval_s: PositiveInt = SCHEDULER_INTERVAL_S
+    outbox_interval_s: PositiveInt = OUTBOX_INTERVAL_S
     handler_timeout_s: PositiveInt = HANDLER_TIMEOUT_S
     dispatch_interval_s: PositiveInt = DISPATCH_INTERVAL_S
     forward_retry_s: PositiveInt = FORWARD_RETRY_S
