@@ -342,6 +342,21 @@ shows that a signal created by a source is classified, forwarded, queued in the 
 Acceptance:
 * A source-created escalation ends as a sent message with buttons, through the composed jobs.
 
+### A10d. Bot API transport (normal)
+
+The real `BotApi` adapter: `call(method, payload)` posts JSON to
+`https://api.telegram.org/bot<token>/<method>` and returns the decoded reply whatever its `ok` says;
+no reply at all (connection error, timeout, a body that is not JSON) is a `ChannelError`. It reads the
+`token_file` of the settings once, in its constructor, and the token is never logged, put in an
+exception message, or kept anywhere else. Add the HTTP client as a dependency (`httpx`, pinned like the
+others) and keep the call timeout a setting. `doctor` already checks the token file; add one probe that
+asks `getMe` through this adapter. Register the adapter in `bootstrap.py` and give it to
+`TelegramChannel` so the composed service can send. A11 will add `getUpdates` on the same adapter.
+
+Acceptance:
+* With `httpx.MockTransport`: a documented success reply, a 429 reply with `retry_after`, a 400 reply and a connection error each come back as the Channel expects; the token appears in the request URL only.
+* No test reads a real token file; the gate makes no network call.
+
 ### A11. Telegram inbound and replies (high)
 
 §7. Long polling with the offset saved only after the update is journaled; dedupe by update id;
