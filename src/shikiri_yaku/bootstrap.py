@@ -15,6 +15,9 @@ from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
+from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import TelegramChannel
+from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
@@ -23,7 +26,11 @@ from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
+from shikiri_yaku.domain.rule_classifier import RuleClassifier
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
+from shikiri_yaku.extensions.product.extension import product_extension
+from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
@@ -45,16 +52,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.adapters.shikiru_mcp import Connector
+    from shikiri_yaku.adapters.telegram import BotApi
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
-    from shikiri_yaku.domain.extension import Handler
-    from shikiri_yaku.ports import Channel, Clock, Forwarder, Reporter
+    from shikiri_yaku.domain.extension import Extension, Handler
+    from shikiri_yaku.ports import Channel, Clock, Forwarder, Outbox, Reporter
     from shikiri_yaku.settings import Component, Settings
 
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
+TELEGRAM_CHANNEL: Final = "telegram"
 
 type LinkFactory = Callable[[str, Path], Connector]
+type BotFactory = Callable[[Settings], BotApi]
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,12 +79,21 @@ class Composition:
         self.journal.close()
 
 
+def http_bot(settings: Settings) -> BotApi:
+    """Return the Bot API transport of the instance's token file and call timeout."""
+    return HttpBotApi(settings.telegram.token_file, settings.operator.telegram_call_timeout_s)
+
+
 def compose(
-    settings: Settings, directory: Path, *, link: LinkFactory = stdio_connector
+    settings: Settings,
+    directory: Path,
+    *,
+    link: LinkFactory = stdio_connector,
+    bot: BotFactory = http_bot,
 ) -> Composition:
     """Build the objects of one instance; the caller closes the result.
 
-    `link` opens a project's MCP link; tests give it a fake.
+    `link` opens a project's MCP link and `bot` makes the Telegram transport; tests give fakes.
     """
     try:
         journal = Database.open(directory / JOURNAL_FILE_NAME)
@@ -86,20 +105,46 @@ def compose(
         for component in settings.components
     }
     clock = SystemClock()
+    reporter = StderrReporter()
+    clients = {
+        component.name: shikiru_client(settings, component, clock, link)
+        for component in settings.components
+    }
     jobs = [
         job
         for component in settings.components
-        for job in project_jobs(settings, component, journal, clock, link)
+        for job in project_jobs(settings, component, clients[component.name], journal, clock)
     ]
+    outbox = JournalOutbox(journal, MessageStore(journal, reporter))
+    extensions = registered_extensions()
+    forwarder = ProductForwarder(
+        settings.product, clients, outbox, clock, _owner_destinations(settings)
+    )
+    jobs += routing_jobs(
+        settings,
+        journal,
+        clock,
+        classifier=RuleClassifier(extensions),
+        handlers={extension.category: extension.handler for extension in extensions},
+        fallback=forwarder,
+        reporter=reporter,
+    )
+    channel = TelegramChannel(bot(settings), clock, outbox)
+    jobs.append(outbox_job(settings, outbox, clock, channel))
     return Composition(settings, clock, journal, probes, jobs)
 
 
-def project_jobs(
-    settings: Settings, component: Component, journal: Database, clock: Clock, link: LinkFactory
-) -> list[Job]:
-    """Return the link supervisor and synchronized sources of one project."""
+def registered_extensions() -> list[Extension]:
+    """Return the extensions of this build, in classification order; the catch-all comes last."""
+    return [product_extension()]
+
+
+def shikiru_client(
+    settings: Settings, component: Component, clock: Clock, link: LinkFactory
+) -> ShikiruMcpClient:
+    """Return the project's one client, which its supervisor, sources and forwarder share."""
     operator = settings.operator
-    client = ShikiruMcpClient(
+    return ShikiruMcpClient(
         link(SHIKIRU_EXECUTABLE, component.path),
         clock,
         backoff_initial_s=operator.link_backoff_initial_s,
@@ -109,6 +154,17 @@ def project_jobs(
         start_argv=[SHIKIRU_EXECUTABLE, "--project", str(component.path), "start"],
         start_timeout_s=operator.link_start_timeout_s,
     )
+
+
+def project_jobs(
+    settings: Settings,
+    component: Component,
+    client: ShikiruMcpClient,
+    journal: Database,
+    clock: Clock,
+) -> list[Job]:
+    """Return the link supervisor and synchronized sources of one project."""
+    operator = settings.operator
     signals = SignalStore(journal)
     cursors = CursorStore(journal, signals)
     sources = JournalSources(cursors, signals)
@@ -170,16 +226,9 @@ def routing_jobs(
     return [dispatcher.run, scheduler.run]
 
 
-def outbox_job(
-    settings: Settings, journal: Database, clock: Clock, channel: Channel, reporter: Reporter
-) -> Job:
+def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channel) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
-    sender = OutboxSender(
-        JournalOutbox(journal, MessageStore(journal, reporter)),
-        channel,
-        clock,
-        interval_s=settings.operator.outbox_interval_s,
-    )
+    sender = OutboxSender(outbox, channel, clock, interval_s=settings.operator.outbox_interval_s)
     return sender.run
 
 
@@ -197,3 +246,8 @@ def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
         OpStore(journal),
         reminder_notice_kinds=frozenset({Kind.PR_REVIEW}),
     )
+
+
+def _owner_destinations(settings: Settings) -> list[Destination]:
+    """Return the private chat of each owner, where a forwarded signal goes (design §7)."""
+    return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in settings.telegram.owners]

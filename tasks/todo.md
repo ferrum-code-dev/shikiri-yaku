@@ -27,7 +27,7 @@ merged and `uv run poe check` passes.
 - [x] A9. Product handler
 - [x] A10a. Recoverable outbox
 - [x] A10b. Telegram send and edit (adapter, size limits, terminal and secret refusal with notices, journaled deletion; fixtures documentation-based, see tests/fixtures/telegram/README.md)
-- [ ] A10c. Composition and the source-to-delivery test
+- [x] A10c. Composition and the source-to-delivery test
 - [ ] A10d. Bot API transport
 - [ ] A11. Telegram inbound and replies
 - [ ] A12. Command confirmation and resolved elsewhere

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from mcp.types import CallToolResult
 
-from shikiri_yaku.bootstrap import project_jobs
+from shikiri_yaku.bootstrap import project_jobs, shikiru_client
 from shikiri_yaku.journal import CursorStore, Database, SignalStore
 from shikiri_yaku.settings import Settings
 
@@ -156,13 +156,11 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 async def _run(settings: Settings, database: Database, session: _Session) -> None:
-    jobs = project_jobs(
-        settings,
-        settings.components[0],
-        database,
-        session.clock,
-        lambda _executable, _path: session.connect,
+    component = settings.components[0]
+    client = shikiru_client(
+        settings, component, session.clock, lambda _executable, _path: session.connect
     )
+    jobs = project_jobs(settings, component, client, database, session.clock)
     tasks = [asyncio.create_task(job()) for job in jobs]
     try:
         await asyncio.wait_for(session.finished.wait(), timeout=5)

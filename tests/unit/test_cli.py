@@ -24,6 +24,7 @@ from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
+from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -327,7 +328,11 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) 
     journal_file = directory / JOURNAL_FILE_NAME
     stopper = threading.Thread(target=_stop_when_signaled, args=(journal_file,))
     stopper.start()
-    composed = partial(compose, link=lambda _executable, _project: _engine_down_link)
+    composed = partial(
+        compose,
+        link=lambda _executable, _project: _engine_down_link,
+        bot=lambda _settings: FakeBotApi(),
+    )
 
     assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed) == 0
 
