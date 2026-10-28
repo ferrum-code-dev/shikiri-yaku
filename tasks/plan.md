@@ -430,16 +430,38 @@ Acceptance:
 * An offline composition test runs an inbound tap through Replies to a journaled resolve.
 * A later answer to a resolved question gets the recorded resolution and time.
 
-### A12. Command confirmation and resolved elsewhere (high)
+### A12. Command confirmation and resolved elsewhere (split into A12a, A12b and A12c)
 
-§10, §10.1. Reconcile non-final `ops` at start; confirm `resolve` by the `escalation_resolved`
-event carrying the command id; `rejected` shown to the PO with Shikiru's message; a `queued` resolve
-whose escalation is still open `lost_command_min` after the engine is up again counts as lost and the
-question is shown again; an `escalation_resolved` event the Operator did not cause closes the signal
-and edits every copy of its message to "Resolved in Shikiru: …".
+§10, §10.1. One task was too large; the Leader's split was approved. Build order: A12a, A12b, then
+A11c2, A11c3 and A11c4, then A12c (it reuses A11c4's journaled edit-all-copies mechanism). One part per
+change, each with `uv run poe check` and its own todo line; `docs/design.md` stays unchanged.
+
+Facts from Shikiru (verified in `engine/handlers/escalations.py` and `domain/commands.py`): the
+`escalation_resolved` event has `data` keys `escalation_id`, `resolution` (the kind: `answer`, `retry`,
+`accept` or `cancel`), `command_id` (the id from the acknowledgement) and, for an answer only,
+`text`. Declare only the keys you read (`extra="ignore"`).
+
+### A12a. Rejected, queued and command-id confirmation (high)
+
+Show `rejected` to the PO with Shikiru's message; keep `queued` or `done` on the op; confirm a resolve
+when the `escalation_resolved` event carries the op's command id (ops move to confirmed).
+
+### A12b. Start-up reconcile and lost commands (high)
+
+At start every non-final resolve op is reconciled by observation: the escalation's state and events.
+A `queued` resolve whose escalation is still open `lost_command_min` after the engine is up again is
+lost: the op fails and the question is shown again (a new message, same signal). An op that was
+claimed but never acknowledged is uncertain: the escalation's state decides; if it is still open, show
+the question again. Crash-point tests: kill after queueing a resolve, after the acknowledgement, and
+mid-send, and check the restart outcome of each.
+
+### A12c. Resolved elsewhere (high)
+
+An `escalation_resolved` event the Operator did not cause (no op carries its command id) closes the
+signal and edits every copy of its message to "Resolved in Shikiru: *resolution*", using A11c4's
+mechanism.
 
 Acceptance:
-* Crash-point tests: kill after queueing a resolve, after the acknowledgement, and mid-send, and check the restart outcome of each.
 * A resolve done in tmux edits all copies of the open message and closes the signal.
 
 ### A13. Status, open, help and measures (normal)
