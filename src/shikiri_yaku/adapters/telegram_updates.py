@@ -82,9 +82,11 @@ _IDENTIFIED: Final[TypeAdapter[_Identified]] = TypeAdapter(_Identified)
 class TelegramUpdates:
     """Long-polls `getUpdates` and reads each update into an Inbound item.
 
-    An update that is not a text message or a button tap, or whose shape is not the documented one,
-    moves the batch's last update id and gives no item, so one odd update cannot stop the polling.
-    Only an update without an integer id, or a reply that is not ok, is a ChannelError.
+    An update of a kind it does not read, or a message without text, moves the batch's last
+    update id and gives no item. A text message or a tap that lacks a field the adapter reads, an
+    update without an integer id, and a reply that is not ok are a ChannelError: the batch is not
+    journaled and the offset does not move past them. The error never carries the payload, which
+    could hold a secret.
     """
 
     def __init__(self, api: BotApi) -> None:
@@ -97,8 +99,8 @@ class TelegramUpdates:
         )
         try:
             reply = _RESULT.validate_python(body)
-        except ValidationError as error:
-            raise ChannelError(NOT_ACCEPTED if _is_failed(body) else UNEXPECTED_REPLY) from error
+        except ValidationError:
+            raise ChannelError(NOT_ACCEPTED if _is_failed(body) else UNEXPECTED_REPLY) from None
         items: list[Inbound] = []
         last: int | None = None
         for raw in reply.result:
@@ -119,15 +121,15 @@ def _is_failed(body: object) -> bool:
 def _update_id(raw: object) -> int:
     try:
         return _IDENTIFIED.validate_python(raw).update_id
-    except ValidationError as error:
-        raise ChannelError(UNEXPECTED_REPLY) from error
+    except ValidationError:
+        raise ChannelError(UNEXPECTED_REPLY) from None
 
 
 def _item(raw: object) -> Inbound | None:
     try:
         update = _UPDATE.validate_python(raw)
     except ValidationError:
-        return None
+        raise ChannelError(UNEXPECTED_REPLY) from None
     if update.callback_query is not None:
         tap = update.callback_query
         ref = _ref(tap.message.chat.id, tap.message.message_id)

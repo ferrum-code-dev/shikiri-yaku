@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import stamp
+from shikiri_yaku.journal.messages import Delivery, Direction
 
 if TYPE_CHECKING:
     import sqlite3
@@ -14,11 +14,8 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.journal.database import Database
 
-
-class InboundState(StrEnum):
-    PENDING = "pending"
-    HANDLED = "handled"
-    REFUSED = "refused"
+# keep: the separator of a message reference, `<chat id>/<message id>`, as the Channel builds it
+REF_SEPARATOR: Final = "/"
 
 
 def _inbound(row: sqlite3.Row) -> Inbound:
@@ -28,13 +25,13 @@ def _inbound(row: sqlite3.Row) -> Inbound:
         sender=row["sender"],
         message_ref=row["message_ref"],
         reply_to_ref=row["reply_to_ref"],
-        text=row["text"],
+        text=row["body"],
         data=row["data"],
     )
 
 
 class JournalInbound:
-    """What the PO sent, stored before the polling offset moves past it (design §7).
+    """What the PO sent: inbound rows of the messages table, one per update id (design §7, §9).
 
     Update ids are unique per bot, and an instance has one bot, so the id alone identifies an item.
     """
@@ -54,7 +51,7 @@ class JournalInbound:
         # keep: one transaction, so a crash leaves the offset behind and the batch is fetched again
         with self._database.transaction() as connection:
             for item in items:
-                self._insert(connection, item, now)
+                self._insert(connection, channel, item, now)
             connection.execute(
                 """
                 INSERT INTO polling (channel, next_offset) VALUES (?, ?)
@@ -66,29 +63,32 @@ class JournalInbound:
 
     def pending(self) -> list[Inbound]:
         rows = self._database.connection.execute(
-            "SELECT * FROM inbound WHERE state = ? ORDER BY update_id", (InboundState.PENDING,)
+            "SELECT * FROM messages WHERE direction = ? AND delivery = ? ORDER BY update_id",
+            (Direction.IN, Delivery.RECEIVED),
         )
         return [_inbound(row) for row in rows]
 
     def mark_handled(self, update_id: int) -> None:
         self._database.connection.execute(
-            "UPDATE inbound SET state = ? WHERE update_id = ? AND state = ?",
-            (InboundState.HANDLED, update_id, InboundState.PENDING),
+            "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
+            (Delivery.HANDLED, update_id, Delivery.RECEIVED),
         )
 
     @staticmethod
-    def _insert(connection: sqlite3.Connection, item: Inbound, now: datetime) -> None:
+    def _insert(connection: sqlite3.Connection, channel: str, item: Inbound, now: datetime) -> None:
         """Insert an item once; a secret keeps its form and loses its text and data."""
-        texts = [text for text in (item.text, item.data) if text is not None]
-        form = secret_form(texts)
+        form = secret_form([text for text in (item.text, item.data) if text is not None])
         connection.execute(
             """
-            INSERT INTO inbound (update_id, kind, sender, message_ref, reply_to_ref, text, data,
-                                 state, refusal, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (update_id) DO NOTHING
+            INSERT INTO messages (direction, channel, chat, update_id, kind, sender, message_ref,
+                                  reply_to_ref, body, data, delivery, refusal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (update_id) WHERE update_id IS NOT NULL DO NOTHING
             """,
             (
+                Direction.IN,
+                channel,
+                item.message_ref.partition(REF_SEPARATOR)[0],
                 item.update_id,
                 item.kind,
                 item.sender,
@@ -96,7 +96,7 @@ class JournalInbound:
                 item.reply_to_ref,
                 None if form else item.text,
                 None if form else item.data,
-                InboundState.PENDING if form is None else InboundState.REFUSED,
+                Delivery.RECEIVED if form is None else Delivery.REFUSED,
                 form,
                 stamp(now),
             ),

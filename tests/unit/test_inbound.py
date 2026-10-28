@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import traceback
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
@@ -113,15 +114,33 @@ def test_the_poll_asks_from_the_offset_and_for_the_kinds_it_reads() -> None:
     ]
 
 
-def test_an_update_of_an_odd_shape_is_skipped_and_the_ones_after_it_are_read() -> None:
-    body = copy.deepcopy(UPDATES)
-    del body["result"][0]["message"]["from"]
+def test_a_kind_the_operator_does_not_read_moves_the_batch_but_gives_no_item() -> None:
+    body = {"ok": True, "result": [UPDATES["result"][4]]}
 
     batch = _read(body)
 
-    assert TEXT not in {item.update_id for item in batch.items}
-    assert {item.update_id for item in batch.items} >= {REPLY, TAP}
-    assert batch.last_update_id == EDITED
+    assert (batch.last_update_id, batch.items) == (EDITED, ())
+
+
+def test_a_text_message_missing_a_field_the_adapter_reads_fails_the_poll(
+    journal: JournalInbound,
+) -> None:
+    body = copy.deepcopy(UPDATES)
+    del body["result"][0]["message"]["from"]
+    poller = InboundPoller(
+        TelegramUpdates(_Api(body)),
+        journal,
+        _Clock(),
+        channel=CHANNEL,
+        owners=[OWNER],
+        wait_s=WAIT_S,
+    )
+
+    with pytest.raises(ChannelError):
+        asyncio.run(poller.poll_once())
+
+    assert journal.pending() == []
+    assert journal.next_offset(CHANNEL) == 0
 
 
 _UNREADABLE: Final[list[object]] = [
@@ -130,6 +149,22 @@ _UNREADABLE: Final[list[object]] = [
     {"ok": True},
     [],
 ]
+
+
+_LEAKING: Final[list[object]] = [
+    {"ok": True, "result": [{"text": SECRETS["sk_key"]}]},
+    {"ok": True, "result": SECRETS["sk_key"]},
+    {"ok": True, "result": [{"update_id": 1, "message": {"text": SECRETS["sk_key"]}}]},
+]
+
+
+@pytest.mark.parametrize("body", _LEAKING)
+def test_a_failed_poll_does_not_carry_the_payload_in_its_traceback(body: object) -> None:
+    with pytest.raises(ChannelError) as raised:
+        _read(body)
+
+    rendered = "".join(traceback.format_exception(raised.value))
+    assert SECRETS["sk_key"] not in rendered
 
 
 @pytest.mark.parametrize("body", _UNREADABLE)
@@ -181,7 +216,7 @@ def test_a_batch_that_cannot_be_journaled_moves_neither_items_nor_offset(
     journal: JournalInbound,
 ) -> None:
     good = _read(UPDATES).items[0]
-    broken = Inbound(TAP, InboundKind.TAP, None, "1001/42")  # type: ignore[arg-type]
+    broken = Inbound(TAP, InboundKind.TAP, OWNER, None)  # type: ignore[arg-type]
 
     with pytest.raises(Exception):  # noqa: B017, PT011 -- the journal's own storage error
         journal.record_batch(CHANNEL, [good, broken], EDITED + 1, NOW)
@@ -206,5 +241,5 @@ def test_a_reply_with_a_secret_is_kept_without_its_text_and_is_not_pending(
     journal.record_batch(CHANNEL, [secret], TEXT + 1, NOW)
 
     assert journal.pending() == []
-    row = database.connection.execute("SELECT * FROM inbound").fetchone()
-    assert (row["text"], row["refusal"]) == (None, "sk_key")
+    row = database.connection.execute("SELECT * FROM messages WHERE direction = 'in'").fetchone()
+    assert (row["body"], row["data"], row["refusal"]) == (None, None, "sk_key")
