@@ -11,7 +11,7 @@ from shikiri_yaku.extensions.product.message import escalation_message
 from shikiri_yaku.journal import NewSignal, OpState, SignalState
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT
 from tests.support.secrets import SECRETS
-from tests.unit.test_replies import NOW, Harness
+from tests.unit.test_replies import ANSWERED_AT, LATER_AT, NOW, Harness
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -75,6 +75,21 @@ def test_confirmation_does_not_resolve_a_closed_escalation(h: Harness) -> None:
     h.client.view = h.client.view.model_copy(update={"escalation": record})
     h.handle(update=701, ref="1001/43", data="a:1:4")
     assert h.client.calls == []
+
+
+def test_confirmation_after_the_operator_resolved_gets_the_recorded_choice(h: Harness) -> None:
+    value = h.client.view.resolutions[-1].model_copy(update={"kind": "accept"})
+    h.client.view = h.client.view.model_copy(update={"agent_options": [], "resolutions": [value]})
+    h.handle(data="a:1:1")
+    (pending,) = h.outbox.pending()
+    h.outbox.confirm(pending.message_id, "1001/43")
+    h.handle(update=701, ref="1001/43", data="a:1:1", at=ANSWERED_AT)
+    h.resolve_in_shikiru()
+    h.handle(update=702, ref="1001/43", data="a:1:1", at=LATER_AT)
+    (notice,) = h.outbox.pending()
+    assert "accept" in notice.message.text
+    assert "12:03 UTC" in notice.message.text
+    assert h.client.calls == [("E-1", "accept", None)]
 
 
 def test_details_queue_full_packet_in_parts_once_per_update(h: Harness) -> None:

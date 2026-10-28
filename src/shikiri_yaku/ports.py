@@ -71,6 +71,7 @@ __all__ = [
     "Reasoner",
     "ReasonerError",
     "ReconcileLog",
+    "RecordedResolution",
     "ReplyLog",
     "ReplyOrigin",
     "Reporter",
@@ -676,7 +677,10 @@ def escalation_choices(view: EscalationView) -> list[Choice]:
 
 
 class ResolvePayload(BaseModel):
-    """The stored command arguments; issuance reads these rather than rebuilding a choice."""
+    """The stored command arguments; issuance reads these rather than rebuilding a choice.
+
+    `label` is what the PO chose, as the Operator says it again to a later answer.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     number: PositiveInt
@@ -686,6 +690,7 @@ class ResolvePayload(BaseModel):
     escalation_id: str
     kind: str
     text: str | None
+    label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -698,10 +703,22 @@ class ReplyOrigin:
     destination: Destination
 
 
+@dataclass(frozen=True, slots=True)
+class RecordedResolution:
+    """A resolution the journal recorded: the label the PO chose and when its op last changed."""
+
+    label: str
+    at: datetime
+
+
 class ReplyLog(Protocol):
     """Origin binding and once-only resolve issuance; issued ops await observation in A12."""
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
+
+    def recorded_resolution(self, number: int) -> RecordedResolution | None:
+        """Return the resolution of the signal that Shikiru took, or None when there is none."""
+        ...
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         """Keep the first payload; a secret is refused with sanitized metadata and returns None."""

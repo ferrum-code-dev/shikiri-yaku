@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
@@ -12,11 +13,15 @@ from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
 from shikiri_yaku.journal.signals import SignalState
-from shikiri_yaku.ports import Message, ReplyOrigin, ResolutionKind, ResolvePayload
+from shikiri_yaku.ports import (
+    Message,
+    RecordedResolution,
+    ReplyOrigin,
+    ResolutionKind,
+    ResolvePayload,
+)
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.signals import SignalStore
     from shikiri_yaku.ports import Ack
@@ -53,6 +58,20 @@ class JournalReplies:
             row["notice_key"],
             Destination(row["channel"], row["chat"]),
         )
+
+    def recorded_resolution(self, number: int) -> RecordedResolution | None:
+        row = self._database.connection.execute(
+            """
+            SELECT payload, updated_at FROM ops
+            WHERE kind = ? AND state IN (?, ?) AND json_extract(payload, '$.number') = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (_RESOLVE, OpState.ISSUED, OpState.CONFIRMED, number),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = ResolvePayload.model_validate_json(row["payload"])
+        return RecordedResolution(payload.label, datetime.fromisoformat(row["updated_at"]))
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         form = secret_form([payload.text or ""])

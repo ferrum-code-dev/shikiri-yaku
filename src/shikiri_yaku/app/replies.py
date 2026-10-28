@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC
 from typing import TYPE_CHECKING, Final
 
 from pydantic import PositiveInt, TypeAdapter, ValidationError
@@ -24,7 +25,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Outbox, ReplyLog, ReplyOrigin, ShikiruClient
+    from shikiri_yaku.ports import (
+        Clock,
+        EscalationView,
+        Outbox,
+        ReplyLog,
+        ReplyOrigin,
+        ShikiruClient,
+    )
 
 
 _ANSWER: Final = "a"
@@ -32,6 +40,7 @@ _DETAILS: Final = "d"
 _ACKNOWLEDGE: Final = "k"
 _CONFIRM: Final = "confirm:"
 _OP_ID = TypeAdapter[int](PositiveInt)
+_TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
 
 
 class Replies:
@@ -77,11 +86,21 @@ class Replies:
             if origin.purpose == Purpose.QUESTION:
                 await self._answer(item, origin, option=options[0])
             elif origin.purpose == Purpose.APPROVAL:
-                await self._confirm(origin)
+                await self._confirm(item, origin)
         elif verb == _DETAILS and origin.purpose == Purpose.QUESTION:
             await self._details(item, origin)
         elif verb == _ACKNOWLEDGE and origin.purpose == Purpose.NOTICE:
             self._log.acknowledge_notice(origin.number, self._clock.now())
+
+    async def _open_escalation(self, item: Inbound, origin: ReplyOrigin) -> EscalationView | None:
+        signal = origin.signal
+        if signal.escalation_id is None:
+            return None
+        view = await self._clients[signal.project].get_escalation(signal.escalation_id)
+        if view is not None and view.escalation.status != EscalationStatus.OPEN:
+            self._already_resolved(item, origin)
+            return None
+        return view
 
     async def _answer(
         self,
@@ -92,12 +111,11 @@ class Replies:
         text: str | None = None,
     ) -> None:
         signal = origin.signal
-        if signal.escalation_id is None:
-            return
-        view = await self._clients[signal.project].get_escalation(signal.escalation_id)
-        if view is None or view.escalation.status != EscalationStatus.OPEN:
+        view = await self._open_escalation(item, origin)
+        if view is None:
             return
         kind = ResolutionKind.ANSWER
+        label = text or kind
         if option is not None:
             choice = next(
                 (choice for choice in escalation_choices(view) if choice.number == option), None
@@ -109,14 +127,14 @@ class Replies:
                 if value.needs_input:
                     self._input(item, origin)
                     return
-                text = (
-                    f"{value.label} ({value.consequences})" if value.consequences else value.label
-                )
+                label = value.label
+                text = f"{label} ({value.consequences})" if value.consequences else label
             else:
                 kind = value.kind
                 if kind == ResolutionKind.ANSWER:
                     self._input(item, origin)
                     return
+                label = kind
         if kind not in {resolution.kind for resolution in view.resolutions}:
             return
         payload = ResolvePayload(
@@ -124,9 +142,10 @@ class Replies:
             project=signal.project,
             task_id=signal.task_id,
             reason=signal.reason,
-            escalation_id=signal.escalation_id,
+            escalation_id=view.escalation.id,
             kind=kind,
             text=text,
+            label=label,
         )
         await self._resolve(item, origin, payload)
 
@@ -182,20 +201,26 @@ class Replies:
             key=f"input:{item.update_id}",
         )
 
-    async def _confirm(self, origin: ReplyOrigin) -> None:
-        if (
-            origin.key is None
-            or not origin.key.startswith(_CONFIRM)
-            or origin.signal.escalation_id is None
-        ):
+    async def _confirm(self, item: Inbound, origin: ReplyOrigin) -> None:
+        if origin.key is None or not origin.key.startswith(_CONFIRM):
             return
-        view = await self._clients[origin.signal.project].get_escalation(
-            origin.signal.escalation_id
+        if await self._open_escalation(item, origin) is None:
+            return
+        op_id = _OP_ID.validate_python(origin.key.removeprefix(_CONFIRM))
+        if self._log.approve_resolve(op_id, origin.number, self._clock.now()):
+            await self._issue(op_id, origin)
+
+    def _already_resolved(self, item: Inbound, origin: ReplyOrigin) -> None:
+        recorded = self._log.recorded_resolution(origin.number)
+        if recorded is None:
+            return
+        when = recorded.at.astimezone(UTC).strftime(_TIME_FORMAT)
+        self._queue(
+            origin,
+            Message(f"S{origin.number} · Already resolved: {recorded.label} at {when}"),
+            Purpose.NOTICE,
+            key=f"already:{item.update_id}",
         )
-        if view is not None and view.escalation.status == EscalationStatus.OPEN:
-            op_id = _OP_ID.validate_python(origin.key.removeprefix(_CONFIRM))
-            if self._log.approve_resolve(op_id, origin.number, self._clock.now()):
-                await self._issue(op_id, origin)
 
     async def _details(self, item: Inbound, origin: ReplyOrigin) -> None:
         if origin.signal.escalation_id is None:

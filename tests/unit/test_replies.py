@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
+ANSWERED_AT = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
+LATER_AT = datetime(2026, 10, 28, 13, 30, tzinfo=UTC)
 
 
 class Client:
@@ -62,8 +64,11 @@ class Client:
 
 
 class Clock:
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+
     def now(self) -> datetime:
-        return NOW
+        return self._now
 
     async def sleep(self, seconds: float) -> None:
         raise NotImplementedError
@@ -117,14 +122,19 @@ class Harness:
     def log(self) -> JournalReplies:
         return JournalReplies(self.database, self.signals, OpStore(self.database))
 
+    def resolve_in_shikiru(self) -> None:
+        record = self.client.view.escalation.model_copy(update={"status": "resolved"})
+        self.client.view = self.client.view.model_copy(update={"escalation": record})
+
     def handle(
         self,
         update: int = 700,
         ref: str = "1001/42",
         data: str | None = None,
         text: str | None = None,
+        at: datetime = NOW,
     ) -> None:
-        replies = Replies(self.log(), self.outbox, Clock(), self.clients, channel="telegram")
+        replies = Replies(self.log(), self.outbox, Clock(at), self.clients, channel="telegram")
         item = Inbound(
             update,
             InboundKind.TAP if text is None else InboundKind.REPLY,
@@ -251,8 +261,42 @@ def test_issuance_uses_all_stored_fields_including_project(h: Harness) -> None:
         escalation_id="E-2",
         kind="retry",
         text=None,
+        label="retry",
     )
     h.log().intend_resolve(700, payload, NOW)
     h.handle(data="a:1:1")
     assert h.client.calls == []
     assert other.calls == [("E-2", "retry", None)]
+
+
+@pytest.mark.parametrize(("data", "text"), [("a:1:2", None), (None, "Use the other approach")])
+def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
+    h: Harness, data: str | None, text: str | None
+) -> None:
+    h.handle(data="a:1:1", at=ANSWERED_AT)
+    h.resolve_in_shikiru()
+    h.handle(update=701, data=data, text=text, at=LATER_AT)
+    h.handle(update=701, data=data, text=text, at=LATER_AT)
+    (notice,) = h.outbox.pending()
+    assert "Keep existing behavior" in notice.message.text
+    assert "12:03 UTC" in notice.message.text
+    assert "13:30" not in notice.message.text
+    assert h.client.calls == [
+        ("E-1", "answer", "Keep existing behavior (Preserve the current call pattern.)")
+    ]
+
+
+def test_later_answer_to_a_question_resolved_elsewhere_gets_no_recorded_answer(h: Harness) -> None:
+    h.resolve_in_shikiru()
+    h.handle(data="a:1:2")
+    assert h.outbox.pending() == []
+    assert h.client.calls == []
+
+
+def test_rejected_resolution_is_not_recorded_as_the_resolution(h: Harness) -> None:
+    h.client.reject = True
+    h.handle(data="a:1:1")
+    (rejection,) = h.outbox.pending()
+    h.resolve_in_shikiru()
+    h.handle(update=701, data="a:1:2")
+    assert h.outbox.pending() == [rejection]

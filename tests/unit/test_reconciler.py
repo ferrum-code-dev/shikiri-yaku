@@ -221,6 +221,7 @@ def test_one_project_being_unreachable_does_not_block_the_others(world: _World) 
         escalation_id="E-1",
         kind="retry",
         text=None,
+        label="retry",
     )
     log = h.log()
     queued = log.intend_resolve(900, payload, STARTED)

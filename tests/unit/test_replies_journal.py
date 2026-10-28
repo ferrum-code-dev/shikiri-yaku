@@ -18,11 +18,13 @@ from shikiri_yaku.ports import (
     Button,
     EscalationView,
     Message,
+    RecordedResolution,
     ResolvePayload,
     escalation_choices,
 )
 
 NOW: Final = datetime(2026, 10, 28, tzinfo=UTC)
+LATER: Final = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
 PAYLOAD: Final = ResolvePayload(
     number=1,
     project="api",
@@ -31,6 +33,7 @@ PAYLOAD: Final = ResolvePayload(
     escalation_id="E-1",
     kind="answer",
     text="Keep (preserves behavior)",
+    label="Keep",
 )
 
 
@@ -139,4 +142,40 @@ def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) ->
     restarted = JournalReplies(database, SignalStore(database), OpStore(database))
     assert restarted.claim_resolve(op_id, NOW) == payload
     assert restarted.claim_resolve(op_id, NOW) is None
+    database.close()
+
+
+@pytest.mark.parametrize(
+    ("state", "recorded"),
+    [
+        (OpState.INTENDED, False),
+        (OpState.APPROVED, False),
+        (OpState.ISSUED, True),
+        (OpState.CONFIRMED, True),
+        (OpState.FAILED, False),
+        (OpState.UNKNOWN, False),
+    ],
+)
+def test_only_a_resolve_that_shikiru_took_is_the_recorded_resolution(
+    state: OpState, *, recorded: bool
+) -> None:
+    database = Database.open(":memory:")
+    ops = OpStore(database)
+    replies = JournalReplies(database, SignalStore(database), ops)
+    op_id = replies.intend_resolve(700, PAYLOAD, NOW)
+    assert op_id is not None
+    assert ops.transition(op_id, OpState.INTENDED, state, LATER)
+    expected = RecordedResolution(PAYLOAD.label, LATER) if recorded else None
+    assert replies.recorded_resolution(PAYLOAD.number) == expected
+    database.close()
+
+
+def test_recorded_resolution_is_never_another_signals() -> None:
+    database = Database.open(":memory:")
+    ops = OpStore(database)
+    replies = JournalReplies(database, SignalStore(database), ops)
+    other = replies.intend_resolve(700, PAYLOAD.model_copy(update={"number": 2}), NOW)
+    assert other is not None
+    assert ops.transition(other, OpState.INTENDED, OpState.ISSUED, LATER)
+    assert replies.recorded_resolution(PAYLOAD.number) is None
     database.close()
