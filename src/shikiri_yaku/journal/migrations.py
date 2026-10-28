@@ -142,4 +142,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE ops ADD COLUMN acknowledgement TEXT",),
     ("ALTER TABLE messages ADD COLUMN final_body TEXT",),
     ("ALTER TABLE messages ADD COLUMN final_edited INTEGER NOT NULL DEFAULT 0",),
+    ("ALTER TABLE signals ADD COLUMN final_line TEXT",),
 )

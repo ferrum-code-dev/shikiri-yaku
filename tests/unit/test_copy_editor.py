@@ -232,9 +232,7 @@ def _observe(h: _Harness, **data: object) -> None:
     )
     cursors = CursorStore(h.database, h.signals)
     cursors.record_batch("api", [], 1, None, NOW)
-    journal = JournalEvents(
-        h.database, cursors, OpStore(h.database), JournalFinalEdits(h.database, h.replies)
-    )
+    journal = JournalEvents(h.database, cursors, OpStore(h.database))
     source = EventSource("api", cast("ShikiruClient", _Events(event)), journal, _Clock(), 1)
     asyncio.run(source.poll())
 
@@ -263,3 +261,33 @@ def test_a_resolve_the_operator_issued_is_not_shown_as_made_elsewhere(h: _Harnes
         "elsewhere" not in m.text and "in Shikiru" not in m.text for _, m, _ in channel.edits
     )
     assert all("Keep at" in m.text for _, m, _ in channel.edits)
+
+
+def test_a_copy_sent_after_the_external_resolve_is_edited_too(h: _Harness) -> None:
+    late = MessageStore(h.database, _Reporter()).record_outbound(
+        signal_number=h.number,
+        channel="telegram",
+        chat="1003",
+        purpose=Purpose.QUESTION,
+        body=QUESTION,
+        notice_key=None,
+        now=NOW,
+    )
+    _observe(h, escalation_id="E-1", resolution="retry", command_id=999)
+    channel = _Channel(h.database)
+    asyncio.run(h.editor(channel).tick())
+    MessageStore(h.database, _Reporter()).confirm_delivery(late.row_id, "1003/18")
+    asyncio.run(h.editor(channel).tick())
+    assert [ref for ref, _, _ in channel.edits] == [*REFS, "1003/18"]
+    assert all(message.buttons == () for _, message, _ in channel.edits)
+
+
+def test_the_late_event_of_an_op_marked_failed_is_not_shown_as_made_elsewhere(
+    h: _Harness,
+) -> None:
+    h.resolve_unconfirmed()
+    h.database.connection.execute("UPDATE ops SET state = 'failed'")
+    _observe(h, escalation_id="E-1", resolution="answer", command_id=12)
+    channel = _Channel(h.database)
+    asyncio.run(h.editor(channel).tick())
+    assert channel.edits == []

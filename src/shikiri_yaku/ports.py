@@ -569,8 +569,8 @@ class FinalEdits(Protocol):
     refuses for good is given up and never offered again.
     """
 
-    def unsettled(self) -> list[tuple[int, RecordedResolution]]:
-        """Return the signals whose confirmed resolution is not yet shown on every copy."""
+    def unsettled(self) -> list[tuple[int, str]]:
+        """Return the signals whose resolution is not yet shown on every copy, with its line."""
         ...
 
     def settle(self, number: int, line: str) -> None:

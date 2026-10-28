@@ -12,7 +12,6 @@ from shikiri_yaku.journal import (
     Database,
     Inserted,
     JournalEvents,
-    JournalFinalEdits,
     NewOp,
     NewSignal,
     OpState,
@@ -20,7 +19,6 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
-from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import (
     EscalationRecord,
     EscalationView,
@@ -108,12 +106,8 @@ def database() -> Generator[Database]:
 def _source(
     database: Database, client: _FakeClient, signals: SignalStore | None = None
 ) -> tuple[EventSource, JournalEvents]:
-    signals = signals or SignalStore(database)
     journal = JournalEvents(
-        database,
-        CursorStore(database, signals),
-        OpStore(database),
-        JournalFinalEdits(database, JournalReplies(database, signals, OpStore(database))),
+        database, CursorStore(database, signals or SignalStore(database)), OpStore(database)
     )
     return EventSource(
         PROJECT, cast("ShikiruClient", client), journal, _FixedClock(), WAIT_S

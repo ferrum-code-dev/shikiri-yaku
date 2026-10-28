@@ -148,6 +148,14 @@ class OpStore:
         ).rowcount
         return confirmed == 1
 
+    def carries_command(self, project: str, command_id: str) -> bool:
+        """Say whether any resolve op, in any state, was acknowledged with this command id."""
+        row = self._database.connection.execute(
+            "SELECT 1 FROM ops WHERE kind = 'resolve' AND project = ? AND command_id = ?",
+            (project, command_id),
+        ).fetchone()
+        return row is not None
+
     def non_final(self) -> list[StoredOp]:
         """Ops to reconcile at start: everything but `confirmed` and `failed`."""
         rows = self._database.connection.execute(

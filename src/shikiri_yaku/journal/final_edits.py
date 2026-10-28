@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import Purpose, fit
+from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, FinalEdit, Message
 
@@ -42,17 +43,21 @@ class JournalFinalEdits:
             "approval": Purpose.APPROVAL,
         }
 
-    def unsettled(self) -> list[tuple[int, RecordedResolution]]:
+    def unsettled(self) -> list[tuple[int, str]]:
         rows = self._database.connection.execute(
-            f"SELECT DISTINCT signal_number FROM messages WHERE {_SHOWS_BUTTONS} "  # noqa: S608
+            f"SELECT DISTINCT signal_number, final_line FROM messages "  # noqa: S608
+            f"LEFT JOIN signals ON signals.number = signal_number WHERE {_SHOWS_BUTTONS} "
             "AND signal_number IS NOT NULL ORDER BY signal_number",
             self._arguments(),
         ).fetchall()
-        found: list[tuple[int, RecordedResolution]] = []
+        found: list[tuple[int, str]] = []
         for row in rows:
+            if row["final_line"] is not None:
+                found.append((row["signal_number"], row["final_line"]))
+                continue
             recorded = self._replies.recorded_resolution(row["signal_number"])
             if recorded is not None:
-                found.append((row["signal_number"], recorded))
+                found.append((row["signal_number"], _line(recorded)))
         return found
 
     def settle(self, number: int, line: str) -> None:
@@ -104,3 +109,7 @@ class JournalFinalEdits:
             """,
             (reason, message_ref, Direction.OUT),
         )
+
+
+def _line(resolution: RecordedResolution) -> str:
+    return f"Resolved: {resolution.label} at {resolution.at.astimezone(UTC).strftime(TIME_FORMAT)}"

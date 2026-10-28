@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import TIME_FORMAT
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.ports import Channel, Clock, FinalEdits, RecordedResolution
+    from shikiri_yaku.ports import Channel, Clock, FinalEdits
 
 
 class CopyEditor:
@@ -17,8 +15,8 @@ class CopyEditor:
 
     The final state is journaled before any edit, so a restart finishes what was started. A failure
     the platform may repeat leaves the edit recorded for the next tick; one it refuses for good is
-    given up, and the PO is notified of it by the Channel. Another source of a final state calls
-    `FinalEdits.settle` with its own line; this class only applies what is recorded.
+    given up, and the PO is notified of it by the Channel. The journal supplies the line, whether
+    the PO's own resolve was confirmed or the PO resolved elsewhere; this class only applies it.
     """
 
     def __init__(
@@ -35,8 +33,8 @@ class CopyEditor:
             await self._clock.sleep(self._interval_s)
 
     async def tick(self) -> None:
-        for number, resolution in self._log.unsettled():
-            self._log.settle(number, _line(resolution))
+        for number, line in self._log.unsettled():
+            self._log.settle(number, line)
         for edit in self._log.to_edit():
             try:
                 await self._channel.edit(edit.message_ref, edit.message)
@@ -46,7 +44,3 @@ class CopyEditor:
                 continue
             else:
                 self._log.confirm_edit(edit.message_ref)
-
-
-def _line(resolution: RecordedResolution) -> str:
-    return f"Resolved: {resolution.label} at {resolution.at.astimezone(UTC).strftime(TIME_FORMAT)}"
