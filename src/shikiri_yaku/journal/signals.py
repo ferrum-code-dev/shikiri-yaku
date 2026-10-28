@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal.database import Inserted, stamp
 
 if TYPE_CHECKING:
@@ -56,6 +57,17 @@ class StoredSignal:
     state: SignalState
     notes: str | None
     wake_at: str | None
+
+    def to_signal(self) -> Signal:
+        return Signal(
+            project=self.project,
+            kind=Kind(self.kind),
+            source_id=self.id.removeprefix(f"{self.project}:{self.kind}:"),
+            reason=self.reason,
+            text=self.text,
+            task_id=self.task_id,
+            escalation_id=self.escalation_id,
+        )
 
 
 def _signal(row: sqlite3.Row) -> StoredSignal:
@@ -206,3 +218,17 @@ class SignalStore:
             (SignalState.PARKED, stamp(now)),
         )
         return [_signal(row) for row in rows]
+
+    def new(self) -> list[StoredSignal]:
+        """Return the signals waiting for the Router, oldest first."""
+        rows = self._database.connection.execute(
+            "SELECT * FROM signals WHERE state = ? ORDER BY number", (SignalState.NEW,)
+        )
+        return [_signal(row) for row in rows]
+
+    def requeue_handling(self, now: datetime) -> int:
+        """Put every signal left in `handling` back to `new`; return how many."""
+        return self._database.connection.execute(
+            "UPDATE signals SET state = ?, updated_at = ? WHERE state = ?",
+            (SignalState.NEW, stamp(now), SignalState.HANDLING),
+        ).rowcount

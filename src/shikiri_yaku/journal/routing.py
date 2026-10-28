@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from shikiri_yaku.domain.classification import Classification
+    from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.signals import SignalStore
 
@@ -41,6 +42,15 @@ class JournalRouting:
                     now=now,
                 )
             return True
+
+    def recover(self, now: datetime) -> int:
+        return self._signals.requeue_handling(now)
+
+    def new_signals(self) -> list[tuple[int, Signal]]:
+        return [(stored.number, stored.to_signal()) for stored in self._signals.new()]
+
+    def requeue(self, number: int, now: datetime) -> None:
+        self._signals.transition(number, SignalState.HANDLING, SignalState.NEW, now)
 
     def suggestion(self, number: int) -> str:
         stored = self._signals.get(number)

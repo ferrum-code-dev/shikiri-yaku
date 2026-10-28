@@ -23,7 +23,7 @@ merged and `uv run poe check` passes.
 - [x] A8b. Router
 - [x] A8c. Scheduler (notice reminder eligibility registered in bootstrap)
 - [x] A8d. Source cleanup and failing sources
-- [ ] A8e. Dispatcher and start-up recovery
+- [x] A8e. Dispatcher and start-up recovery
 - [ ] A9. Product handler
 - [ ] A10. Telegram send and edit
 - [ ] A11. Telegram inbound and replies

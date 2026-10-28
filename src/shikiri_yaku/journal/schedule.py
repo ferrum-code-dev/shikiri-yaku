@@ -4,7 +4,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.schedule import Awaiting, Destination, Outgoing, Parked
-from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal.database import parse_stamp
 from shikiri_yaku.journal.messages import Delivery, Direction, Purpose
 from shikiri_yaku.journal.ops import NewOp, OpState
@@ -22,16 +21,7 @@ REMIND: Final = "remind"
 
 
 def _parked(stored: StoredSignal) -> Parked:
-    signal = Signal(
-        project=stored.project,
-        kind=Kind(stored.kind),
-        source_id=stored.id.removeprefix(f"{stored.project}:{stored.kind}:"),
-        reason=stored.reason,
-        text=stored.text,
-        task_id=stored.task_id,
-        escalation_id=stored.escalation_id,
-    )
-    return Parked(stored.number, stored.handler or "", signal)
+    return Parked(stored.number, stored.handler or "", stored.to_signal())
 
 
 class JournalSchedule:

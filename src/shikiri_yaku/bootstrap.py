@@ -15,10 +15,13 @@ from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
+from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.project_sources import ProjectSources
+from shikiri_yaku.app.router import Router
+from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
@@ -26,6 +29,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalError,
     JournalEvents,
+    JournalRouting,
     JournalSchedule,
     JournalSources,
     MessageStore,
@@ -40,7 +44,9 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.adapters.shikiru_mcp import Connector
     from shikiri_yaku.cli import Job
-    from shikiri_yaku.ports import Clock
+    from shikiri_yaku.domain.classification import Category, Classifier
+    from shikiri_yaku.domain.extension import Handler
+    from shikiri_yaku.ports import Channel, Clock, Forwarder
     from shikiri_yaku.settings import Component, Settings
 
 
@@ -125,6 +131,42 @@ def project_jobs(
         interval_s=operator.liveness_interval_s,
     )
     return [client.supervise, project_sources.run]
+
+
+def routing_jobs(
+    settings: Settings,
+    journal: Database,
+    clock: Clock,
+    *,
+    classifier: Classifier,
+    handlers: Mapping[Category, Handler],
+    fallback: Forwarder,
+    channel: Channel,
+) -> list[Job]:
+    """Return the Dispatcher and the Scheduler, which share one Router."""
+    operator = settings.operator
+    signals = SignalStore(journal)
+    routing = JournalRouting(journal, signals)
+    router = Router(
+        classifier,
+        handlers,
+        fallback,
+        routing,
+        clock,
+        handler_timeout_s=operator.handler_timeout_s,
+        forward_retry_s=operator.forward_retry_s,
+    )
+    dispatcher = Dispatcher(routing, router, clock, interval_s=operator.dispatch_interval_s)
+    scheduler = Scheduler(
+        schedule_log(journal),
+        router,
+        channel,
+        clock,
+        interval_s=operator.scheduler_interval_s,
+        reminder_first_h=settings.handlers.product.reminder_first_h,
+        reminder_repeat_h=settings.handlers.product.reminder_repeat_h,
+    )
+    return [dispatcher.run, scheduler.run]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

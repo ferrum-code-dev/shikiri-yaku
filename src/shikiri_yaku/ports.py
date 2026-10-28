@@ -36,6 +36,7 @@ __all__ = [
     "CommandResult",
     "CommandRunner",
     "CompositionError",
+    "DispatchLog",
     "EngineStatus",
     "EscalationRecord",
     "EscalationResolution",
@@ -344,11 +345,27 @@ class RoutingLog(Protocol):
         """Return the note stored with the signal's classification, or an empty text."""
         ...
 
+    def requeue(self, number: int, now: datetime) -> None:
+        """Give a signal back to the dispatcher, because its forward could not be delivered."""
+        ...
+
     def resolve(self, number: int, note: str, now: datetime) -> None: ...
 
     def forwarded(self, number: int, note: str, now: datetime) -> None: ...
 
     def park(self, number: int, wake_at: datetime, note: str, now: datetime) -> None: ...
+
+
+class DispatchLog(Protocol):
+    """What the Dispatcher reads in the journal (design §10)."""
+
+    def recover(self, now: datetime) -> int:
+        """Put every signal left in `handling` back to `new`; return how many."""
+        ...
+
+    def new_signals(self) -> list[tuple[int, Signal]]:
+        """Return the signals in state `new` with their numbers, oldest first."""
+        ...
 
 
 class Forwarder(Protocol):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.classification import Category
@@ -18,13 +19,16 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import Clock, Forwarder, RoutingLog
 
+_LOG = logging.getLogger(__name__)
+
 
 class Router:
     """Classifies a signal, runs its handler and turns every failure into a Forward.
 
     Each signal runs as its own asyncio task, so a slow handler holds no other signal. The handler
     is stored with the signal, and a parked signal wakes the handler that parked it. This is the
-    only place where a failure becomes a Forward; the handlers and ports let exceptions cross.
+    only place where a failure becomes a Forward; the handlers and ports let exceptions cross. A
+    forward the Channel cannot take returns the signal to `new` after `forward_retry_s`.
     """
 
     def __init__(
@@ -36,6 +40,7 @@ class Router:
         clock: Clock,
         *,
         handler_timeout_s: float,
+        forward_retry_s: float,
     ) -> None:
         self._classifier = classifier
         self._handlers = handlers
@@ -43,6 +48,7 @@ class Router:
         self._log = log
         self._clock = clock
         self._timeout_s = handler_timeout_s
+        self._retry_s = forward_retry_s
         self._tasks: set[asyncio.Task[None]] = set()
 
     def submit(self, number: int, signal: Signal) -> asyncio.Task[None]:
@@ -106,10 +112,24 @@ class Router:
             case Resolved(note):
                 self._log.resolve(number, note, self._clock.now())
             case Forward(note):
-                await self._fallback.forward(signal, note, suggestion)
+                try:
+                    await self._fallback.forward(signal, note, suggestion)
+                except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
+                    await self._retry_later(number, error)
+                    return
                 self._log.forwarded(number, note, self._clock.now())
             case WaitUntil(wake_at, note):
                 self._log.park(number, wake_at, note, self._clock.now())
+
+    async def _retry_later(self, number: int, error: Exception) -> None:
+        _LOG.warning(
+            "forwarding S%d failed, trying again in %g s: %s",
+            number,
+            self._retry_s,
+            _describe(error),
+        )
+        await self._clock.sleep(self._retry_s)
+        self._log.requeue(number, self._clock.now())
 
 
 def _unknown(classification: Classification | None) -> str:

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 TIMEOUT_S = 0.05
+RETRY_S = 30
 INFRA = Category("infrastructure")
 
 
@@ -118,6 +119,7 @@ class _World:
             JournalRouting(self.database, self.signals),
             _Clock(),
             handler_timeout_s=TIMEOUT_S,
+            forward_retry_s=RETRY_S,
         )
 
     def new(self, name: str) -> tuple[int, Signal]:
