@@ -39,7 +39,7 @@ merged and `uv run poe check` passes.
   - [x] A11c4. Journaled edits that remove the buttons from every copy after a later answer
 - [x] A12a. Rejected, queued and command-id confirmation
 - [x] A12b. Start-up reconcile and lost commands
-- [ ] A12c. Resolved elsewhere (after A11c4)
+- [x] A12c. Resolved elsewhere (after A11c4)
 - [ ] A13. Status, open, help and measures
 - [ ] A14. `/goal`
 

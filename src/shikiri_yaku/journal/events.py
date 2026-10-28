@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.signal import Closing, Confirmation, Kind, LifecycleState, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, LifecycleState, Resolved, Signal
 from shikiri_yaku.journal.signals import NewSignal
 
 if TYPE_CHECKING:
@@ -14,15 +14,19 @@ if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.ops import OpStore
     from shikiri_yaku.journal.signals import Change, SignalStore
+    from shikiri_yaku.ports import FinalEdits
 
 
 class JournalEvents:
     """The journal as an event source sees it: domain signals in, cursor rows behind."""
 
-    def __init__(self, database: Database, cursors: CursorStore, ops: OpStore) -> None:
+    def __init__(
+        self, database: Database, cursors: CursorStore, ops: OpStore, edits: FinalEdits
+    ) -> None:
         self._database = database
         self._cursors = cursors
         self._ops = ops
+        self._edits = edits
 
     def last_event_id(self, project: str) -> int | None:
         cursor = self._cursors.get(project)
@@ -31,21 +35,34 @@ class JournalEvents:
     def record_batch(
         self,
         project: str,
-        changes: Sequence[Signal | Closing | Confirmation],
+        changes: Sequence[Signal | Closing | Resolved],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
         *,
         respected_stop_id: int | None = None,
     ) -> None:
-        stored = [_stored(change) for change in changes if not isinstance(change, Confirmation)]
+        stored = [_stored(change) for change in changes if not isinstance(change, Resolved)]
         with self._database.transaction():
             self._cursors.record_batch(
                 project, stored, last_event_id, lifecycle, now, respected_stop_id=respected_stop_id
             )
             for change in changes:
-                if isinstance(change, Confirmation):
-                    self._ops.confirm_command(change.project, change.command_id, now)
+                if isinstance(change, Resolved):
+                    self._settle_elsewhere(change, now)
+
+    def _settle_elsewhere(self, change: Resolved, now: datetime) -> None:
+        """Show the copies as resolved unless an op of ours carries the event's command id."""
+        if change.command_id is not None and self._ops.confirm_command(
+            change.project, change.command_id, now
+        ):
+            return
+        rows = self._database.connection.execute(
+            "SELECT number FROM signals WHERE project = ? AND escalation_id = ?",
+            (change.project, change.escalation_id),
+        ).fetchall()
+        for row in rows:
+            self._edits.settle(row["number"], f"Resolved in Shikiru: {change.resolution}")
 
 
 def _stored(change: Signal | Closing) -> Change:

@@ -25,10 +25,10 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
     from shikiri_yaku.domain.signal import (
         Closing,
-        Confirmation,
         Kind,
         Lifecycle,
         LifecycleState,
+        Resolved,
         Signal,
     )
 
@@ -282,7 +282,7 @@ class EventJournal(Protocol):
     def record_batch(
         self,
         project: str,
-        changes: Sequence[Signal | Closing | Confirmation],
+        changes: Sequence[Signal | Closing | Resolved],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,

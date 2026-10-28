@@ -67,8 +67,10 @@ class Closing:
 
 
 @dataclass(frozen=True, slots=True)
-class Confirmation:
-    """Shikiru's event log shows the command with this id as carried out."""
+class Resolved:
+    """Shikiru's event log shows an escalation resolved; `command_id` names the command, if any."""
 
     project: str
-    command_id: str
+    escalation_id: str
+    resolution: str
+    command_id: str | None = None

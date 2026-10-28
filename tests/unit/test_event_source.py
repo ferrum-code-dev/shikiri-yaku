@@ -12,6 +12,7 @@ from shikiri_yaku.journal import (
     Database,
     Inserted,
     JournalEvents,
+    JournalFinalEdits,
     NewOp,
     NewSignal,
     OpState,
@@ -19,6 +20,7 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
+from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import (
     EscalationRecord,
     EscalationView,
@@ -106,8 +108,12 @@ def database() -> Generator[Database]:
 def _source(
     database: Database, client: _FakeClient, signals: SignalStore | None = None
 ) -> tuple[EventSource, JournalEvents]:
+    signals = signals or SignalStore(database)
     journal = JournalEvents(
-        database, CursorStore(database, signals or SignalStore(database)), OpStore(database)
+        database,
+        CursorStore(database, signals),
+        OpStore(database),
+        JournalFinalEdits(database, JournalReplies(database, signals, OpStore(database))),
     )
     return EventSource(
         PROJECT, cast("ShikiruClient", client), journal, _FixedClock(), WAIT_S
@@ -126,7 +132,7 @@ def test_first_sync_signals_only_open_escalations_and_respects_a_clean_stop(
     client.events = [
         _event(1, "engine_started"),
         _raised(2, "E1"),
-        _event(3, "escalation_resolved", escalation_id="E1"),
+        _event(3, "escalation_resolved", escalation_id="E1", resolution="answer"),
         _event(4, "task_done"),
         _raised(5, "E2"),
         _event(HISTORY_END, "engine_stopped"),

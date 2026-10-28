@@ -197,7 +197,7 @@ def project_jobs(
     events = EventSource(
         component.name,
         client,
-        JournalEvents(journal, cursors, OpStore(journal)),
+        JournalEvents(journal, cursors, OpStore(journal), _final_edits(journal, signals)),
         clock,
         operator.event_wait_s,
     )
@@ -307,12 +307,14 @@ def secret_cleanup_job(
     return cleanup.run
 
 
+def _final_edits(journal: Database, signals: SignalStore) -> JournalFinalEdits:
+    return JournalFinalEdits(journal, JournalReplies(journal, signals, OpStore(journal)))
+
+
 def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
-    signals = SignalStore(journal)
-    replies = JournalReplies(journal, signals, OpStore(journal))
     editor = CopyEditor(
-        JournalFinalEdits(journal, replies),
+        _final_edits(journal, SignalStore(journal)),
         channel,
         clock,
         interval_s=settings.operator.inbound_interval_s,
