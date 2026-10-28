@@ -16,7 +16,7 @@ from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
-from shikiri_yaku.adapters.telegram import TelegramChannel
+from shikiri_yaku.adapters.telegram import TelegramChannel, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
@@ -73,6 +73,7 @@ class Composition:
     clock: Clock
     journal: Database
     link_probes: Mapping[str, Callable[[], Awaitable[None]]]
+    telegram_probe: Callable[[], Awaitable[None]]
     jobs: Sequence[Job]
 
     def close(self) -> None:
@@ -129,9 +130,10 @@ def compose(
         fallback=forwarder,
         reporter=reporter,
     )
-    channel = TelegramChannel(bot(settings), clock, outbox)
+    bot_api = bot(settings)
+    channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
-    return Composition(settings, clock, journal, probes, jobs)
+    return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
 
 
 def registered_extensions() -> list[Extension]:

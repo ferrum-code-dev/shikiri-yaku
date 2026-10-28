@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 DELETE_MESSAGE: Final = "deleteMessage"
+GET_ME: Final = "getMe"
 REF_SEPARATOR: Final = "/"
 
 # keep: Telegram's error codes (Bot API, "Making requests"); the rest are transient
@@ -85,6 +86,17 @@ class _Failed(BaseModel):
 
 
 _REPLY: Final[TypeAdapter[_Ok | _Failed]] = TypeAdapter(_Ok | _Failed)
+
+
+class _Accepted(BaseModel):
+    """A successful reply to `getMe`, whose User object the probe does not read."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+
+
+_PROBE_REPLY: Final[TypeAdapter[_Accepted | _Failed]] = TypeAdapter(_Accepted | _Failed)
 
 
 class TelegramChannel:
@@ -179,3 +191,14 @@ def _content(message: Message) -> dict[str, object]:
         [{"text": button.label, "callback_data": button.data}] for button in message.buttons
     ]
     return {"text": message.text, "reply_markup": {"inline_keyboard": keyboard}}
+
+
+async def probe_bot(api: BotApi) -> None:
+    """Ask the Bot API who the bot is, for `doctor`; raises ChannelError if it refuses the call."""
+    body = await api.call(GET_ME, {})
+    try:
+        reply = _PROBE_REPLY.validate_python(body)
+    except ValidationError as error:
+        raise ChannelError(UNEXPECTED_REPLY) from error
+    if isinstance(reply, _Failed):
+        raise ChannelError(NOT_ACCEPTED)

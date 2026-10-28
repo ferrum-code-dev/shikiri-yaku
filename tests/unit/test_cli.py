@@ -13,12 +13,14 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final
 
+import httpx
 import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
+from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import compose, main
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
@@ -27,14 +29,18 @@ from shikiri_yaku.service import service_file
 from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Callable, Mapping
     from pathlib import Path
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
+    from shikiri_yaku.bootstrap import BotFactory
+    from shikiri_yaku.settings import Settings
 
 _PRODUCT: Final = "shop"
 _ATTEMPTS: Final = 100
 _ATTEMPT_WAIT_S: Final = 0.1
+_HTTP_OK: Final = 200
+_UNAUTHORIZED: Final = 401
 
 type _Breakage = Callable[[Path], None]
 
@@ -154,8 +160,28 @@ class _unreachable_link:  # noqa: N801 -- used like the link factories next to i
     async def __aexit__(self, *_ignored: object) -> None: ...
 
 
-def _run_doctor(home: Path, link: Callable[[], Any] = _answering_link) -> int:
-    composed = partial(compose, link=lambda _executable, _project: link)
+class _RefusingBotApi:
+    """Answers every call as the Bot API does for a token it does not accept."""
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:  # noqa: ARG002 -- BotApi's signature
+        return {"ok": False, "error_code": _UNAUTHORIZED, "description": "Unauthorized"}
+
+
+def _accepting_bot(_settings: Settings) -> FakeBotApi:
+    return FakeBotApi()
+
+
+def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
+    """The real Bot API transport, with its network replaced by `transport`."""
+    return lambda settings: HttpBotApi(
+        settings.telegram.token_file, settings.operator.telegram_call_timeout_s, transport=transport
+    )
+
+
+def _run_doctor(
+    home: Path, link: Callable[[], Any] = _answering_link, bot: BotFactory = _accepting_bot
+) -> int:
+    composed = partial(compose, link=lambda _executable, _project: link, bot=bot)
     return cli.main(["doctor", _PRODUCT, "--home", str(home)], composed)
 
 
@@ -205,6 +231,31 @@ def test_doctor_names_a_component_whose_mcp_link_does_not_come_up(
     assert _failed(capsys.readouterr().out) == {"link api"}
 
 
+def test_doctor_names_a_telegram_bot_that_refuses_the_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, bot=lambda _settings: _RefusingBotApi()) == 1
+    assert _failed(capsys.readouterr().out) == {"telegram"}
+
+
+def test_doctor_names_a_missing_token_file_and_the_telegram_check_that_needs_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = _instance(tmp_path)
+    (directory / "secrets" / "telegram.token").unlink()
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(_HTTP_OK)
+
+    assert _run_doctor(tmp_path, bot=_http_bot_on(httpx.MockTransport(handle))) == 1
+    assert _failed(capsys.readouterr().out) == {"token file", "telegram"}
+    assert seen == []
+
+
 def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -214,7 +265,9 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
     with (directory / "config.toml").open("a", encoding="utf-8") as config:
         config.write(f'\n[[components]]\nname = "web"\npath = "{second}"\n')
     composed = partial(
-        compose, link=lambda _executable, project: stdio_connector(sys.executable, project)
+        compose,
+        link=lambda _executable, project: stdio_connector(sys.executable, project),
+        bot=_accepting_bot,
     )
 
     assert cli.main(["doctor", _PRODUCT, "--home", str(tmp_path)], composed) == 1
@@ -245,7 +298,10 @@ def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> N
 
 
 def _exit_with(argv: list[str]) -> None:
-    sys.exit(cli.main(argv, partial(compose, link=lambda _executable, _project: _answering_link)))
+    composed = partial(
+        compose, link=lambda _executable, _project: _answering_link, bot=_accepting_bot
+    )
+    sys.exit(cli.main(argv, composed))
 
 
 def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path: Path) -> None:
@@ -331,7 +387,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) 
     composed = partial(
         compose,
         link=lambda _executable, _project: _engine_down_link,
-        bot=lambda _settings: FakeBotApi(),
+        bot=_accepting_bot,
     )
 
     assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed) == 0

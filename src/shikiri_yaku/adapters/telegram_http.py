@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import http.client
-import json
-import urllib.error
-import urllib.request
-from typing import TYPE_CHECKING, Any, Final
+import logging
+from typing import TYPE_CHECKING, Final
+
+import httpx
 
 from shikiri_yaku.ports import ChannelError
 
@@ -15,42 +13,52 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-API_URL: Final = "https://api.telegram.org/bot{token}/{method}"
+API_URL: Final = "https://api.telegram.org/bot{token}"
+HTTPX_LOGGER: Final = "httpx"
 NO_REPLY: Final = "the Bot API could not be reached"
+NO_TOKEN: Final = "the token file cannot be read"  # noqa: S105 -- a message, not the token
 
 
 class HttpBotApi:
     """Posts each method as a JSON body and returns the decoded reply, whatever its `ok` says.
 
-    The token is read from its file on each call, so a rotated token needs no restart and this
-    object holds none. Only a missing reply is a ChannelError: an error reply is a reply, which the
-    Channel reads. The error names neither the URL nor the token.
+    The token file is read once, here, and the token is kept only in the base URL of this object.
+    A file that cannot be read is not an error here: each call then raises ChannelError, so the
+    service starts and `doctor` names the problem. An error reply is a reply, which the Channel
+    reads. No error names the URL or the token.
     """
 
-    def __init__(self, token_file: Path, timeout_s: float, *, api_url: str = API_URL) -> None:
-        self._token_file = token_file
+    def __init__(
+        self,
+        token_file: Path,
+        timeout_s: float,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = _base_url(token_file)
         self._timeout_s = timeout_s
-        self._api_url = api_url
+        self._transport = transport
+        # keep: httpx logs every request's URL at INFO, and that URL carries the token
+        logging.getLogger(HTTPX_LOGGER).setLevel(logging.WARNING)
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if self._base_url is None:
+            raise ChannelError(NO_TOKEN)
         try:
-            return await asyncio.to_thread(self._post, method, payload)
-        except OSError, ValueError, http.client.HTTPException:
+            async with httpx.AsyncClient(
+                timeout=self._timeout_s, transport=self._transport
+            ) as client:
+                response = await client.post(f"{self._base_url}/{method}", json=payload)
+            reply: object = response.json()
+        except httpx.HTTPError, ValueError:
             raise ChannelError(NO_REPLY) from None
-
-    def _post(self, method: str, payload: Mapping[str, object]) -> object:
-        token = self._token_file.read_text(encoding="utf-8").strip()
-        url = self._api_url.format(token=token, method=method)
-        request = urllib.request.Request(  # noqa: S310 -- an HTTPS API address, or a loopback test
-            url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
-        )
-        try:
-            with urllib.request.urlopen(  # noqa: S310 -- an HTTPS API address, or a loopback test
-                request, timeout=self._timeout_s
-            ) as response:
-                raw: bytes = response.read()
-        except urllib.error.HTTPError as error:
-            with error:
-                raw = error.read()
-        reply: Any = json.loads(raw)
         return reply
+
+
+def _base_url(token_file: Path) -> str | None:
+    """Return the API URL with the token in it, or None when the token file cannot be read."""
+    try:
+        token = token_file.read_text(encoding="utf-8").strip()
+    except OSError, ValueError:
+        return None
+    return API_URL.format(token=token)
