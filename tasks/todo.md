@@ -18,7 +18,7 @@ merged and `uv run poe check` passes.
 - [x] A5b. Shikiru commands, `start` and the contract check
 - [x] A6. Event source
 - [ ] A6b. First sync opens pull requests that are waiting
-- [x] A7. Liveness and health sources
+- [x] A7. Liveness and health sources (runtime synchronizes lifecycle events before down decisions)
 - [ ] A8. Router, loop guard and scheduler
 - [ ] A9. Product handler
 - [ ] A10. Telegram send and edit

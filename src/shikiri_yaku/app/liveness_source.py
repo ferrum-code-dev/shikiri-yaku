@@ -9,6 +9,7 @@ from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.ports import EventKinds, ShikiruLinkDownError
 
 if TYPE_CHECKING:
+    from shikiri_yaku.app.event_source import EventSource
     from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
     from shikiri_yaku.ports import Clock, LivenessJournal, ShikiruClient
@@ -32,7 +33,9 @@ class LivenessSource:
         *,
         interval_s: float,
         stop_grace_min: int,
+        events: EventSource | None = None,
     ) -> None:
+        self._events = events
         self._project = project
         self._client = client
         self._journal = journal
@@ -56,6 +59,9 @@ class LivenessSource:
     async def check(self) -> None:
         if (await self._client.status()).engine_up:
             return
+        if self._events is not None:
+            while await self._events.poll(wait_s=0):
+                pass
         state = self._journal.state(self._project)
         if state is None or state.lifecycle is None:
             return

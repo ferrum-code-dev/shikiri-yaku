@@ -15,13 +15,16 @@ from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
+from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.liveness_source import LivenessSource
+from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
     JournalError,
+    JournalEvents,
     JournalSources,
     SignalStore,
 )
@@ -74,15 +77,15 @@ def compose(
     jobs = [
         job
         for component in settings.components
-        for job in _project_jobs(settings, component, journal, clock, link)
+        for job in project_jobs(settings, component, journal, clock, link)
     ]
     return Composition(settings, clock, journal, probes, jobs)
 
 
-def _project_jobs(
+def project_jobs(
     settings: Settings, component: Component, journal: Database, clock: Clock, link: LinkFactory
 ) -> list[Job]:
-    """Return the link supervisor and the liveness check of one project, run until cancelled."""
+    """Return the link supervisor and synchronized sources of one project."""
     operator = settings.operator
     client = ShikiruMcpClient(
         link(SHIKIRU_EXECUTABLE, component.path),
@@ -95,8 +98,12 @@ def _project_jobs(
         start_timeout_s=operator.link_start_timeout_s,
     )
     signals = SignalStore(journal)
-    sources = JournalSources(CursorStore(journal, signals), signals)
+    cursors = CursorStore(journal, signals)
+    sources = JournalSources(cursors, signals)
     health = HealthSource(component.name, sources, clock, operator.link_unreachable_min)
+    events = EventSource(
+        component.name, client, JournalEvents(cursors), clock, operator.event_wait_s
+    )
     liveness = LivenessSource(
         component.name,
         client,
@@ -105,8 +112,17 @@ def _project_jobs(
         health,
         interval_s=operator.liveness_interval_s,
         stop_grace_min=operator.stop_grace_min,
+        events=events,
     )
-    return [client.supervise, liveness.run]
+    project_sources = ProjectSources(
+        events,
+        liveness,
+        health,
+        clock,
+        event_wait_s=operator.event_wait_s,
+        interval_s=operator.liveness_interval_s,
+    )
+    return [client.supervise, project_sources.run]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

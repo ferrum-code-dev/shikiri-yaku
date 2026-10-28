@@ -56,24 +56,27 @@ class EventSource:
         self._clock = clock
         self._wait_s = wait_s
 
-    async def poll(self) -> None:
-        """Wait for events once and record what they mean."""
+    async def poll(self, *, wait_s: float | None = None) -> bool:
+        """Record one batch; return whether another immediate poll may have more events."""
         cursor = self._journal.last_event_id(self._project)
         if cursor is None:
             await self._first_sync()
-            return
-        events = await self._client.wait_for_events(cursor, self._wait_s)
+            return True
+        events = await self._client.wait_for_events(
+            cursor, self._wait_s if wait_s is None else wait_s
+        )
         if not events:
-            return
+            return False
         if events[0].id > cursor + 1:
             await self._first_sync()
-            return
+            return True
         changes: list[Change] = []
         for event in events:
             changes.extend(await self._changes(event))
         self._journal.record_batch(
             self._project, changes, events[-1].id, _lifecycle(events), self._clock.now()
         )
+        return True
 
     async def _first_sync(self) -> None:
         """Read the whole history for its lifecycle only, then open the live escalations.
