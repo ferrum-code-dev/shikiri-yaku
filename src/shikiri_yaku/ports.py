@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
 
 __all__ = [
+    "Ack",
+    "AckStatus",
     "AgentOption",
     "Channel",
     "ChannelError",
@@ -101,6 +103,29 @@ class ResolutionKind:
     CANCEL: Final = "cancel"
 
 
+class AckStatus:
+    """Answers of Shikiru to a command (design §10.1). Shikiru may add more, so these are text."""
+
+    DONE: Final = "done"
+    REJECTED: Final = "rejected"
+    QUEUED: Final = "queued"
+
+
+class Ack(_ShikiruPayload):
+    """Shikiru's acknowledgement of a command; `id` is the command id the events carry."""
+
+    id: int
+    status: str
+    result: dict[str, Any] | None = None
+    message: str | None = None
+
+    @property
+    def task_id(self) -> str | None:
+        """The task a submit created or will create; None for any other command."""
+        value = (self.result or {}).get("task_id")
+        return value if isinstance(value, str) else None
+
+
 class EscalationRecord(_ShikiruPayload):
     id: str
     task_id: str
@@ -160,8 +185,9 @@ class ShikiruClient(Protocol):
     """One project's Shikiru, reached through its MCP link (design §11).
 
     Every verb raises ShikiruLinkDownError while the link is down, ShikiruRejectedError when
-    Shikiru answers with a tool error, and ShikiruProtocolError for a result it cannot read. The
-    commands of §10.1 arrive with the next task.
+    Shikiru answers with a tool error, and ShikiruProtocolError for a result it cannot read. A
+    command Shikiru acknowledges as `rejected` raises ShikiruRejectedError with Shikiru's message;
+    `done` and `queued` come back as the Ack.
     """
 
     async def wait_for_events(self, since_id: int, timeout_s: float) -> list[ShikiruEvent]: ...
@@ -175,6 +201,19 @@ class ShikiruClient(Protocol):
     async def list_tasks(self, statuses: Sequence[str] | None = None) -> list[ShikiruTask]: ...
 
     async def get_task(self, task_id: str) -> TaskDetail | None: ...
+
+    async def resolve_escalation(
+        self, escalation_id: str, kind: str, text: str | None = None
+    ) -> Ack: ...
+
+    async def submit_task(self, request: str) -> Ack: ...
+
+    async def start_engine(self) -> None:
+        """Run the project's `shikiru start`; the caller confirms with `status().engine_up`.
+
+        Raises ShikiruRejectedError when the command exits nonzero and CommandError when it
+        cannot be run to its end.
+        """
 
 
 class Channel(Protocol):

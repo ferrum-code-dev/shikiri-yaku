@@ -17,6 +17,9 @@ from mcp.types import CallToolResult, TextContent
 
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient
 from shikiri_yaku.ports import (
+    AckStatus,
+    CommandError,
+    CommandResult,
     ShikiruLinkDownError,
     ShikiruProtocolError,
     ShikiruRejectedError,
@@ -24,7 +27,7 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
     from datetime import timedelta
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
@@ -96,21 +99,45 @@ class FakeClock:
         self.sleeps.append(seconds)
 
 
-def _client(link: FakeLink, clock: FakeClock) -> ShikiruMcpClient:
+class FakeRunner:
+    def __init__(self, result: CommandResult | CommandError) -> None:
+        self.result = result
+        self.calls: list[tuple[list[str], float]] = []
+
+    async def run(self, argv: Sequence[str], *, timeout_s: float) -> CommandResult:
+        self.calls.append((list(argv), timeout_s))
+        if isinstance(self.result, CommandError):
+            raise self.result
+        return self.result
+
+
+_START_ARGV: Final = ["shikiru", "--project", "/work/api", "start"]
+_START_TIMEOUT_S: Final = 120
+_STARTED: Final = CommandResult(returncode=0, stdout="started", stderr="")
+
+
+def _client(
+    link: Callable[[], Any], clock: FakeClock, runner: FakeRunner | None = None
+) -> ShikiruMcpClient:
     return ShikiruMcpClient(
         link,
         clock,
         backoff_initial_s=_BACKOFF_INITIAL_S,
         backoff_max_s=_BACKOFF_MAX_S,
         call_timeout_s=_CALL_TIMEOUT_S,
+        runner=runner or FakeRunner(_STARTED),
+        start_argv=_START_ARGV,
+        start_timeout_s=_START_TIMEOUT_S,
     )
 
 
 async def _with_link(
-    session: FakeSession, scenario: Callable[[ShikiruMcpClient], Awaitable[None]]
+    session: FakeSession,
+    scenario: Callable[[ShikiruMcpClient], Awaitable[None]],
+    runner: FakeRunner | None = None,
 ) -> None:
     link = FakeLink([session])
-    client = _client(link, FakeClock())
+    client = _client(link, FakeClock(), runner)
     supervisor = asyncio.create_task(client.supervise())
     try:
         await link.connected.wait()
@@ -119,8 +146,12 @@ async def _with_link(
         supervisor.cancel()
 
 
-def _run(session: FakeSession, scenario: Callable[[ShikiruMcpClient], Awaitable[None]]) -> None:
-    asyncio.run(_with_link(session, scenario))
+def _run(
+    session: FakeSession,
+    scenario: Callable[[ShikiruMcpClient], Awaitable[None]],
+    runner: FakeRunner | None = None,
+) -> None:
+    asyncio.run(_with_link(session, scenario, runner))
 
 
 def test_the_s1_escalation_payload_is_read_with_its_decision_fields() -> None:
@@ -376,13 +407,7 @@ def test_the_sdk_rejecting_a_result_is_a_protocol_error_and_the_link_stays_up(
             connected.set()
             yield session
 
-    client = ShikiruMcpClient(
-        connect,
-        FakeClock(),
-        backoff_initial_s=_BACKOFF_INITIAL_S,
-        backoff_max_s=_BACKOFF_MAX_S,
-        call_timeout_s=_CALL_TIMEOUT_S,
-    )
+    client = _client(connect, FakeClock())
 
     async def scenario() -> None:
         supervisor = asyncio.create_task(client.supervise())
@@ -397,3 +422,75 @@ def test_the_sdk_rejecting_a_result_is_a_protocol_error_and_the_link_stays_up(
                 await supervisor
 
     asyncio.run(scenario())
+
+
+def test_a_rejected_ack_becomes_a_rejected_error_with_shikirus_message() -> None:
+    rejected = {"id": 7, "status": "rejected", "result": None, "message": "E-1 is already resolved"}
+    session = FakeSession({"resolve_escalation": _reply(rejected)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        with pytest.raises(ShikiruRejectedError, match="E-1 is already resolved"):
+            await client.resolve_escalation("E-1", "answer", "yes")
+
+    _run(session, scenario)
+    assert session.calls[0][1] == {
+        "escalation_id": "E-1",
+        "resolution": {"kind": "answer", "text": "yes"},
+    }
+
+
+def test_a_queued_ack_is_returned_as_queued_and_a_submit_carries_its_task_id() -> None:
+    queued = {
+        "id": 9,
+        "status": "queued",
+        "result": {"task_id": "T-4"},
+        "message": "applies when the engine starts",
+    }
+    session = FakeSession({"submit_task": _reply(queued)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        ack = await client.submit_task("add a login page")
+        assert (ack.id, ack.status, ack.task_id) == (9, AckStatus.QUEUED, "T-4")
+
+    _run(session, scenario)
+
+
+def test_a_done_ack_with_fields_shikiru_added_is_read() -> None:
+    done = {"id": 3, "status": "done", "result": None, "message": None, "later": 1}
+    session = FakeSession({"resolve_escalation": _reply(done)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        ack = await client.resolve_escalation("E-1", "retry")
+        assert (ack.id, ack.status, ack.task_id) == (3, AckStatus.DONE, None)
+
+    _run(session, scenario)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error"),
+    [
+        (CommandResult(returncode=1, stdout="", stderr="no tmux\n"), ShikiruRejectedError),
+        (CommandError("did not finish"), CommandError),
+    ],
+)
+def test_start_engine_fails_with_the_commands_own_message(
+    outcome: CommandResult | CommandError, error: type[Exception]
+) -> None:
+    runner = FakeRunner(outcome)
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        with pytest.raises(error):
+            await client.start_engine()
+
+    _run(FakeSession(), scenario, runner)
+    assert runner.calls == [(_START_ARGV, _START_TIMEOUT_S)]
+
+
+def test_start_engine_runs_the_stored_argument_list() -> None:
+    runner = FakeRunner(_STARTED)
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        await client.start_engine()
+
+    _run(FakeSession(), scenario, runner)
+    assert runner.calls == [(_START_ARGV, _START_TIMEOUT_S)]

@@ -38,6 +38,7 @@ LINK_UNREACHABLE_MIN: Final = 10
 LINK_BACKOFF_INITIAL_S: Final = 1
 LINK_BACKOFF_MAX_S: Final = 60
 LINK_CALL_TIMEOUT_S: Final = 30
+LINK_START_TIMEOUT_S: Final = 120
 
 COMMAND_TIMEOUT_MIN: Final = 10
 QUOTA_WAIT_MAX_H: Final = 24
@@ -121,6 +122,7 @@ class OperatorSettings(_FrozenModel):
     link_backoff_initial_s: PositiveInt = LINK_BACKOFF_INITIAL_S
     link_backoff_max_s: PositiveInt = LINK_BACKOFF_MAX_S
     link_call_timeout_s: PositiveInt = LINK_CALL_TIMEOUT_S
+    link_start_timeout_s: PositiveInt = LINK_START_TIMEOUT_S
 
 
 class InfrastructureSettings(_FrozenModel):

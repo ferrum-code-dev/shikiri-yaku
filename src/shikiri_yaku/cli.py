@@ -20,12 +20,12 @@ from shikiri_yaku.instance import (
     instance_dir,
     instance_lock,
 )
-from shikiri_yaku.ports import CompositionError
+from shikiri_yaku.ports import CompositionError, ShikiruError
 from shikiri_yaku.service import ServiceError, service_file, write_service_file
 from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Mapping, Sequence
 
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
@@ -36,6 +36,9 @@ TOKEN_MODE: Final = 0o600
 
 class Lifecycle(Protocol):
     """A composed instance, as the command line sees it: it is closed when the command ends."""
+
+    @property
+    def link_probes(self) -> Mapping[str, Callable[[], Awaitable[None]]]: ...
 
     def close(self) -> None: ...
 
@@ -117,7 +120,7 @@ def _doctor(arguments: argparse.Namespace, compose: Compose) -> int:
             _Check("components", _components_problem(settings)),
             _Check("token file", _token_problem(settings.telegram.token_file)),
             _lock_check(directory),
-            _Check("journal", _journal_problem(settings, directory, compose)),
+            *_composed_checks(settings, directory, compose),
         ]
     )
 
@@ -170,12 +173,26 @@ def _lock_check(directory: Path) -> _Check:
         return _Check("instance lock", str(error))
 
 
-def _journal_problem(settings: Settings, directory: Path, compose: Compose) -> str | None:
+def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> list[_Check]:
     try:
         composition = compose(settings, directory)
     except CompositionError as error:
-        return str(error)
-    composition.close()
+        return [_Check("journal", str(error))]
+    try:
+        links = [
+            _Check(f"link {name}", _link_problem(probe))
+            for name, probe in composition.link_probes.items()
+        ]
+    finally:
+        composition.close()
+    return [*links, _Check("journal")]
+
+
+def _link_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
+    try:
+        asyncio.run(probe())
+    except ShikiruError as error:
+        return str(error) or type(error).__name__
     return None
 
 

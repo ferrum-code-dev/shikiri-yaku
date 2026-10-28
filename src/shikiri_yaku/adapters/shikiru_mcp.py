@@ -13,6 +13,8 @@ from mcp.types import TextContent
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shikiri_yaku.ports import (
+    Ack,
+    AckStatus,
     EngineStatus,
     EscalationView,
     ShikiruEvent,
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
 
     from mcp.types import CallToolResult
 
-    from shikiri_yaku.ports import Clock
+    from shikiri_yaku.ports import Clock, CommandRunner
 
 BACKOFF_FACTOR = 2
 
@@ -81,9 +83,15 @@ class ShikiruMcpClient:
         backoff_initial_s: float,
         backoff_max_s: float,
         call_timeout_s: float,
+        runner: CommandRunner,
+        start_argv: Sequence[str],
+        start_timeout_s: float,
     ) -> None:
         self._connect = connect
         self._clock = clock
+        self._runner = runner
+        self._start_argv = list(start_argv)
+        self._start_timeout_s = start_timeout_s
         self._backoff_initial_s = backoff_initial_s
         self._backoff_max_s = backoff_max_s
         self._call_timeout_s = call_timeout_s
@@ -136,6 +144,21 @@ class ShikiruMcpClient:
             await self._call("get_task", {"task_id": task_id}, _Result[TaskDetail | None])
         ).result
 
+    async def resolve_escalation(
+        self, escalation_id: str, kind: str, text: str | None = None
+    ) -> Ack:
+        resolution = {"kind": kind, "text": text}
+        arguments = {"escalation_id": escalation_id, "resolution": resolution}
+        return _accepted(await self._call("resolve_escalation", arguments, Ack))
+
+    async def submit_task(self, request: str) -> Ack:
+        return _accepted(await self._call("submit_task", {"request": request}, Ack))
+
+    async def start_engine(self) -> None:
+        result = await self._runner.run(self._start_argv, timeout_s=self._start_timeout_s)
+        if result.returncode != 0:
+            raise ShikiruRejectedError(result.stderr.strip() or result.stdout.strip())
+
     async def _call[M: BaseModel](
         self,
         tool: str,
@@ -147,30 +170,57 @@ class ShikiruMcpClient:
         if session is None:
             message = "the link to Shikiru is down"
             raise ShikiruLinkDownError(message)
-        timeout = timedelta(
-            seconds=self._call_timeout_s if read_timeout_s is None else read_timeout_s
-        )
+        timeout_s = self._call_timeout_s if read_timeout_s is None else read_timeout_s
         try:
-            # keep: the SDK raises these for a result that breaks the tool's schema, not a lost link
-            result = await session.call_tool(tool, arguments, timeout)
-        except (RuntimeError, ValidationError) as error:
-            message = f"{tool} returned an unreadable result: {error}"
-            raise ShikiruProtocolError(message) from error
-        except Exception as error:
+            return await _invoke(session, tool, arguments, reply_type, timeout_s)
+        except ShikiruLinkDownError:
             self._drop(session)
-            raise ShikiruLinkDownError(str(error)) from error
-        if result.isError:
-            raise ShikiruRejectedError(_error_text(result))
-        try:
-            return reply_type.model_validate(result.structuredContent)
-        except ValidationError as error:
-            message = f"{tool} returned an unreadable result: {error}"
-            raise ShikiruProtocolError(message) from error
+            raise
 
     def _drop(self, session: ToolSession) -> None:
         if self._session is session:
             self._session = None
             self._dropped.set()
+
+
+async def _invoke[M: BaseModel](
+    session: ToolSession,
+    tool: str,
+    arguments: dict[str, Any],
+    reply_type: type[M],
+    timeout_s: float,
+) -> M:
+    try:
+        # keep: the SDK raises these for a result that breaks the tool's schema, not a lost link
+        result = await session.call_tool(tool, arguments, timedelta(seconds=timeout_s))
+    except (RuntimeError, ValidationError) as error:
+        message = f"{tool} returned an unreadable result: {error}"
+        raise ShikiruProtocolError(message) from error
+    except Exception as error:
+        raise ShikiruLinkDownError(str(error)) from error
+    if result.isError:
+        raise ShikiruRejectedError(_error_text(result))
+    try:
+        return reply_type.model_validate(result.structuredContent)
+    except ValidationError as error:
+        message = f"{tool} returned an unreadable result: {error}"
+        raise ShikiruProtocolError(message) from error
+
+
+def _accepted(ack: Ack) -> Ack:
+    if ack.status == AckStatus.REJECTED:
+        raise ShikiruRejectedError(ack.message or "Shikiru rejected the command")
+    return ack
+
+
+async def probe_link(connect: Connector, timeout_s: float) -> None:
+    """Bring the link up once and ask `status`, for `doctor`; raises a ShikiruError if it fails."""
+    try:
+        async with asyncio.timeout(timeout_s), connect() as session:
+            await _invoke(session, "status", {}, EngineStatus, timeout_s)
+    except (OSError, TimeoutError) as error:
+        message = f"the link did not come up: {error}"
+        raise ShikiruLinkDownError(message) from error
 
 
 def _error_text(result: CallToolResult) -> str:

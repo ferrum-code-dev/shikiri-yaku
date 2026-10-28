@@ -6,20 +6,26 @@ import multiprocessing
 import os
 import signal
 import sys
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from functools import partial
+from typing import TYPE_CHECKING, Any, Final
 
 import pytest
+from mcp.types import CallToolResult
 
-from shikiri_yaku.bootstrap import main
+from shikiri_yaku import cli
+from shikiri_yaku.bootstrap import compose, main
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
     from pathlib import Path
+
+    from shikiri_yaku.adapters.shikiru_mcp import ToolSession
 
 _PRODUCT: Final = "shop"
 _ATTEMPTS: Final = 100
@@ -117,8 +123,32 @@ def _token_path_and_lock_broken(home: Path) -> None:
     _lock_becomes_directory(home)
 
 
-def _run_doctor(home: Path) -> int:
-    return main(["doctor", _PRODUCT, "--home", str(home)])
+class _StatusSession:
+    async def call_tool(self, name: str, *_ignored: object) -> object:
+        assert name == "status"
+        return CallToolResult(
+            content=[],
+            structuredContent={"engine_up": True, "quotas": {}},
+            isError=False,
+        )
+
+
+@asynccontextmanager
+async def _answering_link() -> AsyncGenerator[ToolSession]:
+    yield _StatusSession()  # pyright: ignore[reportReturnType]
+
+
+class _unreachable_link:  # noqa: N801 -- used like the link factories next to it
+    async def __aenter__(self) -> ToolSession:
+        message = "no such executable"
+        raise FileNotFoundError(message)
+
+    async def __aexit__(self, *_ignored: object) -> None: ...
+
+
+def _run_doctor(home: Path, link: Callable[[], Any] = _answering_link) -> int:
+    composed = partial(compose, link=lambda _executable, _project: link)
+    return cli.main(["doctor", _PRODUCT, "--home", str(home)], composed)
 
 
 def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -156,6 +186,15 @@ def test_doctor_names_each_failed_check_and_exits_non_zero(
 
     assert _run_doctor(tmp_path) == 1
     assert _failed(capsys.readouterr().out) == failed
+
+
+def test_doctor_names_a_component_whose_mcp_link_does_not_come_up(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, _unreachable_link) == 1
+    assert _failed(capsys.readouterr().out) == {"link api"}
 
 
 def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
