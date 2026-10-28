@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING, Final
 from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
+from shikiri_yaku.journal.signals import SignalState
 from shikiri_yaku.ports import Message, ReplyOrigin, ResolvePayload
 
 if TYPE_CHECKING:
@@ -47,6 +49,7 @@ class JournalReplies:
             Purpose(row["purpose"]),
             _BODY.validate_json(row["body"]),
             row["notice_key"],
+            Destination(row["channel"], row["chat"]),
         )
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int:
@@ -70,6 +73,9 @@ class JournalReplies:
             payload = ResolvePayload.model_validate_json(op.payload)
             if not self._ops.transition(op_id, OpState.INTENDED, OpState.ISSUED, now):
                 return None
+            self._signals.transition(
+                payload.number, SignalState.FORWARDED, SignalState.ANSWERED, now
+            )
             return payload
 
     def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
@@ -80,3 +86,6 @@ class JournalReplies:
             """,
             (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
         )
+
+    def acknowledge_notice(self, number: int, now: datetime) -> None:
+        self._signals.transition(number, SignalState.FORWARDED, SignalState.CLOSED, now)

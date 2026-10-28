@@ -656,6 +656,7 @@ class ReplyOrigin:
     purpose: Purpose
     message: Message
     key: str | None
+    destination: Destination
 
 
 class ReplyLog(Protocol):
@@ -673,4 +674,8 @@ class ReplyLog(Protocol):
 
     def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
         """Save the acknowledgement and command id without confirming the op."""
+        ...
+
+    def acknowledge_notice(self, number: int, now: datetime) -> None:
+        """Close an informational signal without issuing a Shikiru resolution."""
         ...

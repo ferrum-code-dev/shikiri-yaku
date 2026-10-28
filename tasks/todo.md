@@ -31,7 +31,7 @@ merged and `uv run poe check` passes.
 - [x] A10d. Bot API transport
 - [x] A11a. Inbound transport and parsing
 - [x] A11a2. Durable inbound ingestion
-- [ ] A11b. Replies
+- [x] A11b. Replies
 - [ ] A11c. Polling, answers and composition
 - [ ] A12. Command confirmation and resolved elsewhere
 - [ ] A13. Status, open, help and measures

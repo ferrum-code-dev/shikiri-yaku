@@ -11,7 +11,14 @@ import pytest
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.journal import Database, MessageStore, OpState, OpStore, SignalStore
+from shikiri_yaku.journal import (
+    Database,
+    JournalOutbox,
+    MessageStore,
+    OpState,
+    OpStore,
+    SignalStore,
+)
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
@@ -79,6 +86,7 @@ class Harness:
             NOW,
         ).row_id
         self.messages = MessageStore(self.database, Reporter())
+        self.outbox = JournalOutbox(self.database, self.messages)
         self.ops = OpStore(self.database)
         self.client = Client()
         self.clients = {"api": cast("ShikiruClient", self.client)}
@@ -111,7 +119,7 @@ class Harness:
         data: str | None = None,
         text: str | None = None,
     ) -> None:
-        replies = Replies(self.log(), Clock(), self.clients, channel="telegram")
+        replies = Replies(self.log(), self.outbox, Clock(), self.clients, channel="telegram")
         item = Inbound(
             update,
             InboundKind.TAP if text is None else InboundKind.REPLY,
@@ -190,13 +198,13 @@ def test_unknown_origin_wrong_signal_and_invalid_buttons_do_not_resolve(
 
 
 @pytest.mark.parametrize("data", ["a:1:1", "a:1:3", "a:1:4"])
-def test_unfinished_input_and_confirmation_branches_do_not_resolve(h: Harness, data: str) -> None:
+def test_input_and_confirmation_taps_do_not_resolve_immediately(h: Harness, data: str) -> None:
     option = h.client.view.agent_options[0].model_copy(update={"needs_input": True})
     h.client.view = h.client.view.model_copy(
         update={"agent_options": [option, h.client.view.agent_options[1]]}
     )
     h.handle(data=data)
-    assert h.ops.non_final() == []
+    assert all(op.state == OpState.INTENDED for op in h.ops.non_final())
     assert h.client.calls == []
 
 
