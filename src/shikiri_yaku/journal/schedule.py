@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.schedule import Awaiting, Destination, Outgoing, Parked
@@ -55,16 +56,22 @@ class JournalSchedule:
             """
             SELECT s.number, s.project, s.task_id, m.channel, m.chat, m.created_at
             FROM signals s JOIN messages m ON m.signal_number = s.number
-            WHERE s.state = ? AND m.direction = ? AND m.delivery = ? AND m.purpose IN (?, ?)
+            WHERE s.state = :forwarded AND m.direction = :out AND m.delivery = :sent
+                AND (m.purpose IN (:question, :approval)
+                     OR (m.purpose = :notice AND s.kind = :review
+                         AND (m.notice_key IS NULL OR m.notice_key NOT LIKE :reminders)))
             ORDER BY s.number, m.id
             """,
-            (
-                SignalState.FORWARDED,
-                Direction.OUT,
-                Delivery.SENT,
-                Purpose.QUESTION,
-                Purpose.APPROVAL,
-            ),
+            {
+                "forwarded": SignalState.FORWARDED,
+                "out": Direction.OUT,
+                "sent": Delivery.SENT,
+                "question": Purpose.QUESTION,
+                "approval": Purpose.APPROVAL,
+                "notice": Purpose.NOTICE,
+                "review": Kind.PR_REVIEW,
+                "reminders": f"{REMIND}:%",
+            },
         )
         grouped: dict[int, Awaiting] = {}
         for row in rows:
@@ -78,37 +85,38 @@ class JournalSchedule:
                     row["number"], row["project"], row["task_id"], asked_at, (where,)
                 )
             else:
-                grouped[row["number"]] = Awaiting(
-                    known.number,
-                    known.project,
-                    known.task_id,
-                    min(known.asked_at, asked_at),
-                    (*known.destinations, where),
+                grouped[row["number"]] = replace(
+                    known,
+                    asked_at=min(known.asked_at, asked_at),
+                    destinations=known.destinations
+                    if where in known.destinations
+                    else (*known.destinations, where),
                 )
         return list(grouped.values())
 
     def schedule_reminder(
         self, awaiting: Awaiting, occurrence: int, now: datetime
     ) -> list[Outgoing]:
-        # keep: the op only books the occurrence; delivery is the outbox's, so it is final at once.
+        # keep: one transaction, so an interruption leaves neither the op nor a partial outbox
         identity = f"{REMIND}:{awaiting.number}:{occurrence}"
         op = NewOp(identity, REMIND, awaiting.project, awaiting.task_id, state=OpState.CONFIRMED)
-        if not self._ops.intend(op, now).is_new:
-            return []
-        return [
-            Outgoing(
-                self._messages.record_outbound(
-                    signal_number=awaiting.number,
-                    channel=where.channel,
-                    chat=where.chat,
-                    purpose=Purpose.NOTICE,
-                    notice_key=identity,
-                    now=now,
-                ).row_id,
-                where,
-            )
-            for where in awaiting.destinations
-        ]
+        with self._database.transaction():
+            if not self._ops.intend(op, now).is_new:
+                return []
+            return [
+                Outgoing(
+                    self._messages.record_outbound(
+                        signal_number=awaiting.number,
+                        channel=where.channel,
+                        chat=where.chat,
+                        purpose=Purpose.NOTICE,
+                        notice_key=identity,
+                        now=now,
+                    ).row_id,
+                    where,
+                )
+                for where in awaiting.destinations
+            ]
 
     def delivered(self, outgoing: Outgoing, message_ref: str) -> None:
         self._messages.confirm_delivery(outgoing.message_id, message_ref)

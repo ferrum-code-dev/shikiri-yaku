@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -10,6 +10,7 @@ from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.journal import (
     Database,
+    Inserted,
     JournalSchedule,
     MessageStore,
     NewSignal,
@@ -94,10 +95,15 @@ class _World:
             reminder_repeat_h=REPEAT_H,
         )
 
-    def signal(self, name: str, state: SignalState, wake_at: datetime | None = None) -> int:
+    def signal(
+        self,
+        name: str,
+        state: SignalState,
+        wake_at: datetime | None = None,
+        kind: str = "escalation",
+    ) -> int:
         number = self.signals.insert_if_absent(
-            NewSignal(f"api:escalation:{name}", "api", "escalation", "agent_error", "x", "T-1"),
-            START,
+            NewSignal(f"api:{kind}:{name}", "api", kind, "agent_error", "x", "T-1"), START
         ).row_id
         self.signals.classify(
             number, category="infra", classified_by="rule", verdict=None, handler="infra", now=START
@@ -106,13 +112,19 @@ class _World:
         self.signals.transition(number, SignalState.HANDLING, state, START, wake_at=wake_at)
         return number
 
-    def ask(self, number: int) -> None:
+    def ask(
+        self,
+        number: int,
+        chat: str = CHAT,
+        purpose: Purpose = Purpose.QUESTION,
+        key: str | None = None,
+    ) -> None:
         sent = self.messages.record_outbound(
             signal_number=number,
             channel="telegram",
-            chat=CHAT,
-            purpose=Purpose.QUESTION,
-            notice_key=None,
+            chat=chat,
+            purpose=purpose,
+            notice_key=key,
             now=START,
         )
         self.messages.confirm_delivery(sent.row_id, "m1")
@@ -182,3 +194,68 @@ def test_a_failed_send_stays_booked_in_the_outbox_and_is_not_rescheduled(
 
     assert world.channel.sent == []
     assert len(MessageStore(world.database).unconfirmed()) == 1
+
+
+def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_one(
+    world: _World,
+) -> None:
+    number = world.signal("e1", SignalState.FORWARDED)
+    world.messages.record_outbound(
+        signal_number=number,
+        channel="telegram",
+        chat=CHAT,
+        purpose=Purpose.QUESTION,
+        notice_key="copy",
+        now=START,
+    )
+    world.ask(number)
+    world.ask(number, chat="1002")
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    _tick(world)
+    _tick(world)
+
+    assert sorted(destination for destination, _ in world.channel.sent) == [CHAT, "1002"]
+
+
+def test_unacknowledged_review_is_reminded_but_its_reminder_is_not_and_acknowledged_stops(
+    world: _World,
+) -> None:
+    number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
+    world.ask(number, purpose=Purpose.NOTICE, key="review:api:T-1")
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    _tick(world)
+    world.clock.moment = START + timedelta(hours=FIRST_H + 1)
+    _tick(world)
+    assert len(world.channel.sent) == 1
+
+    world.signals.transition(number, SignalState.FORWARDED, SignalState.ANSWERED, world.clock.now())
+    world.clock.moment = START + timedelta(hours=FIRST_H + REPEAT_H)
+    _tick(world)
+    assert len(world.channel.sent) == 1
+
+
+def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    number = world.signal("e1", SignalState.FORWARDED)
+    world.ask(number)
+    world.ask(number, chat="1002")
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    record = MessageStore.record_outbound
+    calls: list[str] = []
+
+    def interrupted(store: MessageStore, **kwargs: Any) -> Inserted:
+        calls.append(kwargs["chat"])
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return record(store, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(MessageStore, "record_outbound", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            _tick(world)
+    assert world.database.connection.execute("SELECT count(*) FROM ops").fetchone()[0] == 0
+    assert world.messages.unconfirmed() == []
+
+    _tick(world)
+    assert sorted(destination for destination, _ in world.channel.sent) == [CHAT, "1002"]
