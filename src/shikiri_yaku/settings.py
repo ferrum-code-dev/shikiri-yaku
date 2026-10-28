@@ -47,6 +47,7 @@ LINK_CALL_TIMEOUT_S: Final = 30
 LINK_START_TIMEOUT_S: Final = 120
 TELEGRAM_CALL_TIMEOUT_S: Final = 30
 TELEGRAM_POLL_WAIT_S: Final = 20
+INBOUND_INTERVAL_S: Final = 1
 
 COMMAND_TIMEOUT_MIN: Final = 10
 QUOTA_WAIT_MAX_H: Final = 24
@@ -139,6 +140,7 @@ class OperatorSettings(_FrozenModel):
     link_start_timeout_s: PositiveInt = LINK_START_TIMEOUT_S
     telegram_call_timeout_s: PositiveInt = TELEGRAM_CALL_TIMEOUT_S
     telegram_poll_wait_s: PositiveInt = TELEGRAM_POLL_WAIT_S
+    inbound_interval_s: PositiveInt = INBOUND_INTERVAL_S
 
     @model_validator(mode="after")
     def _call_outlasts_poll(self) -> Self:

@@ -21,7 +21,8 @@ from shikiri_yaku.settings import load_settings
 from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Sequence
+    from collections.abc import AsyncGenerator, Callable, Sequence
+    from contextlib import AbstractAsyncContextManager
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
     from shikiri_yaku.cli import Job
@@ -30,10 +31,15 @@ _PRODUCT: Final = "shop"
 _OWNER: Final = 123456789
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
+TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 
 
 class _ShikiruSession:
     """Answers the tools of one healthy project whose only event is an open escalation."""
+
+    def __init__(self, resolved: asyncio.Event) -> None:
+        self.resolved = resolved
+        self.resolutions: list[dict[str, Any]] = []
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name == "wait_for_events":
@@ -41,14 +47,23 @@ class _ShikiruSession:
             payload: dict[str, Any] = {"result": []}
         elif name == "status":
             payload = {"engine_up": True, "quotas": {}}
+        elif name == "resolve_escalation":
+            self.resolutions.append(arguments)
+            self.resolved.set()
+            payload = {"id": 12, "status": "queued", "result": None, "message": None}
         else:
             payload = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
         return CallToolResult(content=[], structuredContent=payload, isError=False)
 
 
-@asynccontextmanager
-async def _shikiru_link() -> AsyncGenerator[ToolSession]:
-    yield _ShikiruSession()  # pyright: ignore[reportReturnType]
+def _shikiru_link(
+    session: _ShikiruSession,
+) -> Callable[[], AbstractAsyncContextManager[ToolSession]]:
+    @asynccontextmanager
+    async def link() -> AsyncGenerator[ToolSession]:
+        yield session  # pyright: ignore[reportReturnType]
+
+    return link
 
 
 def _instance(home: Path) -> Path:
@@ -65,12 +80,12 @@ def _instance(home: Path) -> Path:
     return directory
 
 
-async def _deliver(jobs: Sequence[Job], bot: FakeBotApi) -> None:
-    """Run the composed jobs until the Bot API is first asked, then stop every job."""
+async def _deliver(jobs: Sequence[Job], done: asyncio.Event) -> None:
+    """Run the composed jobs until `done` is set, then stop every job."""
     running = [asyncio.create_task(job()) for job in jobs]
     try:
         async with asyncio.timeout(_DELIVERY_TIMEOUT_S):
-            await bot.called.wait()
+            await done.wait()
     finally:
         for task in running:
             task.cancel()
@@ -80,18 +95,19 @@ async def _deliver(jobs: Sequence[Job], bot: FakeBotApi) -> None:
 def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path) -> None:
     directory = _instance(tmp_path)
     bot = FakeBotApi()
+    session = _ShikiruSession(asyncio.Event())
     composition = compose(
         load_settings(directory),
         directory,
-        link=lambda _executable, _project: _shikiru_link,
+        link=lambda _executable, _project: _shikiru_link(session),
         bot=lambda _settings: bot,
     )
     try:
-        asyncio.run(_deliver(composition.jobs, bot))
+        asyncio.run(_deliver(composition.jobs, bot.called))
     finally:
         composition.close()
 
-    [(method, payload)] = bot.calls
+    method, payload = next(call for call in bot.calls if call[0] != "getUpdates")
     assert method == "sendMessage"
     assert payload["chat_id"] == str(_OWNER)
     assert payload["reply_markup"]["inline_keyboard"]
@@ -102,3 +118,41 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
     finally:
         database.close()
     assert references == ["1001/42"]
+
+
+def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    tap = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
+    [update] = tap["result"][2:]
+    update["callback_query"]["from"]["id"] = _OWNER
+    bot = FakeBotApi(updates=[update])
+    session = _ShikiruSession(asyncio.Event())
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+    )
+    try:
+        asyncio.run(_deliver(composition.jobs, session.resolved))
+    finally:
+        composition.close()
+
+    assert session.resolutions == [
+        {
+            "escalation_id": "E-1",
+            "resolution": {
+                "kind": "answer",
+                "text": "Keep existing behavior (Preserve the current call pattern.)",
+            },
+        }
+    ]
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        [op] = database.connection.execute(
+            "SELECT state, command_id FROM ops WHERE kind = 'resolve'"
+        )
+        offset = database.connection.execute("SELECT next_offset FROM polling").fetchone()
+    finally:
+        database.close()
+    assert (op["state"], op["command_id"], offset["next_offset"]) == ("issued", "12", 703)

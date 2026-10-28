@@ -18,12 +18,16 @@ from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdi
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import TelegramChannel, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
+from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
+from shikiri_yaku.app.inbound_poller import InboundPoller
+from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
+from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
@@ -37,6 +41,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalError,
     JournalEvents,
+    JournalInbound,
     JournalOutbox,
     JournalRouting,
     JournalSchedule,
@@ -45,6 +50,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import CompositionError
 
 if TYPE_CHECKING:
@@ -56,7 +62,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
     from shikiri_yaku.domain.extension import Extension, Handler
-    from shikiri_yaku.ports import Channel, Clock, Forwarder, Outbox, Reporter
+    from shikiri_yaku.ports import Channel, Clock, Forwarder, Outbox, Reporter, ShikiruClient
     from shikiri_yaku.settings import Component, Settings
 
 
@@ -133,6 +139,7 @@ def compose(
     bot_api = bot(settings)
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
+    jobs.append(inbound_job(settings, journal, outbox, clock, clients=clients, bot_api=bot_api))
     return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
 
 
@@ -232,6 +239,42 @@ def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channe
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(outbox, channel, clock, interval_s=settings.operator.outbox_interval_s)
     return sender.run
+
+
+def inbound_job(
+    settings: Settings,
+    journal: Database,
+    outbox: Outbox,
+    clock: Clock,
+    *,
+    clients: Mapping[str, ShikiruClient],
+    bot_api: BotApi,
+) -> Job:
+    """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
+    operator = settings.operator
+    signals = SignalStore(journal)
+    log = JournalInbound(journal)
+    poller = InboundPoller(
+        TelegramUpdates(bot_api),
+        log,
+        clock,
+        channel=TELEGRAM_CHANNEL,
+        owners=settings.telegram.owners,
+        wait_s=operator.telegram_poll_wait_s,
+    )
+    replies = Replies(
+        JournalReplies(journal, signals, OpStore(journal)),
+        outbox,
+        clock,
+        clients,
+        channel=TELEGRAM_CHANNEL,
+    )
+    sources = JournalSources(CursorStore(journal, signals), signals)
+    health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
+    service = InboundService(
+        poller, log, replies, health, clock, interval_s=operator.inbound_interval_s
+    )
+    return service.run
 
 
 def main(argv: Sequence[str] | None = None) -> int:

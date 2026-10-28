@@ -35,6 +35,7 @@ __all__ = [
     "Button",
     "Channel",
     "ChannelError",
+    "ChannelProtocolError",
     "ChannelRefusedError",
     "Choice",
     "Classifier",
@@ -446,7 +447,10 @@ class Channel(Protocol):
 
 
 class Updates(Protocol):
-    """Poll from `offset` for up to `wait_s`; transport or protocol failures raise ChannelError."""
+    """Poll from `offset` for up to `wait_s`.
+
+    A transport failure raises ChannelError; an unreadable reply raises ChannelProtocolError.
+    """
 
     async def fetch(self, offset: int, wait_s: float) -> Batch: ...
 
@@ -593,6 +597,10 @@ class ShikiruProtocolError(ShikiruError):
 
 class ChannelError(Exception):
     """A message could not be sent or edited; it may be tried again."""
+
+
+class ChannelProtocolError(ChannelError):
+    """The platform answered in a shape the Channel does not read; retrying alone will not help."""
 
 
 class ChannelRefusedError(Exception):

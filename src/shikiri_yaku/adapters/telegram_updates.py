@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, Valid
 
 from shikiri_yaku.adapters.telegram import REF_SEPARATOR, UNEXPECTED_REPLY
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import ChannelProtocolError
 
 if TYPE_CHECKING:
     from shikiri_yaku.adapters.telegram import BotApi
@@ -80,7 +80,7 @@ class TelegramUpdates:
         try:
             reply = _RESULT.validate_python(body)
         except ValidationError:
-            raise ChannelError(UNEXPECTED_REPLY) from None
+            raise ChannelProtocolError(UNEXPECTED_REPLY) from None
         items: list[Inbound] = []
         last: int | None = None
         for update in reply.result:
