@@ -34,6 +34,7 @@ __all__ = [
     "Button",
     "Channel",
     "ChannelError",
+    "ChannelRefusedError",
     "Classifier",
     "Clock",
     "CommandError",
@@ -418,8 +419,10 @@ class Message:
 class Channel(Protocol):
     """The PO's chat (design §7), Telegram first.
 
-    `send` returns the reference the platform gives the message, and `edit` takes it back. The
-    inbound stream of taps, replies and commands arrives with the inbound adapter.
+    `send` returns the reference the platform gives the message, and `edit` takes it back. A
+    message the platform refuses for good raises ChannelRefusedError; any other failure raises
+    ChannelError and is tried again. The inbound stream of taps, replies and commands arrives with
+    the inbound adapter.
     """
 
     async def send(self, destination: str, message: Message) -> str: ...
@@ -460,6 +463,13 @@ class Outbox(Protocol):
     def pending(self) -> list[Pending]: ...
 
     def confirm(self, message_id: int, message_ref: str) -> None: ...
+
+    def refuse(self, message_id: int, reason: str) -> None:
+        """Record a refusal for good: the body is dropped and only the reason stays.
+
+        A refused message is never offered again.
+        """
+        ...
 
 
 class Reasoner(Protocol):
@@ -513,7 +523,14 @@ class ShikiruProtocolError(ShikiruError):
 
 
 class ChannelError(Exception):
-    """A message could not be sent or edited."""
+    """A message could not be sent or edited; it may be tried again."""
+
+
+class ChannelRefusedError(Exception):
+    """The platform will never take this message, however often it is sent.
+
+    The text is the reason. It is not a ChannelError, so a sender never retries it.
+    """
 
 
 class ReasonerError(Exception):

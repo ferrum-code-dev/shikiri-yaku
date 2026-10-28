@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
     from shikiri_yaku.ports import Channel, Clock, Outbox
@@ -13,9 +13,10 @@ if TYPE_CHECKING:
 class OutboxSender:
     """Sends what the outbox holds and confirms each message after the Channel accepted it.
 
-    A failed send stays pending and is tried again on the next tick. A crash between the Channel
-    accepting a message and the confirmation sends it once more; its body carries `S<number>`, so
-    the PO can recognize the duplicate.
+    A failed send stays pending and is tried again on the next tick. A message the Channel refuses
+    for good is recorded as refused and never offered again. A crash between the Channel accepting
+    a message and the confirmation sends it once more; its body carries `S<number>`, so the PO can
+    recognize the duplicate.
     """
 
     def __init__(
@@ -35,6 +36,9 @@ class OutboxSender:
         for pending in self._outbox.pending():
             try:
                 ref = await self._channel.send(pending.destination.chat, pending.message)
+            except ChannelRefusedError as error:
+                self._outbox.refuse(pending.message_id, str(error))
+                continue
             except ChannelError:
                 continue
             self._outbox.confirm(pending.message_id, ref)

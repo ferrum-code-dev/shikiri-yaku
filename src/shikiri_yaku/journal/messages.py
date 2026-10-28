@@ -25,6 +25,7 @@ class Direction(StrEnum):
 class Delivery(StrEnum):
     PENDING = "pending"
     SENT = "sent"
+    REFUSED = "refused"
     RECEIVED = "received"
 
 
@@ -41,6 +42,7 @@ class StoredMessage:
     purpose: Purpose | None
     delivery: Delivery
     body: Message | None
+    refusal: str | None
 
 
 def _message(row: sqlite3.Row) -> StoredMessage:
@@ -53,6 +55,7 @@ def _message(row: sqlite3.Row) -> StoredMessage:
         purpose=None if row["purpose"] is None else Purpose(row["purpose"]),
         delivery=Delivery(row["delivery"]),
         body=None if row["body"] is None else _BODY.validate_json(row["body"]),
+        refusal=row["refusal"],
     )
 
 
@@ -104,6 +107,16 @@ class MessageStore:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ?, platform_message_id = ? WHERE id = ?",
             (Delivery.SENT, platform_message_id, message_id),
+        )
+
+    def refuse_delivery(self, message_id: int, reason: str) -> None:
+        """Drop the body of a message the platform refused for good; only the reason stays."""
+        self._database.connection.execute(
+            """
+            UPDATE messages SET delivery = ?, body = NULL, refusal = ?
+            WHERE id = ? AND delivery = ?
+            """,
+            (Delivery.REFUSED, reason, message_id, Delivery.PENDING),
         )
 
     def unconfirmed(self) -> list[StoredMessage]:

@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "result": {
+    "message_id": 42,
+    "from": {"id": 5550001, "is_bot": true, "first_name": "Shikiri-yaku", "username": "shikiri_yaku_bot"},
+    "chat": {"id": 1001, "first_name": "Pavel", "type": "private"},
+    "date": 1793174400,
+    "edit_date": 1793174460,
+    "text": "S1 · Answered: option 1"
+  }
+}

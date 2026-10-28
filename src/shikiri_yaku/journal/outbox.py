@@ -54,3 +54,6 @@ class JournalOutbox:
 
     def confirm(self, message_id: int, message_ref: str) -> None:
         self._messages.confirm_delivery(message_id, message_ref)
+
+    def refuse(self, message_id: int, reason: str) -> None:
+        self._messages.refuse_delivery(message_id, reason)

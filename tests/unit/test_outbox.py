@@ -15,13 +15,14 @@ from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     Database,
+    Delivery,
     JournalOutbox,
     MessageStore,
     NewSignal,
     SignalState,
     SignalStore,
 )
-from shikiri_yaku.ports import Button, ChannelError, Message
+from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -48,8 +49,13 @@ class _Channel:
     def __init__(self) -> None:
         self.sent: list[tuple[str, Message]] = []
         self.failing = False
+        self.refusal: str | None = None
+        self.attempts = 0
 
     async def send(self, destination: str, message: Message) -> str:
+        self.attempts += 1
+        if self.refusal is not None:
+            raise ChannelRefusedError(self.refusal)
         if self.failing:
             raise ChannelError
         self.sent.append((destination, message))
@@ -143,6 +149,23 @@ def test_a_failed_send_stays_pending_and_is_sent_when_the_channel_recovers(
     channel.failing = False
     asyncio.run(_sender(memory, channel).tick())
     assert len(channel.sent) == 1
+
+
+def test_a_message_the_platform_refuses_for_good_is_never_offered_again(memory: Database) -> None:
+    number = _signal(memory)
+    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    channel = _Channel()
+    channel.refusal = "too_long"
+
+    asyncio.run(_sender(memory, channel).tick())
+    channel.refusal = None
+    asyncio.run(_sender(memory, channel).tick())
+
+    assert channel.attempts == 1
+    assert channel.sent == []
+    assert _outbox(memory).pending() == []
+    [stored] = MessageStore(memory).for_signal(number)
+    assert (stored.delivery, stored.body, stored.refusal) == (Delivery.REFUSED, None, "too_long")
 
 
 def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database) -> None:
