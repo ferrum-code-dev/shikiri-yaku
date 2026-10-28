@@ -34,7 +34,7 @@ merged and `uv run poe check` passes.
 - [x] A11b. Replies
 - [ ] A11c. Polling, answers and composition
   - [x] A11c1. Polling and delivery job, unreadable-batch health signal, offline composition test
-  - [ ] A11c2. Delete secret inbound messages in the chat (journal the attempt first)
+  - [x] A11c2. Delete secret inbound messages in the chat (journal the attempt first)
   - [ ] A11c3. "Already resolved: … at …" from the journal (resolve op's updated_at and option label)
   - [ ] A11c4. Journaled edits that remove the buttons from every copy after a later answer
 - [x] A12a. Rejected, queued and command-id confirmation

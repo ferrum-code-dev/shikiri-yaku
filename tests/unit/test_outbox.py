@@ -68,6 +68,9 @@ class _Channel:
     async def edit(self, message_ref: str, message: Message) -> None:
         raise NotImplementedError
 
+    async def delete(self, message_ref: str) -> None:
+        raise NotImplementedError
+
 
 class _Reporter:
     def __init__(self) -> None:

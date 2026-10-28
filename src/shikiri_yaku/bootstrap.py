@@ -31,6 +31,7 @@ from shikiri_yaku.app.reconciler import ResolveReconciler
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
+from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
@@ -150,6 +151,7 @@ def compose(
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
     jobs.append(inbound_job(settings, journal, outbox, clock, clients=clients, bot_api=bot_api))
+    jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
     return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
 
@@ -290,6 +292,16 @@ def inbound_job(
         poller, log, replies, health, clock, interval_s=operator.inbound_interval_s
     )
     return service.run
+
+
+def secret_cleanup_job(
+    settings: Settings, journal: Database, channel: Channel, clock: Clock
+) -> Job:
+    """Return the job that deletes the PO's messages which carried a secret (design §7)."""
+    cleanup = SecretCleanup(
+        JournalInbound(journal), channel, clock, interval_s=settings.operator.inbound_interval_s
+    )
+    return cleanup.run
 
 
 def reconcile_job(

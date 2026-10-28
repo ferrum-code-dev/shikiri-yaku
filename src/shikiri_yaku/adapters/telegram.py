@@ -130,6 +130,9 @@ class TelegramChannel:
             self._copies.record_refused_edit(message_ref, str(refusal), now=self._clock.now())
             raise
 
+    async def delete(self, message_ref: str) -> None:
+        await self._request(DELETE_MESSAGE, _target(message_ref))
+
     async def _delete_copy(self, message_ref: str, reason: str) -> None:
         """Delete the copy a secret was edited into, when the journal knows it (design §7).
 

@@ -74,6 +74,30 @@ class JournalInbound:
             (Delivery.HANDLED, update_id, Delivery.RECEIVED),
         )
 
+    def to_delete(self) -> list[Inbound]:
+        # keep: a tap's message is the bot's own question, so only what the PO typed is deleted
+        rows = self._database.connection.execute(
+            """
+            SELECT * FROM messages
+            WHERE direction = ? AND delivery = ? AND kind IN (?, ?)
+            ORDER BY update_id
+            """,
+            (Direction.IN, Delivery.REFUSED, InboundKind.TEXT, InboundKind.REPLY),
+        )
+        return [_inbound(row) for row in rows]
+
+    def record_deletion(self, update_id: int) -> None:
+        self._database.connection.execute(
+            "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
+            (Delivery.DELETE_ATTEMPTED, update_id, Delivery.REFUSED),
+        )
+
+    def confirm_deletion(self, update_id: int) -> None:
+        self._database.connection.execute(
+            "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
+            (Delivery.DELETED, update_id, Delivery.DELETE_ATTEMPTED),
+        )
+
     @staticmethod
     def _insert(connection: sqlite3.Connection, channel: str, item: Inbound, now: datetime) -> None:
         """Insert an item once; a secret keeps its form and loses its text and data."""

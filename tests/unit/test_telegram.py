@@ -126,6 +126,21 @@ def test_edit_targets_the_ref_and_clears_buttons_with_an_empty_keyboard() -> Non
     ]
 
 
+def test_delete_posts_the_chat_and_message_of_the_reference() -> None:
+    api = _Api([_recorded("delete_ok.json")])
+
+    asyncio.run(TelegramChannel(api, _Clock(), _Copies(api)).delete(SENT))
+
+    assert api.calls == [("deleteMessage", {"chat_id": "1001", "message_id": 42})]
+
+
+def test_a_deletion_the_platform_refuses_is_a_refusal_and_not_transient() -> None:
+    api = _Api([_recorded("message_too_long.json")])
+
+    with pytest.raises(ChannelRefusedError):
+        asyncio.run(TelegramChannel(api, _Clock(), _Copies(api)).delete(SENT))
+
+
 def test_a_rate_limit_is_waited_out_once_and_the_send_is_repeated() -> None:
     clock = _Clock()
     api = _Api([_recorded("rate_limited.json"), _recorded("send_ok.json")])

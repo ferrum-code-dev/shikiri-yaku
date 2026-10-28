@@ -79,6 +79,7 @@ __all__ = [
     "ResolvePayload",
     "RoutingLog",
     "ScheduleLog",
+    "SecretLog",
     "ShikiruClient",
     "ShikiruError",
     "ShikiruEvent",
@@ -446,14 +447,16 @@ class Message:
 class Channel(Protocol):
     """The PO's chat (design §7), Telegram first.
 
-    `send` returns the reference the platform gives the message, and `edit` takes it back. A
-    message the platform refuses for good raises ChannelRefusedError; any other failure raises
-    ChannelError and is tried again. What the PO sends comes through `Updates`.
+    `send` returns the reference the platform gives the message, and `edit` and `delete` take it
+    back. A message the platform refuses for good raises ChannelRefusedError; any other failure
+    raises ChannelError and is tried again. What the PO sends comes through `Updates`.
     """
 
     async def send(self, destination: str, message: Message) -> str: ...
 
     async def edit(self, message_ref: str, message: Message) -> None: ...
+
+    async def delete(self, message_ref: str) -> None: ...
 
 
 class Updates(Protocol):
@@ -547,6 +550,21 @@ class Copies(Protocol):
         ...
 
     def confirm_deletion(self, message_ref: str) -> None: ...
+
+
+class SecretLog(Protocol):
+    """Inbound messages that carried a secret, and the attempt to delete each (design §7).
+
+    The attempt is journaled before the platform is asked, and is never repeated.
+    """
+
+    def to_delete(self) -> list[Inbound]:
+        """Return the refused messages whose deletion was not attempted yet, oldest first."""
+        ...
+
+    def record_deletion(self, update_id: int) -> None: ...
+
+    def confirm_deletion(self, update_id: int) -> None: ...
 
 
 class Reporter(Protocol):
