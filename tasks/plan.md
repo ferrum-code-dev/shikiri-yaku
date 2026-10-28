@@ -289,6 +289,14 @@ Acceptance:
 * An escalation without agent options offers only the resolutions the escalation allows.
 * A message over 4096 characters is cut with a *Details* button; callback data is at most 64 bytes.
 
+Decisions (consultation 04-consult-i2; clarification to §7, `docs/design.md` not edited):
+* Every escalation choice (options, answer, retry, accept, cancel, needs_input) uses `a:<signal no>:<option no>` with positive option numbers. `a` only selects a structured choice; input and confirmation are derived from that choice in A11.
+* `d:<signal no>` is Details (packet parts) and `k:<signal no>` is Acknowledge (information-message behaviour of §6.1). A11 decodes `d` and `k` separately. A9 sends the `d` button on a cut message only and the `k` button on information messages only.
+* Size: A9 stays one change (530 insertions, 15 deletions over 12 files). This is a task-specific exception to the ~300-line limit, not a precedent for later tasks.
+* Recommended mark: on a recommended agent option when there is one; otherwise on a recommended resolution of a known kind.
+* Option labels are numbers 1..n; Details appears only on truncation.
+* A9 has no inbound handling and no production sender: `ProductForwarder` is not wired into `compose()`. A10 journals each outbound message before sending and tracks delivery per destination.
+
 ### A10. Telegram send and edit (normal)
 
 Complete the deferred A8e integration: register the real extensions and classifier in `bootstrap.py`

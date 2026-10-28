@@ -25,7 +25,11 @@ TITLE_INFORMATION: Final = "For information"
 
 
 class Tap:
-    """The verb at the start of a button's data, the rest being numbers (design §7)."""
+    """The verb at the start of a button's data, the rest being numbers.
+
+    `a` selects a choice (design §7). `d` and `k` are Details and Acknowledge, a clarification
+    to §7 recorded in tasks/plan.md under A9.
+    """
 
     ANSWER: Final = "a"
     DETAILS: Final = "d"
