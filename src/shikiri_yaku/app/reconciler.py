@@ -54,19 +54,22 @@ class ResolveReconciler:
         # keep: taken before anything else: an op issued later by this process is not uncertain
         uncertain = {op.op_id for op in self._log.unsettled() if op.ack is None}
         while True:
-            # keep: the link supervisor and the sources report a failure; the next tick tries again
-            with contextlib.suppress(ShikiruError):
-                await self.tick(uncertain)
+            await self.tick(uncertain)
             await self._clock.sleep(self._interval_s)
 
     async def tick(self, uncertain: set[int]) -> None:
         for op in self._log.unsettled():
-            if op.ack is None:
-                if op.op_id in uncertain:
-                    await self._decide(op, lost=True)
-                    uncertain.discard(op.op_id)
-            elif op.ack.status == AckStatus.QUEUED:
-                await self._decide(op, lost=await self._is_lost(op))
+            # keep: the link supervisor reports an outage; this op is tried again on the next tick
+            with contextlib.suppress(ShikiruError):
+                await self._settle(op, uncertain)
+
+    async def _settle(self, op: Unsettled, uncertain: set[int]) -> None:
+        if op.ack is None:
+            if op.op_id in uncertain:
+                await self._decide(op, lost=True)
+                uncertain.discard(op.op_id)
+        elif op.ack.status == AckStatus.QUEUED:
+            await self._decide(op, lost=await self._is_lost(op))
 
     async def _decide(self, op: Unsettled, *, lost: bool) -> None:
         escalation_id = op.payload.escalation_id

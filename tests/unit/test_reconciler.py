@@ -12,8 +12,15 @@ from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import OpState
 from shikiri_yaku.journal.reconcile import JournalReconcile
-from shikiri_yaku.journal.signals import SignalState
-from shikiri_yaku.ports import Ack, EngineStatus, ShikiruClient, ShikiruLinkDownError
+from shikiri_yaku.journal.signals import NewSignal, SignalState
+from shikiri_yaku.ports import (
+    Ack,
+    EngineStatus,
+    EscalationView,
+    ResolvePayload,
+    ShikiruClient,
+    ShikiruLinkDownError,
+)
 from tests.unit.test_replies import Client, Harness
 
 if TYPE_CHECKING:
@@ -28,6 +35,13 @@ class _Client(Client):
         super().__init__()
         self.engine_up = True
         self.ack_status = "queued"
+        self.down = False
+
+    async def get_escalation(self, escalation_id: str) -> EscalationView:
+        if self.down:
+            message = "link is down"
+            raise ShikiruLinkDownError(message)
+        return await super().get_escalation(escalation_id)
 
     async def resolve_escalation(self, escalation_id: str, kind: str, text: str | None) -> Ack:
         await super().resolve_escalation(escalation_id, kind, text)
@@ -38,8 +52,7 @@ class _Client(Client):
 
 
 class _Lifecycles:
-    def state(self, project: str) -> LifecycleState:
-        assert project == "api"
+    def state(self, project: str) -> LifecycleState:  # noqa: ARG002 -- every project started alike
         return LifecycleState(1, Lifecycle(1, "engine_started", has_reason=False, at=STARTED), None)
 
     def respect_stop(self, project: str, event_id: int) -> None:
@@ -190,3 +203,37 @@ def test_acknowledged_done_resolve_is_left_to_its_event(world: _World) -> None:
     world.clock.at = STARTED + timedelta(hours=1)
     world.tick()
     assert (_only_op(world), world.reshown()) == (OpState.ISSUED, 0)
+
+
+def test_one_project_being_unreachable_does_not_block_the_others(world: _World) -> None:
+    h = world.h
+    world.client.fail = True
+    with pytest.raises(ShikiruLinkDownError):
+        h.handle(data="a:1:1")
+    web = NewSignal("web:escalation:E-1", "web", "escalation", "agent_error", "q", "T-2", "E-1")
+    number = h.signals.insert_if_absent(web, STARTED).row_id
+    h.signals.transition(number, SignalState.NEW, SignalState.FORWARDED, STARTED)
+    payload = ResolvePayload(
+        number=number,
+        project="web",
+        task_id="T-2",
+        reason="agent_error",
+        escalation_id="E-1",
+        kind="retry",
+        text=None,
+    )
+    log = h.log()
+    queued = log.intend_resolve(900, payload, STARTED)
+    assert queued is not None
+    assert log.claim_resolve(queued, STARTED) is not None
+    log.acknowledge_resolve(queued, Ack(id=3, status="queued", result=None, message=None), STARTED)
+    h.clients["web"] = cast("ShikiruClient", _Client())
+    uncertain = world.restart()
+    world.client.down = True
+    world.clock.at = STARTED + timedelta(minutes=LOST_MIN)
+    world.tick(uncertain)
+    states = {op.id: op.state for op in h.ops.non_final()}
+    assert states == {1: OpState.ISSUED}
+    world.client.down = False
+    world.tick(uncertain)
+    assert h.ops.non_final() == []
