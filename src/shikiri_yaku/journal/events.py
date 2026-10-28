@@ -75,8 +75,8 @@ class JournalSources:
     def open(self, signal: Signal, now: datetime) -> None:
         self._signals.insert_if_absent(_stored_signal(signal), now)
 
-    def has_open(self, project: str, kind: Kind) -> bool:
-        return self._signals.has_open(project, kind.value)
+    def has_open(self, project: str, kind: Kind, reason: str | None = None) -> bool:
+        return self._signals.has_open(project, kind.value, reason)
 
     def close(self, closing: Closing, now: datetime) -> None:
         self._signals.close(closing, now)

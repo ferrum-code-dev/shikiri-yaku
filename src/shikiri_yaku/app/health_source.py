@@ -16,6 +16,7 @@ LINK_SCOPE = "link"
 EVENTS_SCOPE = "events"
 LIVENESS_SCOPE = "liveness"
 OUTAGE_ID_FORMAT = "%Y-%m-%dT%H:%MZ"
+SOURCE_ID_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 
 class HealthSource:
@@ -39,7 +40,7 @@ class HealthSource:
         self._patience = timedelta(minutes=link_unreachable_min)
         self._since: datetime | None = None
         self._reachable: bool | None = None
-        self._failing: dict[str, datetime] = {}
+        self._failing: set[str] = set()
         self._working: set[str] = set()
 
     def link_failed(self) -> None:
@@ -48,7 +49,7 @@ class HealthSource:
         if self._since is None:
             self._since = now
         if now - self._since >= self._patience and not self._journal.has_open(
-            self._project, Kind.HEALTH
+            self._project, Kind.HEALTH, LINK_SCOPE
         ):
             self._journal.open(self._outage(self._since), now)
 
@@ -63,21 +64,24 @@ class HealthSource:
     def source_failed(self, scope: str, error: Exception) -> None:
         now = self._clock.now()
         self._working.discard(scope)
-        since = self._failing.setdefault(scope, now)
-        text = f"The {scope} source of {self._project} fails: {error}"
-        self._journal.open(self._signal(scope, since, text), now)
+        if scope in self._failing:
+            return
+        self._failing.add(scope)
+        if not self._journal.has_open(self._project, Kind.HEALTH, scope):
+            text = f"The {scope} source of {self._project} fails: {error}"
+            self._journal.open(self._signal(scope, now, text, SOURCE_ID_FORMAT), now)
 
     def source_recovered(self, scope: str) -> None:
         if scope not in self._working:
             closing = Closing(self._project, kind=Kind.HEALTH, reason=scope)
             self._journal.close(closing, self._clock.now())
             self._working.add(scope)
-        self._failing.pop(scope, None)
+        self._failing.discard(scope)
 
-    def _signal(self, scope: str, since: datetime, text: str) -> Signal:
-        stamp = since.astimezone(UTC).strftime(OUTAGE_ID_FORMAT)
+    def _signal(self, scope: str, since: datetime, text: str, id_format: str) -> Signal:
+        stamp = since.astimezone(UTC).strftime(id_format)
         return Signal(self._project, Kind.HEALTH, f"{scope}:{stamp}", scope, text)
 
     def _outage(self, since: datetime) -> Signal:
         text = f"The link to {self._project} has been unreachable since {since.isoformat()}."
-        return self._signal(LINK_SCOPE, since, text)
+        return self._signal(LINK_SCOPE, since, text, OUTAGE_ID_FORMAT)

@@ -206,8 +206,12 @@ def test_runtime_malformed_event_opens_one_health_signal_and_blocks_liveness_unt
         session.poison_until = START + timedelta(minutes=3)
         asyncio.run(_run(_settings(tmp_path), database, session))
         rows = database.connection.execute("SELECT id, state FROM signals WHERE kind = 'health'")
-        assert [tuple(row) for row in rows] == [("api:health:events:2026-10-28T09:00Z", "closed")]
-        assert session.open_health_on_good_batch == ["api:health:events:2026-10-28T09:00Z"]
+        assert [tuple(row) for row in rows] == [
+            ("api:health:events:2026-10-28T09:00:00.000000Z", "closed")
+        ]
+        assert session.open_health_on_good_batch == [
+            "api:health:events:2026-10-28T09:00:00.000000Z"
+        ]
         assert min(session.status_times) >= session.poison_until
     finally:
         database.close()

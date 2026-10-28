@@ -244,3 +244,37 @@ def test_first_recovery_after_a_start_closes_the_signal_of_an_earlier_run(world:
     after_restart = world.health()
     after_restart.link_recovered()
     assert world.signals(Kind.HEALTH) == []
+
+
+def test_a_refailure_within_the_same_minute_is_a_new_signal(world: _World) -> None:
+    health = world.health()
+    health.source_failed("events", ValueError("bad"))
+    world.clock.current += timedelta(seconds=10)
+    health.source_recovered("events")
+    world.clock.current += timedelta(seconds=10)
+    health.source_failed("events", ValueError("bad"))
+    assert len(world.signals(Kind.HEALTH)) == 1
+
+
+def test_source_failure_continuing_across_an_operator_restart_keeps_one_signal(
+    world: _World,
+) -> None:
+    world.health().source_failed("events", ValueError("bad"))
+    world.clock.current += timedelta(minutes=1)
+    after_restart = world.health()
+    after_restart.source_failed("events", ValueError("bad"))
+    after_restart.source_failed("events", ValueError("bad"))
+    assert len(world.signals(Kind.HEALTH)) == 1
+
+
+def test_source_and_link_signals_coexist_and_recover_independently(world: _World) -> None:
+    health = world.health()
+    health.source_failed("events", ValueError("bad"))
+    health.link_failed()
+    world.clock.current += timedelta(minutes=UNREACHABLE_MIN)
+    health.link_failed()
+    assert len(world.signals(Kind.HEALTH)) == 2
+    health.link_recovered()
+    assert len(world.signals(Kind.HEALTH)) == 1
+    health.source_recovered("events")
+    assert world.signals(Kind.HEALTH) == []
