@@ -38,6 +38,15 @@ class ProductForwarder:
         self._destinations = tuple(destinations)
 
     async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+        await self._show(number, signal, note, suggestion, key=f"forward:{number}")
+
+    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
+        """Queue the signal's message again as a new one, once per key."""
+        await self._show(number, signal, note, "", key=key)
+
+    async def _show(
+        self, number: int, signal: Signal, note: str, suggestion: str, *, key: str
+    ) -> None:
         view = await self._view(signal)
         if view is None:
             purpose = Purpose.NOTICE
@@ -55,7 +64,7 @@ class ProductForwarder:
             purpose,
             self._destinations,
             message,
-            key=f"forward:{number}",
+            key=key,
             now=self._clock.now(),
         )
 

@@ -1,0 +1,97 @@
+"""Reconciles issued resolves by observation: after a restart and when Shikiru loses one (§10.1)."""
+
+from __future__ import annotations
+
+import contextlib
+from datetime import timedelta
+from typing import TYPE_CHECKING, Final
+
+from shikiri_yaku.ports import AckStatus, EscalationStatus, EventKinds, ShikiruError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from shikiri_yaku.ports import (
+        Clock,
+        LifecycleJournal,
+        ReconcileLog,
+        Reshower,
+        ShikiruClient,
+        Unsettled,
+    )
+
+AGAIN_NOTE: Final = "Your answer did not reach Shikiru, so please answer again."
+
+
+class ResolveReconciler:
+    """Settles every issued resolve whose result the events did not confirm.
+
+    An op with no acknowledgement when the Operator starts is uncertain: the escalation's state
+    decides. A queued one is lost when its escalation is still open `lost_command_min` after the
+    engine is up again. A lost or uncertain op fails and the question is shown again.
+    """
+
+    def __init__(
+        self,
+        log: ReconcileLog,
+        lifecycles: LifecycleJournal,
+        reshower: Reshower,
+        clients: Mapping[str, ShikiruClient],
+        clock: Clock,
+        *,
+        lost_command_min: int,
+        interval_s: float,
+    ) -> None:
+        self._log = log
+        self._lifecycles = lifecycles
+        self._reshower = reshower
+        self._clients = clients
+        self._clock = clock
+        self._lost_after = timedelta(minutes=lost_command_min)
+        self._interval_s = interval_s
+
+    async def run(self) -> None:
+        # keep: taken before anything else: an op issued later by this process is not uncertain
+        uncertain = {op.op_id for op in self._log.unsettled() if op.ack is None}
+        while True:
+            # keep: the link supervisor and the sources report a failure; the next tick tries again
+            with contextlib.suppress(ShikiruError):
+                await self.tick(uncertain)
+            await self._clock.sleep(self._interval_s)
+
+    async def tick(self, uncertain: set[int]) -> None:
+        for op in self._log.unsettled():
+            if op.ack is None:
+                if op.op_id in uncertain:
+                    await self._decide(op, lost=True)
+                    uncertain.discard(op.op_id)
+            elif op.ack.status == AckStatus.QUEUED:
+                await self._decide(op, lost=await self._is_lost(op))
+
+    async def _decide(self, op: Unsettled, *, lost: bool) -> None:
+        escalation_id = op.payload.escalation_id
+        view = await self._clients[op.payload.project].get_escalation(escalation_id)
+        if view is None:
+            return
+        now = self._clock.now()
+        if view.escalation.status != EscalationStatus.OPEN:
+            # keep: a queued command's event confirms it; without an acknowledgement there is no id
+            if op.ack is None and view.escalation.resolution == op.payload.kind:
+                self._log.confirm(op.op_id, now)
+            elif op.ack is None:
+                self._log.fail(op.op_id, now)
+        elif lost:
+            await self._reshower.reshow(
+                op.payload.number, op.signal, AGAIN_NOTE, key=f"reshow:{op.op_id}"
+            )
+            self._log.fail(op.op_id, now)
+
+    async def _is_lost(self, op: Unsettled) -> bool:
+        project = op.payload.project
+        state = self._lifecycles.state(project)
+        lifecycle = None if state is None else state.lifecycle
+        if lifecycle is None or lifecycle.kind != EventKinds.ENGINE_STARTED:
+            return False
+        if not (await self._clients[project].status()).engine_up:
+            return False
+        return self._clock.now() >= max(lifecycle.at, op.since) + self._lost_after

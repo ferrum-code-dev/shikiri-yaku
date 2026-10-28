@@ -38,7 +38,7 @@ merged and `uv run poe check` passes.
   - [ ] A11c3. "Already resolved: … at …" from the journal (resolve op's updated_at and option label)
   - [ ] A11c4. Journaled edits that remove the buttons from every copy after a later answer
 - [x] A12a. Rejected, queued and command-id confirmation
-- [ ] A12b. Start-up reconcile and lost commands
+- [x] A12b. Start-up reconcile and lost commands
 - [ ] A12c. Resolved elsewhere (after A11c4)
 - [ ] A13. Status, open, help and measures
 - [ ] A14. `/goal`

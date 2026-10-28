@@ -27,6 +27,7 @@ from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
+from shikiri_yaku.app.reconciler import ResolveReconciler
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
@@ -50,6 +51,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import CompositionError
 
@@ -62,7 +64,15 @@ if TYPE_CHECKING:
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
     from shikiri_yaku.domain.extension import Extension, Handler
-    from shikiri_yaku.ports import Channel, Clock, Forwarder, Outbox, Reporter, ShikiruClient
+    from shikiri_yaku.ports import (
+        Channel,
+        Clock,
+        Forwarder,
+        Outbox,
+        Reporter,
+        Reshower,
+        ShikiruClient,
+    )
     from shikiri_yaku.settings import Component, Settings
 
 
@@ -140,6 +150,7 @@ def compose(
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
     jobs.append(inbound_job(settings, journal, outbox, clock, clients=clients, bot_api=bot_api))
+    jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
     return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
 
 
@@ -279,6 +290,29 @@ def inbound_job(
         poller, log, replies, health, clock, interval_s=operator.inbound_interval_s
     )
     return service.run
+
+
+def reconcile_job(
+    settings: Settings,
+    journal: Database,
+    clock: Clock,
+    *,
+    clients: Mapping[str, ShikiruClient],
+    reshower: Reshower,
+) -> Job:
+    """Return the reconciler of issued resolves; it settles what a restart left uncertain."""
+    operator = settings.operator
+    signals = SignalStore(journal)
+    reconciler = ResolveReconciler(
+        JournalReconcile(journal, signals, OpStore(journal)),
+        JournalSources(CursorStore(journal, signals), signals),
+        reshower,
+        clients,
+        clock,
+        lost_command_min=operator.lost_command_min,
+        interval_s=operator.liveness_interval_s,
+    )
+    return reconciler.run
 
 
 def main(argv: Sequence[str] | None = None) -> int:

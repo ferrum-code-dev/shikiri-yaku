@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,6 @@ from shikiri_yaku.ports import Ack
 
 if TYPE_CHECKING:
     import sqlite3
-    from datetime import datetime
 
     from shikiri_yaku.domain.loop_guard import AutoOp
     from shikiri_yaku.journal.database import Database
@@ -51,6 +51,7 @@ class StoredOp:
     command_id: str | None
     output_path: str | None
     acknowledgement: Ack | None
+    updated_at: datetime
 
 
 def _op(row: sqlite3.Row) -> StoredOp:
@@ -68,6 +69,7 @@ def _op(row: sqlite3.Row) -> StoredOp:
         acknowledgement=None
         if row["acknowledgement"] is None
         else Ack.model_validate_json(row["acknowledgement"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
     )
 
 

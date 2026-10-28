@@ -70,9 +70,11 @@ __all__ = [
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
+    "ReconcileLog",
     "ReplyLog",
     "ReplyOrigin",
     "Reporter",
+    "Reshower",
     "ResolutionKind",
     "ResolvePayload",
     "RoutingLog",
@@ -87,6 +89,7 @@ __all__ = [
     "SignalLog",
     "TaskDetail",
     "TaskStatus",
+    "Unsettled",
     "Updates",
     "WakeTarget",
     "escalation_choices",
@@ -702,3 +705,34 @@ class ReplyLog(Protocol):
     def acknowledge_notice(self, number: int, now: datetime) -> None:
         """Close an informational signal without issuing a Shikiru resolution."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class Unsettled:
+    """An issued resolve no event has confirmed; `since` is when it last changed."""
+
+    op_id: int
+    payload: ResolvePayload
+    signal: Signal
+    ack: Ack | None
+    since: datetime
+
+
+class ReconcileLog(Protocol):
+    """The issued resolves to reconcile by observation (design §10.1)."""
+
+    def unsettled(self) -> list[Unsettled]: ...
+
+    def confirm(self, op_id: int, now: datetime) -> bool:
+        """Confirm an issued op whose escalation is seen resolved as asked."""
+        ...
+
+    def fail(self, op_id: int, now: datetime) -> bool:
+        """Fail an issued op and make its signal answerable again; False if it moved already."""
+        ...
+
+
+class Reshower(Protocol):
+    """Shows a signal's question again as a new message, once per key."""
+
+    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None: ...
