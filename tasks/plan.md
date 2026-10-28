@@ -110,22 +110,47 @@ Acceptance:
   test on content that matters, not on whitespace).
 * Both renderers are covered by tests that never write to the real launchd or systemd directories.
 
-### A5. Shikiru MCP adapter (high)
+### A5a. Shikiru MCP link and read verbs (high)
 
-§4, §10.1, §11. An adapter implementing `ShikiruClient` over one supervised
-`shikiru --project <path> mcp` stdio link per component: `wait_for_events`, `status`,
-`list_escalations`, `get_escalation` (with the S1 fields), `list_tasks`, `get_task`,
-`resolve_escalation`, `submit_task`, and `start_engine` via the CLI. Reconnect with backoff; typed
-exceptions for a down link, a rejected command and a protocol error. Acknowledgements keep their
-`done` / `rejected` / `queued` state and command id.
+§4, §10, §11. The `ShikiruClient` port grows its read verbs, with frozen pydantic result types in
+`ports.py` or a module it imports: `wait_for_events(since_id, timeout_s)` returning events (id,
+kind, task id, message, data, time), `status()` (engine up, quotas with `resets_at` and `used_pct`),
+`list_escalations()` and `get_escalation(id)` (the escalation: id, task id, reason, headline, status,
+resolution, plus the S1 fields `question`, `agent_options` with `label`, `consequences`,
+`recommended`, `needs_input`, and `resolutions` with `kind`, `consequences`, `recommended`, and the
+`packet` text), `list_tasks(statuses)` and `get_task(id)` (task id, parent id, status, title; only
+the fields the design uses). The adapter in `adapters/` talks to one component's
+`shikiru --project <path> mcp` over stdio with the `mcp` Python SDK (a pydantic-free thin wrapper:
+call the tool, parse the structured content with the result types). It supervises the link: it
+reconnects with backoff (`Clock.sleep`), and while the link is down every verb raises
+`ShikiruLinkDownError`; a tool error raises `ShikiruRejectedError`; an unparsable result raises
+`ShikiruProtocolError`. The executable is `shikiru` (found on PATH) and is a parameter, so the
+contract script can point it at another checkout.
 
 Acceptance:
-* Contract test script (human-launched, not in the gate) runs against a real Shikiru engine with its
-  fake agent: events arrive, an escalation has `question`, `agent_options` and `resolutions`, a
-  resolve is acknowledged, a second resolve is `rejected`, `start` brings `engine_up`. Record its output in the task report.
-* Unit tests with a fake MCP session cover reconnect backoff and the mapping of each exception.
-* `doctor` gets one MCP probe per component (design §3.2): the link comes up and `status` answers.
-  The probe is registered in `bootstrap.py` with this adapter. It is not claimed by A4.
+* Unit tests with a fake MCP session cover each result parse, reconnect with backoff, the
+  link-down error while disconnected, and the mapping of each exception.
+* The result types accept a real S1 payload (use a JSON fixture recorded from the S1 branch, kept under `tests/fixtures/shikiru/`).
+
+### A5b. Shikiru commands, `start` and the contract check (high)
+
+§10.1, §11. The client port grows `resolve_escalation(id, kind, text|None)` (kinds `answer`, `retry`,
+`accept`, `cancel`) and `submit_task(request)`; each returns an `Ack` (`done`, `rejected` or `queued`,
+the command id, and for a submit the task id; check the real field names in the Shikiru repository
+at `/Users/pavel/Projects/ferrum-code-dev/shikiru`, `operator/commands.py`, before you write the type).
+`start_engine()` runs `shikiru --project <path> start` through the `CommandRunner` port. Write the
+plain `CommandRunner` adapter here: an argument list (no shell), closed stdin, a timeout, the whole
+process group killed on timeout, output captured; it is the one module exempt from the subprocess
+ban (a per-file ignore in `pyproject.toml`); the Install phase adds the login shell and the host lock
+on top of it. Add `scripts/contract_check.py`, run by a human and not by the gate: it starts a
+real Shikiru engine with its fake agent in a temporary project, using the `shikiru` executable given
+on the command line, and checks the assumptions of §11 through the adapter.
+
+Acceptance:
+* Unit tests with a fake MCP session: a `rejected` ack becomes `ShikiruRejectedError` with Shikiru's message; a `queued` ack is returned as queued.
+* CommandRunner tests with real harmless commands: success output, nonzero exit code, timeout kills a child that ignores SIGTERM, stdin is closed.
+* `doctor` gets one MCP probe per component (design §3.2): the link comes up and `status` answers. It is registered in `bootstrap.py` with this adapter.
+* The contract script passes against a Shikiru that has S1 (the branch checkout at `/Users/pavel/Projects/ferrum-code-dev/shikiru`, run with `uv run --project`), and its output is recorded in the task report: events arrive, an escalation has `question`, `agent_options` and `resolutions`, a resolve is acknowledged and its command id appears in the `escalation_resolved` event, a second resolve is `rejected`, `start` brings `engine_up`. The script is not run by the agent unless it can start the fake agent offline; if it cannot, the task report says exactly what was not run.
 
 ### A6. Event source (high)
 

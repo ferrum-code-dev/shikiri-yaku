@@ -14,7 +14,8 @@ merged and `uv run poe check` passes.
 - [x] A3. Signals, classification and extensions
 - [x] A4. Ports, composition root and CLI (ports, Clock, bootstrap entry point, run and doctor in; lint-imports green)
 - [x] A4b. Install service (install-service writes the launchd plist or systemd unit; doctor shows a held lock as running)
-- [ ] A5. Shikiru MCP adapter
+- [ ] A5a. Shikiru MCP link and read verbs
+- [ ] A5b. Shikiru commands, `start` and the contract check
 - [ ] A6. Event source
 - [ ] A7. Liveness and health sources
 - [ ] A8. Router, loop guard and scheduler
