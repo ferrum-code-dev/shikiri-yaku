@@ -44,7 +44,7 @@ def test_the_systemd_user_unit_runs_the_command_with_the_login_path() -> None:
         "[Unit]",
         "Description=shikiri-yaku for shop",
         "[Service]",
-        'ExecStart="/opt/tools/shikiri-yaku" "run" "shop" "--home" "/srv/op"',
+        'ExecStart=:"/opt/tools/shikiri-yaku" "run" "shop" "--home" "/srv/op"',
         'Environment="PATH=/opt/tools:/usr/bin:/bin"',
         "Restart=on-failure",
         "[Install]",
@@ -57,6 +57,7 @@ def test_the_systemd_user_unit_runs_the_command_with_the_login_path() -> None:
     [
         ("/opt/shikiri-yaku", '"/opt/shikiri-yaku"'),
         ("/Apps/My Tools/shikiri-yaku", '"/Apps/My Tools/shikiri-yaku"'),
+        ("/opt/$TOOLS/bin/shikiri-yaku", '"/opt/$TOOLS/bin/shikiri-yaku"'),
         ('/a"b\\c%d/shikiri-yaku', '"/a\\"b\\\\c%%d/shikiri-yaku"'),
     ],
 )
@@ -65,14 +66,14 @@ def test_the_systemd_executable_is_quoted_so_that_it_reads_back_whole(
 ) -> None:
     service = service_file("linux", _HOME, "shop", [executable, "run", "shop"], _LOGIN_PATH)
 
-    assert f"ExecStart={quoted} " in service.content.decode("utf-8")
+    assert f"ExecStart=:{quoted} " in service.content.decode("utf-8")
 
 
 @pytest.mark.parametrize(
     ("argument", "quoted"),
     [
-        ("/srv/${MISSING}/instances", '"/srv/$${MISSING}/instances"'),
-        ("$NAME", '"$$NAME"'),
+        ("/srv/${MISSING}/instances", '"/srv/${MISSING}/instances"'),
+        ("$NAME", '"$NAME"'),
     ],
 )
 def test_the_systemd_exec_start_keeps_a_dollar_sign_literal(argument: str, quoted: str) -> None:
@@ -81,7 +82,7 @@ def test_the_systemd_exec_start_keeps_a_dollar_sign_literal(argument: str, quote
     )
 
     lines = _unit_lines(service.content)
-    assert f'ExecStart="/opt/shikiri-yaku" "run" "shop" {quoted}' in lines
+    assert f'ExecStart=:"/opt/shikiri-yaku" "run" "shop" {quoted}' in lines
 
 
 def test_the_systemd_environment_path_is_not_dollar_escaped() -> None:

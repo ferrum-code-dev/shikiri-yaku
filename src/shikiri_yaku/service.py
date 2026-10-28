@@ -82,7 +82,7 @@ def _launchd_plist(name: str, program: Sequence[str], login_path: str) -> bytes:
 
 
 def _systemd_unit(product: str, program: Sequence[str], login_path: str) -> str:
-    command = " ".join(_exec_argument(word) for word in program)
+    command = f":{_quoted(program[0])} " + " ".join(_quoted(word) for word in program[1:])
     path_setting = _quoted(f"PATH={login_path}")
     return (
         "[Unit]\n"
@@ -96,10 +96,6 @@ def _systemd_unit(product: str, program: Sequence[str], login_path: str) -> str:
         "[Install]\n"
         "WantedBy=default.target\n"
     )
-
-
-def _exec_argument(word: str) -> str:
-    return _quoted(word.replace("$", "$$"))
 
 
 def _quoted(word: str) -> str:
