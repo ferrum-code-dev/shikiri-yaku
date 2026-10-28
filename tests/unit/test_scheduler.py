@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from shikiri_yaku.app.scheduler import Scheduler
+from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.journal import (
     Database,
@@ -82,11 +83,10 @@ class _World:
         self.signals = SignalStore(database)
         self.messages = MessageStore(database)
 
-    def scheduler(self) -> Scheduler:
+    def scheduler(self, log: JournalSchedule | None = None) -> Scheduler:
         """A new Scheduler over the same journal: what an Operator restart gives."""
-        log = JournalSchedule(self.database, self.signals, self.messages, OpStore(self.database))
         return Scheduler(
-            log,
+            schedule_log(self.database) if log is None else log,
             self.target,
             self.channel,
             self.clock,
@@ -127,7 +127,7 @@ class _World:
             notice_key=key,
             now=START,
         )
-        self.messages.confirm_delivery(sent.row_id, "m1")
+        self.messages.confirm_delivery(sent.row_id, f"m{sent.row_id}")
 
 
 def _tick(world: _World) -> None:
@@ -200,7 +200,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
     world: _World,
 ) -> None:
     number = world.signal("e1", SignalState.FORWARDED)
-    world.messages.record_outbound(
+    copy = world.messages.record_outbound(
         signal_number=number,
         channel="telegram",
         chat=CHAT,
@@ -208,6 +208,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
         notice_key="copy",
         now=START,
     )
+    world.messages.confirm_delivery(copy.row_id, "m-copy")
     world.ask(number)
     world.ask(number, chat="1002")
     world.clock.moment = START + timedelta(hours=FIRST_H)
@@ -217,8 +218,10 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
     assert sorted(destination for destination, _ in world.channel.sent) == [CHAT, "1002"]
 
 
-def test_unacknowledged_review_is_reminded_but_its_reminder_is_not_and_acknowledged_stops(
+@pytest.mark.parametrize("final_state", [SignalState.ANSWERED, SignalState.CLOSED])
+def test_unacknowledged_review_is_reminded_until_acknowledged_or_closed(
     world: _World,
+    final_state: SignalState,
 ) -> None:
     number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
     world.ask(number, purpose=Purpose.NOTICE, key="review:api:T-1")
@@ -228,10 +231,31 @@ def test_unacknowledged_review_is_reminded_but_its_reminder_is_not_and_acknowled
     _tick(world)
     assert len(world.channel.sent) == 1
 
-    world.signals.transition(number, SignalState.FORWARDED, SignalState.ANSWERED, world.clock.now())
+    world.signals.transition(number, SignalState.FORWARDED, final_state, world.clock.now())
     world.clock.moment = START + timedelta(hours=FIRST_H + REPEAT_H)
     _tick(world)
     assert len(world.channel.sent) == 1
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_notice_reminders_follow_injected_registration(world: _World, *, registered: bool) -> None:
+    kind = "another_notice_kind"
+    number = world.signal("n1", SignalState.FORWARDED, kind=kind)
+    world.ask(number, purpose=Purpose.NOTICE, key="original")
+    world.ask(number, chat="1002", purpose=Purpose.NOTICE, key=f"remind:{number}:1")
+    world.ask(world.signal("n2", SignalState.FORWARDED, kind="health"), purpose=Purpose.NOTICE)
+    log = JournalSchedule(
+        world.database,
+        world.signals,
+        world.messages,
+        OpStore(world.database),
+        reminder_notice_kinds=frozenset({kind}) if registered else frozenset(),
+    )
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    asyncio.run(world.scheduler(log).tick())
+    asyncio.run(world.scheduler(log).tick())
+
+    assert [chat for chat, _ in world.channel.sent] == ([CHAT] if registered else [])
 
 
 def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(

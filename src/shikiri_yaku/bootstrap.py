@@ -19,13 +19,17 @@ from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.project_sources import ProjectSources
+from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
     JournalError,
     JournalEvents,
+    JournalSchedule,
     JournalSources,
+    MessageStore,
+    OpStore,
     SignalStore,
 )
 from shikiri_yaku.ports import CompositionError
@@ -128,3 +132,14 @@ def project_jobs(
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
     return cli.main(argv, compose)
+
+
+def schedule_log(journal: Database) -> JournalSchedule:
+    """Register notice kinds that need reminders until acknowledged (design §6.4)."""
+    return JournalSchedule(
+        journal,
+        SignalStore(journal),
+        MessageStore(journal),
+        OpStore(journal),
+        reminder_notice_kinds=frozenset({Kind.PR_REVIEW}),
+    )

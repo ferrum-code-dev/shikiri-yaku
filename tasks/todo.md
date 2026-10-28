@@ -21,7 +21,7 @@ merged and `uv run poe check` passes.
 - [x] A7. Liveness and health sources (runtime synchronizes lifecycle events before down decisions)
 - [x] A8a. Loop guard and journal queries
 - [ ] A8b. Router
-- [x] A8c. Scheduler
+- [x] A8c. Scheduler (notice reminder eligibility registered in bootstrap)
 - [ ] A8d. Source cleanup and failing sources
 - [ ] A9. Product handler
 - [ ] A10. Telegram send and edit
