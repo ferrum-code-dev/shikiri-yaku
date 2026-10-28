@@ -53,7 +53,7 @@ basedpyright, vulture and pytest. Use `uv run poe fix` to format.
 ## Tests
 
 Write tests that protect a stated behavior, as listed in design §12 "Tests that earn their place".
-Table-driven where the rule is a table. Fakes for ports; real SQLite in memory; recorded payloads
+Table-driven where the rule is a table. Fakes for ports; real SQLite in memory; payload fixtures
 for Telegram. Do not write tests of message wording, getters, config defaults, or mocks of internal
 classes, and do not chase a coverage number.
 

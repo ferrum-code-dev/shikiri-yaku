@@ -470,7 +470,7 @@ shikiri-yaku/
 | **Crash-point tests** of the journal: kill after queueing a resolve, after an approval, mid-command, mid-send, and check the restart result | Safe restart |
 | Contract tests against a real Shikiru engine with its fake agent, run by a human-launched script: events, escalations, S1 fields, `resolve` rejection, command ids in events, `start` | The assumptions about Shikiru ([§11](#11-shikiru-what-is-used-what-is-needed)) |
 | Executor tests with real harmless commands: timeout, closed stdin, killing the process group | The host-command path |
-| Telegram adapter tests against recorded payloads: size limits, callback data, offset handling | The channel edge |
+| Telegram adapter tests against fixture payloads shaped as the Bot API documents them (replaced by real recordings by the human-run script of Phase E): size limits, callback data, offset handling | The channel edge |
 
 Not worth writing: tests of message wording or snapshots, getters, config defaults, and mocks of the Operator's own internals. A coverage percentage is not a goal.
 

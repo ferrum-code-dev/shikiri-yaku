@@ -329,7 +329,7 @@ attempted deletion is journaled before it is invoked. Transient failures stay pe
 refusal is never treated as a delivery.
 
 Acceptance:
-* Tests against recorded Telegram payloads (kept under `tests/fixtures/telegram/`): send, edit, rate limit, message too long, button data length.
+* Tests against fixture payloads shaped as the Bot API documents them (kept under `tests/fixtures/telegram/`, each file labeled with its source): send, edit, rate limit, message too long, button data length.
 * Each secret form is refused and never reaches the journal or the transport.
 
 ### A10c. Composition and the source-to-delivery test (normal)
@@ -402,4 +402,4 @@ Acceptance:
   which the classifier already sends to `product` with that note. `RuleClassifier` rejects two rules
   claiming one reason; relax that to (reason, verdict) pairs when a second category shares
   `decision_required`.
-* **E Hardening:** drills, contract-test script, crash-point tests, security review.
+* **E Hardening:** drills, contract-test script, a human-run `scripts/record_telegram.py` that records real Bot API replies with the PO's own bot (token read from the token file by the script only, never by the gate) to replace the documentation-shaped fixtures, crash-point tests, security review.
