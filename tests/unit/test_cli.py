@@ -249,6 +249,26 @@ def test_install_service_writes_the_unit_of_the_run_command_under_home(
     assert expected.path.read_bytes() == expected.content
 
 
+def test_install_service_writes_an_absolute_executable_for_a_relative_path_entry(
+    tmp_path: Path, user_environment: _UserEnvironment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instances = tmp_path / "instances"
+    _instance(instances)
+    relative_bin = tmp_path / "local-bin"
+    relative_bin.mkdir()
+    executable = relative_bin / "shikiri-yaku"
+    executable.write_text("", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "local-bin")
+
+    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 0
+
+    program = [str(executable), "run", _PRODUCT, "--home", str(instances)]
+    expected = service_file(sys.platform, user_environment.home, _PRODUCT, program, "local-bin")
+    assert expected.path.read_bytes() == expected.content
+
+
 def test_install_service_refuses_an_instance_that_cannot_run(
     tmp_path: Path, user_environment: _UserEnvironment
 ) -> None:

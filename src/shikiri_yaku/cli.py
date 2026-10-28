@@ -199,5 +199,5 @@ def _service(arguments: argparse.Namespace, login_path: str) -> ServiceFile:
         message = f"{_PROGRAM} is not on PATH, so a service could not find it"
         raise ServiceError(message)
     home_arguments = [] if arguments.home is None else ["--home", str(arguments.home.absolute())]
-    program = [executable, "run", arguments.product, *home_arguments]
+    program = [str(Path(executable).absolute()), "run", arguments.product, *home_arguments]
     return service_file(sys.platform, Path.home(), arguments.product, program, login_path)

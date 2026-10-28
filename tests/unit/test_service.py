@@ -68,6 +68,28 @@ def test_the_systemd_executable_is_quoted_so_that_it_reads_back_whole(
     assert f"ExecStart={quoted} " in service.content.decode("utf-8")
 
 
+@pytest.mark.parametrize(
+    ("argument", "quoted"),
+    [
+        ("/srv/${MISSING}/instances", '"/srv/$${MISSING}/instances"'),
+        ("$NAME", '"$$NAME"'),
+    ],
+)
+def test_the_systemd_exec_start_keeps_a_dollar_sign_literal(argument: str, quoted: str) -> None:
+    service = service_file(
+        "linux", _HOME, "shop", ["/opt/shikiri-yaku", "run", "shop", argument], _LOGIN_PATH
+    )
+
+    lines = _unit_lines(service.content)
+    assert f'ExecStart="/opt/shikiri-yaku" "run" "shop" {quoted}' in lines
+
+
+def test_the_systemd_environment_path_is_not_dollar_escaped() -> None:
+    service = service_file("linux", _HOME, "shop", _PROGRAM, "/opt/$HOME/bin")
+
+    assert 'Environment="PATH=/opt/$HOME/bin"' in _unit_lines(service.content)
+
+
 def test_a_platform_without_a_service_manager_is_refused() -> None:
     with pytest.raises(ServiceError):
         service_file("win32", _HOME, "shop", _PROGRAM, _LOGIN_PATH)
