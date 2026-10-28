@@ -19,7 +19,7 @@ merged and `uv run poe check` passes.
 - [x] A6. Event source
 - [x] A6b. First sync opens pull requests that are waiting
 - [x] A7. Liveness and health sources (runtime synchronizes lifecycle events before down decisions)
-- [ ] A8a. Loop guard and journal queries
+- [x] A8a. Loop guard and journal queries
 - [ ] A8b. Router
 - [ ] A8c. Scheduler
 - [ ] A8d. Source cleanup and failing sources

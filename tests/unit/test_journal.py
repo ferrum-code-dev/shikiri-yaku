@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from shikiri_yaku.domain.loop_guard import Cause
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -249,3 +250,17 @@ def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> No
         connection.execute(f"PRAGMA user_version = {number}")
     rows = connection.execute("SELECT notice_key FROM messages").fetchall()
     assert [row["notice_key"] for row in rows] == ["done:api:T-1"]
+
+
+def test_created_times_filter_by_kind_project_cause_and_window(memory: Database) -> None:
+    ops = OpStore(memory)
+    old = NOW - timedelta(days=2)
+    ops.intend(NewOp("a", "retry", PROJECT, "t1", "agent_error"), old)
+    ops.intend(NewOp("b", "retry", PROJECT, "t1", "agent_error"), NOW)
+    ops.intend(NewOp("c", "retry", PROJECT, "t2", "agent_error"), NOW)
+    ops.intend(NewOp("d", "retry", "web", "t1", "agent_error"), NOW)
+    cause = Cause("t1", "agent_error")
+    assert ops.created_times("retry", PROJECT, cause, None) == [old, NOW]
+    assert ops.created_times("retry", PROJECT, cause, NOW - timedelta(days=1)) == [NOW]
+    assert ops.created_times("retry", PROJECT, None, None) == [old, NOW, NOW]
+    assert ops.created_times("restart", PROJECT, None, None) == []

@@ -19,11 +19,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from shikiri_yaku.domain.classification import Assessment
+    from shikiri_yaku.domain.loop_guard import AutoOp, Cause
     from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
 
 __all__ = [
     "Ack",
     "AckStatus",
+    "ActionLog",
     "AgentOption",
     "Channel",
     "ChannelError",
@@ -274,6 +276,23 @@ class SignalLog(Protocol):
     def has_open(self, project: str, kind: Kind) -> bool: ...
 
     def close(self, closing: Closing, now: datetime) -> None: ...
+
+
+class ActionLog(Protocol):
+    """The automatic actions the loop guard counts and records (design §6, §9)."""
+
+    def times(
+        self, kind: str, project: str, cause: Cause | None, since: datetime | None
+    ) -> list[datetime]:
+        """Return when ops of the kind were journaled after `since` (all if None), oldest first.
+
+        With a cause only the ops of that task and reason count; without one, the whole project.
+        """
+        ...
+
+    def record(self, op: AutoOp, now: datetime) -> int:
+        """Journal the op before it happens and return its id; the identity must be new."""
+        ...
 
 
 class LivenessJournal(LifecycleJournal, SignalLog, Protocol):

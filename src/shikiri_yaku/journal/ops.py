@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.journal.database import Inserted, stamp
+from shikiri_yaku.domain.loop_guard import Cause
+from shikiri_yaku.journal.database import Inserted, parse_stamp, stamp
 
 if TYPE_CHECKING:
     import sqlite3
     from datetime import datetime
 
+    from shikiri_yaku.domain.loop_guard import AutoOp
     from shikiri_yaku.journal.database import Database
 
 
@@ -134,3 +136,39 @@ class OpStore:
             (OpState.CONFIRMED, OpState.FAILED),
         )
         return [_op(row) for row in rows]
+
+    def created_times(
+        self, kind: str, project: str, cause: Cause | None, since: datetime | None
+    ) -> list[datetime]:
+        """Return when ops of the kind were journaled after `since`, oldest first.
+
+        With a cause only that task and reason count (a missing one matches a missing one);
+        without it the whole project does.
+        """
+        query = "SELECT created_at FROM ops WHERE kind = ? AND project = ?"
+        arguments: list[str | None] = [kind, project]
+        if cause is not None:
+            query += " AND task_id IS ? AND reason IS ?"
+            arguments += [cause.task_id, cause.reason]
+        if since is not None:
+            query += " AND created_at > ?"
+            arguments.append(stamp(since))
+        rows = self._database.connection.execute(query + " ORDER BY id", arguments)
+        return [moment for row in rows if (moment := parse_stamp(row["created_at"]))]
+
+
+class JournalActions:
+    """The ops table as the loop guard sees it."""
+
+    def __init__(self, ops: OpStore) -> None:
+        self._ops = ops
+
+    def times(
+        self, kind: str, project: str, cause: Cause | None, since: datetime | None
+    ) -> list[datetime]:
+        return self._ops.created_times(kind, project, cause, since)
+
+    def record(self, op: AutoOp, now: datetime) -> int:
+        cause = op.cause or Cause(None, None)
+        new = NewOp(op.identity, op.kind, op.project, cause.task_id, cause.reason, op.payload)
+        return self._ops.intend(new, now).row_id
