@@ -31,12 +31,13 @@ class JournalEvents:
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
+        *,
+        respected_stop_id: int | None = None,
     ) -> None:
         stored = [_stored(change) for change in changes]
-        self._cursors.record_batch(project, stored, last_event_id, lifecycle, now)
-
-    def respect_stop(self, project: str, event_id: int) -> None:
-        self._cursors.respect_stop(project, event_id)
+        self._cursors.record_batch(
+            project, stored, last_event_id, lifecycle, now, respected_stop_id=respected_stop_id
+        )
 
 
 def _stored(change: Signal | Closing) -> Change:

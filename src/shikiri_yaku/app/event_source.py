@@ -92,13 +92,20 @@ class EventSource:
             for view in views
             if view.escalation.status == EscalationStatus.OPEN
         ]
-        self._journal.record_batch(self._project, changes, last_id, lifecycle, self._clock.now())
-        if (
+        clean_stop = (
             lifecycle is not None
             and lifecycle.kind == EventKinds.ENGINE_STOPPED
             and not lifecycle.has_reason
-        ):
-            self._journal.respect_stop(self._project, lifecycle.event_id)
+        )
+        respected = lifecycle.event_id if clean_stop and lifecycle is not None else None
+        self._journal.record_batch(
+            self._project,
+            changes,
+            last_id,
+            lifecycle,
+            self._clock.now(),
+            respected_stop_id=respected,
+        )
 
     async def _changes(self, event: ShikiruEvent) -> list[Change]:
         match event.kind:

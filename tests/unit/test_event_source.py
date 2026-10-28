@@ -33,6 +33,7 @@ PROJECT = "api"
 WAIT_S = 1
 HISTORY_END = 6
 FAR_EVENT = 50
+HISTORY_STOP = 3
 
 
 def _event(event_id: int, kind: str, task_id: str | None = "T1", **data: Any) -> ShikiruEvent:
@@ -213,3 +214,20 @@ def test_escalation_event_without_its_data_is_a_protocol_error(database: Databas
     client.events = [_event(1, "escalation")]
     with pytest.raises(ShikiruProtocolError):
         asyncio.run(source.poll())
+
+
+def test_crash_during_first_sync_leaves_no_cursor_so_the_clean_stop_is_still_respected(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    client.events = [_event(1, "engine_started"), _raised(2, "E1"), _event(3, "engine_stopped")]
+    client.views = {"E1": _view("E1")}
+    crashed, journal = _source(database, client, _CrashingSignals(database))
+    with pytest.raises(RuntimeError, match="crash after"):
+        asyncio.run(crashed.poll())
+    assert journal.last_event_id(PROJECT) is None
+    restarted, _ = _source(database, client)
+    asyncio.run(restarted.poll())
+    cursor = CursorStore(database, SignalStore(database)).get(PROJECT)
+    assert cursor is not None
+    assert cursor.respected_stop_id == HISTORY_STOP

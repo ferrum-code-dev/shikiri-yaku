@@ -244,12 +244,10 @@ class EventJournal(Protocol):
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
+        *,
+        respected_stop_id: int | None = None,
     ) -> None:
-        """Apply the changes in order and move the cursor, all or nothing."""
-        ...
-
-    def respect_stop(self, project: str, event_id: int) -> None:
-        """Only for a project whose cursor is recorded."""
+        """Apply the changes in order, move the cursor, save the respected stop; all or nothing."""
         ...
 
 

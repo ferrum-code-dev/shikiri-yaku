@@ -49,12 +49,15 @@ class CursorStore:
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
+        *,
+        respected_stop_id: int | None = None,
     ) -> list[Inserted]:
         """Apply the changes of one batch of events and advance the cursor, in one transaction.
 
         The changes go first and in event order, so a crash between them and the cursor leaves
         the cursor behind and the batch is read again; the signals are then recognised by id.
-        Returns what each new signal's insert gave, in order.
+        A stop that is respected from the start is saved in the same transaction, so a crash
+        cannot leave the cursor without it. Returns what each new signal's insert gave, in order.
         """
         with self._database.transaction() as connection:
             inserted: list[Inserted] = []
@@ -83,6 +86,8 @@ class CursorStore:
                     "has_reason": None if lifecycle is None else int(lifecycle.has_reason),
                 },
             )
+            if respected_stop_id is not None:
+                self.respect_stop(project, respected_stop_id)
             return inserted
 
     def respect_stop(self, project: str, event_id: int) -> None:
