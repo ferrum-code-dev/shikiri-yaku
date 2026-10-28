@@ -63,3 +63,4 @@ class Closing:
     kind: Kind | None = None
     escalation_id: str | None = None
     task_id: str | None = None
+    reason: str | None = None

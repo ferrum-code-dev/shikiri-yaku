@@ -6,11 +6,10 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.signal import Kind, Signal
-from shikiri_yaku.ports import EventKinds, ShikiruLinkDownError
+from shikiri_yaku.ports import EventKinds
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.event_source import EventSource
-    from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
     from shikiri_yaku.ports import Clock, LivenessJournal, ShikiruClient
 
@@ -29,39 +28,23 @@ class LivenessSource:
         client: ShikiruClient,
         journal: LivenessJournal,
         clock: Clock,
-        health: HealthSource,
         *,
-        interval_s: float,
         stop_grace_min: int,
-        events: EventSource | None = None,
+        events: EventSource,
     ) -> None:
         self._events = events
         self._project = project
         self._client = client
         self._journal = journal
         self._clock = clock
-        self._health = health
-        self._interval_s = interval_s
         self._grace = timedelta(minutes=stop_grace_min)
         self._run_started = clock.now()
-
-    async def run(self) -> None:
-        """Check at once and then every interval; a down link is the health source's business."""
-        while True:
-            try:
-                await self.check()
-            except ShikiruLinkDownError:
-                self._health.link_failed()
-            else:
-                self._health.link_recovered()
-            await self._clock.sleep(self._interval_s)
 
     async def check(self) -> None:
         if (await self._client.status()).engine_up:
             return
-        if self._events is not None:
-            while await self._events.poll(wait_s=0):
-                pass
+        while await self._events.poll(wait_s=0):
+            pass
         state = self._journal.state(self._project)
         if state is None or state.lifecycle is None:
             return

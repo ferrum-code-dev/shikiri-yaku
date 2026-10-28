@@ -113,8 +113,6 @@ def project_jobs(
         client,
         sources,
         clock,
-        health,
-        interval_s=operator.liveness_interval_s,
         stop_grace_min=operator.stop_grace_min,
         events=events,
     )

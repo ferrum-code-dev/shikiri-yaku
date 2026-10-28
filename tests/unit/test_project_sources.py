@@ -47,6 +47,8 @@ class _Session:
         self.unreachable_until = START
         self.open_health_on_recovery: list[str] = []
         self.failed = False
+        self.poison_until = START
+        self.open_health_on_good_batch: list[str] | None = None
 
     @asynccontextmanager
     async def connect(self) -> AsyncGenerator[ToolSession]:
@@ -66,12 +68,7 @@ class _Session:
                 message = "event link lost"
                 raise ConnectionError(message)
             if self.failed:
-                self.open_health_on_recovery = [
-                    row["id"]
-                    for row in self.database.connection.execute(
-                        "SELECT id FROM signals WHERE kind = 'health' AND state != 'closed'"
-                    )
-                ]
+                self.open_health_on_recovery = self.open_health()
                 self.failed = False
             result = await self._events(arguments)
         elif name == "list_escalations":
@@ -92,7 +89,17 @@ class _Session:
             )
         return CallToolResult(content=[], structuredContent={"result": result})
 
+    def open_health(self) -> list[str]:
+        rows = self.database.connection.execute(
+            "SELECT id FROM signals WHERE kind = 'health' AND state != 'closed'"
+        )
+        return [row["id"] for row in rows]
+
     async def _events(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+        if self.clock.now() < self.poison_until:
+            return [{"id": 1, "kind": "escalation", "ts": START.isoformat(), "data": {}}]
+        if self.poison_until > START and self.open_health_on_good_batch is None:
+            self.open_health_on_good_batch = self.open_health()
         events: list[dict[str, Any]] = [
             {
                 "id": 1,
@@ -186,5 +193,21 @@ def test_runtime_event_link_outage_opens_health_and_recovers_before_checking_liv
         assert [tuple(row) for row in rows] == [("api:health:link:2026-10-28T09:00Z", "closed")]
         assert session.open_health_on_recovery == ["api:health:link:2026-10-28T09:00Z"]
         assert session.status_times[0] > session.unreachable_until
+    finally:
+        database.close()
+
+
+def test_runtime_malformed_event_opens_one_health_signal_and_blocks_liveness_until_good(
+    tmp_path: Path,
+) -> None:
+    database = Database.open(":memory:")
+    try:
+        session = _Session(_Clock(), database, clean_stop=False)
+        session.poison_until = START + timedelta(minutes=3)
+        asyncio.run(_run(_settings(tmp_path), database, session))
+        rows = database.connection.execute("SELECT id, state FROM signals WHERE kind = 'health'")
+        assert [tuple(row) for row in rows] == [("api:health:events:2026-10-28T09:00Z", "closed")]
+        assert session.open_health_on_good_batch == ["api:health:events:2026-10-28T09:00Z"]
+        assert min(session.status_times) >= session.poison_until
     finally:
         database.close()

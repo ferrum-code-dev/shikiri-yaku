@@ -118,6 +118,7 @@ class SignalStore:
                 AND (:kind IS NULL OR kind = :kind)
                 AND (:escalation_id IS NULL OR escalation_id = :escalation_id)
                 AND (:task_id IS NULL OR task_id = :task_id)
+                AND (:reason IS NULL OR reason = :reason)
             """,
             {
                 "closed": SignalState.CLOSED,
@@ -127,6 +128,7 @@ class SignalStore:
                 "kind": closing.kind,
                 "escalation_id": closing.escalation_id,
                 "task_id": closing.task_id,
+                "reason": closing.reason,
             },
         ).rowcount
 

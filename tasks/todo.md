@@ -22,7 +22,7 @@ merged and `uv run poe check` passes.
 - [x] A8a. Loop guard and journal queries
 - [x] A8b. Router
 - [x] A8c. Scheduler (notice reminder eligibility registered in bootstrap)
-- [ ] A8d. Source cleanup and failing sources
+- [x] A8d. Source cleanup and failing sources
 - [ ] A8e. Dispatcher and start-up recovery
 - [ ] A9. Product handler
 - [ ] A10. Telegram send and edit

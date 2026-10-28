@@ -16,6 +16,7 @@ from shikiri_yaku.ports import EngineStatus, EventKinds, ShikiruLinkDownError
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from shikiri_yaku.app.event_source import EventSource
     from shikiri_yaku.ports import ShikiruClient
 
 PROJECT = "api"
@@ -23,7 +24,6 @@ BEFORE_RUN = datetime(2026, 10, 28, 8, 0, tzinfo=UTC)
 RUN_START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 GRACE_MIN = 2
 UNREACHABLE_MIN = 10
-INTERVAL_S = 60
 LAST_EVENT = 40
 STOP_ID = 38
 STARTED = EventKinds.ENGINE_STARTED
@@ -33,14 +33,18 @@ STOPPED = EventKinds.ENGINE_STOPPED
 class _Clock:
     def __init__(self, now: datetime) -> None:
         self.current = now
-        self.slept: list[float] = []
 
     def now(self) -> datetime:
         return self.current
 
     async def sleep(self, seconds: float) -> None:
-        self.slept.append(seconds)
-        raise asyncio.CancelledError
+        del seconds
+
+
+class _NoEvents:
+    async def poll(self, *, wait_s: float | None = None) -> bool:
+        del wait_s
+        return False
 
 
 class _Engine:
@@ -70,7 +74,7 @@ class _World:
         cursors = CursorStore(self.database, SignalStore(self.database))
         cursors.record_batch(PROJECT, [], LAST_EVENT, lifecycle, at)
 
-    def operator(self, health: HealthSource | None = None) -> LivenessSource:
+    def operator(self) -> LivenessSource:
         """A new run of the Operator, started at the clock's current time."""
         journal = self.journal
         return LivenessSource(
@@ -78,9 +82,8 @@ class _World:
             cast("ShikiruClient", self.engine),
             journal,
             self.clock,
-            health or self.health(),
-            interval_s=INTERVAL_S,
             stop_grace_min=GRACE_MIN,
+            events=cast("EventSource", _NoEvents()),
         )
 
     def health(self) -> HealthSource:
@@ -240,13 +243,4 @@ def test_first_recovery_after_a_start_closes_the_signal_of_an_earlier_run(world:
     health.link_failed()
     after_restart = world.health()
     after_restart.link_recovered()
-    assert world.signals(Kind.HEALTH) == []
-
-
-def test_run_reports_a_down_link_to_health_and_keeps_checking(world: _World) -> None:
-    world.engine.down_link = True
-    source = world.operator()
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(source.run())
-    assert world.clock.slept == [INTERVAL_S]
     assert world.signals(Kind.HEALTH) == []
