@@ -231,3 +231,39 @@ def test_crash_during_first_sync_leaves_no_cursor_so_the_clean_stop_is_still_res
     cursor = CursorStore(database, SignalStore(database)).get(PROJECT)
     assert cursor is not None
     assert cursor.respected_stop_id == HISTORY_STOP
+
+
+def test_first_sync_keeps_only_the_pull_request_that_is_still_waiting(database: Database) -> None:
+    client = _FakeClient()
+    client.events = [
+        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=1),
+        _event(2, "pr_opened", task_id="T2", url="u2", branch="b2", commits=1),
+        _event(3, "pr_withdrawn", task_id="T2"),
+        _event(4, "pr_opened", task_id="T3", url="u3", branch="b3", commits=1),
+        _event(5, "task_done", task_id="T3"),
+        _event(6, "pr_opened", task_id="T4", url="u4", branch="b4", commits=1),
+        _event(7, "escalation", task_id="T4", escalation_id="E4", reason="pr_closed"),
+        _raised(8, "E1"),
+    ]
+    client.views = {"E1": _view("E1")}
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    assert _states(database) == {
+        "api:pr_review:1": SignalState.NEW,
+        "api:escalation:E1": SignalState.NEW,
+    }
+
+
+def test_restart_and_repeated_first_sync_add_no_second_pr_review_signal(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    client.events = [_event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=1)]
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    restarted, journal = _source(database, client)
+    asyncio.run(restarted.poll())
+    client.events.append(_event(FAR_EVENT, "engine_started"))
+    asyncio.run(restarted.poll())
+    assert journal.last_event_id(PROJECT) == FAR_EVENT
+    assert _states(database) == {"api:pr_review:1": SignalState.NEW}

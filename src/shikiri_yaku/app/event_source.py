@@ -35,6 +35,29 @@ class _EscalationData(_ResolvedData):
     reason: str
 
 
+class _OpenPulls:
+    def __init__(self) -> None:
+        self._opened: list[ShikiruEvent] = []
+
+    def apply(self, event: ShikiruEvent) -> None:
+        match event.kind:
+            case EventKinds.PR_OPENED:
+                self._opened.append(event)
+            case EventKinds.TASK_DONE | EventKinds.PR_WITHDRAWN:
+                self._close(event.task_id)
+            case EventKinds.ESCALATION:
+                if _event_data(event, _EscalationData).reason == PR_CLOSED_REASON:
+                    self._close(event.task_id)
+            case _:
+                pass
+
+    def still_open(self) -> list[ShikiruEvent]:
+        return self._opened
+
+    def _close(self, task_id: str | None) -> None:
+        self._opened = [event for event in self._opened if event.task_id != task_id]
+
+
 class EventSource:
     """Reads one project's events; the supervisor calls `poll` again after each return.
 
@@ -79,22 +102,28 @@ class EventSource:
         return True
 
     async def _first_sync(self) -> None:
-        """Read the whole history for its lifecycle only, then open the live escalations.
+        """Read the history for its lifecycle and open pull requests, then the open escalations.
 
         The events come before the escalation list: one that is raised in between is read again
         from the cursor and recognised by id.
         """
         last_id = NO_EVENTS
         lifecycle = None
+        pulls = _OpenPulls()
         while events := await self._client.wait_for_events(last_id, 0):
             last_id = events[-1].id
             lifecycle = _lifecycle(events) or lifecycle
+            for event in events:
+                pulls.apply(event)
         views = await self._client.list_escalations()
-        changes = [
+        changes: list[Change] = [
             _escalation_signal(self._project, view.escalation.task_id, view)
             for view in views
             if view.escalation.status == EscalationStatus.OPEN
         ]
+        changes.extend(
+            self._signal(event, Kind.PR_REVIEW, event.kind) for event in pulls.still_open()
+        )
         clean_stop = (
             lifecycle is not None
             and lifecycle.kind == EventKinds.ENGINE_STOPPED
