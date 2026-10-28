@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 import pytest
+from mcp import types
+from mcp.server.lowlevel import Server
+from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import CallToolResult, TextContent
 
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient
@@ -184,7 +187,7 @@ def test_status_events_and_tasks_are_read() -> None:
         (summary,) = await client.list_tasks([TaskStatus.ESCALATED])
         detail = await client.get_task("T-1")
         assert detail is not None
-        assert detail.task == summary
+        assert detail.task.id == summary.id
         assert (summary.id, summary.parent_id, summary.status, summary.title) == (
             "T-1",
             None,
@@ -219,6 +222,7 @@ def test_an_unknown_escalation_or_task_is_none() -> None:
         pytest.param(_reply(None), id="no structured content"),
         pytest.param(_reply({"engine_up": "maybe"}), id="wrong type"),
         pytest.param(_reply({"quotas": {}}), id="missing field"),
+        pytest.param(_reply({"engine_up": True, "contract": 2}), id="unexpected field"),
     ],
 )
 def test_an_unreadable_result_is_a_protocol_error(bad: CallToolResult) -> None:
@@ -293,3 +297,63 @@ def test_reconnecting_waits_longer_after_each_failure_up_to_a_limit() -> None:
 
     asyncio.run(scenario())
     assert clock.sleeps == [1, 2, 4, 5, 5]
+
+
+def _sdk_server(structured: dict[str, Any] | None) -> Server[Any]:
+    schema = {
+        "type": "object",
+        "properties": {"engine_up": {"type": "boolean"}},
+        "required": ["engine_up"],
+    }
+    server: Server[Any] = Server("shikiru")
+
+    @server.list_tools()
+    async def list_tools() -> list[types.Tool]:
+        return [types.Tool(name="status", inputSchema={"type": "object"}, outputSchema=schema)]
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(_name: str, _arguments: dict[str, Any]) -> CallToolResult:
+        return CallToolResult(content=[], structuredContent=structured)
+
+    return server
+
+
+@pytest.mark.parametrize(
+    "structured",
+    [
+        pytest.param({"engine_up": "invalid"}, id="breaks the output schema"),
+        pytest.param(None, id="no structured content"),
+    ],
+)
+def test_the_sdk_rejecting_a_result_is_a_protocol_error_and_the_link_stays_up(
+    structured: dict[str, Any] | None,
+) -> None:
+    connected = asyncio.Event()
+
+    @asynccontextmanager
+    async def connect() -> AsyncGenerator[ToolSession]:
+        async with create_connected_server_and_client_session(_sdk_server(structured)) as session:
+            connected.set()
+            yield session
+
+    client = ShikiruMcpClient(
+        connect,
+        FakeClock(),
+        backoff_initial_s=_BACKOFF_INITIAL_S,
+        backoff_max_s=_BACKOFF_MAX_S,
+        call_timeout_s=_CALL_TIMEOUT_S,
+    )
+
+    async def scenario() -> None:
+        supervisor = asyncio.create_task(client.supervise())
+        try:
+            await connected.wait()
+            for _ in range(2):
+                with pytest.raises(ShikiruProtocolError):
+                    await client.status()
+        finally:
+            supervisor.cancel()
+            with suppress(asyncio.CancelledError):
+                await supervisor
+
+    asyncio.run(scenario())

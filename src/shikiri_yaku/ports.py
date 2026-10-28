@@ -47,29 +47,46 @@ __all__ = [
     "ShikiruRejectedError",
     "ShikiruTask",
     "TaskDetail",
+    "TaskRecord",
     "TaskStatus",
 ]
 
 
-class _ShikiruPayload(BaseModel):
-    """A payload of Shikiru's MCP server, read only for the fields the Operator uses.
+type _Unread = object | None
 
-    Unknown fields are ignored: Shikiru may add fields without breaking the Operator, and the
-    design lists the fields it relies on (§11).
+
+class _ShikiruPayload(BaseModel):
+    """A payload of Shikiru's MCP server (design §11).
+
+    Fields are forbidden beyond those declared, so a change in Shikiru's views surfaces as a
+    ShikiruProtocolError. The fields the Operator does not use are declared as `_Unread` and never
+    looked at.
     """
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class QuotaWindow(_ShikiruPayload):
     name: str
     used_pct: float
     resets_at: datetime | None
+    observed_at: _Unread = None
 
 
 class EngineStatus(_ShikiruPayload):
     engine_up: bool
     quotas: dict[str, list[QuotaWindow]] = Field(default_factory=dict)
+    project: _Unread = None
+    slots: _Unread = None
+    active_tasks: _Unread = None
+    queued_tasks: _Unread = None
+    escalations: _Unread = None
+    usage: _Unread = None
+    faults: _Unread = None
+    oldest_escalation_age_seconds: _Unread = None
+    run_directories: _Unread = None
+    engine_output: _Unread = None
+    task: _Unread = None
 
 
 class ShikiruEvent(_ShikiruPayload):
@@ -90,6 +107,11 @@ class EscalationRecord(_ShikiruPayload):
     headline: str
     status: Literal["open", "resolved"]
     resolution: str | None = None
+    step: _Unread = None
+    packet_path: _Unread = None
+    options: _Unread = None
+    created_at: _Unread = None
+    resolved_at: _Unread = None
 
 
 class AgentOption(_ShikiruPayload):
@@ -110,6 +132,7 @@ class EscalationView(_ShikiruPayload):
 
     escalation: EscalationRecord
     packet: str | None
+    packet_error: _Unread = None
     question: str | None = None
     agent_options: list[AgentOption] = Field(default_factory=list)
     resolutions: list[EscalationResolution] = Field(default_factory=list)
@@ -129,10 +152,46 @@ class ShikiruTask(_ShikiruPayload):
     parent_id: str | None = None
     status: TaskStatus
     title: str
+    step: _Unread = None
+    priority: _Unread = None
+    wait_reason: _Unread = None
+    holds: _Unread = None
+    slot: _Unread = None
+    summary: _Unread = None
+
+
+class TaskRecord(ShikiruTask):
+    """The task inside `get_task`, which carries all of Shikiru's task fields."""
+
+    seq: _Unread = None
+    origin: _Unread = None
+    request: _Unread = None
+    mode: _Unread = None
+    complexity: _Unread = None
+    depends_on: _Unread = None
+    status_reason: _Unread = None
+    iteration: _Unread = None
+    counters: _Unread = None
+    rung_index: _Unread = None
+    overrides: _Unread = None
+    repo: _Unread = None
+    window_id: _Unread = None
+    panes: _Unread = None
+    requeued_at: _Unread = None
+    created_at: _Unread = None
+    started_at: _Unread = None
+    finished_at: _Unread = None
 
 
 class TaskDetail(_ShikiruPayload):
-    task: ShikiruTask
+    task: TaskRecord
+    events: _Unread = None
+    reports: _Unread = None
+    recorded_facts: _Unread = None
+    facts_turn: _Unread = None
+    evidence_errors: _Unread = None
+    branches: _Unread = None
+    sessions: _Unread = None
 
 
 class ShikiruClient(Protocol):

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shikiri_yaku.ports import (
     EngineStatus,
@@ -47,6 +47,8 @@ type Connector = Callable[[], AbstractAsyncContextManager[ToolSession]]
 
 class _Result[T](BaseModel):
     """Shikiru's server wraps a list or optional result in a `result` key."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     result: T
 
@@ -149,7 +151,11 @@ class ShikiruMcpClient:
             seconds=self._call_timeout_s if read_timeout_s is None else read_timeout_s
         )
         try:
+            # keep: the SDK raises these for a result that breaks the tool's schema, not a lost link
             result = await session.call_tool(tool, arguments, timeout)
+        except (RuntimeError, ValidationError) as error:
+            message = f"{tool} returned an unreadable result: {error}"
+            raise ShikiruProtocolError(message) from error
         except Exception as error:
             self._drop(session)
             raise ShikiruLinkDownError(str(error)) from error
