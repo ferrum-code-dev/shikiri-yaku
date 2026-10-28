@@ -85,5 +85,9 @@ def test_a_refusal_is_journaled_with_its_history_and_not_counted(
     assert isinstance(second, Refused)
     assert START.isoformat() in first.note
     assert _refusals(memory) == 2
+    guard.restart(PROJECT)
+    assert isinstance(guard.restart(PROJECT), Refused)
+    assert _refusals(memory) == 3
+    assert {op.kind for op in OpStore(memory).non_final()} == {"retry", "restart"}
     clock.moment += timedelta(days=1, minutes=1)
     assert isinstance(guard.retry(PROJECT, "t1", REASON), Granted)

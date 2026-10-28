@@ -20,9 +20,10 @@ REFUSED_SUFFIX: Final = "_refused"
 class LoopGuard:
     """Grants an automatic action while its budget lasts and journals the grant before it runs.
 
-    A refusal is journaled too, as its own kind, so it never counts against a budget and the
-    history can be shown. An identity carries the number of all earlier ops of its kind and cause,
-    not of those in the window, so it stays unique after old ops leave the window.
+    A refusal is journaled too, as its own kind and already final because no effect waits on it,
+    so it never counts against a budget and the history can be shown. An identity carries the
+    number of all earlier ops of its kind and cause, not of those in the window, so it stays
+    unique after old ops leave the window.
     """
 
     def __init__(
@@ -55,18 +56,25 @@ class LoopGuard:
         now = self._clock.now()
         used = self._log.times(action, project, cause, now - window)
         if len(used) < budget:
-            return Granted(self._record(action, project, cause, None, now))
+            return Granted(self._record(action, project, cause, None, now, refused=False))
         note = _history(action, used, window)
-        self._record(f"{action}{REFUSED_SUFFIX}", project, cause, note, now)
+        self._record(f"{action}{REFUSED_SUFFIX}", project, cause, note, now, refused=True)
         return Refused(note)
 
     def _record(
-        self, kind: str, project: str, cause: Cause | None, payload: str | None, now: datetime
+        self,
+        kind: str,
+        project: str,
+        cause: Cause | None,
+        payload: str | None,
+        now: datetime,
+        *,
+        refused: bool,
     ) -> int:
         number = len(self._log.times(kind, project, cause, None)) + 1
         scope = f"{cause.task_id or ''}:{cause.reason or ''}" if cause else ""
         identity = f"{kind}:{project}:{scope}:{number}"
-        return self._log.record(AutoOp(identity, kind, project, cause, payload), now)
+        return self._log.record(AutoOp(identity, kind, project, cause, payload, refused), now)
 
 
 def _history(action: AutoAction, used: list[datetime], window: timedelta) -> str:

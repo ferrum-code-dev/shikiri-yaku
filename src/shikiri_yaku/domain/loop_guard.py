@@ -28,6 +28,7 @@ class AutoOp:
     project: str
     cause: Cause | None
     payload: str | None
+    refused: bool = False
 
 
 @dataclass(frozen=True, slots=True)

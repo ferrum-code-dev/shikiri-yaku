@@ -34,6 +34,7 @@ class NewOp:
     task_id: str | None = None
     reason: str | None = None
     payload: str | None = None
+    state: OpState = OpState.INTENDED
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ class OpStore:
                     op.task_id,
                     op.reason,
                     op.payload,
-                    OpState.INTENDED,
+                    op.state,
                     stamp(now),
                     stamp(now),
                 ),
@@ -170,5 +171,8 @@ class JournalActions:
 
     def record(self, op: AutoOp, now: datetime) -> int:
         cause = op.cause or Cause(None, None)
-        new = NewOp(op.identity, op.kind, op.project, cause.task_id, cause.reason, op.payload)
+        state = OpState.FAILED if op.refused else OpState.INTENDED
+        new = NewOp(
+            op.identity, op.kind, op.project, cause.task_id, cause.reason, op.payload, state
+        )
         return self._ops.intend(new, now).row_id
