@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from shikiri_yaku.instance import (
     InstanceLockedError,
@@ -25,7 +25,7 @@ from shikiri_yaku.service import ServiceError, service_file, write_service_file
 from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
@@ -40,9 +40,13 @@ class Lifecycle(Protocol):
     @property
     def link_probes(self) -> Mapping[str, Callable[[], Awaitable[None]]]: ...
 
+    @property
+    def jobs(self) -> Sequence[Job]: ...
+
     def close(self) -> None: ...
 
 
+type Job = Callable[[], Coroutine[Any, Any, None]]
 type Compose = Callable[[Settings, Path], Lifecycle]
 
 
@@ -92,21 +96,36 @@ def _run(arguments: argparse.Namespace, compose: Compose) -> int:
         with instance_lock(directory):
             composition = compose(settings, directory)
             try:
-                asyncio.run(_serve())
+                asyncio.run(_serve(composition.jobs))
             finally:
                 composition.close()
-    except (SettingsError, InstanceLockError, CompositionError) as error:
+    except (SettingsError, InstanceLockError, CompositionError, ShikiruError) as error:
         sys.stderr.write(f"{error}\n")
         return 1
     return 0
 
 
-async def _serve() -> None:
+async def _wait_for(event: asyncio.Event) -> None:
+    await event.wait()
+
+
+async def _serve(jobs: Sequence[Job]) -> None:
+    """Run the jobs until a stop signal; a job that fails ends the service with its error."""
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for number in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(number, stop.set)
-    await stop.wait()
+    running = [asyncio.create_task(job()) for job in jobs]
+    waiting = asyncio.create_task(_wait_for(stop))
+    try:
+        await asyncio.wait([waiting, *running], return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (waiting, *running):
+            task.cancel()
+        outcomes = await asyncio.gather(*running, waiting, return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            raise outcome
 
 
 def _doctor(arguments: argparse.Namespace, compose: Compose) -> int:

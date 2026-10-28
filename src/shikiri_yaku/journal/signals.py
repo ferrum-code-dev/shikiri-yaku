@@ -128,6 +128,14 @@ class SignalStore:
             },
         ).rowcount
 
+    def has_open(self, project: str, kind: str) -> bool:
+        """Say whether the project has a non-final signal of the kind."""
+        row = self._database.connection.execute(
+            "SELECT 1 FROM signals WHERE project = ? AND kind = ? AND state NOT IN (?, ?)",
+            (project, kind, SignalState.RESOLVED, SignalState.CLOSED),
+        ).fetchone()
+        return row is not None
+
     def get(self, number: int) -> StoredSignal | None:
         row = self._database.connection.execute(
             "SELECT * FROM signals WHERE number = ?", (number,)

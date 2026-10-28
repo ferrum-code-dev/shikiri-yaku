@@ -6,8 +6,10 @@ import multiprocessing
 import os
 import signal
 import sys
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final
 
@@ -17,8 +19,9 @@ from mcp.types import CallToolResult
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.bootstrap import compose, main
+from shikiri_yaku.domain.signal import Lifecycle
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
-from shikiri_yaku.journal import Database
+from shikiri_yaku.journal import CursorStore, Database, SignalStore
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
 
@@ -238,7 +241,7 @@ def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> N
 
 
 def _exit_with(argv: list[str]) -> None:
-    sys.exit(main(argv))
+    sys.exit(cli.main(argv, partial(compose, link=lambda _executable, _project: _answering_link)))
 
 
 def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path: Path) -> None:
@@ -269,6 +272,54 @@ def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path
     assert process.exitcode == 0
     with instance_lock(directory):
         pass
+
+
+class _DownSession:
+    async def call_tool(self, name: str, *_ignored: object) -> object:
+        assert name == "status"
+        return CallToolResult(
+            content=[], structuredContent={"engine_up": False, "quotas": {}}, isError=False
+        )
+
+
+@asynccontextmanager
+async def _engine_down_link() -> AsyncGenerator[ToolSession]:
+    yield _DownSession()  # pyright: ignore[reportReturnType]
+
+
+def _stop_when_signaled(journal_file: Path) -> None:
+    pause = threading.Event()
+    for _ in range(_ATTEMPTS):
+        pause.wait(_ATTEMPT_WAIT_S)
+        database = Database.open(journal_file)
+        try:
+            found = database.connection.execute("SELECT 1 FROM signals").fetchone()
+        finally:
+            database.close()
+        if found:
+            break
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    journal_file = directory / JOURNAL_FILE_NAME
+    database = Database.open(journal_file)
+    started = Lifecycle(7, "engine_started", has_reason=False, at=datetime(2026, 1, 1, tzinfo=UTC))
+    signals = SignalStore(database)
+    CursorStore(database, signals).record_batch("api", [], 9, started, started.at)
+    database.close()
+    stopper = threading.Thread(target=_stop_when_signaled, args=(journal_file,))
+    stopper.start()
+    composed = partial(compose, link=lambda _executable, _project: _engine_down_link)
+
+    assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed) == 0
+
+    stopper.join()
+    database = Database.open(journal_file)
+    ids = [row["id"] for row in database.connection.execute("SELECT id FROM signals")]
+    database.close()
+    assert ids == ["api:engine_down:9"]
 
 
 @pytest.fixture

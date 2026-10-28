@@ -218,6 +218,21 @@ def test_a_new_outage_is_a_new_signal(world: _World) -> None:
     assert world.signals(Kind.HEALTH) == ["api:health:link:2026-10-28T10:10Z"]
 
 
+def test_uninterrupted_outage_across_an_operator_restart_keeps_one_signal(
+    world: _World,
+) -> None:
+    health = world.health()
+    health.link_failed()
+    world.clock.current += timedelta(minutes=UNREACHABLE_MIN)
+    health.link_failed()
+    world.clock.current += timedelta(minutes=1)
+    after_restart = world.health()
+    after_restart.link_failed()
+    world.clock.current += timedelta(minutes=UNREACHABLE_MIN)
+    after_restart.link_failed()
+    assert world.signals(Kind.HEALTH) == ["api:health:link:2026-10-28T09:00Z"]
+
+
 def test_first_recovery_after_a_start_closes_the_signal_of_an_earlier_run(world: _World) -> None:
     health = world.health()
     health.link_failed()

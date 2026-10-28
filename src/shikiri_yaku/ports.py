@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from shikiri_yaku.domain.classification import Assessment
-    from shikiri_yaku.domain.signal import Closing, Lifecycle, LifecycleState, Signal
+    from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Signal
 
 __all__ = [
     "Ack",
@@ -270,6 +270,8 @@ class SignalLog(Protocol):
     """Where a source opens and closes its signals; opening a known id changes nothing."""
 
     def open(self, signal: Signal, now: datetime) -> None: ...
+
+    def has_open(self, project: str, kind: Kind) -> bool: ...
 
     def close(self, closing: Closing, now: datetime) -> None: ...
 

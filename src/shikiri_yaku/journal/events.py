@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.signal import Closing, LifecycleState, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, LifecycleState, Signal
 from shikiri_yaku.journal.signals import NewSignal
 
 if TYPE_CHECKING:
@@ -74,6 +74,9 @@ class JournalSources:
 
     def open(self, signal: Signal, now: datetime) -> None:
         self._signals.insert_if_absent(_stored_signal(signal), now)
+
+    def has_open(self, project: str, kind: Kind) -> bool:
+        return self._signals.has_open(project, kind.value)
 
     def close(self, closing: Closing, now: datetime) -> None:
         self._signals.close(closing, now)

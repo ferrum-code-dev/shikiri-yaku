@@ -20,8 +20,9 @@ class HealthSource:
     """Turns the link's failures and recoveries, as its owner reports them, into one signal.
 
     One `health` signal opens when a failure has lasted `link_unreachable_min` and stays the one
-    signal of that outage; a recovery closes it. The first report after a start that says the
-    link works also closes, because the outage may have been signaled by an earlier run.
+    signal of that outage; a recovery closes it. The journal is asked before opening, so an outage
+    that an earlier run signaled is not signaled again, and the first report after a start that
+    says the link works also closes, because that run may not have seen the recovery.
     """
 
     def __init__(
@@ -39,7 +40,9 @@ class HealthSource:
         self._reachable = False
         if self._since is None:
             self._since = now
-        if now - self._since >= self._patience:
+        if now - self._since >= self._patience and not self._journal.has_open(
+            self._project, Kind.HEALTH
+        ):
             self._journal.open(self._outage(self._since), now)
 
     def link_recovered(self) -> None:
