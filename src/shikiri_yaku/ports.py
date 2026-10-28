@@ -8,18 +8,22 @@ exceptions below; only the Router turns such a failure into a Forward.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from datetime import datetime  # noqa: TC003 -- pydantic reads the annotations at runtime
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from shikiri_yaku.domain.classification import Classifier
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import datetime
 
     from shikiri_yaku.domain.classification import Assessment
     from shikiri_yaku.domain.signal import Signal
 
 __all__ = [
+    "AgentOption",
     "Channel",
     "ChannelError",
     "Classifier",
@@ -29,29 +33,129 @@ __all__ = [
     "CommandRunner",
     "CompositionError",
     "EngineStatus",
+    "EscalationRecord",
+    "EscalationResolution",
+    "EscalationView",
+    "QuotaWindow",
     "Reasoner",
     "ReasonerError",
     "ShikiruClient",
     "ShikiruError",
+    "ShikiruEvent",
     "ShikiruLinkDownError",
     "ShikiruProtocolError",
     "ShikiruRejectedError",
+    "ShikiruTask",
+    "TaskDetail",
+    "TaskStatus",
 ]
 
 
-@dataclass(frozen=True, slots=True)
-class EngineStatus:
+class _ShikiruPayload(BaseModel):
+    """A payload of Shikiru's MCP server, read only for the fields the Operator uses.
+
+    Unknown fields are ignored: Shikiru may add fields without breaking the Operator, and the
+    design lists the fields it relies on (§11).
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+
+class QuotaWindow(_ShikiruPayload):
+    name: str
+    used_pct: float
+    resets_at: datetime | None
+
+
+class EngineStatus(_ShikiruPayload):
     engine_up: bool
+    quotas: dict[str, list[QuotaWindow]] = Field(default_factory=dict)
+
+
+class ShikiruEvent(_ShikiruPayload):
+    """One event of a project's log; `kind` stays text because Shikiru adds kinds."""
+
+    id: int
+    ts: datetime
+    task_id: str | None = None
+    kind: str
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class EscalationRecord(_ShikiruPayload):
+    id: str
+    task_id: str
+    reason: str
+    headline: str
+    status: Literal["open", "resolved"]
+    resolution: str | None = None
+
+
+class AgentOption(_ShikiruPayload):
+    label: str
+    consequences: str
+    recommended: bool
+    needs_input: bool
+
+
+class EscalationResolution(_ShikiruPayload):
+    kind: Literal["answer", "retry", "accept", "cancel"]
+    consequences: str
+    recommended: bool
+
+
+class EscalationView(_ShikiruPayload):
+    """An escalation with the decision fields Shikiru parses from its packet (design §11, S1)."""
+
+    escalation: EscalationRecord
+    packet: str | None
+    question: str | None = None
+    agent_options: list[AgentOption] = Field(default_factory=list)
+    resolutions: list[EscalationResolution] = Field(default_factory=list)
+
+
+class TaskStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    INTEGRATING = "integrating"
+    ESCALATED = "escalated"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class ShikiruTask(_ShikiruPayload):
+    id: str
+    parent_id: str | None = None
+    status: TaskStatus
+    title: str
+
+
+class TaskDetail(_ShikiruPayload):
+    task: ShikiruTask
 
 
 class ShikiruClient(Protocol):
     """One project's Shikiru, reached through its MCP link (design §11).
 
-    Only `status` is declared here. The other verbs of §11 come with the MCP adapter, which brings
-    the result types they need.
+    Every verb raises ShikiruLinkDownError while the link is down, ShikiruRejectedError when
+    Shikiru answers with a tool error, and ShikiruProtocolError for a result it cannot read. The
+    commands of §10.1 arrive with the next task.
     """
 
+    async def wait_for_events(self, since_id: int, timeout_s: float) -> list[ShikiruEvent]: ...
+
     async def status(self) -> EngineStatus: ...
+
+    async def list_escalations(self) -> list[EscalationView]: ...
+
+    async def get_escalation(self, escalation_id: str) -> EscalationView | None: ...
+
+    async def list_tasks(
+        self, statuses: Sequence[TaskStatus] | None = None
+    ) -> list[ShikiruTask]: ...
+
+    async def get_task(self, task_id: str) -> TaskDetail | None: ...
 
 
 class Channel(Protocol):

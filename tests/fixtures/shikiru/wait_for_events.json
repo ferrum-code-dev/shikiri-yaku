@@ -1,0 +1,23 @@
+{
+  "result": [
+    {
+      "id": 41,
+      "ts": "2026-10-28T08:00:00Z",
+      "task_id": "T-1",
+      "kind": "escalation",
+      "message": "decision_required: A product decision is needed",
+      "data": {
+        "escalation_id": "E-1",
+        "reason": "decision_required"
+      }
+    },
+    {
+      "id": 42,
+      "ts": "2026-10-28T08:05:00Z",
+      "task_id": null,
+      "kind": "engine_stopped",
+      "message": "engine stopped",
+      "data": {}
+    }
+  ]
+}

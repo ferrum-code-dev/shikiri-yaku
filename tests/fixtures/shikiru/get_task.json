@@ -1,0 +1,45 @@
+{
+  "result": {
+    "task": {
+      "id": "T-1",
+      "seq": 1,
+      "parent_id": null,
+      "origin": "operator",
+      "title": "decide",
+      "request": "decide",
+      "mode": null,
+      "complexity": null,
+      "priority": 0,
+      "depends_on": [],
+      "status": "escalated",
+      "step": "consult",
+      "status_reason": null,
+      "holds": [],
+      "iteration": 0,
+      "counters": {
+        "rejections_on_rung": 0,
+        "consults": 0,
+        "conflict_rounds": 0
+      },
+      "rung_index": {},
+      "overrides": {},
+      "repo": null,
+      "slot": null,
+      "window_id": null,
+      "panes": {},
+      "wait_reason": null,
+      "requeued_at": null,
+      "summary": null,
+      "created_at": "2026-10-28T00:13:41.762707Z",
+      "started_at": null,
+      "finished_at": null
+    },
+    "events": [],
+    "reports": [],
+    "recorded_facts": null,
+    "facts_turn": null,
+    "evidence_errors": [],
+    "branches": [],
+    "sessions": []
+  }
+}

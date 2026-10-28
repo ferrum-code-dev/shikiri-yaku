@@ -1,0 +1,97 @@
+{
+  "project": "demo",
+  "engine_up": false,
+  "slots": {
+    "active": 0,
+    "maximum": 2
+  },
+  "active_tasks": [
+    {
+      "id": "T-1",
+      "title": "decide",
+      "status": "escalated",
+      "step": "consult",
+      "priority": 0,
+      "wait_reason": null,
+      "holds": [],
+      "slot": null,
+      "parent_id": null,
+      "summary": null
+    }
+  ],
+  "queued_tasks": [],
+  "escalations": [
+    {
+      "escalation": {
+        "id": "E-1",
+        "task_id": "T-1",
+        "step": "consult",
+        "reason": "decision_required",
+        "headline": "A product decision is needed",
+        "packet_path": "/project/T-1-decision_required.md",
+        "options": [
+          {
+            "label": "answer",
+            "recommended": true
+          },
+          {
+            "label": "cancel",
+            "recommended": false
+          }
+        ],
+        "status": "open",
+        "resolution": null,
+        "created_at": "2026-10-28T00:13:41.763307Z",
+        "resolved_at": null
+      },
+      "packet": "# T-1 · consult · decision_required: The Leader needs an Operator decision to continue.\n\n## Timeline\n\n- turn completed: implementation\n\n## What was tried\n\nOne implementation and review round.\n\n## Evidence\n\n### Reports\n\nImplementation report evidence.\n\n### Facts\n\nRecorded git facts.\n\n### Recent turn signals\n\nRecent stream tail.\n\n### Sessions\n\nLeader session evidence.\n\n## Question\n\nWhich behavior should remain?\n\n## Agent alternatives\n\n{\n  \"question\": \"Which behavior should remain?\",\n  \"options\": [\n    {\n      \"label\": \"Keep existing behavior\",\n      \"consequences\": \"Preserve the current call pattern.\",\n      \"recommended\": true,\n      \"needs_input\": false\n    },\n    {\n      \"label\": \"Change behavior\",\n      \"consequences\": \"Update callers and documentation.\",\n      \"recommended\": false,\n      \"needs_input\": false\n    }\n  ]\n}\n\n## Options\n\n- `answer` ★: Give the Leader guidance; the task continues from a consult turn.\n- `cancel`: Cancel the task and keep its branch; preserve its worktree when uncommitted work remains or it is off its task branch.\n",
+      "packet_error": null,
+      "question": "Which behavior should remain?",
+      "agent_options": [
+        {
+          "label": "Keep existing behavior",
+          "consequences": "Preserve the current call pattern.",
+          "recommended": true,
+          "needs_input": false
+        },
+        {
+          "label": "Change behavior",
+          "consequences": "Update callers and documentation.",
+          "recommended": false,
+          "needs_input": false
+        }
+      ],
+      "resolutions": [
+        {
+          "kind": "answer",
+          "consequences": "Give the Leader guidance; the task continues from a consult turn.",
+          "recommended": true
+        },
+        {
+          "kind": "cancel",
+          "consequences": "Cancel the task and keep its branch; preserve its worktree when uncommitted work remains or it is off its task branch.",
+          "recommended": false
+        }
+      ]
+    }
+  ],
+  "usage": [],
+  "quotas": {
+    "claude": [
+      {
+        "name": "five_hour",
+        "used_pct": 42.5,
+        "resets_at": "2026-10-28T13:00:00Z",
+        "observed_at": "2026-10-28T08:00:00Z"
+      }
+    ]
+  },
+  "faults": [],
+  "oldest_escalation_age_seconds": 0.029806,
+  "run_directories": {
+    "directories": 0,
+    "size_bytes": 0
+  },
+  "engine_output": null,
+  "task": null
+}
