@@ -222,7 +222,6 @@ def test_an_unknown_escalation_or_task_is_none() -> None:
         pytest.param(_reply(None), id="no structured content"),
         pytest.param(_reply({"engine_up": "maybe"}), id="wrong type"),
         pytest.param(_reply({"quotas": {}}), id="missing field"),
-        pytest.param(_reply({"engine_up": True, "contract": 2}), id="unexpected field"),
     ],
 )
 def test_an_unreadable_result_is_a_protocol_error(bad: CallToolResult) -> None:
@@ -231,6 +230,47 @@ def test_an_unreadable_result_is_a_protocol_error(bad: CallToolResult) -> None:
             await client.status()
 
     _run(FakeSession({"status": bad}), scenario)
+
+
+def test_fields_and_values_shikiru_adds_still_parse() -> None:
+    status: dict[str, Any] = {"engine_up": True, "quotas": {}, "contract": 2}
+    tasks = _recorded("list_tasks")
+    tasks["result"][0]["status"] = "paused"
+    escalation = _recorded("get_escalation")
+    escalation["result"]["resolutions"][1]["kind"] = "pause"
+    session = FakeSession(
+        {
+            "status": _reply(status),
+            "list_tasks": _reply(tasks),
+            "get_escalation": _reply(escalation),
+        }
+    )
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        assert (await client.status()).engine_up is True
+        (summary,) = await client.list_tasks()
+        assert summary.status == "paused"
+        one = await client.get_escalation("E-1")
+        assert one is not None
+        assert [resolution.kind for resolution in one.resolutions] == ["answer", "pause"]
+
+    _run(session, scenario)
+
+
+def test_a_payload_missing_a_field_the_operator_reads_is_a_protocol_error() -> None:
+    tasks = _recorded("list_tasks")
+    del tasks["result"][0]["status"]
+    escalation = _recorded("get_escalation")
+    del escalation["result"]["resolutions"]
+    session = FakeSession({"list_tasks": _reply(tasks), "get_escalation": _reply(escalation)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        with pytest.raises(ShikiruProtocolError):
+            await client.list_tasks()
+        with pytest.raises(ShikiruProtocolError):
+            await client.get_escalation("E-1")
+
+    _run(session, scenario)
 
 
 def test_a_tool_error_is_a_rejection_with_shikiru_s_message() -> None:
@@ -257,7 +297,7 @@ def test_every_verb_raises_link_down_before_the_link_is_up() -> None:
 
 def test_a_lost_link_raises_link_down_until_it_reconnects() -> None:
     first = FakeSession()
-    second = FakeSession({"status": _reply({"engine_up": True})})
+    second = FakeSession({"status": _reply({"engine_up": True, "quotas": {}})})
     link = FakeLink([first, second])
     clock = FakeClock()
     client = _client(link, clock)

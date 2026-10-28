@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 -- pydantic reads the annotations at runtime
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from shikiri_yaku.domain.classification import Classifier
 
@@ -35,10 +34,12 @@ __all__ = [
     "EngineStatus",
     "EscalationRecord",
     "EscalationResolution",
+    "EscalationStatus",
     "EscalationView",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
+    "ResolutionKind",
     "ShikiruClient",
     "ShikiruError",
     "ShikiruEvent",
@@ -47,46 +48,30 @@ __all__ = [
     "ShikiruRejectedError",
     "ShikiruTask",
     "TaskDetail",
-    "TaskRecord",
     "TaskStatus",
 ]
-
-
-type _Unread = object | None
 
 
 class _ShikiruPayload(BaseModel):
     """A payload of Shikiru's MCP server (design §11).
 
-    Fields are forbidden beyond those declared, so a change in Shikiru's views surfaces as a
-    ShikiruProtocolError. The fields the Operator does not use are declared as `_Unread` and never
-    looked at.
+    Only the fields the Operator reads are declared, and none has a default: a declared field that
+    is missing or has the wrong type fails as a ShikiruProtocolError. Fields Shikiru adds are
+    ignored, so Shikiru can grow without breaking the Operator.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
 
 class QuotaWindow(_ShikiruPayload):
     name: str
     used_pct: float
     resets_at: datetime | None
-    observed_at: _Unread = None
 
 
 class EngineStatus(_ShikiruPayload):
     engine_up: bool
-    quotas: dict[str, list[QuotaWindow]] = Field(default_factory=dict)
-    project: _Unread = None
-    slots: _Unread = None
-    active_tasks: _Unread = None
-    queued_tasks: _Unread = None
-    escalations: _Unread = None
-    usage: _Unread = None
-    faults: _Unread = None
-    oldest_escalation_age_seconds: _Unread = None
-    run_directories: _Unread = None
-    engine_output: _Unread = None
-    task: _Unread = None
+    quotas: dict[str, list[QuotaWindow]]
 
 
 class ShikiruEvent(_ShikiruPayload):
@@ -94,10 +79,26 @@ class ShikiruEvent(_ShikiruPayload):
 
     id: int
     ts: datetime
-    task_id: str | None = None
+    task_id: str | None
     kind: str
     message: str
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any]
+
+
+class EscalationStatus:
+    """Escalation states the Operator acts on. Shikiru may add more, so these are text."""
+
+    OPEN: Final = "open"
+    RESOLVED: Final = "resolved"
+
+
+class ResolutionKind:
+    """Resolutions `resolve_escalation` takes (design §10.1). Shikiru may add kinds."""
+
+    ANSWER: Final = "answer"
+    RETRY: Final = "retry"
+    ACCEPT: Final = "accept"
+    CANCEL: Final = "cancel"
 
 
 class EscalationRecord(_ShikiruPayload):
@@ -105,13 +106,8 @@ class EscalationRecord(_ShikiruPayload):
     task_id: str
     reason: str
     headline: str
-    status: Literal["open", "resolved"]
-    resolution: str | None = None
-    step: _Unread = None
-    packet_path: _Unread = None
-    options: _Unread = None
-    created_at: _Unread = None
-    resolved_at: _Unread = None
+    status: str
+    resolution: str | None
 
 
 class AgentOption(_ShikiruPayload):
@@ -122,7 +118,7 @@ class AgentOption(_ShikiruPayload):
 
 
 class EscalationResolution(_ShikiruPayload):
-    kind: Literal["answer", "retry", "accept", "cancel"]
+    kind: str
     consequences: str
     recommended: bool
 
@@ -132,66 +128,32 @@ class EscalationView(_ShikiruPayload):
 
     escalation: EscalationRecord
     packet: str | None
-    packet_error: _Unread = None
-    question: str | None = None
-    agent_options: list[AgentOption] = Field(default_factory=list)
-    resolutions: list[EscalationResolution] = Field(default_factory=list)
+    question: str | None
+    agent_options: list[AgentOption]
+    resolutions: list[EscalationResolution]
 
 
-class TaskStatus(StrEnum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    INTEGRATING = "integrating"
-    ESCALATED = "escalated"
-    DONE = "done"
-    CANCELLED = "cancelled"
+class TaskStatus:
+    """Task statuses the Operator acts on. Shikiru may add more, so these are text."""
+
+    QUEUED: Final = "queued"
+    RUNNING: Final = "running"
+    INTEGRATING: Final = "integrating"
+    ESCALATED: Final = "escalated"
+    DONE: Final = "done"
+    CANCELLED: Final = "cancelled"
+    ACTIVE: Final = frozenset({QUEUED, RUNNING, INTEGRATING, ESCALATED})
 
 
 class ShikiruTask(_ShikiruPayload):
     id: str
-    parent_id: str | None = None
-    status: TaskStatus
+    parent_id: str | None
+    status: str
     title: str
-    step: _Unread = None
-    priority: _Unread = None
-    wait_reason: _Unread = None
-    holds: _Unread = None
-    slot: _Unread = None
-    summary: _Unread = None
-
-
-class TaskRecord(ShikiruTask):
-    """The task inside `get_task`, which carries all of Shikiru's task fields."""
-
-    seq: _Unread = None
-    origin: _Unread = None
-    request: _Unread = None
-    mode: _Unread = None
-    complexity: _Unread = None
-    depends_on: _Unread = None
-    status_reason: _Unread = None
-    iteration: _Unread = None
-    counters: _Unread = None
-    rung_index: _Unread = None
-    overrides: _Unread = None
-    repo: _Unread = None
-    window_id: _Unread = None
-    panes: _Unread = None
-    requeued_at: _Unread = None
-    created_at: _Unread = None
-    started_at: _Unread = None
-    finished_at: _Unread = None
 
 
 class TaskDetail(_ShikiruPayload):
-    task: TaskRecord
-    events: _Unread = None
-    reports: _Unread = None
-    recorded_facts: _Unread = None
-    facts_turn: _Unread = None
-    evidence_errors: _Unread = None
-    branches: _Unread = None
-    sessions: _Unread = None
+    task: ShikiruTask
 
 
 class ShikiruClient(Protocol):
@@ -210,9 +172,7 @@ class ShikiruClient(Protocol):
 
     async def get_escalation(self, escalation_id: str) -> EscalationView | None: ...
 
-    async def list_tasks(
-        self, statuses: Sequence[TaskStatus] | None = None
-    ) -> list[ShikiruTask]: ...
+    async def list_tasks(self, statuses: Sequence[str] | None = None) -> list[ShikiruTask]: ...
 
     async def get_task(self, task_id: str) -> TaskDetail | None: ...
 

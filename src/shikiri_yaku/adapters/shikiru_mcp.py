@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from mcp.types import CallToolResult
 
-    from shikiri_yaku.ports import Clock, TaskStatus
+    from shikiri_yaku.ports import Clock
 
 BACKOFF_FACTOR = 2
 
@@ -48,7 +48,7 @@ type Connector = Callable[[], AbstractAsyncContextManager[ToolSession]]
 class _Result[T](BaseModel):
     """Shikiru's server wraps a list or optional result in a `result` key."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     result: T
 
@@ -127,8 +127,8 @@ class ShikiruMcpClient:
             await self._call("get_escalation", arguments, _Result[EscalationView | None])
         ).result
 
-    async def list_tasks(self, statuses: Sequence[TaskStatus] | None = None) -> list[ShikiruTask]:
-        arguments = {"statuses": None if statuses is None else [str(status) for status in statuses]}
+    async def list_tasks(self, statuses: Sequence[str] | None = None) -> list[ShikiruTask]:
+        arguments = {"statuses": None if statuses is None else list(statuses)}
         return (await self._call("list_tasks", arguments, _Result[list[ShikiruTask]])).result
 
     async def get_task(self, task_id: str) -> TaskDetail | None:
