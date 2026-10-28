@@ -410,6 +410,12 @@ Acceptance:
 
 ### A11c. Polling, answers and composition (high)
 
+Note from the A11a2 review (design §7 "Secrets never travel through chat"): an inbound item that
+carries a secret is already stored as refused without its text; A11c must also delete that message
+in the chat where the platform allows it (journal the attempt first), and a malformed supported
+update, which fails its whole batch, must surface as one visible `health` signal instead of stalling
+the polling in silence.
+
 Polling and delivery of pending items registered in `bootstrap.py` with the shared Bot API and Shikiru
 clients. "Already resolved: … at …" from the journal for a later answer; journaled edits that remove
 the buttons from every copy once a resolution is observed. A12 keeps command-event correlation, start-up
