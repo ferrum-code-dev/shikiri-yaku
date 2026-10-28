@@ -221,6 +221,11 @@ exception, a timeout or an unknown category into `Forward`. Handle each signal a
 `Forward` hands the signal to the product fallback, injected through the constructor (the real Product
 handler is A9). `WaitUntil` parks the signal durably.
 
+Note from the A8c review: the Scheduler (already merged, behind the `WakeTarget` port) claims a
+due parked signal by moving it to `handling` and then awaits `wake`. The Router implements
+`WakeTarget`; `wake` must never raise. A signal left in `handling` by a crash must be dispatched again
+at start-up (find it in the journal), or a restart loses it.
+
 Acceptance:
 * A handler that raises, one that times out and an unregistered category each end as a forward carrying the failure in the note.
 * Signals run independently: a slow handler does not hold another signal.
@@ -270,6 +275,12 @@ Acceptance:
 destinations as the private chat of each owner, an outbox in the journal (a message is recorded
 before sending and its delivery state after), size limits, retry on rate limit with the server's wait
 time, refusal and deletion of messages that look like secrets (inbound check lives in A11).
+
+Note from the A8c review: the Scheduler books a reminder as an outbound `notice` row (key
+`remind:<signal>:<occurrence>`) and sends it itself through `Channel.send`; a `ChannelError` leaves
+the row `pending` and the occurrence is never booked again. The outbox sender written here must pick
+up every pending outbound row, reminders included, and the Scheduler must stop calling `send` itself
+(it only books); otherwise a message can go out twice or never.
 
 Acceptance:
 * Tests against recorded Telegram payloads (kept under `tests/fixtures/telegram/`): send, edit, rate limit, message too long, button data length.
