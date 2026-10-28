@@ -196,30 +196,60 @@ Acceptance:
   inside the grace time, project never started.
 * `engine_down` ids are stable across restarts; one open `health` signal per outage.
 
-### A8. Router, loop guard and scheduler (high)
+### A8. Router, loop guard and scheduler (split into A8a to A8d, each high)
 
-§3, §6. The Router: classify, find the handler for the category, run it with a timeout, and turn an
-exception, a timeout or an unknown category into `Forward`; handle each signal as an independent
-asyncio task; `Forward` hands the signal to the product handler with the note. The loop guard
-records automatic actions in `ops` and answers budget questions (`retry_budget_per_day`,
-`restart_budget_per_hour`). The scheduler dispatches parked signals when due and sends due reminders
-(`reminder_first_h`, `reminder_repeat_h`). `WaitUntil` parks the signal.
+§3, §6, §9. One task was too large; the Leader's split below was approved. Do one letter per change.
+Each ends with `uv run poe check` and its own todo line. Keep `docs/design.md` unchanged.
 
-Note: `ops.identity` is unique, so every automatic action needs its own identity (for example
-`retry:<project>:<task>:<reason>:<n>`), and the journal needs a query that counts the ops of a
-`(project, task, reason, kind)` since a given time; add it to `OpStore` with its test.
+### A8a. Loop guard and journal queries (high)
 
-Note from the A7 review: `LivenessSource.run` and the optional `events` argument are left over
-from before `ProjectSources`; production calls only `check`, and `ProjectSources` already drains the
-event source. Remove `run` (move its tests to `ProjectSources`) and make `events` required or drop it.
-A source that raises something other than a link failure (for example a malformed event, which is a
-`ShikiruProtocolError`) now ends the whole service and the service manager restarts it into the same
-event; decide here how a failing source becomes one visible `health` signal instead of a crash loop.
+The loop guard records automatic actions in `ops` and answers budget questions: retries per
+`(project, task, reason)` within `retry_budget_per_day`, restarts per project within
+`restart_budget_per_hour`. `ops.identity` is unique, so every automatic action needs its own identity
+(for example `retry:<project>:<task>:<reason>:<n>`), and the sequence must stay unique after a budget
+window expires (do not derive it from the rolling-window count alone). Add the count query to `OpStore`
+with its test. A refused action is recorded so the refusal history can be shown.
+
+Acceptance:
+* A spent budget returns a refusal; the same action for another task is allowed; a restart budget counts across tasks and reasons.
+* Identities stay unique after the window has passed.
+
+### A8b. Router (high)
+
+§3, §6. Classify, find the handler of the category in the registry, run it with a timeout, and turn an
+exception, a timeout or an unknown category into `Forward`. Handle each signal as its own asyncio task.
+`Forward` hands the signal to the product fallback, injected through the constructor (the real Product
+handler is A9). `WaitUntil` parks the signal durably.
 
 Acceptance:
 * A handler that raises, one that times out and an unregistered category each end as a forward carrying the failure in the note.
-* A spent loop-guard budget returns a refusal; the same action for another task is allowed.
-* A parked signal is dispatched once when due, also after a restart; reminders fire at the configured times and never twice.
+* Signals run independently: a slow handler does not hold another signal.
+* A parked signal is stored with its due time and the handler that parked it.
+
+### A8c. Scheduler (high)
+
+Dispatch due parked signals once, with a conditional claim, to the stored handler, also after a restart.
+Reminders: `reminder_first_h`, then every `reminder_repeat_h`, bookkept as ops of kind `remind` with
+one identity per signal and occurrence, so an occurrence is never scheduled twice. Delivery goes through
+the journaled outbox; a recognizable duplicate after a lost send acknowledgement is allowed (§7).
+
+Acceptance:
+* A parked signal is dispatched once when due, also after a restart.
+* Reminders fire at the configured times and never twice for one occurrence.
+
+### A8d. Source cleanup and failing sources (high)
+
+Remove `LivenessSource.run` and its leftover dependencies; keep `events` required (`check` drains the
+event source after a down status); move the run-loop tests to `ProjectSources`. A typed non-link
+`ShikiruError` from a source (for example a malformed event) no longer ends the service: at the
+`ProjectSources` boundary open one `health` signal at once for that source's failing episode, retry
+after the existing delay without advancing the cursor, make no liveness decision while the event
+synchronization is failing, and close that source's signal when it recovers. Link failures keep their
+delayed health behavior.
+
+Acceptance:
+* A malformed event opens one `health` signal, is retried, and does not crash the service; a later good batch closes the signal.
+* No `engine_down` is opened while the event sync is failing.
 
 ### A9. Product handler (normal; needs S1)
 
