@@ -24,6 +24,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from shikiri_yaku.app.commands import Commands
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
         Clock,
@@ -53,17 +54,22 @@ class Replies:
         clients: Mapping[str, ShikiruClient],
         *,
         channel: str,
+        commands: Commands,
     ) -> None:
         self._log = log
         self._outbox = outbox
         self._clock = clock
         self._clients = clients
         self._channel = channel
+        self._commands = commands
 
     async def handle(self, item: Inbound) -> None:
+        if item.kind == InboundKind.TEXT:
+            await self._commands.handle(item)
+            return
         reference = item.reply_to_ref if item.kind == InboundKind.REPLY else item.message_ref
         origin = None if reference is None else self._log.origin(self._channel, reference)
-        if origin is None or item.kind == InboundKind.TEXT:
+        if origin is None:
             return
         if item.kind == InboundKind.REPLY:
             if origin.purpose == Purpose.QUESTION and item.text:

@@ -8,14 +8,18 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.replies import Replies
+from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import (
+    CursorStore,
     Database,
     JournalFinalEdits,
     JournalOutbox,
+    JournalSources,
     MessageStore,
     OpState,
     OpStore,
@@ -125,6 +129,11 @@ class Harness:
     def log(self) -> JournalReplies:
         return JournalReplies(self.database, self.signals, OpStore(self.database))
 
+    def commands(self, at: datetime) -> Commands:
+        sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
+        status = Status(self.clients, sources)
+        return Commands(self.outbox, Clock(at), status, channel="telegram")
+
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})
         self.client.view = self.client.view.model_copy(update={"escalation": record})
@@ -140,7 +149,14 @@ class Harness:
         text: str | None = None,
         at: datetime = NOW,
     ) -> None:
-        replies = Replies(self.log(), self.outbox, Clock(at), self.clients, channel="telegram")
+        replies = Replies(
+            self.log(),
+            self.outbox,
+            Clock(at),
+            self.clients,
+            channel="telegram",
+            commands=self.commands(at),
+        )
         item = Inbound(
             update,
             InboundKind.TAP if text is None else InboundKind.REPLY,
@@ -158,6 +174,13 @@ def h() -> Generator[Harness]:
     harness = Harness()
     yield harness
     harness.database.close()
+
+
+def test_text_reply_to_a_question_answers_and_queues_no_command_reply(h: Harness) -> None:
+    h.handle(text="Use the other approach")
+
+    assert h.client.calls
+    assert h.outbox.pending() == []
 
 
 @pytest.mark.parametrize("text", [None, "Use the other approach"])

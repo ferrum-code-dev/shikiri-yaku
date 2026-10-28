@@ -512,7 +512,7 @@ class Outbox(Protocol):
 
     def queue(
         self,
-        number: int,
+        number: int | None,
         purpose: Purpose,
         destinations: Sequence[Destination],
         message: Message,

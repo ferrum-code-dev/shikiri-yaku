@@ -248,6 +248,20 @@ def test_a_secret_in_any_place_is_refused_when_queued_and_the_po_gets_a_notice_w
     assert (refused.delivery, refused.body, refused.refusal) == (Delivery.REFUSED, None, form)
 
 
+@pytest.mark.parametrize(("secret", "message"), [(s, m) for _, s, m in secret_cases()])
+def test_a_command_reply_with_a_secret_is_refused_and_its_notice_names_no_signal(
+    memory: Database, secret: str, message: Message
+) -> None:
+    _outbox(memory).queue(None, Purpose.NOTICE, [OWNER], message, key="command:1", now=START)
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel).tick())
+
+    [(_, notice)] = channel.sent
+    assert "None" not in notice.text
+    assert not any(secret in text for text in notice.texts())
+
+
 def test_a_refused_message_gets_one_notice_in_each_chat_it_was_queued_for(memory: Database) -> None:
     number = _signal(memory)
     secret = Message(f"S1 {TOKEN}")

@@ -19,6 +19,7 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import TelegramChannel, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
+from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
@@ -33,6 +34,7 @@ from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
+from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
@@ -282,14 +284,16 @@ def inbound_job(
         owners=settings.telegram.owners,
         wait_s=operator.telegram_poll_wait_s,
     )
+    sources = JournalSources(CursorStore(journal, signals), signals)
+    commands = Commands(outbox, clock, Status(clients, sources), channel=TELEGRAM_CHANNEL)
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal)),
         outbox,
         clock,
         clients,
         channel=TELEGRAM_CHANNEL,
+        commands=commands,
     )
-    sources = JournalSources(CursorStore(journal, signals), signals)
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(
         poller, log, replies, health, clock, interval_s=operator.inbound_interval_s

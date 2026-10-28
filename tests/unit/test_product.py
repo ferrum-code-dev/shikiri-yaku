@@ -98,7 +98,7 @@ class _Outbox:
 
     def queue(
         self,
-        number: int,
+        number: int | None,
         purpose: Purpose,
         destinations: Sequence[Destination],
         message: Message,

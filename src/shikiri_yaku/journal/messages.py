@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import Purpose, refusal_notice
+from shikiri_yaku.domain.outbound import Purpose, message_label, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import Inserted, stamp
 from shikiri_yaku.ports import Message
@@ -79,7 +79,7 @@ class MessageStore:
     def record_outbound(
         self,
         *,
-        signal_number: int,
+        signal_number: int | None,
         channel: str,
         chat: str,
         purpose: Purpose,
@@ -118,7 +118,7 @@ class MessageStore:
     def _insert(
         self,
         *,
-        signal_number: int,
+        signal_number: int | None,
         channel: str,
         chat: str,
         purpose: Purpose,
@@ -161,7 +161,7 @@ class MessageStore:
     def _notify(
         self,
         *,
-        signal_number: int,
+        signal_number: int | None,
         channel: str,
         chat: str,
         refused_id: int,
@@ -187,13 +187,15 @@ class MessageStore:
             )
         except sqlite3.Error:
             self._reporter.report(
-                f"S{signal_number} refused ({reason}); its notice was not journaled"
+                f"{message_label(signal_number)} refused ({reason}); its notice was not journaled"
             )
 
     def _notify_refusal(self, row: sqlite3.Row, reason: str, now: datetime) -> None:
         """Notify the PO of a refused row; a refused notice is reported instead, never noticed."""
         if _is_notice_of_refusal(row["notice_key"]):
-            self._reporter.report(f"S{row['signal_number']} notice refused ({reason})")
+            self._reporter.report(
+                f"{message_label(row['signal_number'])} notice refused ({reason})"
+            )
             return
         self._notify(
             signal_number=row["signal_number"],
