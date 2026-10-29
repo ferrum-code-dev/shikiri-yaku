@@ -197,9 +197,7 @@ class _ClosedTopic(BaseModel):
 _CREATE_TOPIC_REPLY: Final[TypeAdapter[_CreatedTopic | _Failed]] = TypeAdapter(
     _CreatedTopic | _Failed
 )
-_CLOSE_TOPIC_REPLY: Final[TypeAdapter[_ClosedTopic | _Failed]] = TypeAdapter(
-    _ClosedTopic | _Failed
-)
+_CLOSE_TOPIC_REPLY: Final[TypeAdapter[_ClosedTopic | _Failed]] = TypeAdapter(_ClosedTopic | _Failed)
 
 
 class TelegramChannel:
@@ -302,9 +300,7 @@ def _content(message: Message) -> dict[str, object]:
     return {"text": message.text, "reply_markup": {"inline_keyboard": keyboard}}
 
 
-async def probe_bot(
-    api: BotApi, group_id: int | None = None, owners: tuple[int, ...] = ()
-) -> None:
+async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int, ...] = ()) -> None:
     """Check bot authentication and the configured group's topic and membership requirements."""
     body = await api.call(GET_ME, {})
     reply = _validated(body, _PROBE_REPLY)
@@ -324,9 +320,7 @@ class TelegramForumTopics(ForumTopics):
         self._group_id = group_id
 
     async def create(self, name: str) -> int:
-        body = await self._api.call(
-            CREATE_FORUM_TOPIC, {"chat_id": self._group_id, "name": name}
-        )
+        body = await self._api.call(CREATE_FORUM_TOPIC, {"chat_id": self._group_id, "name": name})
         reply = _validated(body, _CREATE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)

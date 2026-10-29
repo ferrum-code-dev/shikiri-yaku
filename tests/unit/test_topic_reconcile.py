@@ -31,7 +31,8 @@ class _FixtureBotApi:
             assert isinstance(name, str)
             component = None if name == "General" else name
             topic = self.topics.get(component)
-            assert topic is not None and topic.state == TOPIC_CREATING
+            assert topic is not None
+            assert topic.state == TOPIC_CREATING
             reply = _fixture("forum_topic_created.json")
             self.created += 1
             reply["result"]["message_thread_id"] = 72 + self.created
@@ -42,7 +43,7 @@ class _FixtureBotApi:
             topic = next(item for item in self.topics.all() if item.thread_id == thread_id)
             assert topic.state == TOPIC_CLOSING
             return _fixture("forum_topic_closed.json")
-        raise AssertionError(f"unexpected Bot API method: {method}")
+        raise AssertionError(method)
 
 
 def _fixture(name: str) -> Any:
@@ -59,7 +60,8 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         asyncio.run(TopicReconciler(topics, forum, ["api"]).run())
         api_topic = topics.get("api")
         general_topic = topics.get(None)
-        assert api_topic is not None and general_topic is not None
+        assert api_topic is not None
+        assert general_topic is not None
         assert (api_topic.component, api_topic.thread_id, api_topic.state) == (
             "api",
             73,
@@ -77,7 +79,8 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         asyncio.run(TopicReconciler(topics, forum, []).run())
         assert [method for method, _payload in api.calls].count("closeForumTopic") == 1
         closed_topic = topics.get("api")
-        assert closed_topic is not None and closed_topic.state == TOPIC_CLOSED
+        assert closed_topic is not None
+        assert closed_topic.state == TOPIC_CLOSED
         assert closed_topic.thread_id == 73
         assert not any(method == "deleteForumTopic" for method, _payload in api.calls)
     finally:
