@@ -475,10 +475,19 @@ CALLBACK_DATA_LIMIT: Final = 64
 
 @dataclass(frozen=True, slots=True)
 class Button:
-    """An inline button. Its `data` comes back in the tap, so it carries numbers (design §7)."""
+    """An inline button: a tap sends its `data` back, or a link opens its `url` (design §6.4, §7).
+
+    `data` carries numbers only, so it stays short; a button has exactly one of the two.
+    """
 
     label: str
-    data: str
+    data: str = ""
+    url: str | None = None
+
+    def __post_init__(self) -> None:
+        if bool(self.data) == bool(self.url):
+            message = "a button takes exactly one of data or url"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,10 +498,11 @@ class Message:
     buttons: tuple[Button, ...] = ()
 
     def texts(self) -> tuple[str, ...]:
-        """Every text the message puts in front of the PO or sends back in a tap."""
+        """Every text the message puts in front of the PO or sends back in a tap or a link."""
         labels = [button.label for button in self.buttons]
-        data = [button.data for button in self.buttons]
-        return (self.text, *labels, *data)
+        data = [button.data for button in self.buttons if button.data]
+        urls = [button.url for button in self.buttons if button.url]
+        return (self.text, *labels, *data, *urls)
 
 
 class Channel(Protocol):

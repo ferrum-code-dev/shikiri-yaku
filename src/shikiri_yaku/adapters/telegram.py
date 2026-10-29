@@ -11,6 +11,7 @@ from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
+    Button,
     ChannelError,
     ChannelRefusedError,
 )
@@ -288,16 +289,21 @@ def _content(message: Message) -> dict[str, object]:
     """Refuse what Telegram would refuse before sending; then build the text and keyboard.
 
     One button per row. An empty keyboard is what removes the buttons of a final state (design §7).
+    A link button has no callback data, so only the tap buttons are measured against its limit.
     """
     if len(message.text) > MESSAGE_TEXT_LIMIT:
         raise ChannelRefusedError(TEXT_TOO_LONG)
     for button in message.buttons:
-        if len(button.data.encode()) > CALLBACK_DATA_LIMIT:
+        if not button.url and len(button.data.encode()) > CALLBACK_DATA_LIMIT:
             raise ChannelRefusedError(BUTTON_DATA_TOO_LONG)
-    keyboard = [
-        [{"text": button.label, "callback_data": button.data}] for button in message.buttons
-    ]
+    keyboard = [[_keyboard_button(button)] for button in message.buttons]
     return {"text": message.text, "reply_markup": {"inline_keyboard": keyboard}}
+
+
+def _keyboard_button(button: Button) -> dict[str, str]:
+    if button.url:
+        return {"text": button.label, "url": button.url}
+    return {"text": button.label, "callback_data": button.data}
 
 
 async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int, ...] = ()) -> None:

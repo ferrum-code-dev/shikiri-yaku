@@ -110,6 +110,33 @@ def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> 
     ]
 
 
+def test_a_link_button_is_posted_as_a_url_beside_a_callback_button() -> None:
+    api = _Api([_recorded("send_ok.json")])
+    link = Message(
+        "S1 · Pull request ready",
+        (Button("Open PR", url="https://example.test/pull/7"), Button("Acknowledge", "k:1")),
+    )
+
+    _send(api, _Clock(), link)
+
+    assert api.calls[0][1]["reply_markup"] == {
+        "inline_keyboard": [
+            [{"text": "Open PR", "url": "https://example.test/pull/7"}],
+            [{"text": "Acknowledge", "callback_data": "k:1"}],
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("data", "url"),
+    [("", ""), ("", None), ("a:1:1", "https://example.test/pull/7")],
+    ids=["neither", "neither, empty url", "both"],
+)
+def test_a_button_takes_exactly_one_of_data_or_url(data: str, url: str | None) -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        Button("1", data, url=url)
+
+
 def test_send_posts_a_topic_thread_when_the_destination_has_one() -> None:
     api = _Api([_recorded("send_ok.json")])
 
@@ -216,6 +243,13 @@ def _sent_or_refused(message: Message) -> tuple[str, int]:
         (Message("x" * MESSAGE_TEXT_LIMIT), SENT, 1),
         (Message("x" * (MESSAGE_TEXT_LIMIT + 1)), TEXT_TOO_LONG, 0),
         (Message("S1", (Button("1", "a" * CALLBACK_DATA_LIMIT),)), SENT, 1),
+        (
+            Message(
+                "S1", (Button("Open", url="https://example.test/" + "p" * CALLBACK_DATA_LIMIT * 2),)
+            ),
+            SENT,
+            1,
+        ),
         (Message("S1", (Button("1", "a" * (CALLBACK_DATA_LIMIT + 1)),)), BUTTON_DATA_TOO_LONG, 0),
         # keep: two bytes per letter, so half the limit in letters is exactly the limit in bytes
         (Message("S1", (Button("1", "é" * (CALLBACK_DATA_LIMIT // 2)),)), SENT, 1),
