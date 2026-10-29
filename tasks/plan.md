@@ -22,7 +22,7 @@ the rule scripts and configuration from the Shikiru repository at `/Users/pavel/
 `tests/support/comment_rule.py`, `tests/support/literal_rule.py`) and adapt names. Create the empty
 packages named in `AGENTS.md`, `cli.py` with a `--version` command, and `.gitignore`.
 
-Acceptance:
+Acceptance criteria:
 * `uv run poe check` passes on the scaffold, including a test for each rule script that proves it fails on a violating sample.
 * An import-linter contract fails when `domain` imports `app`, `adapters` or `journal`.
 * `shikiri-yaku --version` prints the version.
@@ -38,7 +38,7 @@ value except `product`, `components` and `channels.telegram` has a default. Reso
 `~/.shikiri-yaku/<product>/` (or `--home`), the token path relative to the instance directory, and
 `instance.lock` acquisition with a clear error when held.
 
-Acceptance:
+Acceptance criteria:
 * A valid file loads; a missing required key, an unknown key, a duplicate component name and a
   relative component path each fail with a message naming the key.
 * The sample file in design §3.2 loads and matches the documented defaults.
@@ -52,7 +52,7 @@ advance a cursor in one transaction, insert-if-absent a signal by id, transition
 with conditional updates, find non-final ops, find parked signals due). Signal numbers are row ids.
 Only this package contains SQL.
 
-Acceptance:
+Acceptance criteria:
 * Migrations create a fresh database and refuse a database newer than the code.
 * Inserting the same signal id twice yields one row; the second call reports "already known".
 * An op moves `intended → approved` only once under concurrent callers (test with two threads or tasks).
@@ -68,7 +68,7 @@ Acceptance:
 construction, the product catch-all is last). No handlers yet; the rule table of §5 is created from
 small extension stubs in tests.
 
-Acceptance:
+Acceptance criteria:
 * Table-driven test over every escalation reason Shikiru has (the 15 in §5 plus an unknown one):
   each maps to the category in the §5 table; the unknown one falls to `product`.
 * `task_done` and `health` map to `notice`; `pr_review` to `review`; engine kinds to `infrastructure`.
@@ -89,7 +89,7 @@ CLI: `run <product>` (starts the asyncio loop, takes the instance lock, stops cl
 Split (decided): `install-service` is task A4b. A4 stays unchecked until A4b is done; the acceptance
 below covers the part that lands first.
 
-Acceptance:
+Acceptance criteria:
 * `run` with a valid config starts and stops on SIGTERM with exit code 0.
 * `doctor` reports each failed check by name and exits non-zero; passes on a valid instance. A path
   of the wrong type (a directory where a file belongs, or the reverse) or one that cannot be read
@@ -106,7 +106,7 @@ named `shikiri-yaku-<product>`, with the PATH of the user's login shell and the 
 Also: `doctor` shows a held instance lock as "running", not as a failure, because a service that is
 up holds it; the check still fails when the lock file cannot be opened.
 
-Acceptance:
+Acceptance criteria:
 * The generated unit/plist contains the login-shell PATH and the exact `run` command (golden file
   test on content that matters, not on whitespace).
 * Both renderers are covered by tests that never write to the real launchd or systemd directories.
@@ -128,7 +128,7 @@ reconnects with backoff (`Clock.sleep`), and while the link is down every verb r
 `ShikiruProtocolError`. The executable is `shikiru` (found on PATH) and is a parameter, so the
 contract script can point it at another checkout.
 
-Acceptance:
+Acceptance criteria:
 * Unit tests with a fake MCP session cover each result parse, reconnect with backoff, the
   link-down error while disconnected, and the mapping of each exception.
 * The result types accept a real S1 payload (use a JSON fixture recorded from the S1 branch, kept under `tests/fixtures/shikiru/`).
@@ -147,7 +147,7 @@ on top of it. Add `scripts/contract_check.py`, run by a human and not by the gat
 real Shikiru engine with its fake agent in a temporary project, using the `shikiru` executable given
 on the command line, and checks the assumptions of §11 through the adapter.
 
-Acceptance:
+Acceptance criteria:
 * Unit tests with a fake MCP session: a `rejected` ack becomes `ShikiruRejectedError` with Shikiru's message; a `queued` ack is returned as queued.
 * CommandRunner tests with real harmless commands: success output, nonzero exit code, timeout kills a child that ignores SIGTERM, stdin is closed.
 * `doctor` gets one MCP probe per component (design §3.2): the link comes up and `status` answers. It is registered in `bootstrap.py` with this adapter.
@@ -165,7 +165,7 @@ history counts as respected. Repeat the first sync when the cursor falls behind 
 Note: `CursorStore.respect_stop` does nothing for a project without a cursor row, so the first sync
 records its batch before it respects a clean stop.
 
-Acceptance:
+Acceptance criteria:
 * After a simulated crash between the signal insert and the cursor commit, a restart yields exactly
   one signal per source event.
 * First sync of a project with history produces signals only for currently open escalations (open pull requests follow in A6b).
@@ -180,7 +180,7 @@ escalation event's data names its reason). After the escalations, it creates a `
 for each open pull request, with the id and text of a live `pr_opened` event, so a later live read
 of the same event is recognised by id.
 
-Acceptance:
+Acceptance criteria:
 * First sync with a history of an open PR, a withdrawn PR, a merged PR and a closed PR produces one `pr_review` signal, for the open one.
 * A restart after a first sync, and a repeated first sync after the cursor fell behind, add no second signal for the same PR.
 
@@ -191,7 +191,7 @@ including the clean-stop rule (respect after `stop_grace_min` when the stop happ
 run; a never-respected earlier clean stop is `engine_down` at once; the respected event id is stored in `cursors`).
 Health: an unreachable MCP link for `link_unreachable_min` opens one `health` signal and closes it on recovery.
 
-Acceptance:
+Acceptance criteria:
 * Table-driven test of every row of the liveness table, including: reboot (clean stop before this run),
   deliberate stop respected after the grace time and still respected after an Operator restart, stop
   inside the grace time, project never started.
@@ -211,7 +211,7 @@ The loop guard records automatic actions in `ops` and answers budget questions: 
 window expires (do not derive it from the rolling-window count alone). Add the count query to `OpStore`
 with its test. A refused action is recorded so the refusal history can be shown.
 
-Acceptance:
+Acceptance criteria:
 * A spent budget returns a refusal; the same action for another task is allowed; a restart budget counts across tasks and reasons.
 * Identities stay unique after the window has passed.
 
@@ -227,7 +227,7 @@ due parked signal by moving it to `handling` and then awaits `wake`. The Router 
 `WakeTarget`; `wake` must never raise. A signal left in `handling` by a crash must be dispatched again
 at start-up (find it in the journal), or a restart loses it.
 
-Acceptance:
+Acceptance criteria:
 * A handler that raises, one that times out and an unregistered category each end as a forward carrying the failure in the note.
 * Signals run independently: a slow handler does not hold another signal.
 * A parked signal is stored with its due time and the handler that parked it.
@@ -239,7 +239,7 @@ Reminders: `reminder_first_h`, then every `reminder_repeat_h`, bookkept as ops o
 one identity per signal and occurrence, so an occurrence is never scheduled twice. Delivery goes through
 the journaled outbox; a recognizable duplicate after a lost send acknowledgement is allowed (§7).
 
-Acceptance:
+Acceptance criteria:
 * A parked signal is dispatched once when due, also after a restart.
 * Reminders fire at the configured times and never twice for one occurrence.
 
@@ -253,7 +253,7 @@ after the existing delay without advancing the cursor, make no liveness decision
 synchronization is failing, and close that source's signal when it recovers. Link failures keep their
 delayed health behavior.
 
-Acceptance:
+Acceptance criteria:
 * A malformed event opens one `health` signal, is retried, and does not crash the service; a later good batch closes the signal.
 * No `engine_down` is opened while the event sync is failing.
 
@@ -270,7 +270,7 @@ Scope decision: `bootstrap.routing_jobs` composes the Dispatcher and Scheduler a
 Router. Calling it from `compose()` is deferred until A9's Product fallback and A10's outbound
 Channel exist; A4 forbids placeholder adapters. Until then, real runs leave signals in `new`.
 
-Acceptance:
+Acceptance criteria:
 * A signal inserted by a source reaches its handler without any other call; two signals run concurrently.
 * After a simulated crash a `handling` signal is handled again; a `resolved`, `forwarded` or `parked` one is not.
 * A forward that fails once is retried and ends `forwarded`; the failure does not end the service.
@@ -285,7 +285,7 @@ table, buttons for options, free-text reply, `accept` and `cancel` with confirmi
 without an escalation (and failed notice, review or health messages) are shown as information with
 *Acknowledge*. Messages go through the `Channel` port with callback data `a:<signal no>:<option no>`.
 
-Acceptance:
+Acceptance criteria:
 * Given a fixture escalation view, the message contains the question, each option and one recommended mark; no raw packet markdown.
 * An escalation without agent options offers only the resolutions the escalation allows.
 * A message over 4096 characters is cut with a *Details* button; callback data is at most 64 bytes.
@@ -311,7 +311,7 @@ pending. `ProductForwarder` only queues; the Scheduler only books reminders (it 
 `Channel.send`); one sender drains every pending outbound row, reminders included. A crash between
 recording and sending leads to one resend carrying the signal reference (`S41`).
 
-Acceptance:
+Acceptance criteria:
 * A crash after recording and before sending resends once; a confirmed row is never sent again.
 * A reminder row and a question row are sent by the same sender; a failed send stays pending.
 
@@ -329,7 +329,7 @@ reported on stderr as metadata only. Where an existing Telegram copy of a secret
 attempted deletion is journaled before it is invoked. Transient failures stay pending; a permanent
 refusal is never treated as a delivery.
 
-Acceptance:
+Acceptance criteria:
 * Tests against fixture payloads shaped as the Bot API documents them (kept under `tests/fixtures/telegram/`, each file labeled with its source): send, edit, rate limit, message too long, button data length.
 * Each secret form is refused and never reaches the journal or the transport.
 
@@ -340,7 +340,7 @@ Shared Shikiru clients per project, the Product extension and the classifier reg
 and A10a/A10b's outbox and Channel. An integration test with fake external ports and no live network
 shows that a signal created by a source is classified, forwarded, queued in the outbox and sent.
 
-Acceptance:
+Acceptance criteria:
 * A source-created escalation ends as a sent message with buttons, through the composed jobs.
 
 ### A10d. Bot API transport (normal)
@@ -362,7 +362,7 @@ others) and keep the call timeout a setting. `doctor` already checks the token f
 asks `getMe` through this adapter. Register the adapter in `bootstrap.py` and give it to
 `TelegramChannel` so the composed service can send. A11 will add `getUpdates` on the same adapter.
 
-Acceptance:
+Acceptance criteria:
 * With `httpx.MockTransport`: a documented success reply, a 429 reply with `retry_after`, a 400 reply and a connection error each come back as the Channel expects; the token appears in the request URL only.
 * No test reads a real token file; the gate makes no network call.
 
@@ -377,7 +377,7 @@ part per change, about 300 lines each. Each ends with `uv run poe check` and its
 `getUpdates` through the shared Bot API, with typed taps, replies and texts retaining sender and
 message references. No production polling or journal changes in this delivery (review 06-verify-i2).
 
-Acceptance:
+Acceptance criteria:
 * Documentation-shaped fixtures cover text, reply and tap references and polling arguments.
 * Unsupported kinds can be skipped; malformed supported updates fail the whole batch.
 * Protocol errors never expose inbound secrets in formatted tracebacks.
@@ -389,7 +389,7 @@ state. Save allowed items and durable polling offset transactionally; filter non
 without blocking progress. Apply the existing secret-refusal policy. Add the poller and timeout
 settings (HTTP timeout must outlast polling). Production polling stays unwired until A11c.
 
-Acceptance:
+Acceptance criteria:
 * Duplicate delivery stores one item; non-owner content is excluded while its offset advances.
 * Rollback preserves both rows and offset; pending items survive a restart until handled.
 * Secret text is never persisted. In-memory SQLite tests cover these guarantees.
@@ -404,7 +404,7 @@ Choices are resolved by re-reading the escalation view, with the numbering rule 
 renderer through an inward-facing helper. The typed resolve payload is journaled as an `ops` row with an
 update-based identity before `resolve_escalation`, and the acknowledgement and command id are saved.
 
-Acceptance:
+Acceptance criteria:
 * The same update delivered twice issues one resolve, also after a restart.
 * A tap on an approval message accepts only its own buttons; a free-text reply is matched by `reply_to_message`.
 * An issued or uncertain op is left for A12; an acknowledgement alone never confirms a resolve.
@@ -427,7 +427,7 @@ Order note: A12 is built before A11c2 to A11c4. A12 and A11c4 both edit every co
 remove its buttons or show its final state; whichever is built second reuses the mechanism of the
 first and does not add another.
 
-Acceptance:
+Acceptance criteria:
 * An offline composition test runs an inbound tap through Replies to a journaled resolve.
 * A later answer to a resolved question gets the recorded resolution and time.
 
@@ -462,7 +462,7 @@ An `escalation_resolved` event the Operator did not cause (no op carries its com
 signal and edits every copy of its message to "Resolved in Shikiru: *resolution*", using A11c4's
 mechanism.
 
-Acceptance:
+Acceptance criteria:
 * A resolve done in tmux edits all copies of the open message and closes the signal.
 
 ### A13. Status, open, help and measures (split into A13a, A13b and A13c)
@@ -532,7 +532,7 @@ never started (never started: the engine is down and the lifecycle journal holds
 or more, design §6.2). A component that does not answer is shown as unreachable; it does not stop the
 inbound batch. Wired through `bootstrap.py`.
 
-Acceptance:
+Acceptance criteria:
 * A text reply to a question still answers and queues no command reply; `/status` and free text queue
   one reply each to the sender's chat, with no signal.
 * The same update id delivered twice queues one reply.
@@ -556,7 +556,7 @@ and the callback-data rules stay. The click-time Shikiru check and the condition
 kept, and re-shown copies take part in final-state edits. Final or issued approvals and stale
 escalations are excluded. Install approval belongs to Phase D; only approvals that exist today are shown.
 
-Acceptance:
+Acceptance criteria:
 * Replaying the same `/open` update re-shows nothing new.
 * Two copies of one approval confirm one op: one resolve is issued.
 * An escalation resolved elsewhere is not shown as open, and its tap does not resolve.
@@ -587,7 +587,7 @@ SQL stays in `journal/`. It prints four sections:
 
 Misroutes stay a manual review (design §15), not a fifth printed metric.
 
-Acceptance:
+Acceptance criteria:
 * `stats` on a seeded in-memory journal prints the four sections with proxies and gaps labelled.
 * A closed signal with no question is not counted as handled without the PO; a copy is counted once;
   an unfinished signal is excluded from durations.
@@ -599,7 +599,7 @@ the Telegram update id; the PO gets the task id. After a crash between queueing 
 the goal is not resubmitted: the PO is asked with the "I may have submitted this already" message
 and a *Submit again* button.
 
-Acceptance:
+Acceptance criteria:
 * A duplicate update id submits once.
 * Crash-point test: a goal with an unconfirmed op is not resubmitted at restart and produces the question.
 
@@ -637,7 +637,7 @@ signal; without a group, the private chat of each owner as now. The topic ids ar
 (`topics`: component or `general`, thread id, state). `TelegramChannel` sends with `message_thread_id`
 and the outbox stores the thread with the destination. Message references keep working for edits.
 
-Acceptance:
+Acceptance criteria:
 * An escalation of component `api` is queued for the `api` topic, a `task_done` notice for the general topic, with a group; both go to the owners' private chats without one.
 * A restart sends what is pending to the same topic (the thread is stored with the row).
 
@@ -649,7 +649,7 @@ keeping its history. `doctor` checks that the bot is an administrator with the m
 and that the group holds only the owners and the bot (everyone in the group sees project data), and
 names the problem when not.
 
-Acceptance:
+Acceptance criteria:
 * With fixtures shaped as the Bot API documents them: a new component gets one topic; a second start creates nothing; a removed component's topic is closed and not deleted.
 * `doctor` fails on a group with a non-owner member.
 
@@ -660,7 +660,7 @@ another chat is ignored and not stored. A reply or tap in a topic is routed by t
 as before. `/goal <text>` inside a component's topic implies that component; `/goal` in the general
 topic still needs the component name.
 
-Acceptance:
+Acceptance criteria:
 * A message from a group that is not configured is ignored and not stored.
 * `/goal <text>` in the `api` topic submits to `api`; in the general topic without a component it asks for one.
 
@@ -679,16 +679,104 @@ Target shape:
 * `InboundPoller` loses `group_id`: the chat rule runs in the adapter, and an unserved update still moves the offset without being stored. The owner check may stay in the poller.
 * `bootstrap.py` only builds the adapter pieces and passes them in.
 
-Acceptance:
+Acceptance criteria:
 * `grep -rniE "topic|forum|group" src/shikiri_yaku` matches only under `adapters/`, `journal/topics.py` and its migration, `settings.py` (`group_id`), and `bootstrap.py` wiring lines. Nothing in `app/`, `domain/`, `extensions/`, `ports.py` or `cli.py`.
 * Every existing B1 to B3 test still passes with only its imports and constructor arguments changed; no test is deleted.
 * `/goal <text>` in a component's topic, the topic reconcile, the uncertain-creation stop and the group filter behave as before.
 
+## Phase C: infrastructure basics and review
+
+Design §5 and §6.2 to §6.5. All tasks are `normal`. Each extension is a folder under `extensions/`
+registered in `registered_extensions()` before `product`; the catch-all stays last. Handlers get no
+signal number, so a message a handler sends itself is queued with `number=None` and a key built from
+`signal.id`, through the `Notifier` that C1 adds. `decision_required` with verdict `host_tool` belongs to
+Phase D and is not registered here, so it keeps going to `product`.
+
+### C1. Infrastructure handler and Retry (normal)
+
+`extensions/infrastructure/`: the rules of design §5 (the eight escalation reasons and the kinds
+`engine_down` and `engine_fault`), an `InfrastructureHandler` that picks the registered action by the
+signal's reason or kind from a dictionary built in its constructor (a signal no action covers
+forwards), and the **Retry** action for `agent_error`, `agent_stuck`, `agent_protocol`,
+`integration_conflict` and `integration_blocked`: ask the loop guard, then
+`resolve_escalation(retry)`. A refused guard forwards with its history. Two actions claiming one reason
+fail at registration. Add `app/notifier.py`: `Notifier.tell(signal, text, key)` queues an informational
+message for the signal's destinations with `number=None`; the key is recorded so a repeat sends nothing.
+
+Acceptance criteria:
+* Each of the five reasons calls `resolve_escalation(retry)` once and returns `Resolved`; the second escalation of the same task and reason within a day forwards, and the note names the earlier retry.
+* An escalation of a reason no action covers (for example `ladder_exhausted` before C2) forwards with a note that names it.
+* End to end with the in-memory journal and a fake client: an `agent_error` signal reaches `Resolved` and nothing is sent to the PO.
+
+### C2. Quota wait (normal)
+
+The **Wait** action for `quota_exhausted` and `ladder_exhausted`: the reset time is the latest
+`resets_at` among the windows of `status().quotas` whose `used_pct` is 100 or more. Tell the PO the
+time (through the Notifier), record a `wait` op and return `WaitUntil(reset + 1 minute)`. On the second
+call the op is due, so the action performs `resolve_escalation(retry)` and returns `Resolved`. No
+known reset time, or one more than `quota_wait_max_h` away, forwards.
+
+Acceptance criteria:
+* Table-driven: no exhausted window, an exhausted window without `resets_at`, a reset beyond the maximum all forward; a reset in 3 hours parks until then plus one minute and sends one notice.
+* The second call after the wake time resolves with `retry` and sends no second notice; a restart between the two calls does the same (the op decides, not memory).
+* A wake time in the past after a long outage resolves at once.
+
+### C3. Engine restart (normal)
+
+The **Restart** action for `engine_down`, `engine_fault` and `engine_error`: ask the loop guard, call
+`start_engine()`, then confirm `status().engine_up` (retrying for `restart_confirm_s`, a new setting
+with a default) and tell the PO. For `engine_error` restart only if the engine is down, then
+`resolve_escalation(retry)`. A refused guard, a failed start or an engine that stays down forwards with
+the failed checks from `shikiru doctor --json`, run through `CommandRunner`.
+
+Acceptance criteria:
+* A down engine that comes up returns `Resolved` and sends one notice; the second restart within an hour forwards with the first restart's time and the doctor's failed checks.
+* A start that exits nonzero forwards with Shikiru's message; an engine that never comes up forwards after `restart_confirm_s`.
+* `engine_error` with the engine up calls only `resolve_escalation(retry)`.
+
+### C4. Review handler (normal)
+
+`extensions/review/`: the rule for the `pr_review` kind, a `ReviewHandler` that sends the message of
+design §6.4 and returns `Forward`-free outcomes of its own: the title from `get_task`, the commit count
+and the link from the signal, an *Open PR* link button (a `Button` gains an optional `url`; a button
+has `data` or `url`, never both, and the Telegram adapter sends `url` as a link button) and an
+*Acknowledge* button that silences the reminders. The message is sent with the signal number so the
+reminders of A8c apply. Read what the event source already keeps of `pr_opened` and add only what is
+missing to the signal's `text`; report if a signal field is needed.
+
+Acceptance criteria:
+* A `pr_review` signal produces one message with the link button and *Acknowledge*; a restart does not send it twice.
+* An unanswered review is reminded by the Scheduler on the Product handler's schedule, and *Acknowledge* stops the reminders.
+* If `get_task` fails the message is still sent, with the task id as the title.
+
+### C5. Review closing (normal)
+
+The review message is edited to its final state and its reminders stop when the task is done
+(merged), the PR is withdrawn, or Shikiru escalates `pr_closed`. Reuse the final-edit path of A11c4 and
+the closing rules of the event source; extend them only where `pr_review` is not covered yet, and
+report any gap in the design instead of inventing behavior.
+
+Acceptance criteria:
+* Each of the three events edits every copy of the review message to its final state, with the buttons removed, and a late *Acknowledge* tap changes nothing.
+* A `pr_closed` escalation still reaches the Product handler as its own signal.
+
+### C6. Notice handler (normal)
+
+`extensions/notice/`: the rules for the kinds `task_done` and `health`. On `task_done`, read
+`list_tasks`, follow `parent_id` to the family root and stay silent while any task of that family is
+`queued`, `running`, `integrating` or `escalated`; when none is left send one message per root:
+"api · *root title* integrated (N tasks)", keyed by the root so it never repeats. A `health` signal
+becomes one message that is edited to "recovered" when the signal closes.
+
+Acceptance criteria:
+* A family of three tasks produces one message, after the last one is done, with the count 3; replaying the events produces none.
+* A task with no children produces one message at once.
+* A `health` signal is sent once, and its closing edits the message; the Notice handler failing forwards the original signal (the Router's rule).
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
-* **C Infrastructure basics and review:** retry, quota wait, engine restart, review handler, notice
-  handler.
+* **C Infrastructure basics and review:** tasks C1 to C6 above.
 * **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
   recipes, approval flow, Executor (with the `CommandRunner` adapter and its subprocess exemption in
   `pyproject.toml`), restart handling. `doctor` gets the Reasoner CLI probe (design §3.2) with the
