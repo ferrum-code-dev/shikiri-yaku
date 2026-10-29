@@ -25,6 +25,24 @@ class _Silent(Client):
         raise ShikiruLinkDownError(message)
 
 
+class _Raced:
+    def __init__(self, view: EscalationView, detail: EscalationView | None) -> None:
+        self._view = view
+        self._detail = detail
+
+    async def list_escalations(self) -> list[EscalationView]:
+        return [self._view]
+
+    async def get_escalation(self, escalation_id: str) -> EscalationView | None:
+        assert escalation_id == "E-1"
+        return self._detail
+
+
+def _resolved(view: EscalationView) -> EscalationView:
+    record = view.escalation.model_copy(update={"status": "resolved"})
+    return view.model_copy(update={"escalation": record})
+
+
 @pytest.fixture
 def h() -> Generator[Harness]:
     harness = Harness()
@@ -122,3 +140,41 @@ def test_a_re_shown_copy_takes_the_final_edit_like_the_original(h: Harness) -> N
     edits = JournalFinalEdits(h.database, h.log())
     edits.settle(h.number, "Resolved in Shikiri: Keep existing behavior")
     assert copy in {edit.message_ref for edit in edits.to_edit()}
+
+
+@pytest.mark.parametrize("copy_first", [False, True])
+def test_an_approval_left_approved_by_a_crash_is_shown_again_and_issues_once(
+    h: Harness, *, copy_first: bool
+) -> None:
+    h.handle(data="a:1:4")
+    [original] = _deliver(h)
+    (op,) = h.ops.non_final()
+    # keep: a crash after the approval and before the issue leaves the op APPROVED
+    approved = h.log().approve_resolve(op.id, h.number, NOW)
+    assert approved
+    _open(h)
+    assert [stored.purpose for stored in h.messages.unconfirmed()] == [
+        Purpose.QUESTION,
+        Purpose.APPROVAL,
+    ]
+    assert h.client.calls == []
+    _, copy = _deliver(h)
+    first, second = (copy, original) if copy_first else (original, copy)
+    h.handle(update=701, ref=first, data="a:1:4")
+    h.handle(update=702, ref=second, data="a:1:4")
+    assert h.client.calls == [("E-1", "cancel", None)]
+    assert [stored.id for stored in h.ops.non_final()] == [op.id]
+
+
+def test_a_question_listed_open_but_resolved_on_its_detail_is_not_shown(h: Harness) -> None:
+    h.clients["api"] = cast("ShikiruClient", _Raced(h.client.view, _resolved(h.client.view)))
+    _open(h)
+    assert h.outbox.pending() == []
+
+
+def test_a_question_missing_on_its_detail_fetch_is_not_shown_and_sends_no_notice(
+    h: Harness,
+) -> None:
+    h.clients["api"] = cast("ShikiruClient", _Raced(h.client.view, None))
+    _open(h)
+    assert h.outbox.pending() == []

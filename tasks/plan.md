@@ -472,12 +472,15 @@ A13c, which is independent and reads the journal only. One part per change, each
 `uv run poe check`. Part status is kept here, not in `tasks/todo.md`; the A13 line there is ticked
 only when all three parts pass. `docs/design.md` stays unchanged.
 
-Status: A13a done (43a975b). A13b done (gate green, not pushed). A13c not started.
+Status: A13a done (43a975b). A13b done after its consultation 06 follow-up (gate green, not pushed).
+A13c not started.
 
 Size: A13a (43a975b) is 459 changed lines including tests (443 added, 16 deleted), over the ~300
 target. Consultation 04 accepted it as a one-time size exception; the commit is not rewritten. A13b
-is 463 changed lines against an estimate of 330 to 360, also above the target. It went ahead as one
-change because the estimate, made before editing, was over the target but not substantially so.
+(7ffef86) is 481 changed lines including trackers (455 added, 26 deleted), about 463 excluding tracker
+edits, against an estimate of 330 to 360 and the ~300 target. It is the second size exception, recorded
+by consultation 06; the commit is not rewritten. The ~300-line limit still applies to later changes.
+The follow-up that corrects 7ffef86 is a separate commit and is under that limit.
 
 Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
 for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.
@@ -505,7 +508,10 @@ Acceptance:
 
 ### A13b. /open (normal)
 
-Status: done (gate green; the acceptance criteria below are covered by tests/unit/test_open.py).
+Status: done after the consultation 06 follow-up (gate green, not pushed). The follow-up corrects two
+defects of 7ffef86: an approval confirmed but not yet issued (op APPROVED) was not shown again by
+`/open`, and a question was shown from a detail that was resolved or missing. The acceptance criteria
+below are covered by tests/unit/test_open.py.
 
 `/open` shows the open escalations (Shikiru's `list_escalations`) and the pending approvals (journal),
 with their buttons again. Each copy is tied to its signal and, for an approval, its original op. A

@@ -803,14 +803,14 @@ class ReconcileLog(Protocol):
 
 
 class Reshower(Protocol):
-    """Shows a signal's question again as a new message, once per key."""
+    """Shows a signal's question again as a new message, once per key, while Shikiru has it open."""
 
     async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
 class PendingApproval:
-    """An accept or cancel the PO has not confirmed yet; `kind` is the resolution it would issue."""
+    """An accept or cancel not issued yet, intended or approved; `kind` is what it would issue."""
 
     op_id: int
     number: int
@@ -827,5 +827,5 @@ class OpenLog(Protocol):
         ...
 
     def pending_approvals(self) -> list[PendingApproval]:
-        """Return the accept and cancel ops still intended, oldest first."""
+        """Return the accept and cancel ops intended or approved but not issued, oldest first."""
         ...

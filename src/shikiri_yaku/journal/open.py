@@ -31,9 +31,9 @@ class JournalOpen:
         rows = self._database.connection.execute(
             """
             SELECT id, payload FROM ops
-            WHERE kind = 'resolve' AND state = ? AND payload IS NOT NULL ORDER BY id
+            WHERE kind = 'resolve' AND state IN (?, ?) AND payload IS NOT NULL ORDER BY id
             """,
-            (OpState.INTENDED,),
+            (OpState.INTENDED, OpState.APPROVED),
         ).fetchall()
         found: list[PendingApproval] = []
         for row in rows:

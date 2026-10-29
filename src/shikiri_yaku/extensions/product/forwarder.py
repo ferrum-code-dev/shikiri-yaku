@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.extensions.product.message import escalation_message, information_message
+from shikiri_yaku.ports import EscalationStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -38,16 +39,30 @@ class ProductForwarder:
         self._destinations = tuple(destinations)
 
     async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
-        await self._show(number, signal, note, suggestion, key=f"forward:{number}")
+        view = await self._view(signal)
+        self._show(number, signal, view, note, suggestion, key=f"forward:{number}")
 
     async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
-        """Queue the signal's message again as a new one, once per key."""
-        await self._show(number, signal, note, "", key=key)
+        """Queue the signal's question again as a new message, once per key, if still open.
 
-    async def _show(
-        self, number: int, signal: Signal, note: str, suggestion: str, *, key: str
-    ) -> None:
+        The view that is checked is the one rendered. A missing or closed view queues nothing,
+        because the list that named the escalation was read before this fetch.
+        """
         view = await self._view(signal)
+        if view is None or view.escalation.status != EscalationStatus.OPEN:
+            return
+        self._show(number, signal, view, note, "", key=key)
+
+    def _show(
+        self,
+        number: int,
+        signal: Signal,
+        view: EscalationView | None,
+        note: str,
+        suggestion: str,
+        *,
+        key: str,
+    ) -> None:
         if view is None:
             purpose = Purpose.NOTICE
             message = information_message(
