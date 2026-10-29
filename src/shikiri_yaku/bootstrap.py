@@ -282,6 +282,7 @@ def shikiru_client(
         runner=ProcessCommandRunner(),
         start_argv=[SHIKIRU_EXECUTABLE, "--project", str(component.path), "start"],
         start_timeout_s=operator.link_start_timeout_s,
+        doctor_argv=[SHIKIRU_EXECUTABLE, "--project", str(component.path), "--json", "doctor"],
     )
 
 

@@ -57,6 +57,8 @@ __all__ = [
     "Copies",
     "Destinations",
     "DispatchLog",
+    "DoctorCheck",
+    "DoctorReport",
     "EngineStatus",
     "EscalationRecord",
     "EscalationResolution",
@@ -253,6 +255,16 @@ class TaskDetail(_ShikiruPayload):
     task: ShikiruTask
 
 
+class DoctorCheck(_ShikiruPayload):
+    name: str
+    ok: bool
+    detail: str
+
+
+class DoctorReport(_ShikiruPayload):
+    checks: list[DoctorCheck]
+
+
 class ShikiruClient(Protocol):
     """One project's Shikiru, reached through its MCP link (design §11).
 
@@ -286,6 +298,14 @@ class ShikiruClient(Protocol):
         Raises ShikiruRejectedError when the command exits nonzero and CommandError when it
         cannot be run to its end.
         """
+
+    async def doctor(self) -> list[DoctorCheck]:
+        """Return the checks that did not pass; an empty list when all of them passed.
+
+        `shikiru doctor` exits nonzero when a check fails, so only a missing report is an error:
+        ShikiruProtocolError. CommandError when the command cannot be run to its end.
+        """
+        ...
 
 
 class EventJournal(Protocol):

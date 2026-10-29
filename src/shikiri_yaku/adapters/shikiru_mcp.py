@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from shikiri_yaku.ports import (
     Ack,
     AckStatus,
+    DoctorCheck,
+    DoctorReport,
     EngineStatus,
     EscalationView,
     ShikiruError,
@@ -87,12 +89,14 @@ class ShikiruMcpClient:
         runner: CommandRunner,
         start_argv: Sequence[str],
         start_timeout_s: float,
+        doctor_argv: Sequence[str],
     ) -> None:
         self._connect = connect
         self._clock = clock
         self._runner = runner
         self._start_argv = list(start_argv)
         self._start_timeout_s = start_timeout_s
+        self._doctor_argv = list(doctor_argv)
         self._backoff_initial_s = backoff_initial_s
         self._backoff_max_s = backoff_max_s
         self._call_timeout_s = call_timeout_s
@@ -159,6 +163,17 @@ class ShikiruMcpClient:
         result = await self._runner.run(self._start_argv, timeout_s=self._start_timeout_s)
         if result.returncode != 0:
             raise ShikiruRejectedError(result.stderr.strip() or result.stdout.strip())
+
+    async def doctor(self) -> list[DoctorCheck]:
+        # keep: doctor exits nonzero when a check fails, so its report is read whatever the code
+        result = await self._runner.run(self._doctor_argv, timeout_s=self._call_timeout_s)
+        try:
+            report = DoctorReport.model_validate_json(result.stdout)
+        except ValidationError as error:
+            detail = result.stderr.strip() or result.stdout.strip() or "no output"
+            message = f"shikiru doctor printed no readable report: {detail}"
+            raise ShikiruProtocolError(message) from error
+        return [check for check in report.checks if not check.ok]
 
     async def _call[M: BaseModel](
         self,

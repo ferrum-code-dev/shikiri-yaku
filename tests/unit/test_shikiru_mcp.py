@@ -20,6 +20,7 @@ from shikiri_yaku.ports import (
     AckStatus,
     CommandError,
     CommandResult,
+    DoctorCheck,
     ShikiruLinkDownError,
     ShikiruProtocolError,
     ShikiruRejectedError,
@@ -114,6 +115,7 @@ class FakeRunner:
 _START_ARGV: Final = ["shikiru", "--project", "/work/api", "start"]
 _START_TIMEOUT_S: Final = 120
 _STARTED: Final = CommandResult(returncode=0, stdout="started", stderr="")
+_DOCTOR_ARGV: Final = ["shikiru", "--project", "/work/api", "--json", "doctor"]
 
 
 def _client(
@@ -128,6 +130,7 @@ def _client(
         runner=runner or FakeRunner(_STARTED),
         start_argv=_START_ARGV,
         start_timeout_s=_START_TIMEOUT_S,
+        doctor_argv=_DOCTOR_ARGV,
     )
 
 
@@ -494,6 +497,46 @@ def test_start_engine_runs_the_stored_argument_list() -> None:
 
     _run(FakeSession(), scenario, runner)
     assert runner.calls == [(_START_ARGV, _START_TIMEOUT_S)]
+
+
+_DOCTOR_REPORT: Final = json.dumps(
+    {
+        "ok": False,
+        "checks": [
+            {"name": "tmux", "ok": True, "detail": "session found"},
+            {"name": "agent_cli", "ok": False, "detail": "claude not on PATH"},
+        ],
+    }
+)
+
+
+def test_doctor_returns_only_the_checks_that_failed() -> None:
+    runner = FakeRunner(CommandResult(returncode=1, stdout=_DOCTOR_REPORT, stderr=""))
+    found: list[DoctorCheck] = []
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        found.extend(await client.doctor())
+
+    _run(FakeSession(), scenario, runner)
+    assert [(check.name, check.detail) for check in found] == [("agent_cli", "claude not on PATH")]
+    assert runner.calls == [(_DOCTOR_ARGV, _CALL_TIMEOUT_S)]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        CommandResult(returncode=3, stdout="", stderr="Project state is missing"),
+        CommandResult(returncode=0, stdout=json.dumps({"ok": True}), stderr=""),
+    ],
+)
+def test_doctor_output_without_a_report_is_a_protocol_error(result: CommandResult) -> None:
+    runner = FakeRunner(result)
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        with pytest.raises(ShikiruProtocolError):
+            await client.doctor()
+
+    _run(FakeSession(), scenario, runner)
 
 
 @pytest.mark.parametrize("missing", ["result", "message"])

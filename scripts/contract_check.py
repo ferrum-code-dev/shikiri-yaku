@@ -134,6 +134,7 @@ async def _check(wrapper: Path, project: Path) -> None:
         runner=runner,
         start_argv=[str(wrapper), "--project", str(project), "start"],
         start_timeout_s=COMMAND_TIMEOUT_S,
+        doctor_argv=[str(wrapper), "--project", str(project), "--json", "doctor"],
     )
     supervisor = asyncio.create_task(client.supervise())
     try:
