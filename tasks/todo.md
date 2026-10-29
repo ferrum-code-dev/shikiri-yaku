@@ -54,6 +54,6 @@ merged and `uv run poe check` passes.
 - [x] C3. Engine restart
 - [x] C4. Review handler
 - [x] C5. Review closing
-- [ ] C6. Notice handler
+- [x] C6. Notice handler
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening

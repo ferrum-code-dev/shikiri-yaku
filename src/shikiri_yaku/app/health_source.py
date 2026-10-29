@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.signal import Closing, Kind, Signal
 
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 LINK_SCOPE = "link"
 EVENTS_SCOPE = "events"
 LIVENESS_SCOPE = "liveness"
+RECOVERED_LINE: Final = "Recovered"
 OUTAGE_ID_FORMAT = "%Y-%m-%dT%H:%MZ"
 SOURCE_ID_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
@@ -55,9 +56,10 @@ class HealthSource:
 
     def link_recovered(self) -> None:
         if self._reachable is not True:
-            self._journal.close(
-                Closing(self._project, kind=Kind.HEALTH, reason=LINK_SCOPE), self._clock.now()
+            closing = Closing(
+                self._project, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE
             )
+            self._journal.close(closing, self._clock.now())
         self._reachable = True
         self._since = None
 
@@ -73,7 +75,9 @@ class HealthSource:
 
     def source_recovered(self, scope: str) -> None:
         if scope not in self._working:
-            closing = Closing(self._project, kind=Kind.HEALTH, reason=scope)
+            closing = Closing(
+                self._project, kind=Kind.HEALTH, reason=scope, final_line=RECOVERED_LINE
+            )
             self._journal.close(closing, self._clock.now())
             self._working.add(scope)
         self._failing.discard(scope)

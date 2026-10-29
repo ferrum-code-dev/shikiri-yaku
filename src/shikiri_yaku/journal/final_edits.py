@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC
 from typing import TYPE_CHECKING
 
@@ -17,10 +18,13 @@ if TYPE_CHECKING:
 _BODY = TypeAdapter(Message)
 _SEPARATOR = "\n\n"
 # keep: any copy with buttons ends too, so a review message is finished like a question
+# keep: a copy without buttons ends when its notice key starts with a prefix the caller names
 _SHOWS_BUTTONS = """
     direction = :out AND delivery = :sent
     AND refusal IS NULL AND final_body IS NULL AND body IS NOT NULL
-    AND json_array_length(json_extract(body, '$.buttons')) > 0
+    AND (json_array_length(json_extract(body, '$.buttons')) > 0 OR EXISTS (
+        SELECT 1 FROM json_each(:endings) AS ending
+        WHERE substr(messages.notice_key, 1, length(ending.value)) = ending.value))
 """
 
 
@@ -31,12 +35,23 @@ class JournalFinalEdits:
     may be processed after it, and is answered from the journal as "Already resolved".
     """
 
-    def __init__(self, database: Database, replies: JournalReplies) -> None:
+    def __init__(
+        self,
+        database: Database,
+        replies: JournalReplies,
+        *,
+        ending_prefixes: tuple[str, ...] = (),
+    ) -> None:
         self._database = database
         self._replies = replies
+        self._endings = ending_prefixes
 
     def _arguments(self) -> dict[str, str]:
-        return {"out": Direction.OUT, "sent": Delivery.SENT}
+        return {
+            "out": Direction.OUT,
+            "sent": Delivery.SENT,
+            "endings": json.dumps(self._endings),
+        }
 
     def unsettled(self) -> list[tuple[int, str]]:
         rows = self._database.connection.execute(

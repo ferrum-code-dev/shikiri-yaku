@@ -53,6 +53,8 @@ from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
+from shikiri_yaku.extensions.notice.extension import notice_extension
+from shikiri_yaku.extensions.notice.handler import HEALTH_KEY as HEALTH_NOTICE_KEY
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
@@ -116,6 +118,7 @@ SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
 REMINDED_KINDS: Final = frozenset({Kind.PR_REVIEW})
 SILENCING_PREFIXES: Final = (f"{REVIEW_NOTICE_KEY}:",)
+ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_NOTICE_KEY}:",)
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -306,7 +309,8 @@ def registered_extensions(
     review = review_extension(
         clients, numbers, outbox, clock, product=product, destinations=destinations
     )
-    return [infrastructure, review, product_extension()]
+    notice = notice_extension(clients, numbers, outbox, notifier, clock, destinations=destinations)
+    return [infrastructure, review, notice, product_extension()]
 
 
 def shikiru_client(
@@ -509,7 +513,7 @@ def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock
     signals = SignalStore(journal)
     replies = JournalReplies(journal, signals, OpStore(journal))
     editor = CopyEditor(
-        JournalFinalEdits(journal, replies),
+        JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
         channel,
         clock,
         interval_s=settings.operator.inbound_interval_s,
