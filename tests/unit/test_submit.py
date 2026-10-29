@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.app.submit import Submitter
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.ops import OpStore
 from shikiri_yaku.journal.submits import JournalSubmits
@@ -23,13 +24,18 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from shikiri_yaku.ports import Clock, ShikiruClient
+    from shikiri_yaku.ports import Clock, ShikiruClient, SubmitOp
 
 NOW: Final = datetime(2026, 10, 28, tzinfo=UTC)
-PAYLOAD: Final = SubmitPayload(component="api", request="Add the export")
+PAYLOAD: Final = SubmitPayload(
+    component="api", request="Add the export", destination=Destination("telegram", "1001")
+)
 UPDATE: Final = 41
 NEXT_UPDATE: Final = 42
 LAST_UPDATE: Final = 43
+TAP: Final = 50
+OTHER_TAP: Final = 51
+MISSING: Final = 999
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 QUEUED: Final = Ack(id=7, status=AckStatus.QUEUED, result={"task_id": "T-9"}, message=None)
 NO_TASK: Final = Ack(id=7, status=AckStatus.DONE, result=None, message=None)
@@ -147,3 +153,56 @@ def test_unfinished_lists_only_the_ops_without_a_final_outcome(
     client.answer = ShikiruRejectedError("no such component")
     asyncio.run(submitter.submit(LAST_UPDATE, PAYLOAD))
     assert [op.status for op in log.unfinished()] == [SubmitStatus.ISSUED]
+
+
+def _unknown(submitter: Submitter, client: _Client) -> SubmitOp:
+    client.answer = ShikiruLinkDownError("link down")
+    prompt = asyncio.run(submitter.submit(UPDATE, PAYLOAD))
+    client.answer = DONE
+    return prompt
+
+
+def test_a_tap_replaces_an_unknown_goal_once_and_a_duplicate_delivery_gets_that_replacement(
+    submitter: Submitter, client: _Client, log: JournalSubmits
+) -> None:
+    prompt = _unknown(submitter, client)
+    first = asyncio.run(submitter.retry(prompt.id, TAP))
+    second = asyncio.run(submitter.retry(prompt.id, TAP))
+    assert first is not None
+    assert (first.status, first.task_id) == (SubmitStatus.CONFIRMED, "T-9")
+    assert second == first == log.get(first.id)
+    assert client.requests == [PAYLOAD.request] * 2
+    original = log.get(prompt.id)
+    assert original is not None
+    assert original.status == SubmitStatus.UNKNOWN
+    assert log.unfinished() == []
+
+
+def test_a_second_tap_from_another_update_does_not_replace_a_consumed_prompt(
+    submitter: Submitter, client: _Client
+) -> None:
+    prompt = _unknown(submitter, client)
+    asyncio.run(submitter.retry(prompt.id, TAP))
+    assert asyncio.run(submitter.retry(prompt.id, OTHER_TAP)) is None
+    assert client.requests == [PAYLOAD.request] * 2
+
+
+def test_a_tap_that_names_no_unknown_goal_replaces_nothing(
+    submitter: Submitter, client: _Client
+) -> None:
+    confirmed = asyncio.run(submitter.submit(UPDATE, PAYLOAD))
+    assert asyncio.run(submitter.retry(confirmed.id, TAP)) is None
+    assert asyncio.run(submitter.retry(MISSING, TAP)) is None
+    assert client.requests == [PAYLOAD.request]
+
+
+def test_a_replacement_intended_before_a_crash_is_sent_once_by_the_replayed_tap(
+    submitter: Submitter, client: _Client, log: JournalSubmits
+) -> None:
+    prompt = _unknown(submitter, client)
+    log.retry(prompt.id, TAP, NOW)
+    assert [op.status for op in log.unfinished()] == [SubmitStatus.INTENDED]
+    replayed = asyncio.run(submitter.retry(prompt.id, TAP))
+    assert replayed is not None
+    assert replayed.status == SubmitStatus.CONFIRMED
+    assert client.requests == [PAYLOAD.request] * 2

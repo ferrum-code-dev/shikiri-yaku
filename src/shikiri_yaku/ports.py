@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from shikiri_yaku.domain.classification import Classifier
+from shikiri_yaku.domain.schedule import Destination  # noqa: TC001 -- pydantic reads it at runtime
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause
     from shikiri_yaku.domain.outbound import Purpose
-    from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
+    from shikiri_yaku.domain.schedule import Awaiting, Parked
     from shikiri_yaku.domain.signal import (
         Closing,
         Kind,
@@ -834,11 +835,17 @@ class SubmitStatus:
 
 
 class SubmitPayload(BaseModel):
-    """What a submit op sends: the component whose Shikiru takes it, and the request (§7)."""
+    """What a submit op sends: the component whose Shikiru takes it, and the request (§7).
+
+    `destination` is the chat the outcome is reported in. `retry_of` is the unknown submit that a
+    replacement consumed; it is None for a goal the PO sent.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     component: str
     request: str
+    destination: Destination
+    retry_of: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -876,8 +883,19 @@ class SubmitLog(Protocol):
         """Mark an issued op unknown: it may have reached Shikiru, so it is never sent again."""
         ...
 
+    def retry(self, prompt_id: int, update_id: int, now: datetime) -> SubmitOp | None:
+        """Consume an unknown submit and journal its replacement under the tap's update id.
+
+        The prompt keeps its unknown outcome. A replayed tap gets the replacement it made; None
+        when the prompt is not unknown or another tap consumed it first.
+        """
+        ...
+
     def unfinished(self) -> list[SubmitOp]:
-        """Return the submit ops that are neither confirmed nor failed, oldest first."""
+        """Return the submit ops that are neither confirmed nor failed, oldest first.
+
+        An unknown op that a retry consumed is left out: its replacement carries the question.
+        """
         ...
 
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.journal.database import JournalError, stamp
 from shikiri_yaku.journal.ops import NewOp, OpState
-from shikiri_yaku.ports import SubmitOp, SubmitPayload
+from shikiri_yaku.ports import SubmitOp, SubmitPayload, SubmitStatus
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -28,7 +28,7 @@ class JournalSubmits:
     def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
         inserted = self._ops.intend(
             NewOp(
-                identity=f"telegram:submit:{update_id}",
+                identity=_identity(update_id),
                 kind=_KIND,
                 project=payload.component,
                 payload=payload.model_dump_json(),
@@ -57,8 +57,34 @@ class JournalSubmits:
     def uncertain(self, op_id: int, now: datetime) -> None:
         self._move(op_id, OpState.ISSUED, OpState.UNKNOWN, now)
 
+    def retry(self, prompt_id: int, update_id: int, now: datetime) -> SubmitOp | None:
+        """Consume the prompt and intend its replacement, in one transaction with the check.
+
+        The check and the intent are one transaction, so two taps cannot both consume a prompt.
+        A replay finds the replacement its tap intended, because the identity is the tap's.
+        """
+        identity = _identity(update_id)
+        with self._database.transaction():
+            taken_by = self._taken_by(prompt_id)
+            if taken_by is not None and taken_by != identity:
+                return None
+            prompt = self.get(prompt_id)
+            if prompt is None or prompt.status != SubmitStatus.UNKNOWN:
+                return None
+            payload = prompt.payload.model_copy(update={"retry_of": prompt_id})
+            return self.intend(update_id, payload, now)
+
     def unfinished(self) -> list[SubmitOp]:
-        return [_submit_op(op) for op in self._ops.non_final() if op.kind == _KIND]
+        ops = [_submit_op(op) for op in self._ops.non_final() if op.kind == _KIND]
+        return [op for op in ops if self._taken_by(op.id) is None]
+
+    def _taken_by(self, prompt_id: int) -> str | None:
+        """Return the identity of the replacement that consumed the prompt, or None."""
+        row = self._database.connection.execute(
+            "SELECT identity FROM ops WHERE kind = ? AND json_extract(payload, '$.retry_of') = ?",
+            (_KIND, prompt_id),
+        ).fetchone()
+        return None if row is None else row["identity"]
 
     def _move(
         self,
@@ -89,6 +115,10 @@ class JournalSubmits:
             },
         ).rowcount
         return moved == 1
+
+
+def _identity(update_id: int) -> str:
+    return f"telegram:submit:{update_id}"
 
 
 def _submit_op(op: StoredOp) -> SubmitOp:

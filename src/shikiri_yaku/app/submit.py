@@ -18,8 +18,9 @@ class Submitter:
     """Submits a goal once per update id and returns the op as the journal now holds it.
 
     The op is journaled before the call and claimed before it is made. An op that an earlier
-    attempt issued may have reached Shikiru, so it becomes unknown and is never sent again. The
-    caller submits one update at a time, so no two calls race for the same claim.
+    attempt issued may have reached Shikiru, so it becomes unknown and is never sent again. A
+    retry replaces an unknown goal only when the PO taps *Submit again*. The caller submits one
+    update at a time, so no two calls race for the same claim.
     """
 
     def __init__(
@@ -36,7 +37,19 @@ class Submitter:
         """Return the op for the update id; `payload.component` must name a client."""
         client = self._clients[payload.component]
         now = self._clock.now()
-        op = self._log.intend(update_id, payload, now)
+        return await self._advance(client, self._log.intend(update_id, payload, now), now)
+
+    async def retry(self, prompt_id: int, update_id: int) -> SubmitOp | None:
+        """Return the replacement of an unknown goal, or None when the tap may not retry it."""
+        now = self._clock.now()
+        op = self._log.retry(prompt_id, update_id, now)
+        if op is None:
+            return None
+        # keep: a component dropped from the settings leaves its replacement intended, unsent
+        client = self._clients.get(op.payload.component)
+        return op if client is None else await self._advance(client, op, now)
+
+    async def _advance(self, client: ShikiruClient, op: SubmitOp, now: datetime) -> SubmitOp:
         if op.status == SubmitStatus.ISSUED:
             self._log.uncertain(op.id, now)
             return replace(op, status=SubmitStatus.UNKNOWN)
