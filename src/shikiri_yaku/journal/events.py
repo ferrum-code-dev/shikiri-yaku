@@ -79,6 +79,7 @@ def _stored_signal(change: Signal) -> NewSignal:
         text=change.text,
         task_id=change.task_id,
         escalation_id=change.escalation_id,
+        pull_request=change.pull_request,
     )
 
 

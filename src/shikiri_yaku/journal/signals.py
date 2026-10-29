@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import Kind, PullRequest, Signal
 from shikiri_yaku.journal.database import Inserted, stamp
 
 if TYPE_CHECKING:
@@ -35,6 +35,7 @@ class NewSignal:
     text: str
     task_id: str | None = None
     escalation_id: str | None = None
+    pull_request: PullRequest | None = None
 
 
 type Change = NewSignal | Closing
@@ -58,6 +59,7 @@ class StoredSignal:
     state: SignalState
     notes: str | None
     wake_at: str | None
+    pull_request: PullRequest | None = None
 
     def to_signal(self) -> Signal:
         return Signal(
@@ -68,6 +70,7 @@ class StoredSignal:
             text=self.text,
             task_id=self.task_id,
             escalation_id=self.escalation_id,
+            pull_request=self.pull_request,
         )
 
 
@@ -89,6 +92,9 @@ def _signal(row: sqlite3.Row) -> StoredSignal:
         state=SignalState(row["state"]),
         notes=row["notes"],
         wake_at=row["wake_at"],
+        pull_request=None
+        if row["pr_url"] is None
+        else PullRequest(row["pr_url"], row["pr_commits"]),
     )
 
 
@@ -98,12 +104,13 @@ class SignalStore:
 
     def insert_if_absent(self, signal: NewSignal, now: datetime) -> Inserted:
         """Insert a signal unless its id is known; the signal number is the row id."""
+        pull = signal.pull_request
         with self._database.transaction() as connection:
             created = connection.execute(
                 """
                 INSERT INTO signals (id, project, task_id, escalation_id, kind, reason, text,
-                                     state, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     state, created_at, updated_at, pr_url, pr_commits)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (id) DO NOTHING
                 """,
                 (
@@ -117,6 +124,8 @@ class SignalStore:
                     SignalState.NEW,
                     stamp(now),
                     stamp(now),
+                    None if pull is None else pull.url,
+                    None if pull is None else pull.commits,
                 ),
             ).rowcount
             row = connection.execute("SELECT number FROM signals WHERE id = ?", (signal.id,))

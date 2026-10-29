@@ -19,6 +19,7 @@ Migration 10 marks that edit confirmed without replacing the body: the body keep
 copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
 Migration 11 claims each logical command reply in the same transaction as all of its parts.
 Migration 12 stores Telegram topic threads on outbox rows and records the reconciled topic ids.
+Migration 13 keeps the pull request of a review signal: its link and its commit count (design §4).
 """
 
 from __future__ import annotations
@@ -161,5 +162,9 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         )
         """,
         "CREATE UNIQUE INDEX topics_component ON topics (COALESCE(component, ''))",
+    ),
+    (
+        "ALTER TABLE signals ADD COLUMN pr_url TEXT",
+        "ALTER TABLE signals ADD COLUMN pr_commits INTEGER",
     ),
 )

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, Resolved, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, PullRequest, Resolved, Signal
 from shikiri_yaku.ports import (
     EscalationStatus,
     EscalationView,
@@ -38,6 +38,13 @@ class _ResolvedData(_EscalationId):
 
 class _EscalationData(_EscalationId):
     reason: str
+
+
+class _PullRequestData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    url: str
+    commits: int
 
 
 class _OpenPulls:
@@ -126,9 +133,7 @@ class EventSource:
             for view in views
             if view.escalation.status == EscalationStatus.OPEN
         ]
-        changes.extend(
-            self._signal(event, Kind.PR_REVIEW, event.kind) for event in pulls.still_open()
-        )
+        changes.extend(self._review(event) for event in pulls.still_open())
         clean_stop = (
             lifecycle is not None
             and lifecycle.kind == EventKinds.ENGINE_STOPPED
@@ -166,7 +171,7 @@ class EventSource:
             case EventKinds.TASK_DONE:
                 return [self._signal(event, Kind.TASK_DONE, event.kind), pr_closed]
             case EventKinds.PR_OPENED:
-                return [self._signal(event, Kind.PR_REVIEW, event.kind)]
+                return [self._review(event)]
             case EventKinds.PR_WITHDRAWN:
                 return [pr_closed]
             case _:
@@ -189,13 +194,29 @@ class EventSource:
             changes.append(Closing(self._project, kind=Kind.PR_REVIEW, task_id=event.task_id))
         return changes
 
-    def _signal(self, event: ShikiruEvent, kind: Kind, reason: str) -> Signal:
+    def _review(self, event: ShikiruEvent) -> Signal:
+        data = _event_data(event, _PullRequestData)
+        return self._signal(event, Kind.PR_REVIEW, event.kind, PullRequest(data.url, data.commits))
+
+    def _signal(
+        self,
+        event: ShikiruEvent,
+        kind: Kind,
+        reason: str,
+        pull_request: PullRequest | None = None,
+    ) -> Signal:
         return Signal(
-            self._project, kind, str(event.id), reason, event.message, task_id=event.task_id
+            self._project,
+            kind,
+            str(event.id),
+            reason,
+            event.message,
+            task_id=event.task_id,
+            pull_request=pull_request,
         )
 
 
-def _event_data[T: _EscalationId](event: ShikiruEvent, model: type[T]) -> T:
+def _event_data[T: BaseModel](event: ShikiruEvent, model: type[T]) -> T:
     try:
         return model.model_validate(event.data)
     except ValidationError as error:

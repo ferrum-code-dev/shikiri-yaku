@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from shikiri_yaku.app.event_source import EventSource
+from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -186,9 +187,9 @@ def test_resolved_escalation_and_pr_lifecycle_close_the_matching_signals(
         _raised(1, "E1"),
         _event(2, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
         _event(3, "escalation_resolved", escalation_id="E1", resolution="answer"),
-        _event(4, "pr_opened", task_id="T2"),
+        _event(4, "pr_opened", task_id="T2", url="u2", branch="b2", commits=1),
         _event(5, "pr_withdrawn", task_id="T2"),
-        _event(6, "pr_opened", task_id="T3"),
+        _event(6, "pr_opened", task_id="T3", url="u3", branch="b3", commits=2),
         _event(7, "task_done", task_id="T3"),
     ]
     asyncio.run(source.poll())
@@ -284,6 +285,25 @@ def test_first_sync_keeps_only_the_pull_request_that_is_still_waiting(database: 
         "api:pr_review:1": SignalState.NEW,
         "api:escalation:E1": SignalState.NEW,
     }
+
+
+def test_pr_opened_keeps_its_link_and_commit_count_in_the_journal(database: Database) -> None:
+    client = _FakeClient()
+    client.events = [_event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=3)]
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    stored = SignalStore(database).by_id("api:pr_review:1")
+    assert stored is not None
+    assert stored.to_signal().pull_request == PullRequest("u1", 3)
+
+
+def test_pr_opened_without_its_link_is_a_protocol_error(database: Database) -> None:
+    client = _FakeClient()
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    client.events = [_event(1, "pr_opened", task_id="T1", branch="b1", commits=1)]
+    with pytest.raises(ShikiruProtocolError):
+        asyncio.run(source.poll())
 
 
 def test_restart_and_repeated_first_sync_add_no_second_pr_review_signal(

@@ -20,6 +20,14 @@ class Kind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PullRequest:
+    """The pull request a task opened for review: its link and its commit count (design §4)."""
+
+    url: str
+    commits: int
+
+
+@dataclass(frozen=True, slots=True)
 class Signal:
     """`reason` matters for escalations only; the other kinds are sorted by `kind` (design §5)."""
 
@@ -30,6 +38,7 @@ class Signal:
     text: str
     task_id: str | None = None
     escalation_id: str | None = None
+    pull_request: PullRequest | None = None
 
     @property
     def id(self) -> str:
