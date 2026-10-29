@@ -20,6 +20,7 @@ from shikiri_yaku.journal import (
     JournalActions,
     JournalRetries,
     JournalRouting,
+    JournalStarts,
     JournalWaits,
     NewSignal,
     OpStore,
@@ -142,9 +143,12 @@ def infrastructure(
         retries,
         clock,
         waits=waits,
+        starts=JournalStarts(memory, OpStore(memory), SignalStore(memory)),
         notifier=notifier,
         quota_wait_max=timedelta(hours=24),
         quota_wait_margin=timedelta(minutes=1),
+        restart_confirm=timedelta(seconds=60),
+        restart_poll=timedelta(seconds=5),
     )
 
 
@@ -184,8 +188,7 @@ def test_a_second_retry_of_the_same_task_and_reason_forwards_naming_the_first(
     ("kind", "reason", "named"),
     [
         (Kind.ESCALATION, "engine_error", "engine_error"),
-        (Kind.ENGINE_DOWN, "", "engine_down"),
-        (Kind.ENGINE_FAULT, "", "engine_fault"),
+        (Kind.HEALTH, "", "health"),
     ],
 )
 def test_a_signal_no_action_covers_forwards_naming_it(

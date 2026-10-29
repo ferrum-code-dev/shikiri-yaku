@@ -103,6 +103,7 @@ if TYPE_CHECKING:
         Reshower,
         RetryLog,
         ShikiruClient,
+        StartLog,
         WaitLog,
     )
     from shikiri_yaku.settings import Component, Settings
@@ -198,9 +199,12 @@ def compose(
         retries,
         clock,
         waits=waits,
+        starts=JournalStarts(journal, OpStore(journal), SignalStore(journal)),
         notifier=notifier,
         quota_wait_max=timedelta(hours=infrastructure.quota_wait_max_h),
         quota_wait_margin=timedelta(minutes=infrastructure.quota_wait_margin_min),
+        restart_confirm=timedelta(seconds=infrastructure.restart_confirm_s),
+        restart_poll=timedelta(seconds=infrastructure.restart_poll_s),
     )
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
@@ -254,9 +258,12 @@ def registered_extensions(
     clock: Clock,
     *,
     waits: WaitLog,
+    starts: StartLog,
     notifier: Notifier,
     quota_wait_max: timedelta,
     quota_wait_margin: timedelta,
+    restart_confirm: timedelta,
+    restart_poll: timedelta,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
     infrastructure = infrastructure_extension(
@@ -265,9 +272,12 @@ def registered_extensions(
         retries,
         clock,
         waits=waits,
+        starts=starts,
         notifier=notifier,
         quota_wait_max=quota_wait_max,
         quota_wait_margin=quota_wait_margin,
+        restart_confirm=restart_confirm,
+        restart_poll=restart_poll,
     )
     return [infrastructure, product_extension()]
 

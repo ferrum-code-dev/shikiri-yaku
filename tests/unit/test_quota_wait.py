@@ -17,6 +17,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalActions,
     JournalRetries,
+    JournalStarts,
     JournalWaits,
     NewSignal,
     OpStore,
@@ -86,9 +87,12 @@ class Shop:
             JournalRetries(self.database, ops),
             self.clock,
             waits=JournalWaits(self.database, ops),
+            starts=JournalStarts(self.database, ops, SignalStore(self.database)),
             notifier=journal_notifier(self.outbox, self.clock),
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
+            restart_confirm=timedelta(seconds=60),
+            restart_poll=timedelta(seconds=5),
         )
         return extension.handler
 

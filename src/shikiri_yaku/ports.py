@@ -376,6 +376,8 @@ class Guard(Protocol):
 
     def retry(self, project: str, task_id: str | None, reason: str) -> Granted | Refused: ...
 
+    def restart(self, project: str) -> Granted | Refused: ...
+
 
 class ScheduleLog(Protocol):
     """What the Scheduler reads and writes in the journal (design §6, §9)."""
@@ -978,8 +980,8 @@ class StartLog(Protocol):
         """Find the start already journaled for this signal, if any."""
         ...
 
-    def issue(self, signal: Signal, now: datetime) -> bool:
-        """Journal the start as issued before Shikiru is called; False if the signal has one."""
+    def issue(self, signal: Signal, now: datetime) -> None:
+        """Journal the start as issued before Shikiru is called; a start already journaled stays."""
         ...
 
     def confirm(self, signal: Signal, now: datetime) -> None:

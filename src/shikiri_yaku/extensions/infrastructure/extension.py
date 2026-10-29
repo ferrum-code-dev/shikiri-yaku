@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.extensions.infrastructure.handler import InfrastructureHandler
+from shikiri_yaku.extensions.infrastructure.restart import RestartAction
 from shikiri_yaku.extensions.infrastructure.retry import RetryAction
 from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE, INFRASTRUCTURE_RULE
 from shikiri_yaku.extensions.infrastructure.wait import WaitAction
@@ -14,7 +15,15 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import timedelta
 
-    from shikiri_yaku.ports import Clock, Guard, Notifier, RetryLog, ShikiruClient, WaitLog
+    from shikiri_yaku.ports import (
+        Clock,
+        Guard,
+        Notifier,
+        RetryLog,
+        ShikiruClient,
+        StartLog,
+        WaitLog,
+    )
 
 
 def infrastructure_extension(
@@ -24,9 +33,12 @@ def infrastructure_extension(
     clock: Clock,
     *,
     waits: WaitLog,
+    starts: StartLog,
     notifier: Notifier,
     quota_wait_max: timedelta,
     quota_wait_margin: timedelta,
+    restart_confirm: timedelta,
+    restart_poll: timedelta,
 ) -> Extension:
     """Return the infrastructure category; it is registered before the product catch-all."""
     retry = RetryAction(clients, guard, retries, clock)
@@ -39,7 +51,16 @@ def infrastructure_extension(
         max_wait=quota_wait_max,
         margin=quota_wait_margin,
     )
-    actions = (retry, wait)
+    restart = RestartAction(
+        clients,
+        guard,
+        starts,
+        notifier=notifier,
+        clock=clock,
+        confirm_within=restart_confirm,
+        poll=restart_poll,
+    )
+    actions = (retry, wait, restart)
     return Extension(
         INFRASTRUCTURE, (INFRASTRUCTURE_RULE,), InfrastructureHandler(actions), actions
     )

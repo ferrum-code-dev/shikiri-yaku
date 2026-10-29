@@ -55,6 +55,7 @@ QUOTA_WAIT_MARGIN_MIN: Final = 1
 RETRY_BUDGET_PER_DAY: Final = 1
 RESTART_BUDGET_PER_HOUR: Final = 1
 RESTART_CONFIRM_S: Final = 60
+RESTART_POLL_S: Final = 5
 APPROVAL_EXPIRY_H: Final = 24
 
 REMINDER_FIRST_H: Final = 4
@@ -161,6 +162,7 @@ class InfrastructureSettings(_FrozenModel):
     retry_budget_per_day: PositiveInt = RETRY_BUDGET_PER_DAY
     restart_budget_per_hour: PositiveInt = RESTART_BUDGET_PER_HOUR
     restart_confirm_s: PositiveInt = RESTART_CONFIRM_S
+    restart_poll_s: PositiveInt = RESTART_POLL_S
     approval_expiry_h: PositiveInt = APPROVAL_EXPIRY_H
 
 

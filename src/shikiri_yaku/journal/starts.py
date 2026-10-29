@@ -33,8 +33,8 @@ class JournalStarts:
         ).fetchone()
         return None if row is None else StartAttempt(row["state"])
 
-    def issue(self, signal: Signal, now: datetime) -> bool:
-        inserted = self._ops.intend(
+    def issue(self, signal: Signal, now: datetime) -> None:
+        self._ops.intend(
             NewOp(
                 identity=_identity(signal),
                 kind=_KIND,
@@ -45,7 +45,6 @@ class JournalStarts:
             ),
             now,
         )
-        return inserted.is_new
 
     def confirm(self, signal: Signal, now: datetime) -> None:
         self._move(signal, OpState.CONFIRMED, now)

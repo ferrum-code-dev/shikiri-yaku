@@ -27,6 +27,7 @@ from shikiri_yaku.journal import (
     JournalOutbox,
     JournalRetries,
     JournalRouting,
+    JournalStarts,
     JournalWaits,
     MessageStore,
     NewSignal,
@@ -154,9 +155,12 @@ class World:
             retries,
             self.clock,
             waits=waits,
+            starts=JournalStarts(self.database, self.ops, self.signals),
             notifier=notifier,
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
+            restart_confirm=timedelta(seconds=60),
+            restart_poll=timedelta(seconds=5),
         )
         extensions = [self.infrastructure, product_extension()]
         self.classifier = RuleClassifier(extensions)
