@@ -602,6 +602,18 @@ Acceptance:
 * A duplicate update id submits once.
 * Crash-point test: a goal with an unconfirmed op is not resubmitted at restart and produces the question.
 
+Split (consultation 02, about 300 lines each):
+* **A14a, durable submission core, not wired to `/goal`.** The submit payload, the `SubmitLog`
+  port and its SQLite implementation, and `Submitter`. The op is journaled and claimed before
+  `submit_task`, identified by `telegram:submit:<update_id>`. A task id (queued included) confirms,
+  a rejection fails, and an issued op with no stored outcome is unknown and never sent again.
+  Tests: duplicate update ids, acknowledgement persistence, a crash after the call.
+* **A14b, PO interaction and composition.** `/goal <component> <text>` parsing, usage and help;
+  the saved task id through the outbox; the *Submit again* button (`s:<journal ref>`, validated
+  against the stored originating message, a new submit only for its own tap update); startup
+  reconciliation of unfinished submit ops before the sources start. Replay reuses the stored
+  outcome. The two acceptance points above are tested in A14b.
+
 ## Phase B: topics
 
 Design §7 and §13 "Telegram topics". Only the destination function and a start-up reconcile change;

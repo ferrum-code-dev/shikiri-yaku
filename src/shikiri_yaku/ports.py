@@ -91,6 +91,10 @@ __all__ = [
     "ShikiruTask",
     "SignalLog",
     "StatsLog",
+    "SubmitLog",
+    "SubmitOp",
+    "SubmitPayload",
+    "SubmitStatus",
     "TaskDetail",
     "TaskStatus",
     "Unsettled",
@@ -816,6 +820,64 @@ class ReconcileLog(Protocol):
 
     def fail(self, op_id: int, now: datetime) -> bool:
         """Fail an issued op and make its signal answerable again; False if it moved already."""
+        ...
+
+
+class SubmitStatus:
+    """States of a submit op (design §9, §10.1), as text: ports cannot import the journal's enum."""
+
+    INTENDED: Final = "intended"
+    ISSUED: Final = "issued"
+    CONFIRMED: Final = "confirmed"
+    FAILED: Final = "failed"
+    UNKNOWN: Final = "unknown"
+
+
+class SubmitPayload(BaseModel):
+    """What a submit op sends: the component whose Shikiru takes it, and the request (§7)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    component: str
+    request: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitOp:
+    """A submit op as the journal keeps it; `task_id` is set once Shikiru has acknowledged it."""
+
+    id: int
+    payload: SubmitPayload
+    status: str
+    task_id: str | None
+
+
+class SubmitLog(Protocol):
+    """Submit ops in the journal (design §7, §9). A submit is sent only from an intended op."""
+
+    def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
+        """Journal the submit once per Telegram update id, and return the op as stored."""
+        ...
+
+    def get(self, op_id: int) -> SubmitOp | None: ...
+
+    def claim(self, op_id: int, now: datetime) -> bool:
+        """Move an intended op to issued before the call; exactly one caller wins."""
+        ...
+
+    def confirm(self, op_id: int, ack: Ack, now: datetime) -> None:
+        """Confirm an issued op with the acknowledgement that carries its task id."""
+        ...
+
+    def fail(self, op_id: int, now: datetime) -> None:
+        """Fail an issued op that Shikiru rejected."""
+        ...
+
+    def uncertain(self, op_id: int, now: datetime) -> None:
+        """Mark an issued op unknown: it may have reached Shikiru, so it is never sent again."""
+        ...
+
+    def unfinished(self) -> list[SubmitOp]:
+        """Return the submit ops that are neither confirmed nor failed, oldest first."""
         ...
 
 
