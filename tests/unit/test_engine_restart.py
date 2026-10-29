@@ -109,14 +109,30 @@ class RestartClient:
         return self.checks
 
 
+class LostNotice:
+    """A notifier whose process dies before the notice reaches the outbox."""
+
+    def tell(self, signal: Signal, text: str, key: str) -> None:
+        del signal, text, key
+        raise CrashError
+
+
 class World:
     """One process's services over one journal; a second World on the same journal is a restart."""
 
-    def __init__(self, database: Database, client: RestartClient, clock: StepClock) -> None:
+    def __init__(
+        self,
+        database: Database,
+        client: RestartClient,
+        clock: StepClock,
+        *,
+        lose_notice: bool = False,
+    ) -> None:
         ops = OpStore(database)
         self.starts = JournalStarts(database, ops, SignalStore(database))
         self.outbox = journal_outbox(database)
         guard = LoopGuard(JournalActions(ops), clock, 1, 1)
+        notifier = LostNotice() if lose_notice else journal_notifier(self.outbox, clock)
         extension = infrastructure_extension(
             {"api": cast("ShikiruClient", client)},
             guard,
@@ -124,7 +140,7 @@ class World:
             clock,
             waits=JournalWaits(database, ops),
             starts=self.starts,
-            notifier=journal_notifier(self.outbox, clock),
+            notifier=notifier,
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
             restart_confirm=CONFIRM_WITHIN,
@@ -357,6 +373,35 @@ def test_an_engine_error_with_the_engine_down_restarts_then_is_given_back(
     assert isinstance(world.handle(signal), Resolved)
 
     assert client.starts == 1
+    assert client.resolved == [("E1", "retry")]
+
+
+@pytest.mark.parametrize(
+    ("crash_after_command", "lose_notice"),
+    [(True, False), (False, True)],
+    ids=["after_command", "before_notice"],
+)
+def test_an_engine_error_crash_after_the_start_still_announces_the_restart_once(
+    database: Database,
+    client: RestartClient,
+    clock: StepClock,
+    *,
+    crash_after_command: bool,
+    lose_notice: bool,
+) -> None:
+    signal = journal_escalation(database, ENGINE_ERROR, "E1")
+    client.crash_after_command = crash_after_command
+    with pytest.raises(CrashError):
+        World(database, client, clock, lose_notice=lose_notice).handle(signal)
+
+    client.crash_after_command = False
+    recover(database, client, clock)
+    second = World(database, client, clock)
+
+    assert isinstance(second.handle(signal), Resolved)
+    assert isinstance(second.handle(signal), Resolved)
+    assert client.starts == 1
+    assert len(second.outbox.pending()) == 1
     assert client.resolved == [("E1", "retry")]
 
 

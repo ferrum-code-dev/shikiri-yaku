@@ -61,7 +61,7 @@ def infrastructure_extension(
         confirm_within=restart_confirm,
         poll=restart_poll,
     )
-    engine_error = EngineErrorAction(clients, restart, retry)
+    engine_error = EngineErrorAction(clients, restart, retry, starts)
     actions = (retry, wait, restart, engine_error)
     return Extension(
         INFRASTRUCTURE, (INFRASTRUCTURE_RULE,), InfrastructureHandler(actions), actions
