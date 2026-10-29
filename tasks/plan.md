@@ -472,8 +472,9 @@ A13c, which is independent and reads the journal only. One part per change, each
 `uv run poe check`. Part status is kept here, not in `tasks/todo.md`; the A13 line there is ticked
 only when all three parts pass. `docs/design.md` stays unchanged.
 
-Status: A13a done (43a975b). A13b done after its consultation 06 follow-up (gate green, not pushed).
-A13c not started.
+Status: A13a done (43a975b). A13b done after its consultation 06 follow-up (0561921). A13c implemented
+and gated (not pushed), but it is over the size limit, with no exception granted. A13 therefore stays
+unchecked in `tasks/todo.md` until the PO accepts A13c at its size or approves a split.
 
 Size: A13a (43a975b) is 459 changed lines including tests (443 added, 16 deleted), over the ~300
 target. Consultation 04 accepted it as a one-time size exception; the commit is not rewritten. A13b
@@ -481,6 +482,11 @@ target. Consultation 04 accepted it as a one-time size exception; the commit is 
 edits, against an estimate of 330 to 360 and the ~300 target. It is the second size exception, recorded
 by consultation 06; the commit is not rewritten. The ~300-line limit still applies to later changes.
 The follow-up that corrects 7ffef86 is a separate commit and is under that limit.
+A13c (its commit) is 487 changed lines including trackers (472 added, 15 deleted): 464 are code and
+tests, 23 are tracker edits. The pre-edit estimate of 330 was too low. That is about 60% over the
+~300 limit of consultation 08, which does not grant another exception. The options are to accept it
+as a third exception, or to split it. A split would not shrink it much: the journal query, the measures
+and their tests form about 380 lines, and the CLI wiring about 75.
 
 Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
 for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.
@@ -528,13 +534,18 @@ Acceptance:
 
 ### A13c. Stats command (normal)
 
+Status: implemented and gated (not pushed); the size is an open decision (see A13, Size). The acceptance
+criteria below are covered by tests/unit/test_stats.py.
+
 `shikiri-yaku stats <product>` reads the journal only, reached through the composition root (`cli.py`
 cannot import the journal). It starts no service job and touches no live Shikiru, Telegram or token file.
 SQL stays in `journal/`. It prints four sections:
-1. PO wait time, as labelled proxies. Lifetime: created to updated time of escalation signals in closed
-   or resolved state. Queue time: the earliest outbound question or approval, which is not proof the PO
-   received it. Unfinished signals are excluded; the share is summed queue time over summed lifetime,
-   and unavailable without a denominator.
+1. PO wait time, as labelled proxies. Each completed escalation (resolved or closed) gives a lifetime
+   proxy, its created to updated time; unfinished signals are excluded. Its queue time is the earliest
+   outbound question or approval, so copies and re-shows add no sample, and it is not proof the PO
+   received it. Waiting is the final observed time minus that queue time, zero when nothing was queued.
+   The share is the sum of the waiting times over the sum of the lifetimes, unavailable when that sum
+   is not positive. It is not a mean of percentages.
 2. Handled without the PO, per category: resolved signals with no outbound question or approval. Closed
    is not counted, since it includes external resolutions and cleanup. Zero until a handler returns
    Resolved (Phase C); action attribution is unavailable until actions are recorded.

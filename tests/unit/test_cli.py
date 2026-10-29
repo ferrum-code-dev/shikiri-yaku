@@ -21,7 +21,7 @@ from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
-from shikiri_yaku.bootstrap import compose, main
+from shikiri_yaku.bootstrap import compose, main, stats_report
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
@@ -182,7 +182,7 @@ def _run_doctor(
     home: Path, link: Callable[[], Any] = _answering_link, bot: BotFactory = _accepting_bot
 ) -> int:
     composed = partial(compose, link=lambda _executable, _project: link, bot=bot)
-    return cli.main(["doctor", _PRODUCT, "--home", str(home)], composed)
+    return cli.main(["doctor", _PRODUCT, "--home", str(home)], composed, stats_report)
 
 
 def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -270,7 +270,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
         bot=_accepting_bot,
     )
 
-    assert cli.main(["doctor", _PRODUCT, "--home", str(tmp_path)], composed) == 1
+    assert cli.main(["doctor", _PRODUCT, "--home", str(tmp_path)], composed, stats_report) == 1
     assert _failed(capsys.readouterr().out) == {"link api", "link web"}
 
 
@@ -301,7 +301,7 @@ def _exit_with(argv: list[str]) -> None:
     composed = partial(
         compose, link=lambda _executable, _project: _answering_link, bot=_accepting_bot
     )
-    sys.exit(cli.main(argv, composed))
+    sys.exit(cli.main(argv, composed, stats_report))
 
 
 def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path: Path) -> None:
@@ -390,7 +390,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) 
         bot=_accepting_bot,
     )
 
-    assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed) == 0
+    assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed, stats_report) == 0
 
     stopper.join()
     database = Database.open(journal_file)

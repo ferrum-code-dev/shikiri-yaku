@@ -51,6 +51,7 @@ class Lifecycle(Protocol):
 
 type Job = Callable[[], Coroutine[Any, Any, None]]
 type Compose = Callable[[Settings, Path], Lifecycle]
+type Report = Callable[[Path], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,8 +63,8 @@ class _Check:
     status: str = "ok"
 
 
-def main(argv: Sequence[str] | None, compose: Compose) -> int:
-    """Run one command. The caller passes the composition, so this module builds nothing."""
+def main(argv: Sequence[str] | None, compose: Compose, report: Report) -> int:
+    """Run one command. The caller supplies the composition and report; it builds nothing."""
     parser = argparse.ArgumentParser(prog=_PROGRAM)
     parser.add_argument("--version", action="version", version=f"%(prog)s {version(_PROGRAM)}")
     commands = parser.add_subparsers(required=True)
@@ -76,6 +77,9 @@ def main(argv: Sequence[str] | None, compose: Compose) -> int:
     install = commands.add_parser("install-service", help="write the service unit of one product")
     _add_product(install)
     install.set_defaults(command=_install_service)
+    stats = commands.add_parser("stats", help="print the figures of one product's journal")
+    _add_product(stats)
+    stats.set_defaults(command=partial(_stats, report=report))
     arguments = parser.parse_args(argv)
     return arguments.command(arguments)
 
@@ -217,6 +221,16 @@ def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     except (ShikiruError, ChannelError) as error:
         return str(error) or type(error).__name__
     return None
+
+
+def _stats(arguments: argparse.Namespace, report: Report) -> int:
+    try:
+        text = report(instance_dir(arguments.product, arguments.home))
+    except CompositionError as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
+    sys.stdout.write(text)
+    return 0
 
 
 def _install_service(arguments: argparse.Namespace) -> int:

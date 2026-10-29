@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, PositiveInt
 from shikiri_yaku.domain.classification import Classifier
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from shikiri_yaku.domain.classification import Assessment, Classification
     from shikiri_yaku.domain.inbound import Batch, Inbound
@@ -50,6 +50,7 @@ __all__ = [
     "CommandError",
     "CommandResult",
     "CommandRunner",
+    "CompletedEscalation",
     "CompositionError",
     "Copies",
     "DispatchLog",
@@ -89,6 +90,7 @@ __all__ = [
     "ShikiruRejectedError",
     "ShikiruTask",
     "SignalLog",
+    "StatsLog",
     "TaskDetail",
     "TaskStatus",
     "Unsettled",
@@ -829,3 +831,29 @@ class OpenLog(Protocol):
     def pending_approvals(self) -> list[PendingApproval]:
         """Return the accept and cancel ops intended or approved but not issued, oldest first."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class CompletedEscalation:
+    """An escalation signal that reached resolved or closed, with the journal's own times.
+
+    `first_queued_at` is its earliest outbound question or approval, or None if none was recorded.
+    """
+
+    created_at: datetime
+    final_at: datetime
+    first_queued_at: datetime | None
+
+
+class StatsLog(Protocol):
+    """What `stats` reads of the journal (design §15).
+
+    Counts are per category, reason, verdict or current op state; a None category or verdict is an
+    absent one. The states are not outcomes.
+    """
+
+    def completed_escalations(self) -> list[CompletedEscalation]: ...
+    def handled_without_po(self) -> Mapping[str | None, int]: ...
+    def escalation_reasons(self) -> Mapping[str, int]: ...
+    def escalation_verdicts(self) -> Mapping[str | None, int]: ...
+    def install_states(self) -> Mapping[str, int]: ...

@@ -35,6 +35,7 @@ from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
+from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
@@ -60,6 +61,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
+from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.ports import CompositionError
 
 if TYPE_CHECKING:
@@ -371,7 +373,23 @@ def reconcile_job(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
-    return cli.main(argv, compose)
+    return cli.main(argv, compose, stats_report)
+
+
+def stats_report(directory: Path) -> str:
+    """Return the figures of one instance's journal, which must exist; nothing else is composed."""
+    path = directory / JOURNAL_FILE_NAME
+    if not path.exists():
+        message = f"no journal at {path}"
+        raise CompositionError(message)
+    try:
+        journal = Database.open(path)
+    except JournalError as error:
+        raise CompositionError(str(error)) from error
+    try:
+        return Stats(JournalStats(journal)).report()
+    finally:
+        journal.close()
 
 
 def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
