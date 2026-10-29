@@ -109,6 +109,21 @@ class _Outbox:
         del number, now
         self.queued.append((purpose, tuple(destinations), message, key))
 
+    def command_reply_queued(self, key: str) -> bool:
+        del key
+        return False
+
+    def queue_command_reply(
+        self,
+        destinations: Sequence[Destination],
+        parts: Sequence[Message],
+        *,
+        key: str,
+        now: datetime,
+    ) -> None:
+        del destinations, parts, key, now
+        raise NotImplementedError
+
     def pending(self) -> list[Pending]:
         raise NotImplementedError
 

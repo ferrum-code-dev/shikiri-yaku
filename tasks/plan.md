@@ -497,12 +497,24 @@ Telegram message (/status with many components, the /open unreachable notice wit
 as one Message, and TelegramChannel refused it with TEXT_TOO_LONG, so the PO received only a refusal. Each
 reply is now queued in parts of at most MESSAGE_TEXT_LIMIT, keyed `<key>:<index>` (`app/command_reply.py`,
 `split_reply` in `domain/outbound.py`). The whole reply is screened before it is cut; a refused reply is
-queued whole, so the existing refusal path notices the PO. A replay of the same update queues no part
-again. If the state grew between a delivery and its replay, the replay queues only the new trailing parts.
+queued whole, so the existing refusal path notices the PO. A journaled logical-reply claim and all
+parts commit in one transaction. A replay checks that claim before rendering `/status` again, so a
+changed live state cannot append parts to the stored response; an interruption during insertion rolls
+back the claim and every part together. The extra `command_replies` table stores only those claims; the
+message parts remain in `messages` for delivery and restart recovery.
 Regression: `tests/unit/test_command_parts.py` runs the real journal, outbox, sender and TelegramChannel
 over FakeBotApi on an in-memory journal. FakeBotApi now numbers each sent message, since every part needs
 its own platform message id. Size: 304 changed lines (289 added, 15 deleted) including the regression and
 the new module, counted from `git diff` and the new files, at the ~300 target and before this note.
+
+Correction after verdict 14-verify-i2: the first multipart version could append parts from a newly
+rendered status when the same update was replayed after state changed. The journal now records a logical
+reply claim with all bounded parts atomically; a replay after the queue commits but before inbound
+handling completes drains the original stored parts. A failure partway through insertion leaves no
+claim or partial rows. Regression tests reconstruct the command stack over the same journal after live
+status changes and interrupt while enumerating the second part. This uses a small auxiliary journal table not
+enumerated in design §9; it records the command idempotency needed to preserve the existing durable
+outbox behavior without storing another copy of the reply text.
 
 Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
 for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.

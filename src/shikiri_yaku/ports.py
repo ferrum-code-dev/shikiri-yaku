@@ -525,6 +525,21 @@ class Outbox(Protocol):
         """Record the message once per key and destination; a key seen before records nothing."""
         ...
 
+    def command_reply_queued(self, key: str) -> bool:
+        """Return whether this logical command reply and all of its parts were journaled."""
+        ...
+
+    def queue_command_reply(
+        self,
+        destinations: Sequence[Destination],
+        parts: Sequence[Message],
+        *,
+        key: str,
+        now: datetime,
+    ) -> None:
+        """Journal a command reply claim and every bounded part atomically, once per update."""
+        ...
+
     def pending(self) -> list[Pending]: ...
 
     def confirm(self, message_id: int, message_ref: str) -> None: ...

@@ -7,8 +7,9 @@ API, on an in-memory journal. Nothing reaches the network.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final, Self, cast
+from typing import TYPE_CHECKING, Final, Self, cast, overload
 
 import pytest
 
@@ -31,19 +32,40 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.open import JournalOpen
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, EngineStatus, ShikiruLinkDownError
+from shikiri_yaku.ports import (
+    MESSAGE_TEXT_LIMIT,
+    EngineStatus,
+    Message,
+    ShikiruLinkDownError,
+)
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from shikiri_yaku.ports import EscalationView, ShikiruClient, ShikiruTask
 
 NOW = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
 COMPONENTS: Final = 60
 TOKEN: Final = SECRETS["telegram_bot_token"]
+
+
+class _InterruptedParts(Sequence[Message]):
+    def __len__(self) -> int:
+        return 2
+
+    @overload
+    def __getitem__(self, index: int) -> Message: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[Message]: ...
+
+    def __getitem__(self, index: int | slice) -> Message | Sequence[Message]:
+        if isinstance(index, slice):
+            return [Message("alpha"), Message("beta")][index]
+        if index == 0:
+            return Message("alpha")
+        raise KeyboardInterrupt
 
 
 class _Clock:
@@ -62,8 +84,13 @@ class _Reporter:
 class _Client:
     """A Shikiru client whose engine is up, with no tasks and no escalations."""
 
+    def __init__(self) -> None:
+        self.engine_up = True
+        self.status_calls = 0
+
     async def status(self) -> EngineStatus:
-        return EngineStatus(engine_up=True, quotas={})
+        self.status_calls += 1
+        return EngineStatus(engine_up=self.engine_up, quotas={})
 
     async def list_tasks(self, _statuses: Sequence[str] | None = None) -> list[ShikiruTask]:
         return []
@@ -89,18 +116,29 @@ class _Stack:
     """The journal, outbox and sender, with the real Telegram Channel over the fake Bot API."""
 
     def __init__(self, client: type[_Client]) -> None:
-        clients = {name: cast("ShikiruClient", client()) for name in _names()}
+        self.raw_clients = {name: client() for name in _names()}
+        self.clients = {
+            name: cast("ShikiruClient", instance) for name, instance in self.raw_clients.items()
+        }
         self.database = Database.open(":memory:")
-        self.outbox = JournalOutbox(self.database, MessageStore(self.database, _Reporter()))
+        self.messages = MessageStore(self.database, _Reporter())
+        self.outbox = JournalOutbox(self.database, self.messages)
         self.bot = FakeBotApi()
+        signals = SignalStore(self.database)
+        self.signals = signals
+        self.sources = JournalSources(CursorStore(self.database, signals), signals)
+        self.status: Status
+        self.rebuild_commands()
+
+    def rebuild_commands(self) -> None:
+        self.outbox = JournalOutbox(self.database, self.messages)
         channel = TelegramChannel(self.bot, _Clock(), self.outbox)
         self.sender = OutboxSender(self.outbox, channel, _Clock(), interval_s=1)
-        signals = SignalStore(self.database)
-        self.status = Status(clients, JournalSources(CursorStore(self.database, signals), signals))
-        reshower = ProductForwarder("product", clients, self.outbox, _Clock(), [OWNER])
+        self.status = Status(self.clients, self.sources)
+        reshower = ProductForwarder("product", self.clients, self.outbox, _Clock(), [OWNER])
         opened = OpenCommand(
-            JournalOpen(self.database, signals),
-            clients,
+            JournalOpen(self.database, self.signals),
+            self.clients,
             reshower,
             self.outbox,
             _Clock(),
@@ -169,6 +207,60 @@ def test_replaying_an_update_queues_no_part_again(text: str, client: type[_Clien
     assert len(first) > 1
     assert queued_again == []
     assert sent_again == first
+
+
+def test_replay_after_live_status_changes_reuses_the_committed_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _Stack(_Client) as stack:
+        queue_group = stack.outbox.queue_command_reply
+
+        def interrupt_after_commit(
+            destinations: Sequence[Destination],
+            parts: Sequence[Message],
+            *,
+            key: str,
+            now: datetime,
+        ) -> None:
+            queue_group(destinations, parts, key=key, now=now)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(stack.outbox, "queue_command_reply", interrupt_after_commit)
+        with pytest.raises(KeyboardInterrupt):
+            stack.command("/status")
+        first_pending = stack.outbox.pending()
+        first_parts = [pending.message.text for pending in first_pending]
+        calls = [client.status_calls for client in stack.raw_clients.values()]
+
+        for client in stack.raw_clients.values():
+            client.engine_up = False
+        stack.rebuild_commands()
+        stack.command("/status")
+        queued = stack.outbox.pending()
+        stack.deliver()
+        sent = stack.sent()
+
+    assert len(first_parts) > 1
+    assert [client.status_calls for client in stack.raw_clients.values()] == calls
+    assert queued == first_pending
+    assert sent == first_parts
+
+
+def test_interruption_during_part_insertion_rolls_back_the_group() -> None:
+    key = "command:701"
+    with _Stack(_Client) as stack:
+        with pytest.raises(KeyboardInterrupt):
+            stack.outbox.queue_command_reply([OWNER], _InterruptedParts(), key=key, now=NOW)
+        assert not stack.outbox.command_reply_queued(key)
+        assert stack.outbox.pending() == []
+
+        stack.outbox.queue_command_reply(
+            [OWNER], [Message("alpha"), Message("beta")], key=key, now=NOW
+        )
+        stack.deliver()
+        sent = stack.sent()
+
+    assert sent == ["alpha", "beta"]
 
 
 def test_a_secret_that_a_cut_would_split_is_refused_whole_and_no_part_of_it_is_sent() -> None:

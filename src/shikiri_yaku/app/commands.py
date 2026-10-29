@@ -50,11 +50,14 @@ class Commands:
         if command == _OPEN:
             await self._open.handle(item)
             return
+        key = f"{_KEY_PREFIX}{item.update_id}"
+        if self._outbox.command_reply_queued(key):
+            return
         text = await self._status.report() if command == _STATUS else _HELP
         queue_command_reply(
             self._outbox,
             [Destination(self._channel, str(item.sender))],
             text,
-            key=f"{_KEY_PREFIX}{item.update_id}",
+            key=key,
             now=self._clock.now(),
         )

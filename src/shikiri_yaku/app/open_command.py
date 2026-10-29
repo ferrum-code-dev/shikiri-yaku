@@ -58,6 +58,9 @@ class OpenCommand:
         self._channel = channel
 
     async def handle(self, item: Inbound) -> None:
+        unreachable_key = f"open:{item.update_id}:unreachable"
+        if self._outbox.command_reply_queued(unreachable_key):
+            return
         listed, unreachable = await self._listed()
         for number, signal in self._log.forwarded():
             if (signal.project, signal.escalation_id) in listed:
@@ -82,7 +85,7 @@ class OpenCommand:
                 self._outbox,
                 [Destination(self._channel, str(item.sender))],
                 f"Shikiru did not answer for {', '.join(unreachable)}.",
-                key=f"open:{item.update_id}:unreachable",
+                key=unreachable_key,
                 now=self._clock.now(),
             )
 

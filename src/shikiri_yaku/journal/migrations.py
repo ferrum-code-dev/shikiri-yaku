@@ -17,6 +17,7 @@ Migration 9 keeps the final body of a sent copy whose edit is journaled and not 
 restart finishes the edit (design §7).
 Migration 10 marks that edit confirmed without replacing the body: the body keeps the buttons the
 copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
+Migration 11 claims each logical command reply in the same transaction as all of its parts.
 """
 
 from __future__ import annotations
@@ -143,4 +144,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE messages ADD COLUMN final_body TEXT",),
     ("ALTER TABLE messages ADD COLUMN final_edited INTEGER NOT NULL DEFAULT 0",),
     ("ALTER TABLE signals ADD COLUMN final_line TEXT",),
+    ("CREATE TABLE command_replies (reply_key TEXT PRIMARY KEY)",),
 )

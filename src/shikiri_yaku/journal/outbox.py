@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import Pending
 
@@ -9,7 +10,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.messages import MessageStore
     from shikiri_yaku.ports import Message
@@ -48,6 +48,39 @@ class JournalOutbox:
                     notice_key=key,
                     now=now,
                 )
+
+    def command_reply_queued(self, key: str) -> bool:
+        row = self._database.connection.execute(
+            "SELECT 1 FROM command_replies WHERE reply_key = ?", (key,)
+        ).fetchone()
+        return row is not None
+
+    def queue_command_reply(
+        self,
+        destinations: Sequence[Destination],
+        parts: Sequence[Message],
+        *,
+        key: str,
+        now: datetime,
+    ) -> None:
+        with self._database.transaction() as connection:
+            created = connection.execute(
+                "INSERT INTO command_replies (reply_key) VALUES (?) ON CONFLICT DO NOTHING",
+                (key,),
+            )
+            if created.rowcount != 1:
+                return
+            for index, part in enumerate(parts):
+                for where in destinations:
+                    self._messages.record_outbound(
+                        signal_number=None,
+                        channel=where.channel,
+                        chat=where.chat,
+                        purpose=Purpose.NOTICE,
+                        body=part,
+                        notice_key=f"{key}:{index}",
+                        now=now,
+                    )
 
     def pending(self) -> list[Pending]:
         return [

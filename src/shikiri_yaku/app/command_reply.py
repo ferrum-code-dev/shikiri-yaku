@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import Purpose, split_reply
+from shikiri_yaku.domain.outbound import split_reply
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Message
 
@@ -24,19 +24,14 @@ def queue_command_reply(
     key: str,
     now: datetime,
 ) -> None:
-    """Queue the reply in parts, each under the reply's key and its index.
+    """Queue the reply as one journaled group of parts, each under its key and index.
 
     The whole reply is screened before it is cut, so a secret cannot pass the check by straddling
     a cut. A refused reply is queued whole, so the outbox refuses it and notices the PO as it does
-    any other refusal. A repeated update finds each part's key already queued and queues nothing.
+    any other refusal. The group claim and every part are one transaction, so a replay uses the
+    complete stored response even if the live status has since changed.
     """
+    if outbox.command_reply_queued(key):
+        return
     parts = [text] if secret_form([text]) is not None else split_reply(text, MESSAGE_TEXT_LIMIT)
-    for index, part in enumerate(parts):
-        outbox.queue(
-            None,
-            Purpose.NOTICE,
-            destinations,
-            Message(part),
-            key=f"{key}:{index}",
-            now=now,
-        )
+    outbox.queue_command_reply(destinations, [Message(part) for part in parts], key=key, now=now)
