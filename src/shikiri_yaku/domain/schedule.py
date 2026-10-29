@@ -25,6 +25,7 @@ class Parked:
 class Destination:
     channel: str
     chat: str
+    thread: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

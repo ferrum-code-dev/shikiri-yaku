@@ -65,6 +65,7 @@ from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
+from shikiri_yaku.journal.topics import GENERAL_TOPIC, TOPIC_OPEN, TopicStore
 from shikiri_yaku.ports import CompositionError
 
 if TYPE_CHECKING:
@@ -146,10 +147,10 @@ def compose(
         for job in project_jobs(settings, component, clients[component.name], journal, clock)
     ]
     outbox = JournalOutbox(journal, MessageStore(journal, reporter))
+    topics = TopicStore(journal)
+    destinations = partial(signal_destinations, settings, topics)
     extensions = registered_extensions()
-    forwarder = ProductForwarder(
-        settings.product, clients, outbox, clock, _owner_destinations(settings)
-    )
+    forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
         settings,
         journal,
@@ -173,6 +174,7 @@ def compose(
             reshower=forwarder,
             bot_api=bot_api,
             goal=goal,
+            destinations=destinations,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -295,6 +297,7 @@ def inbound_job(
     reshower: Reshower,
     bot_api: BotApi,
     goal: GoalCommand,
+    destinations: Callable[[str, Kind], Sequence[Destination]],
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -315,7 +318,7 @@ def inbound_job(
         reshower,
         outbox,
         clock,
-        destinations=_owner_destinations(settings),
+        destinations=destinations,
         channel=TELEGRAM_CHANNEL,
     )
     commands = Commands(
@@ -430,3 +433,19 @@ def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
 def _owner_destinations(settings: Settings) -> list[Destination]:
     """Return the private chat of each owner, where a forwarded signal goes (design §7)."""
     return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in settings.telegram.owners]
+
+
+def signal_destinations(
+    settings: Settings, topics: TopicStore, project: str, kind: Kind
+) -> list[Destination]:
+    """Choose the private owner chats or the forum topic for a signal (design §7)."""
+    group = settings.telegram.group_id
+    if group is None:
+        return _owner_destinations(settings)
+    component = project if kind == Kind.ESCALATION else None
+    topic = topics.get(component)
+    if topic is None or topic.state != TOPIC_OPEN:
+        name = GENERAL_TOPIC if component is None else component
+        message = f"Telegram topic '{name}' is not open"
+        raise CompositionError(message)
+    return [Destination(TELEGRAM_CHANNEL, str(group), topic.thread_id)]

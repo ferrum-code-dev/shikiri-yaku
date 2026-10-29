@@ -56,7 +56,7 @@ class JournalReplies:
             Purpose(row["purpose"]),
             _BODY.validate_json(row["body"]),
             row["notice_key"],
-            Destination(row["channel"], row["chat"]),
+            Destination(row["channel"], row["chat"], row["thread"]),
         )
 
     def sent_message(self, destination: Destination, message_ref: str) -> Message | None:

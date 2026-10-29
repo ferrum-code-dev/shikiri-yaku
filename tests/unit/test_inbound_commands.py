@@ -83,14 +83,16 @@ class Harness:
 
     def replies(self) -> Replies:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
-        reshower = ProductForwarder("product", self.clients, self.outbox, _Clock(), [OWNER])
+        reshower = ProductForwarder(
+            "product", self.clients, self.outbox, _Clock(), lambda _project, _kind: [OWNER]
+        )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
             self.clients,
             reshower,
             self.outbox,
             _Clock(),
-            destinations=[OWNER],
+            destinations=lambda _project, _kind: [OWNER],
             channel="telegram",
         )
         goal = goal_command(self.database, self.clients, self.outbox, _Clock())

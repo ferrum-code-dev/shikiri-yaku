@@ -141,14 +141,16 @@ class Harness:
     def commands(self, at: datetime) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources)
-        reshower = ProductForwarder("product", self.clients, self.outbox, Clock(at), [OWNER])
+        reshower = ProductForwarder(
+            "product", self.clients, self.outbox, Clock(at), lambda _project, _kind: [OWNER]
+        )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
             self.clients,
             reshower,
             self.outbox,
             Clock(at),
-            destinations=[OWNER],
+            destinations=lambda _project, _kind: [OWNER],
             channel="telegram",
         )
         goal = goal_command(self.database, self.clients, self.outbox, Clock(at))
@@ -338,7 +340,7 @@ def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
 
 
 class EditChannel:
-    async def send(self, destination: str, message: Message) -> str:
+    async def send(self, destination: Destination, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:

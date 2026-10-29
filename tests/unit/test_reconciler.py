@@ -81,7 +81,11 @@ class _World:
     def reconciler(self) -> ResolveReconciler:
         h = self.h
         forwarder = ProductForwarder(
-            "shop", h.clients, h.outbox, self.clock, [Destination("telegram", "1001")]
+            "shop",
+            h.clients,
+            h.outbox,
+            self.clock,
+            lambda _project, _kind: [Destination("telegram", "1001")],
         )
         return ResolveReconciler(
             JournalReconcile(h.database, h.signals, h.ops),

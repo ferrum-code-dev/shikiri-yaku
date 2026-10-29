@@ -46,6 +46,7 @@ class StoredMessage:
     signal_number: int | None
     channel: str
     chat: str
+    thread: int | None
     platform_message_id: str | None
     purpose: Purpose | None
     delivery: Delivery
@@ -59,6 +60,7 @@ def _message(row: sqlite3.Row) -> StoredMessage:
         signal_number=row["signal_number"],
         channel=row["channel"],
         chat=row["chat"],
+        thread=row["thread"],
         platform_message_id=row["platform_message_id"],
         purpose=None if row["purpose"] is None else Purpose(row["purpose"]),
         delivery=Delivery(row["delivery"]),
@@ -82,6 +84,7 @@ class MessageStore:
         signal_number: int | None,
         channel: str,
         chat: str,
+        thread: int | None = None,
         purpose: Purpose,
         body: Message,
         notice_key: str | None,
@@ -98,6 +101,7 @@ class MessageStore:
                 signal_number=signal_number,
                 channel=channel,
                 chat=chat,
+                thread=thread,
                 purpose=purpose,
                 notice_key=notice_key,
                 now=now,
@@ -109,6 +113,7 @@ class MessageStore:
                     signal_number=signal_number,
                     channel=channel,
                     chat=chat,
+                    thread=thread,
                     refused_id=inserted.row_id,
                     reason=form,
                     now=now,
@@ -121,6 +126,7 @@ class MessageStore:
         signal_number: int | None,
         channel: str,
         chat: str,
+        thread: int | None,
         purpose: Purpose,
         notice_key: str | None,
         now: datetime,
@@ -132,16 +138,19 @@ class MessageStore:
         delivery = Delivery.PENDING if refusal is None else Delivery.REFUSED
         created = connection.execute(
             """
-            INSERT INTO messages (signal_number, direction, channel, chat, purpose, notice_key,
-                                  delivery, body, refusal, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (notice_key, channel, chat) DO NOTHING
+            INSERT INTO messages (
+                signal_number, direction, channel, chat, thread, purpose, notice_key,
+                delivery, body, refusal, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (notice_key, channel, chat, COALESCE(thread, -1)) DO NOTHING
             """,
             (
                 signal_number,
                 Direction.OUT,
                 channel,
                 chat,
+                thread,
                 purpose,
                 notice_key,
                 delivery,
@@ -153,8 +162,11 @@ class MessageStore:
         if created.rowcount == 1:
             return Inserted(created.lastrowid or 0, is_new=True)
         row = connection.execute(
-            "SELECT id FROM messages WHERE notice_key = ? AND channel = ? AND chat = ?",
-            (notice_key, channel, chat),
+            """
+            SELECT id FROM messages
+            WHERE notice_key = ? AND channel = ? AND chat = ? AND thread IS ?
+            """,
+            (notice_key, channel, chat, thread),
         ).fetchone()
         return Inserted(row["id"], is_new=False)
 
@@ -164,6 +176,7 @@ class MessageStore:
         signal_number: int | None,
         channel: str,
         chat: str,
+        thread: int | None,
         refused_id: int,
         reason: str,
         now: datetime,
@@ -179,6 +192,7 @@ class MessageStore:
                 signal_number=signal_number,
                 channel=channel,
                 chat=chat,
+                thread=thread,
                 purpose=Purpose.NOTICE,
                 notice_key=f"{REFUSAL_KEY_PREFIX}{refused_id}",
                 now=now,
@@ -201,6 +215,7 @@ class MessageStore:
             signal_number=row["signal_number"],
             channel=row["channel"],
             chat=row["chat"],
+            thread=row["thread"],
             refused_id=row["id"],
             reason=reason,
             now=now,
@@ -218,7 +233,7 @@ class MessageStore:
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT id, signal_number, channel, chat, notice_key FROM messages
+                SELECT id, signal_number, channel, chat, thread, notice_key FROM messages
                 WHERE id = ? AND delivery = ?
                 """,
                 (message_id, Delivery.PENDING),
@@ -248,7 +263,7 @@ class MessageStore:
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT id, signal_number, channel, chat, notice_key FROM messages
+                SELECT id, signal_number, channel, chat, thread, notice_key FROM messages
                 WHERE platform_message_id = ? AND direction = ? AND delivery = ?
                 """,
                 (message_ref, Direction.OUT, Delivery.SENT),

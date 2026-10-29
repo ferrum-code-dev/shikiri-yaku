@@ -45,7 +45,7 @@ merged and `uv run poe check` passes.
 
 ## Later
 
-- [ ] B1. Destinations with topics
+- [x] B1. Destinations with topics
 - [ ] B2. Topic reconcile at start-up
 - [ ] B3. Inbound in topics
 - [ ] Phase C: Infrastructure basics and review

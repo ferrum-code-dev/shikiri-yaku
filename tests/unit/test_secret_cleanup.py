@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
+    from shikiri_yaku.domain.schedule import Destination
+
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
 OWNER: Final = 1001
@@ -47,7 +49,7 @@ class _Channel:
         self.deleted: list[str] = []
         self.states: list[str] = []
 
-    async def send(self, destination: str, message: Message) -> str:
+    async def send(self, destination: Destination, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:

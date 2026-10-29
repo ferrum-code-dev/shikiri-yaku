@@ -212,6 +212,17 @@ def test_a_minimal_file_gets_the_same_defaults_as_the_sample(tmp_path: Path) -> 
     assert minimal.reasoner is None
 
 
+def test_telegram_group_id_is_optional_and_accepts_a_forum_group_id(tmp_path: Path) -> None:
+    config = _MINIMAL.replace(
+        _TELEGRAM,
+        "[channels.telegram]\ngroup_id = -1001234567890\nowners = [123456789]\n",
+    )
+
+    settings = load_settings(_write(tmp_path, config))
+
+    assert settings.telegram.group_id == -1001234567890
+
+
 @pytest.mark.parametrize(("config", "expected"), _REJECTED)
 def test_a_broken_file_is_rejected_with_the_key_at_fault(
     tmp_path: Path, config: str, expected: tuple[str, ...]

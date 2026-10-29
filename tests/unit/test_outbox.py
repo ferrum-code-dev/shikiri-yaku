@@ -51,12 +51,12 @@ class _Clock:
 
 class _Channel:
     def __init__(self) -> None:
-        self.sent: list[tuple[str, Message]] = []
+        self.sent: list[tuple[Destination, Message]] = []
         self.failing = False
         self.refusal: str | None = None
         self.attempts = 0
 
-    async def send(self, destination: str, message: Message) -> str:
+    async def send(self, destination: Destination, message: Message) -> str:
         self.attempts += 1
         if self.refusal is not None:
             raise ChannelRefusedError(self.refusal)
@@ -133,14 +133,15 @@ def _stored_values(database: Database) -> list[object]:
 def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_confirmed(
     memory: Database,
 ) -> None:
+    topic = Destination("telegram", "-1009", 73)
     number = _signal(memory)
-    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    _outbox(memory).queue(number, Purpose.QUESTION, [topic], QUESTION, key="forward:1", now=START)
     channel = _Channel()
 
     asyncio.run(_sender(memory, channel).tick())
     asyncio.run(_sender(memory, channel).tick())
 
-    assert channel.sent == [("1001", QUESTION)]
+    assert channel.sent == [(topic, QUESTION)]
     assert _outbox(memory).pending() == []
 
 
@@ -206,7 +207,9 @@ def test_a_message_the_platform_refuses_for_good_is_never_offered_again_and_the_
 def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database) -> None:
     number = _signal(memory, Kind.PR_REVIEW)
     clock = _Clock()
-    forwarder = ProductForwarder("Shop", {}, _outbox(memory), clock, [OWNER])
+    forwarder = ProductForwarder(
+        "Shop", {}, _outbox(memory), clock, lambda _project, _kind: [OWNER]
+    )
     signal = Signal("api", Kind.PR_REVIEW, "7", "review_ready", "A review is ready.")
     asyncio.run(forwarder.forward(number, signal, "note", ""))
     channel = _Channel()
@@ -272,7 +275,7 @@ def test_a_refused_message_gets_one_notice_in_each_chat_it_was_queued_for(memory
 
     asyncio.run(_sender(memory, channel).tick())
 
-    assert [destination for destination, _ in channel.sent] == ["1001", "1002"]
+    assert [destination for destination, _ in channel.sent] == [OWNER, OTHER]
 
 
 def test_a_notice_the_platform_refuses_is_reported_and_gets_no_notice_of_its_own(

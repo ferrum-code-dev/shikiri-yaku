@@ -106,7 +106,7 @@ def test_migrations_create_fresh_database(memory: Database) -> None:
         row["name"]
         for row in database.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
-    assert {"cursors", "signals", "messages", "ops"} <= tables
+    assert {"cursors", "signals", "messages", "ops", "topics"} <= tables
 
 
 def test_database_newer_than_code_is_refused(tmp_path: Path) -> None:
@@ -238,7 +238,15 @@ def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
 
 def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> None:
     connection = memory.connection
-    for table in ("command_replies", "messages", "ops", "signals", "cursors", "polling"):
+    for table in (
+        "command_replies",
+        "topics",
+        "messages",
+        "ops",
+        "signals",
+        "cursors",
+        "polling",
+    ):
         connection.execute(f"DROP TABLE {table}")
     for statement in MIGRATIONS[0]:
         connection.execute(statement)

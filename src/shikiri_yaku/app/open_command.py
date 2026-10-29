@@ -8,6 +8,7 @@ from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.ports import (
     EscalationResolution,
     EscalationStatus,
@@ -16,7 +17,7 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
@@ -46,7 +47,7 @@ class OpenCommand:
         outbox: Outbox,
         clock: Clock,
         *,
-        destinations: Sequence[Destination],
+        destinations: Callable[[str, Kind], Sequence[Destination]],
         channel: str,
     ) -> None:
         self._log = log
@@ -54,7 +55,7 @@ class OpenCommand:
         self._reshower = reshower
         self._outbox = outbox
         self._clock = clock
-        self._destinations = tuple(destinations)
+        self._destinations = destinations
         self._channel = channel
 
     async def handle(self, item: Inbound) -> None:
@@ -74,6 +75,7 @@ class OpenCommand:
                 continue
             self._queue(
                 approval.number,
+                approval.project,
                 Purpose.APPROVAL,
                 confirm_message(
                     approval.number, approval.kind, answer_data(approval.number, option)
@@ -104,9 +106,22 @@ class OpenCommand:
                     listed[(project, view.escalation.id)] = view
         return listed, unreachable
 
-    def _queue(self, number: int, purpose: Purpose, message: Message, *, key: str) -> None:
+    def _queue(
+        self,
+        number: int,
+        project: str,
+        purpose: Purpose,
+        message: Message,
+        *,
+        key: str,
+    ) -> None:
         self._outbox.queue(
-            number, purpose, self._destinations, message, key=key, now=self._clock.now()
+            number,
+            purpose,
+            self._destinations(project, Kind.ESCALATION),
+            message,
+            key=key,
+            now=self._clock.now(),
         )
 
 

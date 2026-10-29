@@ -121,6 +121,7 @@ class TelegramSettings(_FrozenModel):
         default=Path(TOKEN_FILE_DEFAULT), validate_default=True
     )
     owners: Annotated[tuple[StrictInt, ...], _AT_LEAST_ONE]
+    group_id: StrictInt | None = None
 
 
 class OperatorSettings(_FrozenModel):

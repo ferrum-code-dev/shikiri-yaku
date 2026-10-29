@@ -18,6 +18,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import Clock, Copies, Message
 
 SEND_MESSAGE: Final = "sendMessage"
@@ -113,9 +114,12 @@ class TelegramChannel:
         self._clock = clock
         self._copies = copies
 
-    async def send(self, destination: str, message: Message) -> str:
+    async def send(self, destination: Destination, message: Message) -> str:
         _refuse_secret(message)
-        reply = await self._request(SEND_MESSAGE, {"chat_id": destination, **_content(message)})
+        payload: dict[str, object] = {"chat_id": destination.chat, **_content(message)}
+        if destination.thread is not None:
+            payload["message_thread_id"] = destination.thread
+        reply = await self._request(SEND_MESSAGE, payload)
         if not isinstance(reply.result, _Sent):
             raise ChannelError(UNEXPECTED_REPLY)
         return f"{reply.result.chat.id}{REF_SEPARATOR}{reply.result.message_id}"

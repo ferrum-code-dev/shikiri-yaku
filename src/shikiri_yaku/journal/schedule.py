@@ -54,7 +54,7 @@ class JournalSchedule:
         rows = self._database.connection.execute(
             """
             SELECT s.number, s.project, s.task_id, s.kind, m.purpose,
-                   m.channel, m.chat, m.created_at
+                   m.channel, m.chat, m.thread, m.created_at
             FROM signals s JOIN messages m ON m.signal_number = s.number
             WHERE s.state = :forwarded AND m.direction = :out AND m.delivery = :sent
                 AND (m.purpose IN (:question, :approval)
@@ -79,7 +79,7 @@ class JournalSchedule:
             asked_at = parse_stamp(row["created_at"])
             if asked_at is None:
                 continue
-            where = Destination(row["channel"], row["chat"])
+            where = Destination(row["channel"], row["chat"], row["thread"])
             known = grouped.get(row["number"])
             if known is None:
                 grouped[row["number"]] = Awaiting(
@@ -109,6 +109,7 @@ class JournalSchedule:
                     signal_number=awaiting.number,
                     channel=where.channel,
                     chat=where.chat,
+                    thread=where.thread,
                     purpose=Purpose.NOTICE,
                     body=message,
                     notice_key=identity,

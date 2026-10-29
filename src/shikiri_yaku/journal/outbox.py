@@ -43,6 +43,7 @@ class JournalOutbox:
                     signal_number=number,
                     channel=where.channel,
                     chat=where.chat,
+                    thread=where.thread,
                     purpose=purpose,
                     body=message,
                     notice_key=key,
@@ -76,6 +77,7 @@ class JournalOutbox:
                         signal_number=None,
                         channel=where.channel,
                         chat=where.chat,
+                        thread=where.thread,
                         purpose=Purpose.NOTICE,
                         body=part,
                         notice_key=f"{key}:{index}",
@@ -84,7 +86,11 @@ class JournalOutbox:
 
     def pending(self) -> list[Pending]:
         return [
-            Pending(stored.id, Destination(stored.channel, stored.chat), stored.body)
+            Pending(
+                stored.id,
+                Destination(stored.channel, stored.chat, stored.thread),
+                stored.body,
+            )
             for stored in self._messages.unconfirmed()
             if stored.body is not None
         ]

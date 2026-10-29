@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.bootstrap import signal_destinations
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
@@ -19,6 +20,7 @@ from shikiri_yaku.extensions.product.message import (
     RECOMMENDED,
     escalation_message,
 )
+from shikiri_yaku.journal import Database, TopicStore
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
@@ -29,6 +31,7 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
 )
+from shikiri_yaku.settings import ChannelsSettings, Component, Settings, TelegramSettings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -148,7 +151,7 @@ def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarde
         {"api": cast("ShikiruClient", client)},
         outbox,
         _Clock(),
-        [Destination("telegram", chat) for chat in chats],
+        lambda _project, _kind: [Destination("telegram", chat) for chat in chats],
     )
 
 
@@ -163,6 +166,49 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
     assert message.text.count(RECOMMENDED) == 1
     assert "## " not in message.text
     assert "`" not in message.text
+
+
+def test_group_escalations_use_the_component_topic_and_other_signals_use_general() -> None:
+    settings = Settings(
+        product="shop",
+        components=(Component(name="api", path=Path.cwd()),),
+        channels=ChannelsSettings(telegram=TelegramSettings(owners=(1001,), group_id=-1009)),
+    )
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        topics.save("api", 73)
+        topics.save("general", 75)
+        topics.save(None, 74)
+        outbox = _Outbox()
+        forwarder = ProductForwarder(
+            PRODUCT,
+            {"api": cast("ShikiruClient", _Client(_fixture_view()))},
+            outbox,
+            _Clock(),
+            lambda project, kind: signal_destinations(settings, topics, project, kind),
+        )
+
+        asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
+        notice = Signal("api", Kind.TASK_DONE, "event-1", "", "Task finished")
+        asyncio.run(forwarder.forward(NUMBER + 1, notice, "", ""))
+
+        assert outbox.queued[0][1] == (Destination("telegram", "-1009", 73),)
+        assert outbox.queued[1][1] == (Destination("telegram", "-1009", 74),)
+        private_settings = settings.model_copy(
+            update={"channels": ChannelsSettings(telegram=TelegramSettings(owners=(1001,)))}
+        )
+        assert signal_destinations(private_settings, topics, "api", Kind.ESCALATION) == [
+            Destination("telegram", "1001")
+        ]
+        assert signal_destinations(private_settings, topics, "api", Kind.TASK_DONE) == [
+            Destination("telegram", "1001")
+        ]
+        assert signal_destinations(settings, topics, "general", Kind.ESCALATION) == [
+            Destination("telegram", "-1009", 75)
+        ]
+    finally:
+        database.close()
 
 
 def test_fixture_view_offers_options_then_resolutions_with_numbered_callback_data() -> None:

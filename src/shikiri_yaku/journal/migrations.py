@@ -18,6 +18,7 @@ restart finishes the edit (design §7).
 Migration 10 marks that edit confirmed without replacing the body: the body keeps the buttons the
 copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
 Migration 11 claims each logical command reply in the same transaction as all of its parts.
+Migration 12 stores Telegram topic threads on outbox rows and records the reconciled topic ids.
 """
 
 from __future__ import annotations
@@ -145,4 +146,20 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE messages ADD COLUMN final_edited INTEGER NOT NULL DEFAULT 0",),
     ("ALTER TABLE signals ADD COLUMN final_line TEXT",),
     ("CREATE TABLE command_replies (reply_key TEXT PRIMARY KEY)",),
+    (
+        "ALTER TABLE messages ADD COLUMN thread INTEGER",
+        "DROP INDEX messages_notice",
+        """
+        CREATE UNIQUE INDEX messages_notice
+            ON messages (notice_key, channel, chat, COALESCE(thread, -1))
+        """,
+        """
+        CREATE TABLE topics (
+            component TEXT,
+            thread_id INTEGER NOT NULL,
+            state TEXT NOT NULL
+        )
+        """,
+        "CREATE UNIQUE INDEX topics_component ON topics (COALESCE(component, ''))",
+    ),
 )

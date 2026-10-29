@@ -37,6 +37,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import ShikiruClient
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -62,7 +63,7 @@ class _Channel:
         self.failures = failures or {}
         self.edits: list[tuple[str, Message, bool]] = []
 
-    async def send(self, destination: str, message: Message) -> str:
+    async def send(self, destination: Destination, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:

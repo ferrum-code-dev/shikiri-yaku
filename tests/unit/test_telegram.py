@@ -16,6 +16,7 @@ from shikiri_yaku.adapters.telegram import (
     TEXT_TOO_LONG,
     TelegramChannel,
 )
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
@@ -88,7 +89,9 @@ class _Copies:
 
 
 def _send(api: _Api, clock: _Clock, message: Message = MESSAGE) -> str:
-    return asyncio.run(TelegramChannel(api, clock, _Copies(api)).send("1001", message))
+    return asyncio.run(
+        TelegramChannel(api, clock, _Copies(api)).send(Destination("telegram", "1001"), message)
+    )
 
 
 def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> None:
@@ -105,6 +108,19 @@ def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> 
             },
         )
     ]
+
+
+def test_send_posts_a_topic_thread_when_the_destination_has_one() -> None:
+    api = _Api([_recorded("send_ok.json")])
+
+    asyncio.run(
+        TelegramChannel(api, _Clock(), _Copies(api)).send(
+            Destination("telegram", "-1009", 73), MESSAGE
+        )
+    )
+
+    assert api.calls[0][1]["chat_id"] == "-1009"
+    assert api.calls[0][1]["message_thread_id"] == 73
 
 
 def test_edit_targets_the_ref_and_clears_buttons_with_an_empty_keyboard() -> None:
