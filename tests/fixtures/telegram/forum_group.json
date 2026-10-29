@@ -4,6 +4,15 @@
     "id": -1009,
     "type": "supergroup",
     "title": "Shop",
-    "is_forum": true
+    "is_forum": true,
+    "accent_color_id": 1,
+    "max_reaction_count": 11,
+    "accepted_gift_types": {
+      "unlimited_gifts": false,
+      "limited_gifts": false,
+      "unique_gifts": false,
+      "premium_subscription": false,
+      "gifts_from_channels": false
+    }
   }
 }

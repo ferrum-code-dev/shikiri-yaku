@@ -104,6 +104,7 @@ __all__ = [
     "SubmitStatus",
     "TaskDetail",
     "TaskStatus",
+    "TopicCreationUncertainError",
     "TopicLog",
     "TopicRecord",
     "Unsettled",
@@ -731,6 +732,17 @@ class ChannelRefusedError(Exception):
 
     The text is the reason. It is not a ChannelError, so a sender never retries it.
     """
+
+
+class TopicCreationUncertainError(Exception):
+    """A topic creation was journaled, but its thread id was not recorded."""
+
+    def __init__(self, component: str | None) -> None:
+        name = "general" if component is None else component
+        super().__init__(
+            f"Telegram topic creation for {name!r} has an uncertain result; "
+            "inspect the forum before changing its journal state."
+        )
 
 
 class ReasonerError(Exception):

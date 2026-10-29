@@ -6,10 +6,19 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Final
 
+import pytest
+
 from shikiri_yaku.adapters.telegram import TelegramForumTopics
 from shikiri_yaku.app.topic_reconciler import TopicReconciler
 from shikiri_yaku.journal import Database, TopicStore
-from shikiri_yaku.ports import TOPIC_CLOSED, TOPIC_CLOSING, TOPIC_CREATING, TOPIC_OPEN
+from shikiri_yaku.ports import (
+    TOPIC_CLOSED,
+    TOPIC_CLOSING,
+    TOPIC_CREATING,
+    TOPIC_OPEN,
+    ChannelError,
+    TopicCreationUncertainError,
+)
 from tests.support.telegram_bot import FIXTURES
 
 if TYPE_CHECKING:
@@ -23,6 +32,7 @@ class _FixtureBotApi:
         self.topics = topics
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.created = 0
+        self.created_names: list[str] = []
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         self.calls.append((method, dict(payload)))
@@ -35,6 +45,7 @@ class _FixtureBotApi:
             assert topic.state == TOPIC_CREATING
             reply = _fixture("forum_topic_created.json")
             self.created += 1
+            self.created_names.append(name)
             reply["result"]["message_thread_id"] = 72 + self.created
             reply["result"]["name"] = name
             return reply
@@ -44,6 +55,14 @@ class _FixtureBotApi:
             assert topic.state == TOPIC_CLOSING
             return _fixture("forum_topic_closed.json")
         raise AssertionError(method)
+
+
+class _LostReplyBotApi(_FixtureBotApi):
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        reply = await super().call(method, payload)
+        if method == "createForumTopic":
+            raise ChannelError
+        return reply
 
 
 def _fixture(name: str) -> Any:
@@ -83,5 +102,28 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         assert closed_topic.state == TOPIC_CLOSED
         assert closed_topic.thread_id == 73
         assert not any(method == "deleteForumTopic" for method, _payload in api.calls)
+    finally:
+        database.close()
+
+
+def test_restart_surfaces_uncertain_topic_creation_without_retrying() -> None:
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        api = _LostReplyBotApi(topics)
+        reconciler = TopicReconciler(topics, TelegramForumTopics(api, GROUP_ID), ["api"])
+
+        with pytest.raises(ChannelError):
+            asyncio.run(reconciler.run())
+
+        topic = topics.get("api")
+        assert topic is not None
+        assert topic.state == TOPIC_CREATING
+
+        with pytest.raises(TopicCreationUncertainError):
+            asyncio.run(reconciler.run())
+
+        assert api.created_names == ["api"]
+        assert [method for method, _payload in api.calls].count("createForumTopic") == 1
     finally:
         database.close()

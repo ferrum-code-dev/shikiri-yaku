@@ -14,6 +14,7 @@ from shikiri_yaku.ports import (
     TOPIC_OPEN,
     UNASSIGNED_THREAD,
     ForumTopics,
+    TopicCreationUncertainError,
     TopicLog,
 )
 
@@ -31,10 +32,12 @@ class TopicReconciler:
     async def run(self) -> None:
         active = set(self._components)
         for topic in self._log.all():
+            if topic.state == TOPIC_CREATING:
+                raise TopicCreationUncertainError(topic.component)
             if (
                 topic.component is not None
                 and topic.component not in active
-                and topic.state not in {TOPIC_CLOSED, TOPIC_CREATING}
+                and topic.state != TOPIC_CLOSED
             ):
                 await self._close(topic.component, topic.thread_id)
         for component in self._components:

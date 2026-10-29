@@ -13,7 +13,7 @@ the reply it stands for. A recording needs the bot token and the network, and th
 | `get_me_ok.json` | the reply to `getMe`: the User object of the bot | Bot API, "Available methods" (getMe) and "User" |
 | `forum_topic_created.json` | the reply to `createForumTopic`: a ForumTopic | Bot API, "Available methods" (createForumTopic) and "ForumTopic" |
 | `forum_topic_closed.json` | the reply to `closeForumTopic`: `true` | Bot API, "Available methods" (closeForumTopic) |
-| `forum_group.json` | the reply to `getChat`: a forum supergroup Chat | Bot API, "Available methods" (getChat) and "Chat" |
+| `forum_group.json` | the reply to `getChat`: a forum supergroup ChatFullInfo, including its required `accent_color_id`, `max_reaction_count`, and `accepted_gift_types` fields | Bot API, "Available methods" (getChat), "ChatFullInfo", and "AcceptedGiftTypes" |
 | `forum_bot_member.json`, `forum_owner_member.json` | replies to `getChatMember`: administrator and member ChatMember objects | Bot API, "Available methods" (getChatMember), "ChatMemberAdministrator", and "ChatMemberMember" |
 | `forum_member_count.json` | the reply to `getChatMemberCount`: an integer | Bot API, "Available methods" (getChatMemberCount) |
 
