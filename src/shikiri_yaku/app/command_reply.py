@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def item_destination(channel: str, item: Inbound) -> Destination:
-    """Return the chat and forum topic the PO sent the item in, where its command reply goes."""
+    """Return the chat and thread the PO sent the item in, where its command reply goes."""
     return Destination(channel, str(item.chat), item.thread)
 
 
@@ -30,11 +30,11 @@ def queue_command_reply(
     key: str,
     now: datetime,
 ) -> None:
-    """Queue the reply as one journaled group of parts, each under its key and index.
+    """Queue the reply as one journaled set of parts, each under its key and index.
 
     The whole reply is screened before it is cut, so a secret cannot pass the check by straddling
     a cut. A refused reply is queued whole, so the outbox refuses it and notices the PO as it does
-    any other refusal. The group claim and every part are one transaction, so a replay uses the
+    any other refusal. The set's claim and every part are one transaction, so a replay uses the
     complete stored response even if the live status has since changed.
     """
     if outbox.command_reply_queued(key):

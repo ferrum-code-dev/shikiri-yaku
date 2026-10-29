@@ -13,7 +13,6 @@ from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
     ChannelError,
     ChannelRefusedError,
-    ForumTopics,
 )
 
 if TYPE_CHECKING:
@@ -22,6 +21,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import Clock, Copies, Message
 
+TELEGRAM_CHANNEL: Final = "telegram"
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 DELETE_MESSAGE: Final = "deleteMessage"
@@ -312,7 +312,7 @@ async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int,
         await _probe_group(api, group_id, owners, reply.result.id)
 
 
-class TelegramForumTopics(ForumTopics):
+class TelegramForumTopics:
     """Create and close topics in the configured group through the Bot API."""
 
     def __init__(self, api: BotApi, group_id: int) -> None:

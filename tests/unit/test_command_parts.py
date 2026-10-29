@@ -39,6 +39,7 @@ from shikiri_yaku.ports import (
     Message,
     ShikiruLinkDownError,
 )
+from tests.support.destinations import FixedDestinations
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
 
@@ -137,7 +138,7 @@ class _Stack:
         self.sender = OutboxSender(self.outbox, channel, _Clock(), interval_s=1)
         self.status = Status(self.clients, self.sources)
         reshower = ProductForwarder(
-            "product", self.clients, self.outbox, _Clock(), lambda _project, _kind: [OWNER]
+            "product", self.clients, self.outbox, _Clock(), FixedDestinations([OWNER])
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -145,10 +146,10 @@ class _Stack:
             reshower,
             self.outbox,
             _Clock(),
-            destinations=lambda _project, _kind: [OWNER],
+            destinations=FixedDestinations([OWNER]),
             channel="telegram",
         )
-        goal = goal_command(self.database, self.clients, self.outbox, _Clock())
+        goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
         self.commands = Commands(
             self.outbox, _Clock(), self.status, opened, goal, channel="telegram"
         )

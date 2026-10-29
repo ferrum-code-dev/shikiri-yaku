@@ -9,16 +9,16 @@ from typing import TYPE_CHECKING, Any, Final
 import pytest
 
 from shikiri_yaku.adapters.telegram import TelegramForumTopics
-from shikiri_yaku.app.topic_reconciler import TopicReconciler
-from shikiri_yaku.journal import Database, TopicStore
-from shikiri_yaku.ports import (
+from shikiri_yaku.adapters.telegram_topics import (
     TOPIC_CLOSED,
     TOPIC_CLOSING,
     TOPIC_CREATING,
     TOPIC_OPEN,
-    ChannelError,
-    TopicCreationUncertainError,
+    TopicReconciler,
 )
+from shikiri_yaku.journal import Database
+from shikiri_yaku.journal.topics import TopicStore
+from shikiri_yaku.ports import ChannelError, ChannelStartupError
 from tests.support.telegram_bot import FIXTURES
 
 if TYPE_CHECKING:
@@ -120,7 +120,7 @@ def test_restart_surfaces_uncertain_topic_creation_without_retrying() -> None:
         assert topic is not None
         assert topic.state == TOPIC_CREATING
 
-        with pytest.raises(TopicCreationUncertainError):
+        with pytest.raises(ChannelStartupError):
             asyncio.run(reconciler.run())
 
         assert api.created_names == ["api"]

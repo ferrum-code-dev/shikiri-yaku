@@ -22,9 +22,9 @@ from shikiri_yaku.instance import (
 )
 from shikiri_yaku.ports import (
     ChannelError,
+    ChannelStartupError,
     CompositionError,
     ShikiruError,
-    TopicCreationUncertainError,
 )
 from shikiri_yaku.service import ServiceError, service_file, write_service_file
 from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings
@@ -121,7 +121,7 @@ def _run(arguments: argparse.Namespace, compose: Compose) -> int:
         CompositionError,
         ShikiruError,
         ChannelError,
-        TopicCreationUncertainError,
+        ChannelStartupError,
     ) as error:
         sys.stderr.write(f"{error}\n")
         return 1

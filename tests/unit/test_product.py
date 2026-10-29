@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.bootstrap import signal_destinations
+from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
@@ -20,7 +20,8 @@ from shikiri_yaku.extensions.product.message import (
     RECOMMENDED,
     escalation_message,
 )
-from shikiri_yaku.journal import Database, TopicStore
+from shikiri_yaku.journal import Database
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
@@ -31,7 +32,8 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
 )
-from shikiri_yaku.settings import ChannelsSettings, Component, Settings, TelegramSettings
+from tests.support.destinations import FixedDestinations
+from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -146,12 +148,13 @@ class _Clock:
 
 
 def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarder:
+    destinations = [Destination("telegram", chat) for chat in chats]
     return ProductForwarder(
         PRODUCT,
         {"api": cast("ShikiruClient", client)},
         outbox,
         _Clock(),
-        lambda _project, _kind: [Destination("telegram", chat) for chat in chats],
+        FixedDestinations(destinations),
     )
 
 
@@ -169,24 +172,22 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
 
 
 def test_group_escalations_use_the_component_topic_and_other_signals_use_general() -> None:
-    settings = Settings(
-        product="shop",
-        components=(Component(name="api", path=Path.cwd()),),
-        channels=ChannelsSettings(telegram=TelegramSettings(owners=(1001,), group_id=-1009)),
-    )
     database = Database.open(":memory:")
     try:
         topics = TopicStore(database)
         topics.save("api", 73)
         topics.save("general", 75)
         topics.save(None, 74)
+        destinations = TelegramDestinations(
+            topics, FakeBotApi(), owners=(1001,), group_id=-1009, components=("api",)
+        )
         outbox = _Outbox()
         forwarder = ProductForwarder(
             PRODUCT,
             {"api": cast("ShikiruClient", _Client(_fixture_view()))},
             outbox,
             _Clock(),
-            lambda project, kind: signal_destinations(settings, topics, project, kind),
+            destinations,
         )
 
         asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
@@ -195,16 +196,12 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
 
         assert outbox.queued[0][1] == (Destination("telegram", "-1009", 73),)
         assert outbox.queued[1][1] == (Destination("telegram", "-1009", 74),)
-        private_settings = settings.model_copy(
-            update={"channels": ChannelsSettings(telegram=TelegramSettings(owners=(1001,)))}
+        private = TelegramDestinations(
+            topics, FakeBotApi(), owners=(1001,), group_id=None, components=("api",)
         )
-        assert signal_destinations(private_settings, topics, "api", Kind.ESCALATION) == [
-            Destination("telegram", "1001")
-        ]
-        assert signal_destinations(private_settings, topics, "api", Kind.TASK_DONE) == [
-            Destination("telegram", "1001")
-        ]
-        assert signal_destinations(settings, topics, "general", Kind.ESCALATION) == [
+        assert private.for_signal("api", Kind.ESCALATION) == [Destination("telegram", "1001")]
+        assert private.for_signal("api", Kind.TASK_DONE) == [Destination("telegram", "1001")]
+        assert destinations.for_signal("general", Kind.ESCALATION) == [
             Destination("telegram", "-1009", 75)
         ]
     finally:

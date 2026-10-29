@@ -12,6 +12,7 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import JournalFinalEdits
 from shikiri_yaku.journal.signals import NewSignal, SignalState
 from shikiri_yaku.ports import ShikiruClient, ShikiruLinkDownError
+from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import NOW, Client, Clock, Harness
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ def _open(h: Harness, update: int = 700) -> None:
         h.clients,
         channel="telegram",
         commands=h.commands(NOW),
-        goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW)),
+        goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW), FixedDestinations()),
     )
     asyncio.run(
         replies.handle(Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open"))

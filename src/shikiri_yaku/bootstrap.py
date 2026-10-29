@@ -17,8 +17,9 @@ from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
-from shikiri_yaku.adapters.telegram import TelegramChannel, TelegramForumTopics, probe_bot
+from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL, TelegramChannel, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
+from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
@@ -40,9 +41,7 @@ from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
-from shikiri_yaku.app.topic_reconciler import TopicReconciler
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
@@ -67,7 +66,7 @@ from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
-from shikiri_yaku.journal.topics import GENERAL_TOPIC, TOPIC_OPEN, TopicStore
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import CompositionError
 
 if TYPE_CHECKING:
@@ -82,6 +81,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import (
         Channel,
         Clock,
+        Destinations,
         Forwarder,
         Outbox,
         Reporter,
@@ -92,7 +92,6 @@ if TYPE_CHECKING:
 
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
-TELEGRAM_CHANNEL: Final = "telegram"
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -149,8 +148,15 @@ def compose(
         for job in project_jobs(settings, component, clients[component.name], journal, clock)
     ]
     outbox = JournalOutbox(journal, MessageStore(journal, reporter))
+    bot_api = bot(settings)
     topics = TopicStore(journal)
-    destinations = partial(signal_destinations, settings, topics)
+    destinations = TelegramDestinations(
+        topics,
+        bot_api,
+        owners=settings.telegram.owners,
+        group_id=settings.telegram.group_id,
+        components=[component.name for component in settings.components],
+    )
     extensions = registered_extensions()
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
@@ -162,10 +168,9 @@ def compose(
         fallback=forwarder,
         reporter=reporter,
     )
-    bot_api = bot(settings)
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
-    goal = goal_command(journal, clients, outbox, clock)
+    goal = goal_command(journal, clients, outbox, clock, destinations)
     jobs.append(
         inbound_job(
             settings,
@@ -183,21 +188,9 @@ def compose(
     jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
 
-    group_id = settings.telegram.group_id
-    topic_reconciler = (
-        None
-        if group_id is None
-        else TopicReconciler(
-            topics,
-            TelegramForumTopics(bot_api, group_id),
-            [component.name for component in settings.components],
-        )
-    )
-
     def recover() -> None:
         goal.recover()
-        if topic_reconciler is not None:
-            asyncio.run(topic_reconciler.run())
+        asyncio.run(destinations.prepare())
 
     return Composition(
         settings,
@@ -322,19 +315,18 @@ def inbound_job(
     reshower: Reshower,
     bot_api: BotApi,
     goal: GoalCommand,
-    destinations: Callable[[str, Kind], Sequence[Destination]],
+    destinations: Destinations,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
     signals = SignalStore(journal)
     log = JournalInbound(journal)
     poller = InboundPoller(
-        TelegramUpdates(bot_api),
+        TelegramUpdates(bot_api, group_id=settings.telegram.group_id),
         log,
         clock,
         channel=TELEGRAM_CHANNEL,
         owners=settings.telegram.owners,
-        group_id=settings.telegram.group_id,
         wait_s=operator.telegram_poll_wait_s,
     )
     sources = JournalSources(CursorStore(journal, signals), signals)
@@ -371,6 +363,7 @@ def goal_command(
     clients: Mapping[str, ShikiruClient],
     outbox: Outbox,
     clock: Clock,
+    destinations: Destinations,
 ) -> GoalCommand:
     """Return the /goal command, which journals its submits and replies."""
     submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
@@ -381,7 +374,7 @@ def goal_command(
         clients,
         outbox,
         clock,
-        topics=TopicStore(journal),
+        destinations=destinations,
         channel=TELEGRAM_CHANNEL,
     )
 
@@ -462,24 +455,3 @@ def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
         OpStore(journal),
         reminder_notice_kinds=frozenset({Kind.PR_REVIEW}),
     )
-
-
-def _owner_destinations(settings: Settings) -> list[Destination]:
-    """Return the private chat of each owner, where a forwarded signal goes (design §7)."""
-    return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in settings.telegram.owners]
-
-
-def signal_destinations(
-    settings: Settings, topics: TopicStore, project: str, kind: Kind
-) -> list[Destination]:
-    """Choose the private owner chats or the forum topic for a signal (design §7)."""
-    group = settings.telegram.group_id
-    if group is None:
-        return _owner_destinations(settings)
-    component = project if kind == Kind.ESCALATION else None
-    topic = topics.get(component)
-    if topic is None or topic.state != TOPIC_OPEN:
-        name = GENERAL_TOPIC if component is None else component
-        message = f"Telegram topic '{name}' is not open"
-        raise CompositionError(message)
-    return [Destination(TELEGRAM_CHANNEL, str(group), topic.thread_id)]

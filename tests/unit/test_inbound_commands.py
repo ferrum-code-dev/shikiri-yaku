@@ -27,6 +27,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import Ack, AckStatus, EngineStatus, ShikiruLinkDownError
+from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -84,7 +85,7 @@ class Harness:
     def replies(self) -> Replies:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         reshower = ProductForwarder(
-            "product", self.clients, self.outbox, _Clock(), lambda _project, _kind: [OWNER]
+            "product", self.clients, self.outbox, _Clock(), FixedDestinations([OWNER])
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -92,10 +93,10 @@ class Harness:
             reshower,
             self.outbox,
             _Clock(),
-            destinations=lambda _project, _kind: [OWNER],
+            destinations=FixedDestinations([OWNER]),
             channel="telegram",
         )
-        goal = goal_command(self.database, self.clients, self.outbox, _Clock())
+        goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
         commands = Commands(
             self.outbox, _Clock(), Status(self.clients, sources), opened, goal, channel="telegram"
         )

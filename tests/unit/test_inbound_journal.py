@@ -21,8 +21,6 @@ NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
 OWNER: Final = 1001
 STRANGER: Final = 2002
-GROUP: Final = -1005
-OTHER_GROUP: Final = -1006
 WAIT_S: Final = 20
 TEXT, TAP, OTHER = 700, 701, 702
 ITEMS: Final = (
@@ -66,7 +64,7 @@ def journal(database: Database) -> JournalInbound:
 
 def _poll(updates: _Updates, journal: JournalInbound) -> None:
     poller = InboundPoller(
-        updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], group_id=GROUP, wait_s=WAIT_S
+        updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], wait_s=WAIT_S
     )
     asyncio.run(poller.poll_once())
 
@@ -94,24 +92,15 @@ def test_an_update_of_someone_but_an_owner_is_not_stored_and_the_offset_moves_on
     assert count == 0
 
 
-@pytest.mark.parametrize(
-    ("sender", "chat", "served"),
-    [
-        (OWNER, OWNER, True),
-        (OWNER, GROUP, True),
-        (OWNER, OTHER_GROUP, False),
-        (STRANGER, GROUP, False),
-    ],
-)
-def test_an_owner_item_is_kept_from_the_private_chat_or_the_configured_group_only(
+@pytest.mark.parametrize(("sender", "served"), [(OWNER, True), (STRANGER, False)])
+def test_only_an_owner_item_is_kept(
     database: Database,
     journal: JournalInbound,
     *,
     sender: int,
-    chat: int,
     served: bool,
 ) -> None:
-    item = Inbound(TEXT, InboundKind.TEXT, sender, chat, f"{chat}/90", text="hello")
+    item = Inbound(TEXT, InboundKind.TEXT, sender, sender, f"{sender}/90", text="hello")
 
     _poll(_Updates(Batch(TEXT, (item,))), journal)
 

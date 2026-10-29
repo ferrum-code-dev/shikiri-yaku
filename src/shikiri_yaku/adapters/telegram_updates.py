@@ -66,12 +66,14 @@ _RESULT: Final[TypeAdapter[_Result]] = TypeAdapter(_Result)
 class TelegramUpdates:
     """Long-polls `getUpdates` and reads each update into an Inbound item.
 
-    Unsupported kinds and messages without text give no item but retain their update id.
+    Unsupported kinds and messages without text give no item but retain their update id. So does
+    an item from a chat that is neither a private chat nor the configured group.
     Invalid supported updates fail the whole batch without exposing their payload in errors.
     """
 
-    def __init__(self, api: BotApi) -> None:
+    def __init__(self, api: BotApi, *, group_id: int | None) -> None:
         self._api = api
+        self._group_id = group_id
 
     async def fetch(self, offset: int, wait_s: float) -> Batch:
         body = await self._api.call(
@@ -86,7 +88,7 @@ class TelegramUpdates:
         last: int | None = None
         for update in reply.result:
             last = update.update_id if last is None else max(last, update.update_id)
-            if (item := _item(update)) is not None:
+            if (item := _item(update)) is not None and item.chat in (item.sender, self._group_id):
                 items.append(item)
         return Batch(last, tuple(items))
 

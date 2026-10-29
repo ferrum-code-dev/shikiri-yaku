@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -21,6 +22,7 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
     SubmitStatus,
 )
+from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -76,7 +78,9 @@ class _Goal:
             clients,
             self.outbox,
             clock,
-            topics=self.topics,
+            destinations=TelegramDestinations(
+                self.topics, FakeBotApi(), owners=(1001,), group_id=GROUP, components=("api",)
+            ),
             channel="telegram",
         )
 

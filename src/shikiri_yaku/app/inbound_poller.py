@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 class InboundPoller:
     """Poll once, retaining owners' items and advancing the offset atomically.
 
-    An item is kept when an owner sent it in the owner's private chat or in the configured group.
-    Anything else is dropped, including what another group sent, and the offset still moves past it.
+    An item is kept when an owner sent it. Anything else is dropped, and the offset still moves past
+    it. The Updates decide which chats an item may come from.
     """
 
     def __init__(
@@ -26,7 +26,6 @@ class InboundPoller:
         *,
         channel: str,
         owners: Collection[int],
-        group_id: int | None = None,
         wait_s: float,
     ) -> None:
         self._updates = updates
@@ -34,7 +33,6 @@ class InboundPoller:
         self._clock = clock
         self._channel = channel
         self._owners = frozenset(owners)
-        self._group_id = group_id
         self._wait_s = wait_s
 
     async def poll_once(self) -> None:
@@ -45,4 +43,4 @@ class InboundPoller:
         self._log.record_batch(self._channel, items, batch.last_update_id + 1, self._clock.now())
 
     def _served(self, item: Inbound) -> bool:
-        return item.sender in self._owners and item.chat in (item.sender, self._group_id)
+        return item.sender in self._owners

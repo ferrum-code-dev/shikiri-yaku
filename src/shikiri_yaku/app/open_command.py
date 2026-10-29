@@ -16,12 +16,12 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping
 
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import (
         Clock,
+        Destinations,
         EscalationView,
         Message,
         OpenLog,
@@ -47,7 +47,7 @@ class OpenCommand:
         outbox: Outbox,
         clock: Clock,
         *,
-        destinations: Callable[[str, Kind], Sequence[Destination]],
+        destinations: Destinations,
         channel: str,
     ) -> None:
         self._log = log
@@ -118,7 +118,7 @@ class OpenCommand:
         self._outbox.queue(
             number,
             purpose,
-            self._destinations(project, Kind.ESCALATION),
+            self._destinations.for_signal(project, Kind.ESCALATION),
             message,
             key=key,
             now=self._clock.now(),

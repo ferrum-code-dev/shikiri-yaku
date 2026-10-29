@@ -36,11 +36,6 @@ if TYPE_CHECKING:
 __all__ = [
     "CALLBACK_DATA_LIMIT",
     "MESSAGE_TEXT_LIMIT",
-    "TOPIC_CLOSED",
-    "TOPIC_CLOSING",
-    "TOPIC_CREATING",
-    "TOPIC_OPEN",
-    "UNASSIGNED_THREAD",
     "Ack",
     "AckStatus",
     "ActionLog",
@@ -50,6 +45,7 @@ __all__ = [
     "ChannelError",
     "ChannelProtocolError",
     "ChannelRefusedError",
+    "ChannelStartupError",
     "Choice",
     "Classifier",
     "Clock",
@@ -59,6 +55,7 @@ __all__ = [
     "CompletedEscalation",
     "CompositionError",
     "Copies",
+    "Destinations",
     "DispatchLog",
     "EngineStatus",
     "EscalationRecord",
@@ -67,7 +64,6 @@ __all__ = [
     "EscalationView",
     "EventJournal",
     "EventKinds",
-    "ForumTopics",
     "Forwarder",
     "InboundLog",
     "LifecycleJournal",
@@ -104,9 +100,6 @@ __all__ = [
     "SubmitStatus",
     "TaskDetail",
     "TaskStatus",
-    "TopicCreationUncertainError",
-    "TopicLog",
-    "TopicRecord",
     "Unsettled",
     "Updates",
     "WakeTarget",
@@ -437,11 +430,6 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
 # keep: Telegram's limits (design §7), named here because the Channel is the only user of them
 MESSAGE_TEXT_LIMIT: Final = 4096
 CALLBACK_DATA_LIMIT: Final = 64
-TOPIC_OPEN: Final = "open"
-TOPIC_CLOSED: Final = "closed"
-TOPIC_CREATING: Final = "creating"
-TOPIC_CLOSING: Final = "closing"
-UNASSIGNED_THREAD: Final = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,36 +469,19 @@ class Channel(Protocol):
     async def delete(self, message_ref: str) -> None: ...
 
 
-@dataclass(frozen=True, slots=True)
-class TopicRecord:
-    component: str | None
-    thread_id: int
-    state: str
+class Destinations(Protocol):
+    """Where a Channel's messages go, and what an inbound item says of its component (design §13).
 
+    The core asks for destinations by project and kind, and for the component an inbound thread
+    implies, and never reads how the channel organises its chats. `prepare` runs once at start-up,
+    before anything is sent, and raises ChannelStartupError if the channel cannot be made ready.
+    """
 
-class ForumTopics(Protocol):
-    """What startup needs from Telegram's topic API (design §7, §13)."""
+    def for_signal(self, project: str, kind: Kind) -> Sequence[Destination]: ...
 
-    async def create(self, name: str) -> int: ...
+    def component_of(self, thread: int | None) -> str | None: ...
 
-    async def close(self, thread_id: int) -> None: ...
-
-
-class TopicLog(Protocol):
-    """The journal mapping of a component or general signals to their topic."""
-
-    def get(self, component: str | None) -> TopicRecord | None: ...
-
-    def save(self, component: str | None, thread_id: int, state: str = TOPIC_OPEN) -> None: ...
-
-    def all(self) -> list[TopicRecord]: ...
-
-    def component_of(self, thread_id: int) -> str | None:
-        """Return the component of the open topic `thread_id`.
-
-        None for the general topic, and for a topic that is unknown or not open.
-        """
-        ...
+    async def prepare(self) -> None: ...
 
 
 class Updates(Protocol):
@@ -741,15 +712,11 @@ class ChannelRefusedError(Exception):
     """
 
 
-class TopicCreationUncertainError(Exception):
-    """A topic creation was journaled, but its thread id was not recorded."""
+class ChannelStartupError(Exception):
+    """A channel cannot be made ready at start-up, and the service must not run without it.
 
-    def __init__(self, component: str | None) -> None:
-        name = "general" if component is None else component
-        super().__init__(
-            f"Telegram topic creation for {name!r} has an uncertain result; "
-            "inspect the forum before changing its journal state."
-        )
+    The text is the reason and says what the PO has to inspect. The service stops on it.
+    """
 
 
 class ReasonerError(Exception):

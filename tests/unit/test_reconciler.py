@@ -21,6 +21,7 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
 )
+from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import Client, Harness
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ class _World:
             h.clients,
             h.outbox,
             self.clock,
-            lambda _project, _kind: [Destination("telegram", "1001")],
+            FixedDestinations([Destination("telegram", "1001")]),
         )
         return ResolveReconciler(
             JournalReconcile(h.database, h.signals, h.ops),

@@ -17,7 +17,6 @@ from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.journal.routing import JournalRouting
 from shikiri_yaku.journal.schedule import JournalSchedule
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore, StoredSignal
-from shikiri_yaku.journal.topics import StoredTopic, TopicStore
 
 __all__ = [
     "Cursor",
@@ -48,6 +47,4 @@ __all__ = [
     "StoredMessage",
     "StoredOp",
     "StoredSignal",
-    "StoredTopic",
-    "TopicStore",
 ]

@@ -23,21 +23,21 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Outbox, ReplyLog, ShikiruClient, SubmitOp, TopicLog
+    from shikiri_yaku.ports import Clock, Destinations, Outbox, ReplyLog, ShikiruClient, SubmitOp
 
 _WORDS: Final = 3
-_TOPIC_WORDS: Final = 2
+_IMPLIED_WORDS: Final = 2
 _ASK_HEAD: Final = "I may have submitted this already: "
 _ASK_TAIL: Final = ". Check /status, or tap Submit again."
 _SUBMIT_AGAIN: Final = "Submit again"
 
 
 class GoalCommand:
-    """Submits a goal and reports its outcome in the chat and topic it was sent from.
+    """Submits a goal and reports its outcome in the chat and thread it was sent from.
 
     The destination is stored with the goal, so the outcome and any question go where the goal was
-    sent. A goal sent in a component's topic implies that component. An unknown outcome is asked
-    about with *Submit again*; only that tap retries the goal.
+    sent. A goal sent in a thread that names a component implies that component. An unknown outcome
+    is asked about with *Submit again*; only that tap retries the goal.
     """
 
     def __init__(
@@ -48,7 +48,7 @@ class GoalCommand:
         outbox: Outbox,
         clock: Clock,
         *,
-        topics: TopicLog,
+        destinations: Destinations,
         channel: str,
     ) -> None:
         self._submitter = submitter
@@ -56,7 +56,7 @@ class GoalCommand:
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
-        self._topics = topics
+        self._destinations = destinations
         self._channel = channel
 
     async def handle(self, item: Inbound) -> None:
@@ -102,13 +102,13 @@ class GoalCommand:
     def _parse(self, item: Inbound) -> tuple[str, str] | None:
         """Return the component and request of a goal, or None when it has no request.
 
-        In a component's topic the whole text after `/goal` is the request; elsewhere the text is
-        `/goal <component> <request>`.
+        In a thread that names a component the whole text after `/goal` is the request; elsewhere
+        the text is `/goal <component> <request>`.
         """
-        implied = None if item.thread is None else self._topics.component_of(item.thread)
+        implied = self._destinations.component_of(item.thread)
         if implied is not None:
             words = (item.text or "").split(maxsplit=1)
-            return None if len(words) < _TOPIC_WORDS else (implied, words[1])
+            return None if len(words) < _IMPLIED_WORDS else (implied, words[1])
         words = (item.text or "").split(maxsplit=_WORDS - 1)
         if len(words) < _WORDS:
             return None

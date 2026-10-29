@@ -43,6 +43,7 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
     ShikiruRejectedError,
 )
+from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -142,7 +143,7 @@ class Harness:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources)
         reshower = ProductForwarder(
-            "product", self.clients, self.outbox, Clock(at), lambda _project, _kind: [OWNER]
+            "product", self.clients, self.outbox, Clock(at), FixedDestinations([OWNER])
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -150,10 +151,12 @@ class Harness:
             reshower,
             self.outbox,
             Clock(at),
-            destinations=lambda _project, _kind: [OWNER],
+            destinations=FixedDestinations([OWNER]),
             channel="telegram",
         )
-        goal = goal_command(self.database, self.clients, self.outbox, Clock(at))
+        goal = goal_command(
+            self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
+        )
         return Commands(self.outbox, Clock(at), status, opened, goal, channel="telegram")
 
     def resolve_in_shikiru(self) -> None:
@@ -178,7 +181,9 @@ class Harness:
             self.clients,
             channel="telegram",
             commands=self.commands(at),
-            goal=goal_command(self.database, self.clients, self.outbox, Clock(at)),
+            goal=goal_command(
+                self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
+            ),
         )
         item = Inbound(
             update,

@@ -9,11 +9,10 @@ from shikiri_yaku.extensions.product.message import escalation_message, informat
 from shikiri_yaku.ports import EscalationStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping
 
-    from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.domain.signal import Kind, Signal
-    from shikiri_yaku.ports import Clock, EscalationView, Outbox, ShikiruClient
+    from shikiri_yaku.domain.signal import Signal
+    from shikiri_yaku.ports import Clock, Destinations, EscalationView, Outbox, ShikiruClient
 
 
 class ProductForwarder:
@@ -30,7 +29,7 @@ class ProductForwarder:
         clients: Mapping[str, ShikiruClient],
         outbox: Outbox,
         clock: Clock,
-        destinations: Callable[[str, Kind], Sequence[Destination]],
+        destinations: Destinations,
     ) -> None:
         self._product = product
         self._clients = clients
@@ -77,7 +76,7 @@ class ProductForwarder:
         self._outbox.queue(
             number,
             purpose,
-            self._destinations(signal.project, signal.kind),
+            self._destinations.for_signal(signal.project, signal.kind),
             message,
             key=key,
             now=self._clock.now(),

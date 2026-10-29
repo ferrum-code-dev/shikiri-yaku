@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.signal import Kind
@@ -40,12 +41,13 @@ class JournalStats:
         # keep: one row per signal, so a question sent to several chats or re-shown counts once
         rows = self._rows(
             """
-            SELECT s.created_at, s.updated_at, MIN(m.created_at) AS queued_at
+            SELECT s.created_at, s.updated_at, (
+                SELECT MIN(m.created_at) FROM messages m WHERE m.signal_number = s.number
+                AND m.direction = :out AND m.purpose IN (:question, :approval)
+            ) AS queued_at
             FROM signals s
-            LEFT JOIN messages m ON m.signal_number = s.number AND m.direction = :out
-                AND m.purpose IN (:question, :approval)
             WHERE s.kind = :escalation AND s.state IN (:resolved, :closed)
-            GROUP BY s.number
+            ORDER BY s.number
             """
         )
         return [
@@ -58,36 +60,37 @@ class JournalStats:
         ]
 
     def handled_without_po(self) -> Mapping[str | None, int]:
-        rows = self._rows(
-            """
-            SELECT s.category AS key, COUNT(*) AS n FROM signals s
-            WHERE s.state = :resolved AND NOT EXISTS (
-                SELECT 1 FROM messages m WHERE m.signal_number = s.number AND m.direction = :out
-                AND m.purpose IN (:question, :approval))
-            GROUP BY s.category
-            """
+        return _counts(
+            self._rows(
+                """
+                SELECT s.category AS key FROM signals s
+                WHERE s.state = :resolved AND NOT EXISTS (
+                    SELECT 1 FROM messages m WHERE m.signal_number = s.number AND m.direction = :out
+                    AND m.purpose IN (:question, :approval))
+                ORDER BY key
+                """
+            )
         )
-        return {row["key"]: row["n"] for row in rows}
 
     def escalation_reasons(self) -> Mapping[str, int]:
-        rows = self._rows(
-            "SELECT reason AS key, COUNT(*) AS n FROM signals WHERE kind = :escalation "
-            "GROUP BY reason"
+        return _counts(
+            self._rows("SELECT reason AS key FROM signals WHERE kind = :escalation ORDER BY key")
         )
-        return {row["key"]: row["n"] for row in rows}
 
     def escalation_verdicts(self) -> Mapping[str | None, int]:
-        rows = self._rows(
-            "SELECT verdict AS key, COUNT(*) AS n FROM signals WHERE kind = :escalation "
-            "GROUP BY verdict"
+        return _counts(
+            self._rows("SELECT verdict AS key FROM signals WHERE kind = :escalation ORDER BY key")
         )
-        return {row["key"]: row["n"] for row in rows}
 
     def install_states(self) -> Mapping[str, int]:
-        rows = self._rows(
-            "SELECT state AS key, COUNT(*) AS n FROM ops WHERE kind = :install GROUP BY state"
+        return _counts(
+            self._rows("SELECT state AS key FROM ops WHERE kind = :install ORDER BY key")
         )
-        return {row["key"]: row["n"] for row in rows}
 
     def _rows(self, sql: str) -> list[sqlite3.Row]:
         return self._database.connection.execute(sql, _PARAMETERS).fetchall()
+
+
+def _counts(rows: list[sqlite3.Row]) -> Mapping[Any, int]:
+    """Count the rows by key, in the order the query sorted the keys."""
+    return Counter(row["key"] for row in rows)
