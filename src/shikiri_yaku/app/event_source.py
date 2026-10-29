@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 STOP_REASON_KEY = "reason"
 PR_CLOSED_REASON = "pr_closed"
 NO_EVENTS = 0
+MERGED_LINE = "Merged"
+WITHDRAWN_LINE = "Withdrawn"
+CLOSED_UNMERGED_LINE = "Closed unmerged"
 
 type Change = Signal | Closing | Resolved
 
@@ -166,14 +169,14 @@ class EventSource:
                 return self._task_changes(event)
 
     def _task_changes(self, event: ShikiruEvent) -> list[Change]:
-        pr_closed = Closing(self._project, kind=Kind.PR_REVIEW, task_id=event.task_id)
         match event.kind:
             case EventKinds.TASK_DONE:
-                return [self._signal(event, Kind.TASK_DONE, event.kind), pr_closed]
+                done = self._signal(event, Kind.TASK_DONE, event.kind)
+                return [done, self._closed_review(event, MERGED_LINE)]
             case EventKinds.PR_OPENED:
                 return [self._review(event)]
             case EventKinds.PR_WITHDRAWN:
-                return [pr_closed]
+                return [self._closed_review(event, WITHDRAWN_LINE)]
             case _:
                 return []
 
@@ -191,8 +194,11 @@ class EventSource:
         )
         changes: list[Change] = [signal]
         if data.reason == PR_CLOSED_REASON:
-            changes.append(Closing(self._project, kind=Kind.PR_REVIEW, task_id=event.task_id))
+            changes.append(self._closed_review(event, CLOSED_UNMERGED_LINE))
         return changes
+
+    def _closed_review(self, event: ShikiruEvent, line: str) -> Closing:
+        return Closing(self._project, kind=Kind.PR_REVIEW, task_id=event.task_id, final_line=line)
 
     def _review(self, event: ShikiruEvent) -> Signal:
         data = _event_data(event, _PullRequestData)

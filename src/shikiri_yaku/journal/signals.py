@@ -135,7 +135,8 @@ class SignalStore:
         """Close the non-final signals that match every field given; return how many."""
         return self._database.connection.execute(
             """
-            UPDATE signals SET state = :closed, updated_at = :now
+            UPDATE signals SET state = :closed, updated_at = :now,
+                final_line = COALESCE(final_line, :final_line)
             WHERE project = :project AND state NOT IN (:resolved, :closed)
                 AND (:kind IS NULL OR kind = :kind)
                 AND (:escalation_id IS NULL OR escalation_id = :escalation_id)
@@ -151,6 +152,7 @@ class SignalStore:
                 "escalation_id": closing.escalation_id,
                 "task_id": closing.task_id,
                 "reason": closing.reason,
+                "final_line": closing.final_line,
             },
         ).rowcount
 

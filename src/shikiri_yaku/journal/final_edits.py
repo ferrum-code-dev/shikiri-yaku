@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit
+from shikiri_yaku.domain.outbound import TIME_FORMAT, fit
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, FinalEdit, Message
 
@@ -16,9 +16,9 @@ if TYPE_CHECKING:
 
 _BODY = TypeAdapter(Message)
 _SEPARATOR = "\n\n"
-# keep: a copy shows buttons when its stored body has any; a refusal or a pending edit ends the need
+# keep: any copy with buttons ends too, so a review message is finished like a question
 _SHOWS_BUTTONS = """
-    direction = :out AND delivery = :sent AND purpose IN (:question, :approval)
+    direction = :out AND delivery = :sent
     AND refusal IS NULL AND final_body IS NULL AND body IS NOT NULL
     AND json_array_length(json_extract(body, '$.buttons')) > 0
 """
@@ -36,12 +36,7 @@ class JournalFinalEdits:
         self._replies = replies
 
     def _arguments(self) -> dict[str, str]:
-        return {
-            "out": Direction.OUT,
-            "sent": Delivery.SENT,
-            "question": Purpose.QUESTION,
-            "approval": Purpose.APPROVAL,
-        }
+        return {"out": Direction.OUT, "sent": Delivery.SENT}
 
     def unsettled(self) -> list[tuple[int, str]]:
         rows = self._database.connection.execute(

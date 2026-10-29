@@ -66,13 +66,17 @@ class LifecycleState:
 
 @dataclass(frozen=True, slots=True)
 class Closing:
-    """Closes the open signals that match every field given: what a source learned has ended."""
+    """Closes the open signals that match every field given: what a source learned has ended.
+
+    `final_line`, when given, is the line the closed signals' messages end with.
+    """
 
     project: str
     kind: Kind | None = None
     escalation_id: str | None = None
     task_id: str | None = None
     reason: str | None = None
+    final_line: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

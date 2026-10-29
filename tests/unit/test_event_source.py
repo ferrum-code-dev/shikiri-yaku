@@ -202,6 +202,23 @@ def test_resolved_escalation_and_pr_lifecycle_close_the_matching_signals(
     }
 
 
+def test_a_pr_closed_escalation_closes_its_review_and_still_raises_its_own_signal(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    client.events = [
+        _event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
+        _event(2, "escalation", task_id="T1", escalation_id="E1", reason="pr_closed"),
+    ]
+    asyncio.run(source.poll())
+    assert _states(database) == {
+        "api:pr_review:1": SignalState.CLOSED,
+        "api:escalation:E1": SignalState.NEW,
+    }
+
+
 def test_resolved_event_confirms_only_the_issued_op_with_its_command_id(
     database: Database,
 ) -> None:

@@ -53,7 +53,7 @@ merged and `uv run poe check` passes.
 - [x] C2. Quota wait
 - [x] C3. Engine restart
 - [x] C4. Review handler
-- [ ] C5. Review closing
+- [x] C5. Review closing
 - [ ] C6. Notice handler
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening

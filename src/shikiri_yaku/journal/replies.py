@@ -168,7 +168,8 @@ class JournalReplies:
 
     def acknowledge_notice(self, number: int, notice_key: str | None, now: datetime) -> None:
         stored = self._signals.get(number)
-        if stored is None:
+        # keep: a tap that arrives after the signal ended changes nothing, not even its op
+        if stored is None or stored.state in {SignalState.RESOLVED, SignalState.CLOSED}:
             return
         if notice_key is not None and notice_key.startswith(self._silencing_prefixes):
             op = NewOp(
