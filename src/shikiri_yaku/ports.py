@@ -857,8 +857,8 @@ class ReconcileLog(Protocol):
         """Confirm an issued op whose escalation is seen resolved as asked."""
         ...
 
-    def fail(self, op_id: int, now: datetime) -> bool:
-        """Fail an issued op and make its signal answerable again; False if it moved already."""
+    def fail(self, op_id: int, now: datetime, *, question_shown: bool = False) -> bool:
+        """Fail an issued op; a re-shown question also settles signal replay to forwarded."""
         ...
 
 

@@ -39,7 +39,7 @@ class JournalReconcile:
     def confirm(self, op_id: int, now: datetime) -> bool:
         return self._ops.transition(op_id, OpState.ISSUED, OpState.CONFIRMED, now)
 
-    def fail(self, op_id: int, now: datetime) -> bool:
+    def fail(self, op_id: int, now: datetime, *, question_shown: bool = False) -> bool:
         with self._database.transaction():
             op = self._ops.get(op_id)
             if op is None or op.payload is None:
@@ -47,6 +47,17 @@ class JournalReconcile:
             if not self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now):
                 return False
             number = ResolvePayload.model_validate_json(op.payload).number
+            if question_shown:
+                # keep: the keyed replacement question owns this signal after a crash
+                for state in (
+                    SignalState.ANSWERED,
+                    SignalState.RESOLVED,
+                    SignalState.HANDLING,
+                    SignalState.NEW,
+                ):
+                    if self._signals.transition(number, state, SignalState.FORWARDED, now):
+                        break
+                return True
             if not self._signals.transition(
                 number, SignalState.ANSWERED, SignalState.FORWARDED, now
             ):

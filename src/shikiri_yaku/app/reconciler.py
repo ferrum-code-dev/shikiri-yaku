@@ -95,7 +95,7 @@ class ResolveReconciler:
             await self._reshower.reshow(
                 op.payload.number, op.signal, note, key=f"reshow:{op.op_id}"
             )
-            self._log.fail(op.op_id, now)
+            self._log.fail(op.op_id, now, question_shown=True)
 
     async def _is_lost(self, op: Unsettled) -> bool:
         project = op.payload.project

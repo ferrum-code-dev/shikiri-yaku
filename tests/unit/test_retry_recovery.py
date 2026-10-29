@@ -12,17 +12,22 @@ from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.reconciler import RETRY_AGAIN_NOTE, ResolveReconciler
 from shikiri_yaku.app.router import Router
+from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Lifecycle, LifecycleState, Resolved, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.product.extension import product_extension
+from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
     JournalActions,
     JournalEvents,
+    JournalOutbox,
     JournalRetries,
     JournalRouting,
+    MessageStore,
     NewSignal,
     OpState,
     OpStore,
@@ -32,6 +37,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.ports import Ack, EngineStatus
+from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import Client
 
 if TYPE_CHECKING:
@@ -95,21 +101,28 @@ class Clock:
 
 
 class Reshower:
-    def __init__(self) -> None:
+    def __init__(self, forwarder: ProductForwarder) -> None:
+        self._forwarder = forwarder
         self.shown: list[tuple[int, str]] = []
 
     async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
-        del signal, key
         self.shown.append((number, note))
+        await self._forwarder.reshow(number, signal, note, key=key)
 
 
 class Fallback:
-    def __init__(self) -> None:
+    def __init__(self, forwarder: ProductForwarder) -> None:
+        self._forwarder = forwarder
         self.forwarded: list[str] = []
 
     async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
-        del number, signal, suggestion
         self.forwarded.append(note)
+        await self._forwarder.forward(number, signal, note, suggestion)
+
+
+class Reporter:
+    def report(self, line: str) -> None:
+        pytest.fail(line)
 
 
 class World:
@@ -121,8 +134,14 @@ class World:
         self.client = RetryClient()
         self.clients = {"api": cast("ShikiruClient", self.client)}
         self.clock = Clock()
-        self.reshower = Reshower()
-        self.fallback = Fallback()
+        self.messages = MessageStore(self.database, Reporter())
+        outbox = JournalOutbox(self.database, self.messages)
+        destinations = FixedDestinations(
+            [Destination("telegram", "owner-1"), Destination("telegram", "owner-2")]
+        )
+        forwarder = ProductForwarder("shop", self.clients, outbox, self.clock, destinations)
+        self.reshower = Reshower(forwarder)
+        self.fallback = Fallback(forwarder)
         retries = JournalRetries(self.database, self.ops)
         guard = LoopGuard(JournalActions(self.ops), self.clock, 1, 1)
         self.infrastructure = infrastructure_extension(self.clients, guard, retries, self.clock)
@@ -209,6 +228,13 @@ class World:
         assert signal is not None
         return signal.state
 
+    def question_chats(self) -> list[str]:
+        return [
+            message.chat
+            for message in self.messages.for_signal(self.number)
+            if message.purpose == Purpose.QUESTION
+        ]
+
     def confirm_by_event(self, resolution: str) -> None:
         events = JournalEvents(self.database, CursorStore(self.database, self.signals), self.ops)
         events.record_batch("api", [Resolved("api", "E-1", resolution, "12")], 5, None, STARTED)
@@ -251,54 +277,64 @@ def test_the_event_naming_the_retry_confirms_it_and_nothing_is_shown_later(world
     assert (world.retry_op().state, world.reshower.shown) == (OpState.CONFIRMED, [])
 
 
-def test_recovered_retry_without_ack_is_reshown_by_the_reconciler_once(world: World) -> None:
-    world.crash_before_ack()
+def test_recovered_queued_retry_waits_for_confirmation_without_forwarding(world: World) -> None:
+    world.crash_after_ack()
+    assert world.restart() == set()
+    world.recover_and_dispatch()
+    assert (
+        world.client.attempts,
+        world.retry_op().state,
+        world.signal_state(),
+        world.question_chats(),
+    ) == (
+        1,
+        OpState.ISSUED,
+        SignalState.RESOLVED,
+        [],
+    )
+
+    world.confirm_by_event("retry")
+    world.tick()
+    assert (world.retry_op().state, world.reshower.shown, world.question_chats()) == (
+        OpState.CONFIRMED,
+        [],
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    ("crash_point", "order"),
+    [
+        ("before_ack", "dispatch_first"),
+        ("before_ack", "reconcile_first"),
+        ("after_ack", "dispatch_first"),
+        ("after_ack", "reconcile_first"),
+    ],
+)
+def test_reconciliation_and_dispatch_queue_one_recovered_question_per_destination(
+    world: World, crash_point: str, order: str
+) -> None:
+    if crash_point == "after_ack":
+        world.crash_after_ack()
+        world.clock.at = STARTED + timedelta(minutes=LOST_MIN)
+    else:
+        world.crash_before_ack()
     assert world.signal_state() == SignalState.HANDLING
     uncertain = world.restart()
-    assert len(uncertain) == 1
-    world.recover_and_dispatch()
-    assert (world.client.attempts, world.signal_state(), world.fallback.forwarded) == (
+
+    if order == "reconcile_first":
+        world.tick(uncertain)
+        world.recover_and_dispatch()
+    else:
+        world.recover_and_dispatch()
+        world.tick(uncertain)
+
+    assert (world.client.attempts, world.retry_op().state, world.signal_state()) == (
         1,
-        SignalState.RESOLVED,
-        [],
-    )
-    world.tick(uncertain)
-    assert (world.retry_op().state, world.reshower.shown) == (
-        OpState.FAILED,
-        [(world.number, RETRY_AGAIN_NOTE)],
-    )
-
-
-@pytest.mark.parametrize("resolution", ["retry", "answer"])
-def test_recovered_queued_retry_is_not_reissued_and_is_settled_once(
-    world: World, resolution: str
-) -> None:
-    world.crash_after_ack()
-    assert world.signal_state() == SignalState.HANDLING
-    assert world.retry_op().acknowledgement == Ack(
-        id=12, status="queued", result=None, message=None
-    )
-    world.recover_and_dispatch()
-    assert (world.client.attempts, world.signal_state(), world.fallback.forwarded) == (
-        1,
-        SignalState.RESOLVED,
-        [],
-    )
-
-    if resolution == "retry":
-        world.confirm_by_event(resolution)
-        world.tick()
-        assert (world.retry_op().state, world.reshower.shown) == (OpState.CONFIRMED, [])
-        return
-
-    world.clock.at = STARTED + timedelta(minutes=LOST_MIN)
-    world.tick()
-    world.tick()
-    assert (world.retry_op().state, world.signal_state()) == (
         OpState.FAILED,
         SignalState.FORWARDED,
     )
-    assert world.reshower.shown == [(world.number, RETRY_AGAIN_NOTE)]
+    assert world.question_chats() == ["owner-1", "owner-2"]
 
 
 @pytest.mark.parametrize(
@@ -322,6 +358,7 @@ def test_a_rejected_retry_fails_its_op_and_the_po_is_told_why(world: World) -> N
         SignalState.FORWARDED,
     )
     assert len(world.fallback.forwarded) == 1
+    assert world.question_chats() == ["owner-1", "owner-2"]
     assert "escalation already resolved" in world.fallback.forwarded[0]
     world.clock.at = STARTED + timedelta(hours=1)
     world.tick()
