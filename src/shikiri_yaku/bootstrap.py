@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -36,6 +37,7 @@ from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.loop_guard import LoopGuard
+from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
@@ -66,6 +68,7 @@ from shikiri_yaku.journal import (
     JournalRouting,
     JournalSchedule,
     JournalSources,
+    JournalWaits,
     MessageStore,
     OpStore,
     SignalStore,
@@ -98,6 +101,7 @@ if TYPE_CHECKING:
         Reshower,
         RetryLog,
         ShikiruClient,
+        WaitLog,
     )
     from shikiri_yaku.settings import Component, Settings
 
@@ -181,7 +185,19 @@ def compose(
         restart_budget_per_hour=settings.handlers.infrastructure.restart_budget_per_hour,
     )
     retries = JournalRetries(journal, OpStore(journal))
-    extensions = registered_extensions(clients, guard, retries, clock)
+    waits = JournalWaits(journal, OpStore(journal))
+    notifier = Notifier(outbox, destinations, clock)
+    infrastructure = settings.handlers.infrastructure
+    extensions = registered_extensions(
+        clients,
+        guard,
+        retries,
+        clock,
+        waits=waits,
+        notifier=notifier,
+        quota_wait_max=timedelta(hours=infrastructure.quota_wait_max_h),
+        quota_wait_margin=timedelta(minutes=infrastructure.quota_wait_margin_min),
+    )
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
         settings,
@@ -232,9 +248,24 @@ def registered_extensions(
     guard: Guard,
     retries: RetryLog,
     clock: Clock,
+    *,
+    waits: WaitLog,
+    notifier: Notifier,
+    quota_wait_max: timedelta,
+    quota_wait_margin: timedelta,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
-    return [infrastructure_extension(clients, guard, retries, clock), product_extension()]
+    infrastructure = infrastructure_extension(
+        clients,
+        guard,
+        retries,
+        clock,
+        waits=waits,
+        notifier=notifier,
+        quota_wait_max=quota_wait_max,
+        quota_wait_margin=quota_wait_margin,
+    )
+    return [infrastructure, product_extension()]
 
 
 def shikiru_client(

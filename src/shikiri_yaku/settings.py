@@ -51,6 +51,7 @@ INBOUND_INTERVAL_S: Final = 1
 
 COMMAND_TIMEOUT_MIN: Final = 10
 QUOTA_WAIT_MAX_H: Final = 24
+QUOTA_WAIT_MARGIN_MIN: Final = 1
 RETRY_BUDGET_PER_DAY: Final = 1
 RESTART_BUDGET_PER_HOUR: Final = 1
 APPROVAL_EXPIRY_H: Final = 24
@@ -155,6 +156,7 @@ class OperatorSettings(_FrozenModel):
 class InfrastructureSettings(_FrozenModel):
     command_timeout_min: PositiveInt = COMMAND_TIMEOUT_MIN
     quota_wait_max_h: PositiveInt = QUOTA_WAIT_MAX_H
+    quota_wait_margin_min: PositiveInt = QUOTA_WAIT_MARGIN_MIN
     retry_budget_per_day: PositiveInt = RETRY_BUDGET_PER_DAY
     restart_budget_per_hour: PositiveInt = RESTART_BUDGET_PER_HOUR
     approval_expiry_h: PositiveInt = APPROVAL_EXPIRY_H

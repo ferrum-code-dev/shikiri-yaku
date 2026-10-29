@@ -70,6 +70,7 @@ __all__ = [
     "LifecycleJournal",
     "LivenessJournal",
     "Message",
+    "Notifier",
     "Outbox",
     "Pending",
     "QuotaWindow",
@@ -106,6 +107,8 @@ __all__ = [
     "TaskStatus",
     "Unsettled",
     "Updates",
+    "WaitAttempt",
+    "WaitLog",
     "WakeTarget",
     "escalation_choices",
 ]
@@ -895,6 +898,39 @@ class RetryAttempt:
     """The journal state of a retry already keyed to a signal."""
 
     state: str
+
+
+class Notifier(Protocol):
+    """Queues an informational message about a signal, once per key (design §7).
+
+    A notice is not a question, so it has no signal number. The key names what the notice is
+    about, so a handler that runs again sends nothing twice.
+    """
+
+    def tell(self, signal: Signal, text: str, key: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class WaitAttempt:
+    """The quota wait journaled for a signal: when it is due (design §6.2)."""
+
+    wake_at: datetime
+
+
+class WaitLog(Protocol):
+    """Quota waits, journaled as wait ops so the op, not memory, says when a signal is due."""
+
+    def existing(self, signal: Signal) -> WaitAttempt | None:
+        """Find the wait journaled for this signal, if it parked before."""
+        ...
+
+    def record(self, signal: Signal, wake_at: datetime, now: datetime) -> None:
+        """Journal the wait before the signal parks; recording it again changes nothing."""
+        ...
+
+    def finish(self, signal: Signal, now: datetime) -> None:
+        """Mark the wait over once its wake-up is being handled."""
+        ...
 
 
 class SubmitStatus:

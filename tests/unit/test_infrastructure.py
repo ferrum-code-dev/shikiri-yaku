@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -20,17 +20,19 @@ from shikiri_yaku.journal import (
     JournalActions,
     JournalRetries,
     JournalRouting,
+    JournalWaits,
     NewSignal,
     OpStore,
     SignalState,
     SignalStore,
 )
 from shikiri_yaku.ports import Ack, AckStatus
+from tests.support.notices import journal_notifier, journal_outbox
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
-    from shikiri_yaku.domain.extension import Handler
+    from shikiri_yaku.domain.extension import Extension, Handler
     from shikiri_yaku.domain.outcome import Outcome
     from shikiri_yaku.ports import ShikiruClient
 
@@ -125,13 +127,30 @@ def guard(memory: Database, clock: FakeClock) -> LoopGuard:
 
 
 @pytest.fixture
-def handler(
+def infrastructure(
+    memory: Database,
     clients: Mapping[str, ShikiruClient],
     guard: LoopGuard,
     retries: JournalRetries,
     clock: FakeClock,
-) -> Handler:
-    return infrastructure_extension(clients, guard, retries, clock).handler
+) -> Extension:
+    waits = JournalWaits(memory, OpStore(memory))
+    notifier = journal_notifier(journal_outbox(memory), clock)
+    return infrastructure_extension(
+        clients,
+        guard,
+        retries,
+        clock,
+        waits=waits,
+        notifier=notifier,
+        quota_wait_max=timedelta(hours=24),
+        quota_wait_margin=timedelta(minutes=1),
+    )
+
+
+@pytest.fixture
+def handler(infrastructure: Extension) -> Handler:
+    return infrastructure.handler
 
 
 @pytest.mark.parametrize("reason", RETRY_REASONS)
@@ -164,8 +183,6 @@ def test_a_second_retry_of_the_same_task_and_reason_forwards_naming_the_first(
 @pytest.mark.parametrize(
     ("kind", "reason", "named"),
     [
-        (Kind.ESCALATION, "ladder_exhausted", "ladder_exhausted"),
-        (Kind.ESCALATION, "quota_exhausted", "quota_exhausted"),
         (Kind.ESCALATION, "engine_error", "engine_error"),
         (Kind.ENGINE_DOWN, "", "engine_down"),
         (Kind.ENGINE_FAULT, "", "engine_fault"),
@@ -187,17 +204,10 @@ def test_two_actions_claiming_one_reason_fail_at_registration() -> None:
 
 
 def test_an_agent_error_resolves_and_the_po_is_not_told(
-    memory: Database,
-    clients: Mapping[str, ShikiruClient],
-    guard: LoopGuard,
-    retries: JournalRetries,
-    client: FakeClient,
+    memory: Database, infrastructure: Extension, client: FakeClient
 ) -> None:
     clock = FakeClock()
-    extensions = [
-        infrastructure_extension(clients, guard, retries, clock),
-        product_extension(),
-    ]
+    extensions = [infrastructure, product_extension()]
     fallback = FakeFallback()
     router = Router(
         RuleClassifier(extensions),

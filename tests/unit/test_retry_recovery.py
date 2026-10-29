@@ -27,6 +27,7 @@ from shikiri_yaku.journal import (
     JournalOutbox,
     JournalRetries,
     JournalRouting,
+    JournalWaits,
     MessageStore,
     NewSignal,
     OpState,
@@ -38,6 +39,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.ports import Ack, EngineStatus
 from tests.support.destinations import FixedDestinations
+from tests.support.notices import journal_notifier, journal_outbox
 from tests.unit.test_replies import Client
 
 if TYPE_CHECKING:
@@ -144,7 +146,18 @@ class World:
         self.fallback = Fallback(forwarder)
         retries = JournalRetries(self.database, self.ops)
         guard = LoopGuard(JournalActions(self.ops), self.clock, 1, 1)
-        self.infrastructure = infrastructure_extension(self.clients, guard, retries, self.clock)
+        waits = JournalWaits(self.database, self.ops)
+        notifier = journal_notifier(journal_outbox(self.database), self.clock)
+        self.infrastructure = infrastructure_extension(
+            self.clients,
+            guard,
+            retries,
+            self.clock,
+            waits=waits,
+            notifier=notifier,
+            quota_wait_max=timedelta(hours=24),
+            quota_wait_margin=timedelta(minutes=1),
+        )
         extensions = [self.infrastructure, product_extension()]
         self.classifier = RuleClassifier(extensions)
         self.routing = JournalRouting(self.database, self.signals)

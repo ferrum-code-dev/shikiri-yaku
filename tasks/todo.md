@@ -50,7 +50,7 @@ merged and `uv run poe check` passes.
 - [x] B3. Inbound in topics
 - [x] B4. Telegram topics belong to the adapter
 - [x] C1. Infrastructure handler and Retry
-- [ ] C2. Quota wait
+- [x] C2. Quota wait
 - [ ] C3. Engine restart
 - [ ] C4. Review handler
 - [ ] C5. Review closing
