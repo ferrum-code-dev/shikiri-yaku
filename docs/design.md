@@ -223,11 +223,12 @@ A handler takes one signal and returns one **outcome**:
 class Handler(Protocol):
     async def handle(self, signal: Signal) -> Outcome: ...
 
-Outcome = Resolved(note) | Forward(note) | WaitUntil(time, note)
+Outcome = Resolved(note) | Forward(note) | WaitUntil(time, note) | Notified(note)
 ```
 
 * `Resolved`: the handler applied a fix in Shikiru; the signal closes.
 * `Forward`: the signal goes to the product handler, with the note saying what was tried and why it stopped.
+* `Notified`: the handler sent the PO its own message about the signal (the Review handler's pull-request message). The signal stays open and unanswered like a forward, so reminders apply, but the Product message is not sent.
 * `WaitUntil`: the signal is parked with a wake-up time and dispatched to the same handler again then. The handler records what it is waiting for as an op of kind `wait`, so on the second call it finds that op due and performs the follow-up action instead of waiting again.
 
 Each handler gets what it needs through its constructor (the Channel, the journal and its actions), so its dependencies are visible and fakeable ([§12](#12-engineering-rules)). A handler that does several things, as the Infrastructure handler does, receives them as **actions**: small objects `Action.run(signal) → Outcome`, each built with its own dependencies (the Shikiru client, the install action, the loop guard) and registered with the reasons it covers. A new action is added without editing the handler, and tests use fake actions. The handler registry is a plain dictionary built in the composition root.
