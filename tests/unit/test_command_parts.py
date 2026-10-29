@@ -19,6 +19,7 @@ from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.status import Status
+from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import refusal_notice, split_reply
 from shikiri_yaku.domain.schedule import Destination
@@ -145,7 +146,10 @@ class _Stack:
             destinations=[OWNER],
             channel="telegram",
         )
-        self.commands = Commands(self.outbox, _Clock(), self.status, opened, channel="telegram")
+        goal = goal_command(self.database, self.clients, self.outbox, _Clock())
+        self.commands = Commands(
+            self.outbox, _Clock(), self.status, opened, goal, channel="telegram"
+        )
 
     def __enter__(self) -> Self:
         return self

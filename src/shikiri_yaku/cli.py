@@ -46,6 +46,9 @@ class Lifecycle(Protocol):
     @property
     def jobs(self) -> Sequence[Job]: ...
 
+    @property
+    def recover(self) -> Callable[[], None]: ...
+
     def close(self) -> None: ...
 
 
@@ -103,6 +106,7 @@ def _run(arguments: argparse.Namespace, compose: Compose) -> int:
         with instance_lock(directory):
             composition = compose(settings, directory)
             try:
+                composition.recover()
                 asyncio.run(_serve(composition.jobs))
             finally:
                 composition.close()

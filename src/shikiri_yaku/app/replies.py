@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.app.commands import Commands
+    from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
         Clock,
@@ -72,7 +73,10 @@ def _confirm_op(key: str) -> int | None:
 
 
 class Replies:
-    """Apply stored inbound items through their originating messages and journaled resolve ops."""
+    """Apply stored inbound items through their originating messages and journaled resolve ops.
+
+    A tap whose message has no signal is a *Submit again* of a goal, so it goes to the goal.
+    """
 
     def __init__(
         self,
@@ -83,6 +87,7 @@ class Replies:
         *,
         channel: str,
         commands: Commands,
+        goal: GoalCommand,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -90,6 +95,7 @@ class Replies:
         self._clients = clients
         self._channel = channel
         self._commands = commands
+        self._goal = goal
 
     async def handle(self, item: Inbound) -> None:
         if item.kind == InboundKind.TEXT:
@@ -98,6 +104,8 @@ class Replies:
         reference = item.reply_to_ref if item.kind == InboundKind.REPLY else item.message_ref
         origin = None if reference is None else self._log.origin(self._channel, reference)
         if origin is None:
+            if item.kind == InboundKind.TAP:
+                await self._goal.tap(item)
             return
         if item.kind == InboundKind.REPLY:
             if origin.purpose == Purpose.QUESTION and item.text:

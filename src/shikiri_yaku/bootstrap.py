@@ -23,6 +23,7 @@ from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
+from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
@@ -37,6 +38,7 @@ from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
+from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
@@ -62,6 +64,7 @@ from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
+from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import CompositionError
 
 if TYPE_CHECKING:
@@ -100,6 +103,7 @@ class Composition:
     link_probes: Mapping[str, Callable[[], Awaitable[None]]]
     telegram_probe: Callable[[], Awaitable[None]]
     jobs: Sequence[Job]
+    recover: Callable[[], None]
 
     def close(self) -> None:
         self.journal.close()
@@ -158,6 +162,7 @@ def compose(
     bot_api = bot(settings)
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
+    goal = goal_command(journal, clients, outbox, clock)
     jobs.append(
         inbound_job(
             settings,
@@ -167,12 +172,15 @@ def compose(
             clients=clients,
             reshower=forwarder,
             bot_api=bot_api,
+            goal=goal,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
-    return Composition(settings, clock, journal, probes, partial(probe_bot, bot_api), jobs)
+    return Composition(
+        settings, clock, journal, probes, partial(probe_bot, bot_api), jobs, goal.recover
+    )
 
 
 def registered_extensions() -> list[Extension]:
@@ -286,6 +294,7 @@ def inbound_job(
     clients: Mapping[str, ShikiruClient],
     reshower: Reshower,
     bot_api: BotApi,
+    goal: GoalCommand,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -309,7 +318,9 @@ def inbound_job(
         destinations=_owner_destinations(settings),
         channel=TELEGRAM_CHANNEL,
     )
-    commands = Commands(outbox, clock, Status(clients, sources), opened, channel=TELEGRAM_CHANNEL)
+    commands = Commands(
+        outbox, clock, Status(clients, sources), opened, goal, channel=TELEGRAM_CHANNEL
+    )
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal)),
         outbox,
@@ -317,12 +328,25 @@ def inbound_job(
         clients,
         channel=TELEGRAM_CHANNEL,
         commands=commands,
+        goal=goal,
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(
         poller, log, replies, health, clock, interval_s=operator.inbound_interval_s
     )
     return service.run
+
+
+def goal_command(
+    journal: Database,
+    clients: Mapping[str, ShikiruClient],
+    outbox: Outbox,
+    clock: Clock,
+) -> GoalCommand:
+    """Return the /goal command, which journals its submits and replies."""
+    submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
+    replies = JournalReplies(journal, SignalStore(journal), OpStore(journal))
+    return GoalCommand(submitter, replies, clients, outbox, clock, channel=TELEGRAM_CHANNEL)
 
 
 def secret_cleanup_job(

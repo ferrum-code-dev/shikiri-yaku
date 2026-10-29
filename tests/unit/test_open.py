@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from shikiri_yaku.app.replies import Replies
+from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import JournalFinalEdits
@@ -53,7 +54,13 @@ def h() -> Generator[Harness]:
 
 def _open(h: Harness, update: int = 700) -> None:
     replies = Replies(
-        h.log(), h.outbox, Clock(NOW), h.clients, channel="telegram", commands=h.commands(NOW)
+        h.log(),
+        h.outbox,
+        Clock(NOW),
+        h.clients,
+        channel="telegram",
+        commands=h.commands(NOW),
+        goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW)),
     )
     asyncio.run(replies.handle(Inbound(update, InboundKind.TEXT, 1001, "1001/90", text="/open")))
 

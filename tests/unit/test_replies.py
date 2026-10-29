@@ -13,6 +13,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
+from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
@@ -150,7 +151,8 @@ class Harness:
             destinations=[OWNER],
             channel="telegram",
         )
-        return Commands(self.outbox, Clock(at), status, opened, channel="telegram")
+        goal = goal_command(self.database, self.clients, self.outbox, Clock(at))
+        return Commands(self.outbox, Clock(at), status, opened, goal, channel="telegram")
 
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})
@@ -174,6 +176,7 @@ class Harness:
             self.clients,
             channel="telegram",
             commands=self.commands(at),
+            goal=goal_command(self.database, self.clients, self.outbox, Clock(at)),
         )
         item = Inbound(
             update,

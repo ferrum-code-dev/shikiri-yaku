@@ -90,6 +90,11 @@ class GoalCommand:
         if op is not None:
             self._report(op)
 
+    def recover(self) -> None:
+        """Ask about each goal an earlier process left unknown; it runs before any inbound item."""
+        for op in self._submitter.recover():
+            self._report(op)
+
     def _report(self, op: SubmitOp) -> None:
         destinations = [op.payload.destination]
         key = f"goal:{op.id}"

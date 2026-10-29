@@ -49,10 +49,23 @@ class Submitter:
         client = self._clients.get(op.payload.component)
         return op if client is None else await self._advance(client, op, now)
 
+    def recover(self) -> list[SubmitOp]:
+        """Settle the submits an earlier process left unfinished, and return the unknown ones.
+
+        An issued op may have reached Shikiru, so it becomes unknown and is never sent again. An
+        intended op was never issued: the replay of its stored inbound item sends it.
+        """
+        now = self._clock.now()
+        unknown: list[SubmitOp] = []
+        for op in self._log.unfinished():
+            settled = self._unknown(op, now) if op.status == SubmitStatus.ISSUED else op
+            if settled.status == SubmitStatus.UNKNOWN:
+                unknown.append(settled)
+        return unknown
+
     async def _advance(self, client: ShikiruClient, op: SubmitOp, now: datetime) -> SubmitOp:
         if op.status == SubmitStatus.ISSUED:
-            self._log.uncertain(op.id, now)
-            return replace(op, status=SubmitStatus.UNKNOWN)
+            return self._unknown(op, now)
         if op.status != SubmitStatus.INTENDED or not self._log.claim(op.id, now):
             return op
         return await self._send(client, op, now)
@@ -64,10 +77,12 @@ class Submitter:
             self._log.fail(op.id, now)
             return replace(op, status=SubmitStatus.FAILED)
         except ShikiruError:
-            self._log.uncertain(op.id, now)
-            return replace(op, status=SubmitStatus.UNKNOWN)
+            return self._unknown(op, now)
         if ack.task_id is None:
-            self._log.uncertain(op.id, now)
-            return replace(op, status=SubmitStatus.UNKNOWN)
+            return self._unknown(op, now)
         self._log.confirm(op.id, ack, now)
         return replace(op, status=SubmitStatus.CONFIRMED, task_id=ack.task_id)
+
+    def _unknown(self, op: SubmitOp, now: datetime) -> SubmitOp:
+        self._log.uncertain(op.id, now)
+        return replace(op, status=SubmitStatus.UNKNOWN)

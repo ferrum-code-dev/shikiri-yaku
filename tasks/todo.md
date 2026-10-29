@@ -41,7 +41,7 @@ merged and `uv run poe check` passes.
 - [x] A12b. Start-up reconcile and lost commands
 - [x] A12c. Resolved elsewhere (after A11c4)
 - [x] A13. Status, open, help and measures
-- [ ] A14. `/goal`
+- [x] A14. `/goal`
 
 ## Later
 
