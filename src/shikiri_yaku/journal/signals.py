@@ -161,6 +161,12 @@ class SignalStore:
         ).fetchone()
         return None if row is None else _signal(row)
 
+    def by_id(self, signal_id: str) -> StoredSignal | None:
+        row = self._database.connection.execute(
+            "SELECT * FROM signals WHERE id = ?", (signal_id,)
+        ).fetchone()
+        return None if row is None else _signal(row)
+
     def classify(
         self,
         number: int,

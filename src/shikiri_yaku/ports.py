@@ -40,6 +40,7 @@ __all__ = [
     "AckStatus",
     "ActionLog",
     "AgentOption",
+    "AttemptState",
     "Button",
     "Channel",
     "ChannelError",
@@ -87,7 +88,6 @@ __all__ = [
     "ResolutionKind",
     "ResolvePayload",
     "RetryAttempt",
-    "RetryAttemptState",
     "RetryLog",
     "RoutingLog",
     "ScheduleLog",
@@ -100,6 +100,8 @@ __all__ = [
     "ShikiruRejectedError",
     "ShikiruTask",
     "SignalLog",
+    "StartAttempt",
+    "StartLog",
     "StatsLog",
     "SubmitLog",
     "SubmitOp",
@@ -108,6 +110,7 @@ __all__ = [
     "TaskDetail",
     "TaskStatus",
     "Unsettled",
+    "UnsettledStart",
     "Updates",
     "WaitAttempt",
     "WaitLog",
@@ -905,8 +908,8 @@ class RetryLog(Protocol):
         ...
 
 
-class RetryAttemptState:
-    """Retry states visible across the RetryLog port."""
+class AttemptState:
+    """States of an automatic attempt, a retry or an engine start, as text (design §6.2, §9)."""
 
     ISSUED: Final = "issued"
     CONFIRMED: Final = "confirmed"
@@ -950,6 +953,45 @@ class WaitLog(Protocol):
 
     def finish(self, signal: Signal, now: datetime) -> None:
         """Mark the wait over once its wake-up is being handled."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class StartAttempt:
+    """The journal state of an engine start already keyed to a signal."""
+
+    state: str
+
+
+@dataclass(frozen=True, slots=True)
+class UnsettledStart:
+    """An engine start issued and not settled; `since` is when it was issued."""
+
+    signal: Signal
+    since: datetime
+
+
+class StartLog(Protocol):
+    """Engine starts, journaled as start ops before Shikiru's `start` runs (design §6.2, §10)."""
+
+    def existing(self, signal: Signal) -> StartAttempt | None:
+        """Find the start already journaled for this signal, if any."""
+        ...
+
+    def issue(self, signal: Signal, now: datetime) -> bool:
+        """Journal the start as issued before Shikiru is called; False if the signal has one."""
+        ...
+
+    def confirm(self, signal: Signal, now: datetime) -> None:
+        """Mark a start confirmed once the engine is seen up."""
+        ...
+
+    def fail(self, signal: Signal, now: datetime) -> None:
+        """Mark a start failed once the engine did not come up in time."""
+        ...
+
+    def unsettled(self) -> list[UnsettledStart]:
+        """Return the starts issued and not yet confirmed or failed."""
         ...
 
 

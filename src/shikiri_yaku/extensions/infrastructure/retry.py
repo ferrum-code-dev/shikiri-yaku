@@ -14,8 +14,8 @@ from shikiri_yaku.extensions.infrastructure.rules import (
     INTEGRATION_CONFLICT,
 )
 from shikiri_yaku.ports import (
+    AttemptState,
     ResolutionKind,
-    RetryAttemptState,
     ShikiruRejectedError,
 )
 
@@ -87,6 +87,6 @@ class RetryAction:
 
 
 def _previous_attempt(state: str) -> Outcome:
-    if state == RetryAttemptState.FAILED:
+    if state == AttemptState.FAILED:
         return Forward(RETRY_FAILED)
     return Resolved(RETRIED)

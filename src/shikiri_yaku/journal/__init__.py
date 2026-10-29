@@ -18,6 +18,7 @@ from shikiri_yaku.journal.retries import JournalRetries
 from shikiri_yaku.journal.routing import JournalRouting
 from shikiri_yaku.journal.schedule import JournalSchedule
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore, StoredSignal
+from shikiri_yaku.journal.starts import JournalStarts
 from shikiri_yaku.journal.waits import JournalWaits
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "JournalRouting",
     "JournalSchedule",
     "JournalSources",
+    "JournalStarts",
     "JournalTooNewError",
     "JournalWaits",
     "Lifecycle",

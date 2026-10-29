@@ -46,6 +46,7 @@ from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
+from shikiri_yaku.app.start_reconciler import StartReconciler
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
@@ -68,6 +69,7 @@ from shikiri_yaku.journal import (
     JournalRouting,
     JournalSchedule,
     JournalSources,
+    JournalStarts,
     JournalWaits,
     MessageStore,
     OpStore,
@@ -157,7 +159,9 @@ def compose(
         component.name: shikiru_client(settings, component, clock, link)
         for component in settings.components
     }
-    jobs = [
+    # keep: first, so an unsettled start is settled before any signal or source runs
+    jobs = [start_reconcile_job(settings, journal, clock, clients=clients)]
+    jobs += [
         job
         for component in settings.components
         for job in project_jobs(settings, component, clients[component.name], journal, clock)
@@ -482,6 +486,26 @@ def reconcile_job(
         clock,
         lost_command_min=operator.lost_command_min,
         interval_s=operator.liveness_interval_s,
+    )
+    return reconciler.run
+
+
+def start_reconcile_job(
+    settings: Settings,
+    journal: Database,
+    clock: Clock,
+    *,
+    clients: Mapping[str, ShikiruClient],
+) -> Job:
+    """Return the reconciler of engine starts a restart left unsettled; it never starts again."""
+    infrastructure = settings.handlers.infrastructure
+    signals = SignalStore(journal)
+    reconciler = StartReconciler(
+        JournalStarts(journal, OpStore(journal), signals),
+        clients,
+        clock,
+        confirm_within=timedelta(seconds=infrastructure.restart_confirm_s),
+        interval_s=settings.operator.liveness_interval_s,
     )
     return reconciler.run
 
