@@ -13,6 +13,7 @@ from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, OpStore, SignalStore
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.submits import JournalSubmits
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
     Ack,
     AckStatus,
@@ -30,6 +31,9 @@ NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = Destination("telegram", "1001")
 GOAL: Final = "/goal api Add the export"
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
+GROUP: Final = -1005
+TOPIC: Final = 77
+GENERAL_THREAD: Final = 5
 
 
 class _Clock:
@@ -65,16 +69,23 @@ class _Goal:
         clock = cast("Clock", _Clock())
         replies = JournalReplies(database, SignalStore(database), OpStore(database))
         submitter = Submitter(self.submits, clients, clock)
+        self.topics = TopicStore(database)
         self.command = GoalCommand(
-            submitter, replies, clients, self.outbox, clock, channel="telegram"
+            submitter,
+            replies,
+            clients,
+            self.outbox,
+            clock,
+            topics=self.topics,
+            channel="telegram",
         )
 
-    def send(self, text: str, update: int = 1) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, "1001/90", text=text)
+    def send(self, text: str, update: int = 1, chat: int = 1001, thread: int | None = None) -> None:
+        item = Inbound(update, InboundKind.TEXT, 1001, chat, f"{chat}/90", text=text, thread=thread)
         asyncio.run(self.command.handle(item))
 
-    def tap(self, data: str, ref: str, update: int = 2, sender: int = 1001) -> None:
-        asyncio.run(self.command.tap(Inbound(update, InboundKind.TAP, sender, ref, data=data)))
+    def tap(self, data: str, ref: str, update: int = 2, chat: int = 1001) -> None:
+        asyncio.run(self.command.tap(Inbound(update, InboundKind.TAP, 1001, chat, ref, data=data)))
 
     def flush(self) -> dict[str, Message]:
         """Confirm every pending message as sent, so the journal can match a tap to it."""
@@ -93,10 +104,10 @@ def goal() -> Generator[_Goal]:
     database.close()
 
 
-def _unknown_goal(goal: _Goal) -> tuple[int, str]:
+def _unknown_goal(goal: _Goal, chat: int = 1001) -> tuple[int, str]:
     """Send a goal whose outcome is unknown and flush its question; return the op id and ref."""
     goal.client.answer = ShikiruLinkDownError("link down")
-    goal.send(GOAL)
+    goal.send(GOAL, chat=chat)
     [op] = goal.submits.unfinished()
     [ref] = goal.flush()
     goal.client.answer = DONE
@@ -170,6 +181,36 @@ def test_a_duplicate_delivery_of_one_tap_retries_once_and_replies_once(goal: _Go
 def test_a_tap_that_was_never_offered_retries_nothing(goal: _Goal) -> None:
     prompt, ref = _unknown_goal(goal)
     goal.tap(f"s:{prompt}", "M-missing", update=2)
-    goal.tap(f"s:{prompt}", ref, update=3, sender=2002)
+    goal.tap(f"s:{prompt}", ref, update=3, chat=2002)
     goal.tap("s:999", ref, update=4)
     assert goal.client.requests == ["Add the export"]
+
+
+def test_submit_again_tapped_in_the_group_retries_and_reports_in_the_group(goal: _Goal) -> None:
+    prompt, ref = _unknown_goal(goal, chat=GROUP)
+    goal.tap(f"s:{prompt}", ref, chat=GROUP)
+    [pending] = goal.outbox.pending()
+    assert "T-9" in pending.message.text
+    assert pending.destination == Destination("telegram", str(GROUP))
+    assert goal.client.requests == ["Add the export"] * 2
+
+
+def test_a_goal_in_a_component_topic_is_submitted_to_that_component_in_that_topic(
+    goal: _Goal,
+) -> None:
+    goal.topics.save("api", TOPIC)
+    goal.send("/goal Add the export", chat=GROUP, thread=TOPIC)
+    [pending] = goal.outbox.pending()
+    assert pending.destination == Destination("telegram", str(GROUP), TOPIC)
+    assert goal.client.requests == ["Add the export"]
+
+
+def test_a_goal_in_the_general_topic_without_a_component_gets_usage_and_submits_nothing(
+    goal: _Goal,
+) -> None:
+    goal.topics.save(None, GENERAL_THREAD)
+    goal.send("/goal fix the export", chat=GROUP, thread=GENERAL_THREAD)
+    [pending] = goal.outbox.pending()
+    assert "/goal" in pending.message.text
+    assert pending.destination == Destination("telegram", str(GROUP), GENERAL_THREAD)
+    assert goal.client.requests == []

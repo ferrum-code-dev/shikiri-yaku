@@ -74,7 +74,7 @@ def database() -> Generator[Database]:
 
 def _message(kind: InboundKind, text: str) -> Inbound:
     origin = QUESTION_REF if kind == InboundKind.REPLY else None
-    return Inbound(TEXT, kind, OWNER, TEXT_REF, reply_to_ref=origin, text=text)
+    return Inbound(TEXT, kind, OWNER, OWNER, TEXT_REF, reply_to_ref=origin, text=text)
 
 
 def _store(database: Database, item: Inbound) -> None:
@@ -126,7 +126,9 @@ def test_a_message_without_a_secret_is_left_in_the_chat(database: Database) -> N
 def test_a_tap_with_a_secret_in_its_data_is_refused_but_the_bots_message_is_kept(
     database: Database,
 ) -> None:
-    _store(database, Inbound(TAP, InboundKind.TAP, OWNER, QUESTION_REF, data=SECRETS["sk_key"]))
+    _store(
+        database, Inbound(TAP, InboundKind.TAP, OWNER, OWNER, QUESTION_REF, data=SECRETS["sk_key"])
+    )
     channel = _Channel(database)
 
     _tick(_cleanup(database, channel))

@@ -505,6 +505,13 @@ class TopicLog(Protocol):
 
     def all(self) -> list[TopicRecord]: ...
 
+    def component_of(self, thread_id: int) -> str | None:
+        """Return the component of the open topic `thread_id`.
+
+        None for the general topic, and for a topic that is unknown or not open.
+        """
+        ...
+
 
 class Updates(Protocol):
     """Poll from `offset` for up to `wait_s`.

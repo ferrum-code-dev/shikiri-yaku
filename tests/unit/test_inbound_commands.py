@@ -110,11 +110,13 @@ class Harness:
         )
 
     def send(self, text: str | None, update: int = 700) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, "1001/90", text=text)
+        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text=text)
         asyncio.run(self.replies().handle(item))
 
     def tap(self, data: str, ref: str, update: int = 800) -> None:
-        asyncio.run(self.replies().handle(Inbound(update, InboundKind.TAP, 1001, ref, data=data)))
+        asyncio.run(
+            self.replies().handle(Inbound(update, InboundKind.TAP, 1001, 1001, ref, data=data))
+        )
 
 
 @pytest.fixture

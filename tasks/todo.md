@@ -47,7 +47,7 @@ merged and `uv run poe check` passes.
 
 - [x] B1. Destinations with topics
 - [x] B2. Topic reconcile at start-up
-- [ ] B3. Inbound in topics
+- [x] B3. Inbound in topics
 - [ ] Phase C: Infrastructure basics and review
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening

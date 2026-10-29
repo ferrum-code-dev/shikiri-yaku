@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.cli import Job
 
 _PRODUCT: Final = "shop"
-_OWNER: Final = 123456789
+_OWNER: Final = 1001
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
 _ASKED: Final = "I may have submitted this already"

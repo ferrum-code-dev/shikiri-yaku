@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = 1001
-TAP: Final = Inbound(700, InboundKind.TAP, OWNER, "1001/42", data="a:1:1")
+TAP: Final = Inbound(700, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
 
 
 class _Clock:

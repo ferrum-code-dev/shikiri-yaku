@@ -334,6 +334,7 @@ def inbound_job(
         clock,
         channel=TELEGRAM_CHANNEL,
         owners=settings.telegram.owners,
+        group_id=settings.telegram.group_id,
         wait_s=operator.telegram_poll_wait_s,
     )
     sources = JournalSources(CursorStore(journal, signals), signals)
@@ -374,7 +375,15 @@ def goal_command(
     """Return the /goal command, which journals its submits and replies."""
     submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
     replies = JournalReplies(journal, SignalStore(journal), OpStore(journal))
-    return GoalCommand(submitter, replies, clients, outbox, clock, channel=TELEGRAM_CHANNEL)
+    return GoalCommand(
+        submitter,
+        replies,
+        clients,
+        outbox,
+        clock,
+        topics=TopicStore(journal),
+        channel=TELEGRAM_CHANNEL,
+    )
 
 
 def secret_cleanup_job(

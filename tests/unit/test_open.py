@@ -62,7 +62,9 @@ def _open(h: Harness, update: int = 700) -> None:
         commands=h.commands(NOW),
         goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW)),
     )
-    asyncio.run(replies.handle(Inbound(update, InboundKind.TEXT, 1001, "1001/90", text="/open")))
+    asyncio.run(
+        replies.handle(Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open"))
+    )
 
 
 def _deliver(h: Harness) -> list[str]:

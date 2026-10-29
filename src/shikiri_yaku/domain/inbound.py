@@ -16,18 +16,21 @@ class InboundKind(StrEnum):
 class Inbound:
     """One tap, reply or text with its sender.
 
-    `message_ref` names the message the item was sent in; for a tap it is the message whose button
-    was pressed. `reply_to_ref` is set on a reply. `text` is the text of a reply or text, and `data`
-    the callback data of a tap.
+    `chat` is the chat the item was sent in: the sender's private chat, or a group. `message_ref`
+    names the message the item was sent in; for a tap it is the message whose button was pressed.
+    `reply_to_ref` is set on a reply. `text` is the text of a reply or text, and `data` the callback
+    data of a tap. `thread` is the forum topic a reply or text was sent in, None outside a topic.
     """
 
     update_id: int
     kind: InboundKind
     sender: int
+    chat: int
     message_ref: str
     reply_to_ref: str | None = None
     text: str | None = None
     data: str | None = None
+    thread: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -40,3 +40,10 @@ class TopicStore:
             "SELECT component, thread_id, state FROM topics ORDER BY component"
         )
         return [StoredTopic(row["component"], row["thread_id"], row["state"]) for row in rows]
+
+    def component_of(self, thread_id: int) -> str | None:
+        row = self._database.connection.execute(
+            "SELECT component FROM topics WHERE thread_id = ? AND state = ?",
+            (thread_id, TOPIC_OPEN),
+        ).fetchone()
+        return None if row is None else row["component"]

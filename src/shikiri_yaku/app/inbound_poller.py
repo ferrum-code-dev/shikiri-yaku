@@ -7,11 +7,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import Clock, InboundLog, Updates
 
 
 class InboundPoller:
-    """Poll once, retaining owners' items and advancing the offset atomically."""
+    """Poll once, retaining owners' items and advancing the offset atomically.
+
+    An item is kept when an owner sent it in the owner's private chat or in the configured group.
+    Anything else is dropped, including what another group sent, and the offset still moves past it.
+    """
 
     def __init__(
         self,
@@ -21,6 +26,7 @@ class InboundPoller:
         *,
         channel: str,
         owners: Collection[int],
+        group_id: int | None = None,
         wait_s: float,
     ) -> None:
         self._updates = updates
@@ -28,11 +34,15 @@ class InboundPoller:
         self._clock = clock
         self._channel = channel
         self._owners = frozenset(owners)
+        self._group_id = group_id
         self._wait_s = wait_s
 
     async def poll_once(self) -> None:
         batch = await self._updates.fetch(self._log.next_offset(self._channel), self._wait_s)
         if batch.last_update_id is None:
             return
-        items = [item for item in batch.items if item.sender in self._owners]
+        items = [item for item in batch.items if self._served(item)]
         self._log.record_batch(self._channel, items, batch.last_update_id + 1, self._clock.now())
+
+    def _served(self, item: Inbound) -> bool:
+        return item.sender in self._owners and item.chat in (item.sender, self._group_id)

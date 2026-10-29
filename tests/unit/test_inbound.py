@@ -23,9 +23,11 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 OWNER: Final = 1001
+GROUP: Final = -1005
 WAIT_S: Final = 20
 UPDATES: Final = json.loads((FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
 TEXT, REPLY, TAP = 700, 701, 702
+TOPIC_TEXT: Final = 710
 
 
 class _Api:
@@ -56,11 +58,41 @@ def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
     assert batch.last_update_id == TAP
     assert set(by_id) == {TEXT, REPLY, TAP}
     assert by_id[TEXT] == Inbound(
-        TEXT, InboundKind.TEXT, OWNER, "1001/90", text="Use the second way"
+        TEXT, InboundKind.TEXT, OWNER, OWNER, "1001/90", text="Use the second way"
     )
     assert by_id[REPLY].kind == InboundKind.REPLY
     assert (by_id[REPLY].message_ref, by_id[REPLY].reply_to_ref) == ("1001/91", "1001/42")
-    assert by_id[TAP] == Inbound(TAP, InboundKind.TAP, OWNER, "1001/42", data="a:1:1")
+    assert by_id[TAP] == Inbound(TAP, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
+
+
+def test_a_message_in_a_forum_topic_keeps_its_group_chat_and_its_topic() -> None:
+    body = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": TOPIC_TEXT,
+                "message": {
+                    "message_id": 33,
+                    "from": {"id": OWNER},
+                    "chat": {"id": GROUP},
+                    "message_thread_id": 77,
+                    "text": "/goal Add the export",
+                },
+            }
+        ],
+    }
+
+    [item] = _read(body).items
+
+    assert item == Inbound(
+        TOPIC_TEXT,
+        InboundKind.TEXT,
+        OWNER,
+        GROUP,
+        f"{GROUP}/33",
+        text="/goal Add the export",
+        thread=77,
+    )
 
 
 def test_a_kind_the_operator_does_not_read_moves_the_batch_but_gives_no_item() -> None:

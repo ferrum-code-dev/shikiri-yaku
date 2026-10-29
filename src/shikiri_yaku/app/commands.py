@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.app.command_reply import queue_command_reply
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.goal import GoalCommand
@@ -64,7 +63,7 @@ class Commands:
         text = await self._status.report() if command == _STATUS else _HELP
         queue_command_reply(
             self._outbox,
-            [Destination(self._channel, str(item.sender))],
+            [item_destination(self._channel, item)],
             text,
             key=key,
             now=self._clock.now(),

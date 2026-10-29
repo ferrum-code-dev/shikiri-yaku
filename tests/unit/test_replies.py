@@ -184,6 +184,7 @@ class Harness:
             update,
             InboundKind.TAP if text is None else InboundKind.REPLY,
             1001,
+            1001,
             ref if text is None else "1001/90",
             reply_to_ref=ref if text else None,
             text=text,

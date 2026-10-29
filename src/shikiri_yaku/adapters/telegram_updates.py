@@ -34,6 +34,7 @@ class _Message(_Payload):
     sender: Annotated[_Identity, Field(alias="from")]
     chat: _Identity
     text: str | None = None
+    message_thread_id: StrictInt | None = None
     reply_to_message: _Replied | None = None
 
 
@@ -94,7 +95,14 @@ def _item(update: _Update) -> Inbound | None:
     if update.callback_query is not None:
         tap = update.callback_query
         ref = _ref(tap.message.chat.id, tap.message.message_id)
-        return Inbound(update.update_id, InboundKind.TAP, tap.sender.id, ref, data=tap.data)
+        return Inbound(
+            update.update_id,
+            InboundKind.TAP,
+            tap.sender.id,
+            tap.message.chat.id,
+            ref,
+            data=tap.data,
+        )
     if update.message is not None and update.message.text is not None:
         sent = update.message
         replied = sent.reply_to_message
@@ -102,9 +110,11 @@ def _item(update: _Update) -> Inbound | None:
             update.update_id,
             InboundKind.TEXT if replied is None else InboundKind.REPLY,
             sent.sender.id,
+            sent.chat.id,
             _ref(sent.chat.id, sent.message_id),
             reply_to_ref=None if replied is None else _ref(sent.chat.id, replied.message_id),
             text=sent.text,
+            thread=sent.message_thread_id,
         )
     return None
 

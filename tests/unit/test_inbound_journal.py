@@ -21,12 +21,14 @@ NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
 OWNER: Final = 1001
 STRANGER: Final = 2002
+GROUP: Final = -1005
+OTHER_GROUP: Final = -1006
 WAIT_S: Final = 20
 TEXT, TAP, OTHER = 700, 701, 702
 ITEMS: Final = (
-    Inbound(TEXT, InboundKind.REPLY, OWNER, "1001/90", "1001/42", text="Use the second way"),
-    Inbound(TAP, InboundKind.TAP, OWNER, "1001/42", data="a:1:1"),
-    Inbound(OTHER, InboundKind.TEXT, STRANGER, "2002/92", text="hello"),
+    Inbound(TEXT, InboundKind.REPLY, OWNER, OWNER, "1001/90", "1001/42", text="Use the second way"),
+    Inbound(TAP, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1"),
+    Inbound(OTHER, InboundKind.TEXT, STRANGER, STRANGER, "2002/92", text="hello"),
 )
 
 
@@ -64,7 +66,7 @@ def journal(database: Database) -> JournalInbound:
 
 def _poll(updates: _Updates, journal: JournalInbound) -> None:
     poller = InboundPoller(
-        updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], wait_s=WAIT_S
+        updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], group_id=GROUP, wait_s=WAIT_S
     )
     asyncio.run(poller.poll_once())
 
@@ -90,6 +92,33 @@ def test_an_update_of_someone_but_an_owner_is_not_stored_and_the_offset_moves_on
     assert journal.next_offset(CHANNEL) == OTHER + 1
     count = database.connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert count == 0
+
+
+@pytest.mark.parametrize(
+    ("sender", "chat", "served"),
+    [
+        (OWNER, OWNER, True),
+        (OWNER, GROUP, True),
+        (OWNER, OTHER_GROUP, False),
+        (STRANGER, GROUP, False),
+    ],
+)
+def test_an_owner_item_is_kept_from_the_private_chat_or_the_configured_group_only(
+    database: Database,
+    journal: JournalInbound,
+    *,
+    sender: int,
+    chat: int,
+    served: bool,
+) -> None:
+    item = Inbound(TEXT, InboundKind.TEXT, sender, chat, f"{chat}/90", text="hello")
+
+    _poll(_Updates(Batch(TEXT, (item,))), journal)
+
+    assert journal.pending() == ([item] if served else [])
+    assert journal.next_offset(CHANNEL) == TEXT + 1
+    count = database.connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert count == (1 if served else 0)
 
 
 def test_a_rollback_preserves_both_items_and_offset(
@@ -135,6 +164,7 @@ def test_text_with_a_secret_is_kept_without_its_text_and_is_not_pending(
     item = Inbound(
         TEXT,
         kind,
+        OWNER,
         OWNER,
         "1001/90",
         text=secret if kind == InboundKind.TEXT else None,

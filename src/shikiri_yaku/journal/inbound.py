@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.secrets import secret_form
@@ -14,19 +14,18 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.journal.database import Database
 
-# keep: the separator of a message reference, `<chat id>/<message id>`, as the Channel builds it
-REF_SEPARATOR: Final = "/"
-
 
 def _inbound(row: sqlite3.Row) -> Inbound:
     return Inbound(
         update_id=row["update_id"],
         kind=InboundKind(row["kind"]),
         sender=row["sender"],
+        chat=int(row["chat"]),
         message_ref=row["message_ref"],
         reply_to_ref=row["reply_to_ref"],
         text=row["body"],
         data=row["data"],
+        thread=row["thread"],
     )
 
 
@@ -111,14 +110,14 @@ class JournalInbound:
         connection.execute(
             """
             INSERT INTO messages (direction, channel, chat, update_id, kind, sender, message_ref,
-                                  reply_to_ref, body, data, delivery, refusal, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  reply_to_ref, body, data, delivery, refusal, created_at, thread)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (update_id) WHERE update_id IS NOT NULL DO NOTHING
             """,
             (
                 Direction.IN,
                 channel,
-                item.message_ref.partition(REF_SEPARATOR)[0],
+                str(item.chat),
                 item.update_id,
                 item.kind,
                 item.sender,
@@ -129,5 +128,6 @@ class JournalInbound:
                 Delivery.RECEIVED if form is None else Delivery.REFUSED,
                 form,
                 stamp(now),
+                item.thread,
             ),
         )
