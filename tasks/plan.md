@@ -492,6 +492,18 @@ A13c's journal read uses `Database.open`, which sets WAL and applies pending mig
 can write to the journal file. It is not a read-only open and is not described as one. Consultation
 10-consult-i1 accepted this; a read-only open would need a new opening mode, which A13 does not add.
 
+Rework after verdict 12-verify-i1 (changes_requested, 13-implement-i2): a command reply longer than one
+Telegram message (/status with many components, the /open unreachable notice with many names) was queued
+as one Message, and TelegramChannel refused it with TEXT_TOO_LONG, so the PO received only a refusal. Each
+reply is now queued in parts of at most MESSAGE_TEXT_LIMIT, keyed `<key>:<index>` (`app/command_reply.py`,
+`split_reply` in `domain/outbound.py`). The whole reply is screened before it is cut; a refused reply is
+queued whole, so the existing refusal path notices the PO. A replay of the same update queues no part
+again. If the state grew between a delivery and its replay, the replay queues only the new trailing parts.
+Regression: `tests/unit/test_command_parts.py` runs the real journal, outbox, sender and TelegramChannel
+over FakeBotApi on an in-memory journal. FakeBotApi now numbers each sent message, since every part needs
+its own platform message id. Size: 304 changed lines (289 added, 15 deleted) including the regression and
+the new module, counted from `git diff` and the new files, at the ~300 target and before this note.
+
 Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
 for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.
 

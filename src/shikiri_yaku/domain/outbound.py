@@ -35,3 +35,32 @@ def fit(text: str, room: int) -> str:
     if len(text) <= room:
         return text
     return text[: room - len(_CUT_MARK)] + _CUT_MARK
+
+
+_BREAKS: Final = ("\n\n", "\n", " ")
+
+
+def split_reply(text: str, limit: int) -> list[str]:
+    """Cut the text into parts of at most `limit` characters, each at the best break that fits.
+
+    The breaks are a blank line, a line break and a space, in that order of preference; a word
+    longer than the limit is cut at the limit. Nothing is dropped except the break itself.
+    """
+    parts: list[str] = []
+    rest = text
+    while len(rest) > limit:
+        cut = _cut(rest, limit)
+        parts.append(rest[:cut])
+        rest = rest[cut:].lstrip()
+    if rest:
+        parts.append(rest)
+    return parts
+
+
+def _cut(text: str, limit: int) -> int:
+    window = text[: limit + 1]
+    for separator in _BREAKS:
+        at = window.rfind(separator)
+        if at > 0:
+            return at
+    return limit

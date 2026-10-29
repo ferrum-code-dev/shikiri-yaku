@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.open_command import OpenCommand
@@ -27,8 +26,8 @@ _KEY_PREFIX: Final = "command:"
 class Commands:
     """Answers `/open` and `/status`; any other text gets the command list.
 
-    A command reply has no signal, so it is journaled with none. Its notice key is the update id:
-    a repeated delivery of the same update queues nothing.
+    A command reply has no signal, so it is journaled with none. Its notice keys are the update id
+    and the part's index: a repeated delivery of the same update queues nothing.
     """
 
     def __init__(
@@ -52,11 +51,10 @@ class Commands:
             await self._open.handle(item)
             return
         text = await self._status.report() if command == _STATUS else _HELP
-        self._outbox.queue(
-            None,
-            Purpose.NOTICE,
+        queue_command_reply(
+            self._outbox,
             [Destination(self._channel, str(item.sender))],
-            Message(text),
+            text,
             key=f"{_KEY_PREFIX}{item.update_id}",
             now=self._clock.now(),
         )

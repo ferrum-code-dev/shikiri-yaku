@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -15,11 +16,14 @@ SEND_OK: Final = FIXTURES / "send_ok.json"
 GET_ME_OK: Final = FIXTURES / "get_me_ok.json"
 GET_ME: Final = "getMe"
 GET_UPDATES: Final = "getUpdates"
+# keep: the message id the sendMessage fixture carries, so the first message sent is 1001/42
+FIRST_MESSAGE_ID: Final = 42
 
 
 class FakeBotApi:
     """Answers getMe with its fixture and every other method with the sendMessage fixture.
 
+    Each reply carries the next message id, as Telegram gives each message its own.
     getUpdates gives `updates` once a message was sent and nothing before or after.
     `called` is set by the first call that is not a getUpdates.
     """
@@ -28,6 +32,7 @@ class FakeBotApi:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.called = asyncio.Event()
         self._updates = updates or []
+        self._message_ids = itertools.count(FIRST_MESSAGE_ID)
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         self.calls.append((method, dict(payload)))
@@ -36,5 +41,8 @@ class FakeBotApi:
             result, self._updates = (self._updates, []) if sent else ([], self._updates)
             return {"ok": True, "result": result}
         self.called.set()
-        reply = GET_ME_OK if method == GET_ME else SEND_OK
-        return json.loads(reply.read_text(encoding="utf-8"))
+        if method == GET_ME:
+            return json.loads(GET_ME_OK.read_text(encoding="utf-8"))
+        reply: dict[str, Any] = json.loads(SEND_OK.read_text(encoding="utf-8"))
+        reply["result"]["message_id"] = next(self._message_ids)
+        return reply

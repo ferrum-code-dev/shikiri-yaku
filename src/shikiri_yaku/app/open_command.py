@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
     EscalationResolution,
     EscalationStatus,
-    Message,
     ShikiruError,
     escalation_choices,
 )
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import (
         Clock,
         EscalationView,
+        Message,
         OpenLog,
         Outbox,
         Reshower,
@@ -77,11 +78,10 @@ class OpenCommand:
                 key=confirm_key(approval.op_id, item.update_id),
             )
         if unreachable:
-            self._outbox.queue(
-                None,
-                Purpose.NOTICE,
+            queue_command_reply(
+                self._outbox,
                 [Destination(self._channel, str(item.sender))],
-                Message(f"Shikiru did not answer for {', '.join(unreachable)}."),
+                f"Shikiru did not answer for {', '.join(unreachable)}.",
                 key=f"open:{item.update_id}:unreachable",
                 now=self._clock.now(),
             )
