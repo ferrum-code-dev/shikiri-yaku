@@ -5,7 +5,8 @@ phases are in `docs/plan.md`. Each task is about 300 lines of change, ends with 
 green, and leaves the repository usable. Tasks run one at a time, in the order below.
 
 **Complexity** is the Leader's hint for the ladder: `high` marks tasks where a mistake loses data or
-breaks the "every route ends at the PO" guarantee.
+breaks the "every route ends at the PO" guarantee. From Phase B4 on, tasks are `normal` unless a
+strong argument is written next to the task title.
 
 Phases B to E are outlined at the end and get detailed tasks after Phase A runs and the gate in
 `docs/plan.md` §2.3 has been decided.
@@ -663,9 +664,29 @@ Acceptance:
 * A message from a group that is not configured is ignored and not stored.
 * `/goal <text>` in the `api` topic submits to `api`; in the general topic without a component it asks for one.
 
+### B4. Telegram topics belong to the adapter (normal)
+
+Design §13 puts topics in the Channel adapter ("destination function + startup reconcile"). B1 to B3
+put the policy in `app` and `bootstrap`. Move it, without changing behavior, so that a second channel
+needs no edit in the core. The core keeps `Destination(channel, chat, thread)` and `Inbound.chat` and
+`.thread`; those are generic.
+
+Target shape:
+* `ports.py` gets one small port, `Destinations`, with three operations: the destinations of a signal (project, kind), the component an inbound item implies (or None), and an async `prepare()` that the channel runs at start-up. `GoalCommand` and the forwarder use only this port.
+* The adapter package owns `ForumTopics`, `TopicReconciler`, the topic journal protocol and record, the `TOPIC_*` states, the destination function (including the private owner chats without a group and the "topic is not open" failure), and the rule that only the owners' private chats and the configured group are served. The reconciler moves from `app/` to `adapters/`.
+* `journal/topics.py` stays the only SQL; the adapter reaches it through a protocol declared in the adapter module. No import-linter contract is weakened and no new exemption is added.
+* `TopicCreationUncertainError` becomes a channel-neutral start-up error in `ports.py` (the Telegram wording stays in the message the adapter raises); `cli.py` catches that one.
+* `InboundPoller` loses `group_id`: the chat rule runs in the adapter, and an unserved update still moves the offset without being stored. The owner check may stay in the poller.
+* `bootstrap.py` only builds the adapter pieces and passes them in.
+
+Acceptance:
+* `grep -rniE "topic|forum|group" src/shikiri_yaku` matches only under `adapters/`, `journal/topics.py` and its migration, `settings.py` (`group_id`), and `bootstrap.py` wiring lines. Nothing in `app/`, `domain/`, `extensions/`, `ports.py` or `cli.py`.
+* Every existing B1 to B3 test still passes with only its imports and constructor arguments changed; no test is deleted.
+* `/goal <text>` in a component's topic, the topic reconcile, the uncertain-creation stop and the group filter behave as before.
+
 ## Later phases (outline)
 
-* **B Topics:** tasks B1 to B3 below.
+* **B Topics:** tasks B1 to B4 above.
 * **C Infrastructure basics and review:** retry, quota wait, engine restart, review handler, notice
   handler.
 * **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
@@ -676,4 +697,4 @@ Acceptance:
   which the classifier already sends to `product` with that note. `RuleClassifier` rejects two rules
   claiming one reason; relax that to (reason, verdict) pairs when a second category shares
   `decision_required`.
-* **E Hardening:** drills, contract-test script, a human-run `scripts/record_telegram.py` that records real Bot API replies with the PO's own bot (token read from the token file by the script only, never by the gate) to replace the documentation-shaped fixtures, crash-point tests, security review.
+* **E Hardening:** a recovery path for an uncertain topic creation (today start-up refuses until the PO inspects the forum by hand), drills, contract-test script, a human-run `scripts/record_telegram.py` that records real Bot API replies with the PO's own bot (token read from the token file by the script only, never by the gate) to replace the documentation-shaped fixtures, crash-point tests, security review.

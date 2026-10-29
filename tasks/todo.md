@@ -48,6 +48,7 @@ merged and `uv run poe check` passes.
 - [x] B1. Destinations with topics
 - [x] B2. Topic reconcile at start-up
 - [x] B3. Inbound in topics
+- [ ] B4. Telegram topics belong to the adapter
 - [ ] Phase C: Infrastructure basics and review
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening
