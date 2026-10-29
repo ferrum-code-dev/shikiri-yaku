@@ -22,6 +22,7 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
+from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
@@ -214,6 +215,24 @@ def test_unacknowledged_review_is_reminded_until_acknowledged_or_closed(
     world.clock.moment = START + timedelta(hours=FIRST_H + REPEAT_H)
     _tick(world)
     assert len(_queued(world)) == 1
+
+
+def test_an_acknowledged_review_is_not_reminded_and_stays_forwarded(world: _World) -> None:
+    number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
+    world.ask(number, purpose=Purpose.NOTICE, key=f"review:{number}")
+    JournalReplies(
+        world.database,
+        world.signals,
+        OpStore(world.database),
+        reminded_kinds=frozenset({"pr_review"}),
+    ).acknowledge_notice(number, START)
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    _tick(world)
+
+    stored = world.signals.get(number)
+    assert stored is not None
+    assert stored.state is SignalState.FORWARDED
+    assert _queued(world) == []
 
 
 @pytest.mark.parametrize("registered", [False, True])

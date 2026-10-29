@@ -111,6 +111,7 @@ if TYPE_CHECKING:
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
+REMINDED_KINDS: Final = frozenset({Kind.PR_REVIEW})
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -442,7 +443,7 @@ def inbound_job(
         outbox, clock, Status(clients, sources), opened, goal, channel=TELEGRAM_CHANNEL
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal)),
+        JournalReplies(journal, signals, OpStore(journal), reminded_kinds=REMINDED_KINDS),
         outbox,
         clock,
         clients,
@@ -574,5 +575,5 @@ def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
         SignalStore(journal),
         MessageStore(journal, reporter),
         OpStore(journal),
-        reminder_notice_kinds=frozenset({Kind.PR_REVIEW}),
+        reminder_notice_kinds=REMINDED_KINDS,
     )

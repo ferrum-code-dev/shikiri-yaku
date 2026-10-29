@@ -27,14 +27,28 @@ if TYPE_CHECKING:
 
 
 _RESOLVE: Final = "resolve"
+ACKNOWLEDGE: Final = "ack"
 _BODY = TypeAdapter(Message)
 
 
 class JournalReplies:
-    def __init__(self, database: Database, signals: SignalStore, ops: OpStore) -> None:
+    """Acknowledging a notice of a reminded kind silences its reminders and keeps the signal open.
+
+    The silence is an op named `ack:<number>`, which the Scheduler reads (design §6.4).
+    """
+
+    def __init__(
+        self,
+        database: Database,
+        signals: SignalStore,
+        ops: OpStore,
+        *,
+        reminded_kinds: frozenset[str] = frozenset(),
+    ) -> None:
         self._database = database
         self._signals = signals
         self._ops = ops
+        self._reminded_kinds = reminded_kinds
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None:
         row = self._database.connection.execute(
@@ -152,4 +166,17 @@ class JournalReplies:
         return self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now)
 
     def acknowledge_notice(self, number: int, now: datetime) -> None:
+        stored = self._signals.get(number)
+        if stored is None:
+            return
+        if stored.kind in self._reminded_kinds:
+            op = NewOp(
+                f"{ACKNOWLEDGE}:{number}",
+                ACKNOWLEDGE,
+                stored.project,
+                stored.task_id,
+                state=OpState.CONFIRMED,
+            )
+            self._ops.intend(op, now)
+            return
         self._signals.transition(number, SignalState.FORWARDED, SignalState.CLOSED, now)

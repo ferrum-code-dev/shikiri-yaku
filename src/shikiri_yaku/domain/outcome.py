@@ -25,4 +25,15 @@ class WaitUntil:
     note: str
 
 
-type Outcome = Resolved | Forward | WaitUntil
+@dataclass(frozen=True, slots=True)
+class Notified:
+    """The handler sent the PO its own message about the signal, which then waits as a forward does.
+
+    Reminders apply to it as to a forward. This outcome is not in design §6: the review handler
+    needs it, because a forward would send the Product message (tasks/plan.md C4).
+    """
+
+    note: str
+
+
+type Outcome = Resolved | Forward | WaitUntil | Notified

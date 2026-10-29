@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import pytest
 from pydantic import ValidationError
@@ -13,7 +15,7 @@ from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
-from shikiri_yaku.journal.signals import NewSignal, SignalStore
+from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore
 from shikiri_yaku.ports import (
     Ack,
     Button,
@@ -23,6 +25,9 @@ from shikiri_yaku.ports import (
     ResolvePayload,
     escalation_choices,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 NOW: Final = datetime(2026, 10, 28, tzinfo=UTC)
 LATER: Final = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
@@ -61,6 +66,41 @@ def test_choices_share_numbers_including_unknown_resolution_gaps() -> None:
     choices = escalation_choices(view)
     assert [choice.number for choice in choices] == [1, 2, 4, 5]
     assert [choice.value for choice in choices] == [*view.agent_options, *view.resolutions[1:]]
+
+
+@pytest.mark.parametrize(
+    ("kind", "state"),
+    [("pr_review", SignalState.FORWARDED), ("health", SignalState.CLOSED)],
+    ids=["reminded kind stays open", "other kind closes"],
+)
+def test_acknowledging_a_notice_keeps_a_reminded_kind_open_and_closes_the_others(
+    kind: str, state: SignalState, memory: Database
+) -> None:
+    database = memory
+    signals = SignalStore(database)
+    number = signals.insert_if_absent(
+        NewSignal(f"api:{kind}:1", "api", kind, "x", "x", "T-1"), NOW
+    ).row_id
+    signals.classify(
+        number, category="product", classified_by="rule", verdict=None, handler="p", now=NOW
+    )
+    signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
+    signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
+
+    JournalReplies(
+        database, signals, OpStore(database), reminded_kinds=frozenset({"pr_review"})
+    ).acknowledge_notice(number, NOW)
+
+    stored = signals.get(number)
+    assert stored is not None
+    assert stored.state is state
+
+
+@pytest.fixture
+def memory() -> Generator[Database]:
+    database = Database.open(":memory:")
+    yield database
+    database.close()
 
 
 class _Reporter:

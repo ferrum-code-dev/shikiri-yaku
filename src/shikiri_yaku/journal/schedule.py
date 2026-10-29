@@ -8,6 +8,7 @@ from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
 from shikiri_yaku.journal.database import parse_stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState
+from shikiri_yaku.journal.replies import ACKNOWLEDGE
 from shikiri_yaku.journal.signals import SignalState
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ class JournalSchedule:
                 AND (m.purpose IN (:question, :approval)
                      OR (m.purpose = :notice
                          AND (m.notice_key IS NULL OR m.notice_key NOT LIKE :reminders)))
+                AND NOT EXISTS (SELECT 1 FROM ops WHERE identity = :acknowledged || s.number)
             ORDER BY s.number, m.id
             """,
             {
@@ -70,6 +72,7 @@ class JournalSchedule:
                 "approval": Purpose.APPROVAL,
                 "notice": Purpose.NOTICE,
                 "reminders": f"{REMIND}:%",
+                "acknowledged": f"{ACKNOWLEDGE}:",
             },
         )
         grouped: dict[int, Awaiting] = {}

@@ -11,7 +11,7 @@ from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.classification import Category, Classification, Source, Verdict
-from shikiri_yaku.domain.outcome import Forward, Resolved, WaitUntil
+from shikiri_yaku.domain.outcome import Forward, Notified, Resolved, WaitUntil
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal import (
     Database,
@@ -187,6 +187,19 @@ def test_a_forward_and_a_resolution_end_the_signal(world: _World) -> None:
     assert world.stored(done[0]).category == INFRA
     assert world.stored(forwarded[0]).state is SignalState.FORWARDED
     assert world.fallback.forwarded == [(forwarded[1].id, "could not fix it")]
+
+
+def test_a_notified_signal_waits_for_the_po_like_a_forward_but_sends_nothing_itself(
+    world: _World,
+) -> None:
+    number, signal = world.new("E1")
+    router = world.router(_Classifier(), infrastructure=_Handler(Notified("sent the review")))
+
+    asyncio.run(_route(router, number, signal))
+
+    assert world.stored(number).state is SignalState.FORWARDED
+    assert "sent the review" in (world.stored(number).notes or "")
+    assert world.fallback.forwarded == []
 
 
 def test_a_signal_is_handled_once(world: _World) -> None:
