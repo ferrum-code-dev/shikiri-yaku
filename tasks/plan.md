@@ -602,10 +602,51 @@ Acceptance:
 * A duplicate update id submits once.
 * Crash-point test: a goal with an unconfirmed op is not resubmitted at restart and produces the question.
 
+## Phase B: topics
+
+Design §7 and §13 "Telegram topics". Only the destination function and a start-up reconcile change;
+handlers, Router and the outbox contract stay as they are. The private chat of each owner keeps
+working when no group is configured.
+
+### B1. Destinations with topics (normal)
+
+`[channels.telegram]` gets an optional `group_id` (a forum supergroup). A `Destination` gains an
+optional `thread` (the topic id). The destination function picks the target of a signal: with a group,
+the topic of the signal's component for escalations and the one general topic for every other
+signal; without a group, the private chat of each owner as now. The topic ids are kept in the journal
+(`topics`: component or `general`, thread id, state). `TelegramChannel` sends with `message_thread_id`
+and the outbox stores the thread with the destination. Message references keep working for edits.
+
+Acceptance:
+* An escalation of component `api` is queued for the `api` topic, a `task_done` notice for the general topic, with a group; both go to the owners' private chats without one.
+* A restart sends what is pending to the same topic (the thread is stored with the row).
+
+### B2. Topic reconcile at start-up (normal)
+
+At start, with a group: create a forum topic for each component and one general topic that is missing
+in the journal (`createForumTopic`), and close the topic of a removed component (`closeForumTopic`),
+keeping its history. `doctor` checks that the bot is an administrator with the manage-topics right
+and that the group holds only the owners and the bot (everyone in the group sees project data), and
+names the problem when not.
+
+Acceptance:
+* With fixtures shaped as the Bot API documents them: a new component gets one topic; a second start creates nothing; a removed component's topic is closed and not deleted.
+* `doctor` fails on a group with a non-owner member.
+
+### B3. Inbound in topics (normal)
+
+Updates from the group are served only for the configured `group_id` and the owners; an update from
+another chat is ignored and not stored. A reply or tap in a topic is routed by the originating message
+as before. `/goal <text>` inside a component's topic implies that component; `/goal` in the general
+topic still needs the component name.
+
+Acceptance:
+* A message from a group that is not configured is ignored and not stored.
+* `/goal <text>` in the `api` topic submits to `api`; in the general topic without a component it asks for one.
+
 ## Later phases (outline)
 
-* **B Topics:** destination function for a forum group, startup topic reconcile, group allow-list,
-  `/goal` without component inside a topic.
+* **B Topics:** tasks B1 to B3 below.
 * **C Infrastructure basics and review:** retry, quota wait, engine restart, review handler, notice
   handler.
 * **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
