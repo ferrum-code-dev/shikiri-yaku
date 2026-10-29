@@ -28,7 +28,7 @@ LINK_DOWN: Final = "the link is down"
 
 
 class StoppedError(Exception):
-    """Ends the reconciler's loop after its first pass, where the clock would sleep."""
+    """Ends the reconciler's loop at a sleep, once the clock has no sleeps left."""
 
 
 class StartClient:
@@ -38,6 +38,10 @@ class StartClient:
         self.engine_up = engine_up
         self.starts = 0
         self.link_down = False
+
+    @property
+    def linked(self) -> bool:
+        return not self.link_down
 
     async def status(self) -> EngineStatus:
         if self.link_down:
@@ -49,15 +53,22 @@ class StartClient:
 
 
 class FakeClock:
-    def __init__(self, at: datetime) -> None:
+    """Moves on by `step` at each sleep, and stops the run at a sleep once `sleeps` are used up."""
+
+    def __init__(self, at: datetime, *, step: timedelta = timedelta(0), sleeps: int = 0) -> None:
         self.at = at
+        self.step = step
+        self.sleeps = sleeps
 
     def now(self) -> datetime:
         return self.at
 
     async def sleep(self, seconds: float) -> None:
         del seconds
-        raise StoppedError
+        if self.sleeps == 0:
+            raise StoppedError
+        self.sleeps -= 1
+        self.at += self.step
 
 
 @pytest.fixture
@@ -71,11 +82,11 @@ def _starts(journal: Database) -> JournalStarts:
     return JournalStarts(journal, OpStore(journal), SignalStore(journal))
 
 
-def _reconciler(journal: Database, client: StartClient, at: datetime) -> StartReconciler:
+def _reconciler(journal: Database, client: StartClient, clock: FakeClock) -> StartReconciler:
     return StartReconciler(
         _starts(journal),
         {"api": cast("ShikiruClient", client)},
-        FakeClock(at),
+        clock,
         confirm_within=CONFIRM_WITHIN,
         interval_s=1,
     )
@@ -117,15 +128,58 @@ def test_an_unsettled_start_is_settled_by_the_engine_and_never_run_again(
     asyncio.run(_start_then_crash(journal, client, command_ran=command_ran))
     starts_before_recovery = client.starts
     with pytest.raises(StoppedError):
-        asyncio.run(_reconciler(journal, client, START + elapsed).run())
+        asyncio.run(_reconciler(journal, client, FakeClock(START + elapsed)).run())
     assert client.starts == starts_before_recovery
     assert _state(journal) == state
+
+
+def test_the_gate_stays_shut_while_an_unsettled_start_is_pending(journal: Database) -> None:
+    client = StartClient(engine_up=False)
+    asyncio.run(_start_then_crash(journal, client, command_ran=False))
+    reconciler = _reconciler(journal, client, FakeClock(START))
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert not reconciler.settled.is_set()
+
+
+def test_the_gate_waits_for_the_link_to_come_up_even_without_a_start(journal: Database) -> None:
+    client = StartClient(engine_up=True)
+    client.link_down = True
+    reconciler = _reconciler(journal, client, FakeClock(START))
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert not reconciler.settled.is_set()
+    client.link_down = False
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert reconciler.settled.is_set()
+
+
+def test_the_gate_opens_once_the_unsettled_starts_are_settled(journal: Database) -> None:
+    client = StartClient(engine_up=True)
+    asyncio.run(_start_then_crash(journal, client, command_ran=True))
+    reconciler = _reconciler(journal, client, FakeClock(START))
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert reconciler.settled.is_set()
+
+
+def test_a_link_that_stays_down_opens_the_gate_at_the_bound(journal: Database) -> None:
+    client = StartClient(engine_up=True)
+    client.link_down = True
+    asyncio.run(_start_then_crash(journal, client, command_ran=True))
+    clock = FakeClock(START, step=CONFIRM_WITHIN / 2, sleeps=2)
+    reconciler = _reconciler(journal, client, clock)
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert reconciler.settled.is_set()
+    assert _state(journal) == AttemptState.ISSUED
 
 
 def test_a_link_outage_leaves_the_start_for_the_next_tick(journal: Database) -> None:
     client = StartClient(engine_up=True)
     asyncio.run(_start_then_crash(journal, client, command_ran=True))
-    reconciler = _reconciler(journal, client, START)
+    reconciler = _reconciler(journal, client, FakeClock(START))
     uncertain = {SIGNAL.id}
     client.link_down = True
     asyncio.run(reconciler.tick(uncertain))
@@ -138,6 +192,6 @@ def test_a_link_outage_leaves_the_start_for_the_next_tick(journal: Database) -> 
 def test_a_start_outside_the_recovery_snapshot_is_left_alone(journal: Database) -> None:
     client = StartClient(engine_up=False)
     asyncio.run(_start_then_crash(journal, client, command_ran=False))
-    reconciler = _reconciler(journal, client, START + CONFIRM_WITHIN)
+    reconciler = _reconciler(journal, client, FakeClock(START + CONFIRM_WITHIN))
     asyncio.run(reconciler.tick(set()))
     assert _state(journal) == AttemptState.ISSUED

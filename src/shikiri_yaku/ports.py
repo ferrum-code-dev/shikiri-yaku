@@ -277,6 +277,9 @@ class ShikiruClient(Protocol):
     `done` and `queued` come back as the Ack.
     """
 
+    @property
+    def linked(self) -> bool: ...
+
     async def wait_for_events(self, since_id: int, timeout_s: float) -> list[ShikiruEvent]: ...
 
     async def status(self) -> EngineStatus: ...

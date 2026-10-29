@@ -120,6 +120,10 @@ class ShikiruMcpClient:
             await self._clock.sleep(delay_s)
             delay_s = min(delay_s * BACKOFF_FACTOR, self._backoff_max_s)
 
+    @property
+    def linked(self) -> bool:
+        return self._session is not None
+
     async def wait_for_events(self, since_id: int, timeout_s: float) -> list[ShikiruEvent]:
         arguments = {"since_id": since_id, "timeout_s": timeout_s}
         read_timeout_s = timeout_s + self._call_timeout_s

@@ -17,10 +17,18 @@ from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.bootstrap import compose
+from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
-from shikiri_yaku.journal import Database, JournalInbound, OpStore
+from shikiri_yaku.journal import (
+    Database,
+    JournalInbound,
+    JournalStarts,
+    NewSignal,
+    OpStore,
+    SignalStore,
+)
 from shikiri_yaku.journal.submits import JournalSubmits
-from shikiri_yaku.ports import SubmitStatus
+from shikiri_yaku.ports import AttemptState, SubmitStatus
 from shikiri_yaku.settings import load_settings
 from tests.support.telegram_bot import FakeBotApi
 
@@ -36,6 +44,11 @@ _OWNER: Final = 1001
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
 _ASKED: Final = "I may have submitted this already"
+_RESTARTED: Final = "the engine was restarted"
+_FAILED_HANDLER: Final = "handler failed"
+_LINK_DELAY_S: Final = 1
+_ENGINE_DOWN: Final = Signal("api", Kind.ENGINE_DOWN, "status", "", "engine is down")
+_ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "engine is down")
 TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 
 
@@ -75,10 +88,14 @@ class _ShikiruSession:
 
 
 def _shikiru_link(
-    session: _ShikiruSession,
+    session: _ShikiruSession, *, delay_s: float = 0
 ) -> Callable[[], AbstractAsyncContextManager[ToolSession]]:
+    """Return a link that comes up after `delay_s`, as a Shikiru that is still starting does."""
+
     @asynccontextmanager
     async def link() -> AsyncGenerator[ToolSession]:
+        if delay_s:
+            await SystemClock().sleep(delay_s)
         yield session  # pyright: ignore[reportReturnType]
 
     return link
@@ -92,10 +109,23 @@ def _instance(home: Path) -> Path:
     (directory / "config.toml").write_text(
         f'product = "{_PRODUCT}"\n\n[[components]]\nname = "api"\npath = "{component}"\n\n'
         f"[channels.telegram]\nowners = [{_OWNER}]\n\n"
-        "[operator]\ndispatch_interval_s = 1\noutbox_interval_s = 1\n",
+        "[operator]\ndispatch_interval_s = 1\noutbox_interval_s = 1\n\n"
+        "[handlers.infrastructure]\nrestart_poll_s = 1\n",
         encoding="utf-8",
     )
     return directory
+
+
+def _interrupted_restart(directory: Path) -> None:
+    """Journal a restart that was issued and then cut short, with its engine-down signal open."""
+    now = SystemClock().now()
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        signals = SignalStore(database)
+        signals.insert_if_absent(_ENGINE_DOWN_NEW, now)
+        JournalStarts(database, OpStore(database), signals).issue(_ENGINE_DOWN, now)
+    finally:
+        database.close()
 
 
 async def _deliver(jobs: Sequence[Job], done: asyncio.Event) -> None:
@@ -110,16 +140,17 @@ async def _deliver(jobs: Sequence[Job], done: asyncio.Event) -> None:
         await asyncio.gather(*running, return_exceptions=True)
 
 
-class _AskingBot(FakeBotApi):
-    """A fake Bot API that also sets `asked` once the question about an unknown goal is sent."""
+class _MarkingBot(FakeBotApi):
+    """A fake Bot API that also sets `marked` once a message containing `marker` is sent."""
 
-    def __init__(self) -> None:
+    def __init__(self, marker: str) -> None:
         super().__init__()
-        self.asked = asyncio.Event()
+        self._marker = marker
+        self.marked = asyncio.Event()
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
-        if _ASKED in str(payload.get("text", "")):
-            self.asked.set()
+        if self._marker in str(payload.get("text", "")):
+            self.marked.set()
         return await super().call(method, payload)
 
 
@@ -225,7 +256,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
     assert (crashed.submits, interrupted.status) == (["Add the export"], SubmitStatus.ISSUED)
 
     restarted = _ShikiruSession(asyncio.Event())
-    bot = _AskingBot()
+    bot = _MarkingBot(_ASKED)
     composition = compose(
         load_settings(directory),
         directory,
@@ -234,7 +265,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
     )
     try:
         composition.recover()
-        asyncio.run(_deliver(composition.jobs, bot.asked))
+        asyncio.run(_deliver(composition.jobs, bot.marked))
     finally:
         composition.close()
 
@@ -251,3 +282,41 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
     finally:
         database.close()
     assert row["asked"] == 1
+
+
+def test_an_interrupted_start_is_settled_before_its_signal_is_handled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # keep: no command can run here, so a start or doctor that should not happen fails instead
+    monkeypatch.setenv("PATH", str(tmp_path))
+    directory = _instance(tmp_path)
+    _interrupted_restart(directory)
+    session = _ShikiruSession(asyncio.Event())
+    bot = _MarkingBot(_RESTARTED)
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session, delay_s=_LINK_DELAY_S),
+        bot=lambda _settings: bot,
+    )
+    try:
+        asyncio.run(_deliver(composition.jobs, bot.marked))
+    finally:
+        composition.close()
+
+    texts = [
+        str(payload.get("text", "")) for method, payload in bot.calls if method == "sendMessage"
+    ]
+    assert not [text for text in texts if _FAILED_HANDLER in text]
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        signals = SignalStore(database)
+        attempt = JournalStarts(database, OpStore(database), signals).existing(_ENGINE_DOWN)
+        row = database.connection.execute(
+            "SELECT COUNT(*) AS notices FROM messages WHERE notice_key = ?",
+            (f"restart:{_ENGINE_DOWN.id}",),
+        ).fetchone()
+    finally:
+        database.close()
+    assert attempt is not None
+    assert (attempt.state, row["notices"]) == (AttemptState.CONFIRMED, 1)

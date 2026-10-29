@@ -160,7 +160,9 @@ async def _run(settings: Settings, database: Database, session: _Session) -> Non
     client = shikiru_client(
         settings, component, session.clock, lambda _executable, _path: session.connect
     )
-    jobs = project_jobs(settings, component, client, database, session.clock)
+    settled = asyncio.Event()
+    settled.set()
+    jobs = project_jobs(settings, component, client, database, session.clock, settled=settled)
     tasks = [asyncio.create_task(job()) for job in jobs]
     try:
         await asyncio.wait_for(session.finished.wait(), timeout=5)

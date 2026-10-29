@@ -160,12 +160,20 @@ def compose(
         component.name: shikiru_client(settings, component, clock, link)
         for component in settings.components
     }
-    # keep: first, so an unsettled start is settled before any signal or source runs
-    jobs = [start_reconcile_job(settings, journal, clock, clients=clients)]
+    starts_reconciler = start_reconciler(settings, journal, clock, clients=clients)
+    # keep: the reconciler waits for the links to connect; signals and sources wait for its gate
+    jobs = [starts_reconciler.run]
     jobs += [
         job
         for component in settings.components
-        for job in project_jobs(settings, component, clients[component.name], journal, clock)
+        for job in project_jobs(
+            settings,
+            component,
+            clients[component.name],
+            journal,
+            clock,
+            settled=starts_reconciler.settled,
+        )
     ]
     outbox = JournalOutbox(journal, MessageStore(journal, reporter))
     bot_api = bot(settings)
@@ -215,6 +223,7 @@ def compose(
         handlers={extension.category: extension.handler for extension in extensions},
         fallback=forwarder,
         reporter=reporter,
+        settled=starts_reconciler.settled,
     )
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
@@ -306,8 +315,10 @@ def project_jobs(
     client: ShikiruMcpClient,
     journal: Database,
     clock: Clock,
+    *,
+    settled: asyncio.Event,
 ) -> list[Job]:
-    """Return the link supervisor and synchronized sources of one project."""
+    """Return the link supervisor and the sources of one project, which wait for `settled`."""
     operator = settings.operator
     signals = SignalStore(journal)
     cursors = CursorStore(journal, signals)
@@ -336,7 +347,7 @@ def project_jobs(
         event_wait_s=operator.event_wait_s,
         interval_s=operator.liveness_interval_s,
     )
-    return [client.supervise, project_sources.run]
+    return [client.supervise, after_settled(settled, project_sources.run)]
 
 
 def routing_jobs(
@@ -348,8 +359,9 @@ def routing_jobs(
     handlers: Mapping[Category, Handler],
     fallback: Forwarder,
     reporter: Reporter,
+    settled: asyncio.Event,
 ) -> list[Job]:
-    """Return the Dispatcher and the Scheduler, which share one Router."""
+    """Return the Dispatcher and the Scheduler, which share one Router and wait for `settled`."""
     operator = settings.operator
     signals = SignalStore(journal)
     routing = JournalRouting(journal, signals)
@@ -371,7 +383,17 @@ def routing_jobs(
         reminder_first_h=settings.handlers.product.reminder_first_h,
         reminder_repeat_h=settings.handlers.product.reminder_repeat_h,
     )
-    return [dispatcher.run, scheduler.run]
+    return [after_settled(settled, dispatcher.run), after_settled(settled, scheduler.run)]
+
+
+def after_settled(settled: asyncio.Event, job: Job) -> Job:
+    """Return the job, which starts only once `settled` is set."""
+
+    async def run() -> None:
+        await settled.wait()
+        await job()
+
+    return run
 
 
 def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channel) -> Job:
@@ -500,24 +522,26 @@ def reconcile_job(
     return reconciler.run
 
 
-def start_reconcile_job(
+def start_reconciler(
     settings: Settings,
     journal: Database,
     clock: Clock,
     *,
     clients: Mapping[str, ShikiruClient],
-) -> Job:
-    """Return the reconciler of engine starts a restart left unsettled; it never starts again."""
+) -> StartReconciler:
+    """Return the reconciler of engine starts a restart left unsettled; it never starts again.
+
+    Its `settled` event gates the signals and sources, so they never act on an unsettled start.
+    """
     infrastructure = settings.handlers.infrastructure
     signals = SignalStore(journal)
-    reconciler = StartReconciler(
+    return StartReconciler(
         JournalStarts(journal, OpStore(journal), signals),
         clients,
         clock,
         confirm_within=timedelta(seconds=infrastructure.restart_confirm_s),
-        interval_s=settings.operator.liveness_interval_s,
+        interval_s=infrastructure.restart_poll_s,
     )
-    return reconciler.run
 
 
 def main(argv: Sequence[str] | None = None) -> int:
