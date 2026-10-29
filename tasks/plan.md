@@ -680,7 +680,7 @@ Target shape:
 * `bootstrap.py` only builds the adapter pieces and passes them in.
 
 Acceptance criteria:
-* `grep -rniE "topic|forum|group" src/shikiri_yaku` matches only under `adapters/`, `journal/topics.py` and its migration, `settings.py` (`group_id`), and `bootstrap.py` wiring lines. Nothing in `app/`, `domain/`, `extensions/`, `ports.py` or `cli.py`.
+* `grep -rniE "topic|forum|group_id|supergroup" src/shikiri_yaku` (SQL `GROUP BY` and ordinary words are not a match) matches only under `adapters/`, `journal/topics.py` and its migration, `settings.py` (`group_id`), and `bootstrap.py` wiring lines. Nothing in `app/`, `domain/`, `extensions/`, `ports.py` or `cli.py`.
 * Every existing B1 to B3 test still passes with only its imports and constructor arguments changed; no test is deleted.
 * `/goal <text>` in a component's topic, the topic reconcile, the uncertain-creation stop and the group filter behave as before.
 

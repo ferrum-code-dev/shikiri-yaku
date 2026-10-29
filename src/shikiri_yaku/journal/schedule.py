@@ -72,7 +72,7 @@ class JournalSchedule:
                 "reminders": f"{REMIND}:%",
             },
         )
-        by_number: dict[int, Awaiting] = {}
+        grouped: dict[int, Awaiting] = {}
         for row in rows:
             if row["purpose"] == Purpose.NOTICE and row["kind"] not in self._reminder_notice_kinds:
                 continue
@@ -80,20 +80,20 @@ class JournalSchedule:
             if asked_at is None:
                 continue
             where = Destination(row["channel"], row["chat"], row["thread"])
-            known = by_number.get(row["number"])
+            known = grouped.get(row["number"])
             if known is None:
-                by_number[row["number"]] = Awaiting(
+                grouped[row["number"]] = Awaiting(
                     row["number"], row["project"], row["task_id"], asked_at, (where,)
                 )
             else:
-                by_number[row["number"]] = replace(
+                grouped[row["number"]] = replace(
                     known,
                     asked_at=min(known.asked_at, asked_at),
                     destinations=known.destinations
                     if where in known.destinations
                     else (*known.destinations, where),
                 )
-        return list(by_number.values())
+        return list(grouped.values())
 
     def schedule_reminder(
         self, awaiting: Awaiting, occurrence: int, message: Message, now: datetime
