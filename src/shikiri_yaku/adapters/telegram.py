@@ -13,6 +13,7 @@ from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
     ChannelError,
     ChannelRefusedError,
+    ForumTopics,
 )
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 DELETE_MESSAGE: Final = "deleteMessage"
 GET_ME: Final = "getMe"
+CREATE_FORUM_TOPIC: Final = "createForumTopic"
+CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
 REF_SEPARATOR: Final = "/"
 
 # keep: Telegram's error codes (Bot API, "Making requests"); the rest are transient
@@ -98,6 +101,34 @@ class _Accepted(BaseModel):
 
 
 _PROBE_REPLY: Final[TypeAdapter[_Accepted | _Failed]] = TypeAdapter(_Accepted | _Failed)
+
+
+class _ForumTopic(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    message_thread_id: int
+
+
+class _CreatedTopic(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: _ForumTopic
+
+
+class _ClosedTopic(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: Literal[True]
+
+
+_CREATE_TOPIC_REPLY: Final[TypeAdapter[_CreatedTopic | _Failed]] = TypeAdapter(
+    _CreatedTopic | _Failed
+)
+_CLOSE_TOPIC_REPLY: Final[TypeAdapter[_ClosedTopic | _Failed]] = TypeAdapter(
+    _ClosedTopic | _Failed
+)
 
 
 class TelegramChannel:
@@ -209,3 +240,35 @@ async def probe_bot(api: BotApi) -> None:
         raise ChannelError(UNEXPECTED_REPLY) from error
     if isinstance(reply, _Failed):
         raise ChannelError(NOT_ACCEPTED)
+
+
+class TelegramForumTopics(ForumTopics):
+    """Create and close topics in the configured group through the Bot API."""
+
+    def __init__(self, api: BotApi, group_id: int) -> None:
+        self._api = api
+        self._group_id = group_id
+
+    async def create(self, name: str) -> int:
+        body = await self._api.call(
+            CREATE_FORUM_TOPIC, {"chat_id": self._group_id, "name": name}
+        )
+        try:
+            reply = _CREATE_TOPIC_REPLY.validate_python(body)
+        except ValidationError as error:
+            raise ChannelError(UNEXPECTED_REPLY) from error
+        if isinstance(reply, _Failed):
+            raise ChannelError(NOT_ACCEPTED)
+        return reply.result.message_thread_id
+
+    async def close(self, thread_id: int) -> None:
+        body = await self._api.call(
+            CLOSE_FORUM_TOPIC,
+            {"chat_id": self._group_id, "message_thread_id": thread_id},
+        )
+        try:
+            reply = _CLOSE_TOPIC_REPLY.validate_python(body)
+        except ValidationError as error:
+            raise ChannelError(UNEXPECTED_REPLY) from error
+        if isinstance(reply, _Failed):
+            raise ChannelError(NOT_ACCEPTED)

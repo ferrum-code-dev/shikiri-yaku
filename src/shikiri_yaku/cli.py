@@ -110,7 +110,13 @@ def _run(arguments: argparse.Namespace, compose: Compose) -> int:
                 asyncio.run(_serve(composition.jobs))
             finally:
                 composition.close()
-    except (SettingsError, InstanceLockError, CompositionError, ShikiruError) as error:
+    except (
+        SettingsError,
+        InstanceLockError,
+        CompositionError,
+        ShikiruError,
+        ChannelError,
+    ) as error:
         sys.stderr.write(f"{error}\n")
         return 1
     return 0

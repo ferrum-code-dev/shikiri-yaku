@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
+
+from shikiri_yaku.ports import TOPIC_OPEN, TopicRecord
 
 if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
 
 GENERAL_TOPIC: Final = "general"
-TOPIC_OPEN: Final = "open"
-TOPIC_CLOSED: Final = "closed"
 
 
-@dataclass(frozen=True, slots=True)
-class StoredTopic:
-    component: str | None
-    thread_id: int
-    state: str
+StoredTopic = TopicRecord
 
 
 class TopicStore:

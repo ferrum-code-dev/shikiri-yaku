@@ -11,6 +11,8 @@ the reply it stands for. A recording needs the bot token and the network, and th
 | `rate_limited.json` | a failed call with `error_code` 429 and `parameters.retry_after` | Bot API, "Making requests" (ResponseParameters) |
 | `get_updates_ok.json` | the reply to `getUpdates`: a text, a reply and a button tap | Bot API, "Getting updates" (getUpdates, Update), "Available types" (Message, CallbackQuery) |
 | `get_me_ok.json` | the reply to `getMe`: the User object of the bot | Bot API, "Available methods" (getMe) and "User" |
+| `forum_topic_created.json` | the reply to `createForumTopic`: a ForumTopic | Bot API, "Available methods" (createForumTopic) and "ForumTopic" |
+| `forum_topic_closed.json` | the reply to `closeForumTopic`: `true` | Bot API, "Available methods" (closeForumTopic) |
 
 In A10d the official page was read in part: the getMe entry, the required User fields, the response
 shape (`ok`, `result`, `description`, `error_code`, `parameters`) and ResponseParameters with

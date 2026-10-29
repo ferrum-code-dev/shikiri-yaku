@@ -63,6 +63,7 @@ __all__ = [
     "EventJournal",
     "EventKinds",
     "Forwarder",
+    "ForumTopics",
     "InboundLog",
     "LifecycleJournal",
     "LivenessJournal",
@@ -98,6 +99,13 @@ __all__ = [
     "SubmitStatus",
     "TaskDetail",
     "TaskStatus",
+    "TopicLog",
+    "TopicRecord",
+    "TOPIC_CLOSED",
+    "TOPIC_CLOSING",
+    "TOPIC_CREATING",
+    "TOPIC_OPEN",
+    "UNASSIGNED_THREAD",
     "Unsettled",
     "Updates",
     "WakeTarget",
@@ -428,6 +436,11 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
 # keep: Telegram's limits (design §7), named here because the Channel is the only user of them
 MESSAGE_TEXT_LIMIT: Final = 4096
 CALLBACK_DATA_LIMIT: Final = 64
+TOPIC_OPEN: Final = "open"
+TOPIC_CLOSED: Final = "closed"
+TOPIC_CREATING: Final = "creating"
+TOPIC_CLOSING: Final = "closing"
+UNASSIGNED_THREAD: Final = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,6 +478,31 @@ class Channel(Protocol):
     async def edit(self, message_ref: str, message: Message) -> None: ...
 
     async def delete(self, message_ref: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class TopicRecord:
+    component: str | None
+    thread_id: int
+    state: str
+
+
+class ForumTopics(Protocol):
+    """What startup needs from Telegram's topic API (design §7, §13)."""
+
+    async def create(self, name: str) -> int: ...
+
+    async def close(self, thread_id: int) -> None: ...
+
+
+class TopicLog(Protocol):
+    """The journal mapping of a component or general signals to their topic."""
+
+    def get(self, component: str | None) -> TopicRecord | None: ...
+
+    def save(self, component: str | None, thread_id: int, state: str = TOPIC_OPEN) -> None: ...
+
+    def all(self) -> list[TopicRecord]: ...
 
 
 class Updates(Protocol):

@@ -7,6 +7,7 @@ so the command line never imports this module and the concrete objects stay here
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Final
@@ -16,7 +17,7 @@ from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
-from shikiri_yaku.adapters.telegram import TelegramChannel, probe_bot
+from shikiri_yaku.adapters.telegram import TelegramChannel, TelegramForumTopics, probe_bot
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
@@ -39,6 +40,7 @@ from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
+from shikiri_yaku.app.topic_reconciler import TopicReconciler
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
@@ -180,8 +182,25 @@ def compose(
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
+
+    group_id = settings.telegram.group_id
+    topic_reconciler = (
+        None
+        if group_id is None
+        else TopicReconciler(
+            topics,
+            TelegramForumTopics(bot_api, group_id),
+            [component.name for component in settings.components],
+        )
+    )
+
+    def recover() -> None:
+        goal.recover()
+        if topic_reconciler is not None:
+            asyncio.run(topic_reconciler.run())
+
     return Composition(
-        settings, clock, journal, probes, partial(probe_bot, bot_api), jobs, goal.recover
+        settings, clock, journal, probes, partial(probe_bot, bot_api), jobs, recover
     )
 
 
