@@ -137,6 +137,16 @@ class OpStore:
         ).rowcount
         return moved == 1
 
+    def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
+        """Save the acknowledgement and command id of an issued resolve; the op stays issued."""
+        self._database.connection.execute(
+            """
+            UPDATE ops SET acknowledgement = ?, command_id = ?, updated_at = ?
+            WHERE id = ? AND kind = 'resolve' AND state = ? AND acknowledgement IS NULL
+            """,
+            (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
+        )
+
     def confirm_command(self, project: str, command_id: str, now: datetime) -> bool:
         """Confirm the issued resolve that Shikiru's event names; an unknown id changes nothing."""
         confirmed = self._database.connection.execute(

@@ -62,6 +62,7 @@ from shikiri_yaku.journal import (
     JournalFinalEdits,
     JournalInbound,
     JournalOutbox,
+    JournalRetries,
     JournalRouting,
     JournalSchedule,
     JournalSources,
@@ -95,6 +96,7 @@ if TYPE_CHECKING:
         Outbox,
         Reporter,
         Reshower,
+        RetryLog,
         ShikiruClient,
     )
     from shikiri_yaku.settings import Component, Settings
@@ -178,7 +180,8 @@ def compose(
         retry_budget_per_day=settings.handlers.infrastructure.retry_budget_per_day,
         restart_budget_per_hour=settings.handlers.infrastructure.restart_budget_per_hour,
     )
-    extensions = registered_extensions(clients, guard)
+    retries = JournalRetries(journal, OpStore(journal))
+    extensions = registered_extensions(clients, guard, retries, clock)
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
         settings,
@@ -224,9 +227,14 @@ def compose(
     )
 
 
-def registered_extensions(clients: Mapping[str, ShikiruClient], guard: Guard) -> list[Extension]:
+def registered_extensions(
+    clients: Mapping[str, ShikiruClient],
+    guard: Guard,
+    retries: RetryLog,
+    clock: Clock,
+) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
-    return [infrastructure_extension(clients, guard), product_extension()]
+    return [infrastructure_extension(clients, guard, retries, clock), product_extension()]
 
 
 def shikiru_client(

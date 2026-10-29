@@ -47,5 +47,9 @@ class JournalReconcile:
             if not self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now):
                 return False
             number = ResolvePayload.model_validate_json(op.payload).number
-            self._signals.transition(number, SignalState.ANSWERED, SignalState.FORWARDED, now)
+            if not self._signals.transition(
+                number, SignalState.ANSWERED, SignalState.FORWARDED, now
+            ):
+                # keep: a lost automatic retry's signal was resolved by the Router, not answered
+                self._signals.transition(number, SignalState.RESOLVED, SignalState.FORWARDED, now)
             return True

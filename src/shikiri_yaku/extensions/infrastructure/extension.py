@@ -12,12 +12,17 @@ from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE, INFRAST
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.ports import Guard, ShikiruClient
+    from shikiri_yaku.ports import Clock, Guard, RetryLog, ShikiruClient
 
 
-def infrastructure_extension(clients: Mapping[str, ShikiruClient], guard: Guard) -> Extension:
+def infrastructure_extension(
+    clients: Mapping[str, ShikiruClient],
+    guard: Guard,
+    retries: RetryLog,
+    clock: Clock,
+) -> Extension:
     """Return the infrastructure category; it is registered before the product catch-all."""
-    actions = (RetryAction(clients, guard),)
+    actions = (RetryAction(clients, guard, retries, clock),)
     return Extension(
         INFRASTRUCTURE, (INFRASTRUCTURE_RULE,), InfrastructureHandler(actions), actions
     )

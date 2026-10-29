@@ -6,7 +6,13 @@ import contextlib
 from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.ports import AckStatus, EscalationStatus, EventKinds, ShikiruError
+from shikiri_yaku.ports import (
+    AckStatus,
+    EscalationStatus,
+    EventKinds,
+    ResolutionKind,
+    ShikiruError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -21,6 +27,7 @@ if TYPE_CHECKING:
     )
 
 AGAIN_NOTE: Final = "Your answer did not reach Shikiru, so please answer again."
+RETRY_AGAIN_NOTE: Final = "The automatic retry did not reach Shikiru, so the decision is yours."
 
 
 class ResolveReconciler:
@@ -84,8 +91,9 @@ class ResolveReconciler:
             elif op.ack is None:
                 self._log.fail(op.op_id, now)
         elif lost:
+            note = RETRY_AGAIN_NOTE if op.payload.kind == ResolutionKind.RETRY else AGAIN_NOTE
             await self._reshower.reshow(
-                op.payload.number, op.signal, AGAIN_NOTE, key=f"reshow:{op.op_id}"
+                op.payload.number, op.signal, note, key=f"reshow:{op.op_id}"
             )
             self._log.fail(op.op_id, now)
 

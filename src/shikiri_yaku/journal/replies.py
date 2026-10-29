@@ -9,7 +9,6 @@ from pydantic import TypeAdapter
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
-from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
 from shikiri_yaku.journal.signals import SignalState
@@ -147,13 +146,7 @@ class JournalReplies:
             return payload
 
     def acknowledge_resolve(self, op_id: int, ack: Ack, now: datetime) -> None:
-        self._database.connection.execute(
-            """
-            UPDATE ops SET acknowledgement = ?, command_id = ?, updated_at = ?
-            WHERE id = ? AND kind = 'resolve' AND state = ? AND acknowledgement IS NULL
-            """,
-            (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
-        )
+        self._ops.acknowledge_resolve(op_id, ack, now)
 
     def reject_resolve(self, op_id: int, now: datetime) -> bool:
         return self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now)

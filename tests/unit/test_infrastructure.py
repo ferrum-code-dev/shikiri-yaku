@@ -13,11 +13,12 @@ from shikiri_yaku.domain.rule_classifier import RegistrationError, RuleClassifie
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.infrastructure.handler import InfrastructureHandler
-from shikiri_yaku.extensions.infrastructure.retry import RetryAction
+from shikiri_yaku.extensions.infrastructure.rules import AGENT_ERROR
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.journal import (
     Database,
     JournalActions,
+    JournalRetries,
     JournalRouting,
     NewSignal,
     OpStore,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
     from shikiri_yaku.domain.extension import Handler
+    from shikiri_yaku.domain.outcome import Outcome
     from shikiri_yaku.ports import ShikiruClient
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -74,8 +76,20 @@ class FakeFallback:
         self.forwarded.append(note)
 
 
-def escalation(reason: str, source: str = "E1") -> Signal:
-    return Signal("api", Kind.ESCALATION, source, reason, "blocked", TASK, source)
+class ClaimsAgentError:
+    """Claims one reason only, so a duplicate is reported by name, whatever the set's order."""
+
+    reasons = frozenset({AGENT_ERROR})
+
+    async def run(self, signal: Signal) -> Outcome:
+        raise NotImplementedError
+
+
+def journal_escalation(memory: Database, reason: str, source: str = "E1") -> tuple[int, Signal]:
+    """Journal the escalation as the Router would, so a retry can find its number."""
+    signal = Signal("api", Kind.ESCALATION, source, reason, "blocked", TASK, source)
+    new = NewSignal(signal.id, "api", "escalation", reason, "blocked", TASK, source)
+    return SignalStore(memory).insert_if_absent(new, START).row_id, signal
 
 
 @pytest.fixture
@@ -96,30 +110,50 @@ def clients(client: FakeClient) -> Mapping[str, ShikiruClient]:
 
 
 @pytest.fixture
-def guard(memory: Database) -> LoopGuard:
-    return LoopGuard(JournalActions(OpStore(memory)), FakeClock(), 1, 1)
+def clock() -> FakeClock:
+    return FakeClock()
 
 
 @pytest.fixture
-def handler(clients: Mapping[str, ShikiruClient], guard: LoopGuard) -> Handler:
-    return infrastructure_extension(clients, guard).handler
+def retries(memory: Database) -> JournalRetries:
+    return JournalRetries(memory, OpStore(memory))
+
+
+@pytest.fixture
+def guard(memory: Database, clock: FakeClock) -> LoopGuard:
+    return LoopGuard(JournalActions(OpStore(memory)), clock, 1, 1)
+
+
+@pytest.fixture
+def handler(
+    clients: Mapping[str, ShikiruClient],
+    guard: LoopGuard,
+    retries: JournalRetries,
+    clock: FakeClock,
+) -> Handler:
+    return infrastructure_extension(clients, guard, retries, clock).handler
 
 
 @pytest.mark.parametrize("reason", RETRY_REASONS)
 def test_each_retry_reason_resolves_the_escalation_once(
-    handler: Handler, client: FakeClient, reason: str
+    memory: Database, handler: Handler, client: FakeClient, reason: str
 ) -> None:
-    outcome = asyncio.run(handler.handle(escalation(reason)))
+    _, signal = journal_escalation(memory, reason)
+
+    outcome = asyncio.run(handler.handle(signal))
 
     assert isinstance(outcome, Resolved)
     assert client.resolved == [("E1", "retry")]
 
 
 def test_a_second_retry_of_the_same_task_and_reason_forwards_naming_the_first(
-    handler: Handler, client: FakeClient
+    memory: Database, handler: Handler, client: FakeClient
 ) -> None:
-    first = asyncio.run(handler.handle(escalation("agent_error", "E1")))
-    second = asyncio.run(handler.handle(escalation("agent_error", "E2")))
+    _, first_signal = journal_escalation(memory, "agent_error", "E1")
+    _, second_signal = journal_escalation(memory, "agent_error", "E2")
+
+    first = asyncio.run(handler.handle(first_signal))
+    second = asyncio.run(handler.handle(second_signal))
 
     assert isinstance(first, Resolved)
     assert isinstance(second, Forward)
@@ -147,30 +181,34 @@ def test_a_signal_no_action_covers_forwards_naming_it(
     assert client.resolved == []
 
 
-def test_two_actions_claiming_one_reason_fail_at_registration(
-    clients: Mapping[str, ShikiruClient], guard: LoopGuard
-) -> None:
-    with pytest.raises(RegistrationError, match="agent_error"):
-        InfrastructureHandler([RetryAction(clients, guard), RetryAction(clients, guard)])
+def test_two_actions_claiming_one_reason_fail_at_registration() -> None:
+    with pytest.raises(RegistrationError, match=f"reason '{AGENT_ERROR}'"):
+        InfrastructureHandler([ClaimsAgentError(), ClaimsAgentError()])
 
 
 def test_an_agent_error_resolves_and_the_po_is_not_told(
-    memory: Database, clients: Mapping[str, ShikiruClient], guard: LoopGuard, client: FakeClient
+    memory: Database,
+    clients: Mapping[str, ShikiruClient],
+    guard: LoopGuard,
+    retries: JournalRetries,
+    client: FakeClient,
 ) -> None:
-    extensions = [infrastructure_extension(clients, guard), product_extension()]
+    clock = FakeClock()
+    extensions = [
+        infrastructure_extension(clients, guard, retries, clock),
+        product_extension(),
+    ]
     fallback = FakeFallback()
     router = Router(
         RuleClassifier(extensions),
         {extension.category: extension.handler for extension in extensions},
         fallback,
         JournalRouting(memory, SignalStore(memory)),
-        FakeClock(),
+        clock,
         handler_timeout_s=60,
         forward_retry_s=60,
     )
-    signal = escalation("agent_error")
-    new = NewSignal(signal.id, "api", "escalation", "agent_error", "blocked", TASK, "E1")
-    number = SignalStore(memory).insert_if_absent(new, START).row_id
+    number, signal = journal_escalation(memory, "agent_error")
 
     async def run() -> None:
         router.submit(number, signal)

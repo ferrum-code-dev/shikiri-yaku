@@ -83,6 +83,7 @@ __all__ = [
     "Reshower",
     "ResolutionKind",
     "ResolvePayload",
+    "RetryLog",
     "RoutingLog",
     "ScheduleLog",
     "SecretLog",
@@ -856,6 +857,22 @@ class ReconcileLog(Protocol):
 
     def fail(self, op_id: int, now: datetime) -> bool:
         """Fail an issued op and make its signal answerable again; False if it moved already."""
+        ...
+
+
+class RetryLog(Protocol):
+    """Automatic retries, journaled as resolve ops so the events and the reconciler settle them."""
+
+    def issue(self, signal: Signal, escalation_id: str, now: datetime) -> int | None:
+        """Journal the retry as issued before Shikiru is called; None if already journaled."""
+        ...
+
+    def acknowledge(self, op_id: int, ack: Ack, now: datetime) -> None:
+        """Save the acknowledgement and command id of a retry Shikiru accepted."""
+        ...
+
+    def reject(self, op_id: int, now: datetime) -> None:
+        """Fail a retry Shikiru refused."""
         ...
 
 
