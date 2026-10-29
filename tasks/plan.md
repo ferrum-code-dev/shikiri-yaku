@@ -602,17 +602,24 @@ Acceptance:
 * A duplicate update id submits once.
 * Crash-point test: a goal with an unconfirmed op is not resubmitted at restart and produces the question.
 
-Split (consultation 02, about 300 lines each):
+Split (consultations 02 and 04, about 300 lines each; A14a ran about 386 lines):
 * **A14a, durable submission core, not wired to `/goal`.** The submit payload, the `SubmitLog`
   port and its SQLite implementation, and `Submitter`. The op is journaled and claimed before
   `submit_task`, identified by `telegram:submit:<update_id>`. A task id (queued included) confirms,
   a rejection fails, and an issued op with no stored outcome is unknown and never sent again.
   Tests: duplicate update ids, acknowledgement persistence, a crash after the call.
-* **A14b, PO interaction and composition.** `/goal <component> <text>` parsing, usage and help;
-  the saved task id through the outbox; the *Submit again* button (`s:<journal ref>`, validated
-  against the stored originating message, a new submit only for its own tap update); startup
-  reconciliation of unfinished submit ops before the sources start. Replay reuses the stored
-  outcome. The two acceptance points above are tested in A14b.
+* **A14b1a, retry reservation (consultation 04).** A tap on *Submit again* consumes its unknown
+  submit and intends the replacement under the tap's update id, in one transaction; the unknown
+  outcome stays on the original op. A replayed tap gets its replacement, and consumed prompts are
+  left out of `unfinished()`. Tests: duplicate delivery, a second update, a tap that names no
+  unknown goal, a crash between intent and send.
+* **A14b1b, `/goal` command.** Parsing, usage and help; the saved task id and a rejection through
+  the outbox; the uncertain question with its *Submit again* button; tap routing validated against
+  the stored originating message, channel and chat. Production wiring is in A14b2.
+* **A14b2, wiring and startup recovery.** `/goal` in `Commands`, the tap in `Replies`, and the
+  composition; startup reconciliation of unfinished submit ops before the sources start. Replay and
+  recovery share response deduplication. The acceptance points above are tested here, offline, by
+  a restart test.
 
 ## Phase B: topics
 

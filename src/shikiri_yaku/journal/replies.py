@@ -59,6 +59,16 @@ class JournalReplies:
             Destination(row["channel"], row["chat"]),
         )
 
+    def sent_message(self, destination: Destination, message_ref: str) -> Message | None:
+        row = self._database.connection.execute(
+            """
+            SELECT body FROM messages WHERE channel = ? AND chat = ? AND platform_message_id = ?
+                AND direction = ? AND delivery = ?
+            """,
+            (destination.channel, destination.chat, message_ref, Direction.OUT, Delivery.SENT),
+        ).fetchone()
+        return None if row is None or row["body"] is None else _BODY.validate_json(row["body"])
+
     def recorded_resolution(self, number: int) -> RecordedResolution | None:
         row = self._database.connection.execute(
             """

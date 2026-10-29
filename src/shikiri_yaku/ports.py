@@ -770,6 +770,10 @@ class ReplyLog(Protocol):
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
 
+    def sent_message(self, destination: Destination, message_ref: str) -> Message | None:
+        """Return the body of the message sent to the destination, or None if none is journaled."""
+        ...
+
     def recorded_resolution(self, number: int) -> RecordedResolution | None:
         """Return the resolution Shikiru confirmed for the signal, or None when there is none."""
         ...
