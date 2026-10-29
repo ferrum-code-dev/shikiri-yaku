@@ -17,9 +17,14 @@ from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
-from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL, TelegramChannel, probe_bot
+from shikiri_yaku.adapters.telegram import (
+    TELEGRAM_CHANNEL,
+    TelegramChannel,
+    TelegramForumTopics,
+    probe_bot,
+)
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
-from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TelegramDestinations, TopicReconciler
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
@@ -150,12 +155,18 @@ def compose(
     outbox = JournalOutbox(journal, MessageStore(journal, reporter))
     bot_api = bot(settings)
     topics = TopicStore(journal)
+    group_id = settings.telegram.group_id
+    reconciler = (
+        None
+        if group_id is None
+        else TopicReconciler(
+            topics,
+            TelegramForumTopics(bot_api, group_id),
+            [component.name for component in settings.components],
+        )
+    )
     destinations = TelegramDestinations(
-        topics,
-        bot_api,
-        owners=settings.telegram.owners,
-        group_id=settings.telegram.group_id,
-        components=[component.name for component in settings.components],
+        topics, owners=settings.telegram.owners, group_id=group_id, reconciler=reconciler
     )
     extensions = registered_extensions()
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)

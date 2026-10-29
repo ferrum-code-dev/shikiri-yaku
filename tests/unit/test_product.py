@@ -33,7 +33,6 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
 )
 from tests.support.destinations import FixedDestinations
-from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -178,9 +177,7 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
         topics.save("api", 73)
         topics.save("general", 75)
         topics.save(None, 74)
-        destinations = TelegramDestinations(
-            topics, FakeBotApi(), owners=(1001,), group_id=-1009, components=("api",)
-        )
+        destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
         outbox = _Outbox()
         forwarder = ProductForwarder(
             PRODUCT,
@@ -196,9 +193,7 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
 
         assert outbox.queued[0][1] == (Destination("telegram", "-1009", 73),)
         assert outbox.queued[1][1] == (Destination("telegram", "-1009", 74),)
-        private = TelegramDestinations(
-            topics, FakeBotApi(), owners=(1001,), group_id=None, components=("api",)
-        )
+        private = TelegramDestinations(topics, owners=(1001,), group_id=None, reconciler=None)
         assert private.for_signal("api", Kind.ESCALATION) == [Destination("telegram", "1001")]
         assert private.for_signal("api", Kind.TASK_DONE) == [Destination("telegram", "1001")]
         assert destinations.for_signal("general", Kind.ESCALATION) == [

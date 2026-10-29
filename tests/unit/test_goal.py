@@ -22,7 +22,6 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
     SubmitStatus,
 )
-from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -79,7 +78,7 @@ class _Goal:
             self.outbox,
             clock,
             destinations=TelegramDestinations(
-                self.topics, FakeBotApi(), owners=(1001,), group_id=GROUP, components=("api",)
+                self.topics, owners=(1001,), group_id=GROUP, reconciler=None
             ),
             channel="telegram",
         )

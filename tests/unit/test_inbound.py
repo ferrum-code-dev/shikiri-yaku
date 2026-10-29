@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 OWNER: Final = 1001
 GROUP: Final = -1005
-OTHER_GROUP: Final = -1006
 WAIT_S: Final = 20
 UPDATES: Final = json.loads((FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
 TEXT, REPLY, TAP = 700, 701, 702
@@ -93,33 +92,6 @@ def test_a_message_in_a_forum_topic_keeps_its_group_chat_and_its_topic() -> None
         f"{GROUP}/33",
         text="/goal Add the export",
         thread=77,
-    )
-
-
-@pytest.mark.parametrize(("chat", "kept"), [(OWNER, True), (GROUP, True), (OTHER_GROUP, False)])
-def test_an_item_comes_only_from_a_private_chat_or_the_configured_group(
-    chat: int, *, kept: bool
-) -> None:
-    body = {
-        "ok": True,
-        "result": [
-            {
-                "update_id": 720,
-                "message": {
-                    "message_id": 34,
-                    "from": {"id": OWNER},
-                    "chat": {"id": chat},
-                    "text": "hi",
-                },
-            }
-        ],
-    }
-
-    batch = _read(body)
-
-    assert (batch.last_update_id, [item.update_id for item in batch.items]) == (
-        720,
-        [720] if kept else [],
     )
 
 

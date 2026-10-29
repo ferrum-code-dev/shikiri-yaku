@@ -9,15 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL, TelegramForumTopics
+from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.ports import ChannelStartupError, CompositionError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from shikiri_yaku.adapters.telegram import BotApi
 
 TOPIC_OPEN: Final = "open"
 TOPIC_CLOSED: Final = "closed"
@@ -66,20 +64,15 @@ class TelegramDestinations:
     def __init__(
         self,
         log: TopicLog,
-        api: BotApi,
         *,
         owners: Sequence[int],
         group_id: int | None,
-        components: Sequence[str],
+        reconciler: TopicReconciler | None,
     ) -> None:
         self._log = log
         self._owners = tuple(owners)
         self._group_id = group_id
-        self._reconciler = (
-            None
-            if group_id is None
-            else TopicReconciler(log, TelegramForumTopics(api, group_id), components)
-        )
+        self._reconciler = reconciler
 
     def for_signal(self, project: str, kind: Kind) -> list[Destination]:
         if self._group_id is None:

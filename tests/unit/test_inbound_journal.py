@@ -4,23 +4,29 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal import Database, JournalInbound
 from tests.support.secrets import SECRETS
+from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
+    from shikiri_yaku.ports import Updates
+
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
 OWNER: Final = 1001
 STRANGER: Final = 2002
+GROUP: Final = -1005
+OTHER_GROUP: Final = -1006
 WAIT_S: Final = 20
 TEXT, TAP, OTHER = 700, 701, 702
 ITEMS: Final = (
@@ -62,11 +68,23 @@ def journal(database: Database) -> JournalInbound:
     return JournalInbound(database)
 
 
-def _poll(updates: _Updates, journal: JournalInbound) -> None:
+def _poll(updates: Updates, journal: JournalInbound) -> None:
     poller = InboundPoller(
         updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], wait_s=WAIT_S
     )
     asyncio.run(poller.poll_once())
+
+
+def _telegram_update(sender: int, chat: int) -> dict[str, Any]:
+    return {
+        "update_id": TEXT,
+        "message": {
+            "message_id": 90,
+            "from": {"id": sender},
+            "chat": {"id": chat},
+            "text": "hello",
+        },
+    }
 
 
 def test_the_same_update_delivered_twice_is_stored_once(journal: JournalInbound) -> None:
@@ -92,17 +110,27 @@ def test_an_update_of_someone_but_an_owner_is_not_stored_and_the_offset_moves_on
     assert count == 0
 
 
-@pytest.mark.parametrize(("sender", "served"), [(OWNER, True), (STRANGER, False)])
-def test_only_an_owner_item_is_kept(
+@pytest.mark.parametrize(
+    ("sender", "chat", "served"),
+    [
+        (OWNER, OWNER, True),
+        (OWNER, GROUP, True),
+        (OWNER, OTHER_GROUP, False),
+        (STRANGER, GROUP, False),
+    ],
+)
+def test_an_owner_item_is_kept_from_the_private_chat_or_the_configured_group_only(
     database: Database,
     journal: JournalInbound,
     *,
     sender: int,
+    chat: int,
     served: bool,
 ) -> None:
-    item = Inbound(TEXT, InboundKind.TEXT, sender, sender, f"{sender}/90", text="hello")
+    api = FakeBotApi([_telegram_update(sender, chat)], after_send=False)
+    item = Inbound(TEXT, InboundKind.TEXT, sender, chat, f"{chat}/90", text="hello")
 
-    _poll(_Updates(Batch(TEXT, (item,))), journal)
+    _poll(TelegramUpdates(api, group_id=GROUP), journal)
 
     assert journal.pending() == ([item] if served else [])
     assert journal.next_offset(CHANNEL) == TEXT + 1
