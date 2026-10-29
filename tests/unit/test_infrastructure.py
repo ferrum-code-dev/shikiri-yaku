@@ -187,7 +187,6 @@ def test_a_second_retry_of_the_same_task_and_reason_forwards_naming_the_first(
 @pytest.mark.parametrize(
     ("kind", "reason", "named"),
     [
-        (Kind.ESCALATION, "engine_error", "engine_error"),
         (Kind.HEALTH, "", "health"),
     ],
 )

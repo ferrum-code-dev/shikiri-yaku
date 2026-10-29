@@ -14,16 +14,20 @@ from shikiri_yaku.domain.outcome import Forward, Resolved
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.infrastructure.restart import RestartFailedError
+from shikiri_yaku.extensions.infrastructure.rules import ENGINE_ERROR
 from shikiri_yaku.journal import (
     Database,
     JournalActions,
     JournalRetries,
     JournalStarts,
     JournalWaits,
+    NewSignal,
     OpStore,
     SignalStore,
 )
 from shikiri_yaku.ports import (
+    Ack,
+    AckStatus,
     AttemptState,
     CommandError,
     DoctorCheck,
@@ -42,6 +46,7 @@ if TYPE_CHECKING:
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CONFIRM_WITHIN = timedelta(seconds=60)
+TASK = "T-1"
 TMUX_DOWN = DoctorCheck(name="tmux", ok=False, detail="no session")
 AGENT_CLI_DOWN = DoctorCheck(name="agent_cli", ok=False, detail="claude not on PATH")
 
@@ -75,9 +80,17 @@ class RestartClient:
         self.starts = 0
         self.crash_before_command = False
         self.crash_after_command = False
+        self.resolved: list[tuple[str, str]] = []
 
     async def status(self) -> EngineStatus:
         return EngineStatus(engine_up=self.engine_up, quotas={})
+
+    async def resolve_escalation(
+        self, escalation_id: str, kind: str, text: str | None = None
+    ) -> Ack:
+        del text
+        self.resolved.append((escalation_id, kind))
+        return Ack(id=1, status=AckStatus.DONE, result=None, message=None)
 
     async def start_engine(self) -> None:
         if self.crash_before_command:
@@ -161,6 +174,14 @@ def world(database: Database, client: RestartClient, clock: StepClock) -> World:
 
 def engine_signal(kind: Kind, source: str) -> Signal:
     return Signal("api", kind, source, "", "the engine is down")
+
+
+def journal_escalation(database: Database, reason: str, source: str) -> Signal:
+    """Journal the escalation as the Router would, so a retry can find its number."""
+    signal = Signal("api", Kind.ESCALATION, source, reason, "blocked", TASK, source)
+    new = NewSignal(signal.id, "api", "escalation", reason, "blocked", TASK, source)
+    SignalStore(database).insert_if_absent(new, START)
+    return signal
 
 
 @pytest.mark.parametrize("kind", [Kind.ENGINE_DOWN, Kind.ENGINE_FAULT])
@@ -314,3 +335,40 @@ def test_an_unconfirmed_start_still_spends_the_restart_budget(
     assert isinstance(outcome, Forward)
     assert "agent_cli" in outcome.note
     assert client.starts == (1 if command_ran else 0)
+
+
+def test_an_engine_error_with_the_engine_up_is_only_given_back_to_shikiru(
+    world: World, client: RestartClient, database: Database
+) -> None:
+    signal = journal_escalation(database, ENGINE_ERROR, "E1")
+    client.engine_up = True
+
+    assert isinstance(world.handle(signal), Resolved)
+
+    assert client.starts == 0
+    assert client.resolved == [("E1", "retry")]
+
+
+def test_an_engine_error_with_the_engine_down_restarts_then_is_given_back(
+    world: World, client: RestartClient, database: Database
+) -> None:
+    signal = journal_escalation(database, ENGINE_ERROR, "E1")
+
+    assert isinstance(world.handle(signal), Resolved)
+
+    assert client.starts == 1
+    assert client.resolved == [("E1", "retry")]
+
+
+def test_an_engine_error_whose_restart_forwards_is_left_to_the_po(
+    world: World, client: RestartClient, database: Database
+) -> None:
+    signal = journal_escalation(database, ENGINE_ERROR, "E1")
+    client.starts_up = False
+    client.checks = [TMUX_DOWN]
+
+    outcome = world.handle(signal)
+
+    assert isinstance(outcome, Forward)
+    assert "tmux" in outcome.note
+    assert client.resolved == []

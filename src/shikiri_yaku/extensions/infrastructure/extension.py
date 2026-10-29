@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.extension import Extension
+from shikiri_yaku.extensions.infrastructure.engine_error import EngineErrorAction
 from shikiri_yaku.extensions.infrastructure.handler import InfrastructureHandler
 from shikiri_yaku.extensions.infrastructure.restart import RestartAction
 from shikiri_yaku.extensions.infrastructure.retry import RetryAction
@@ -60,7 +61,8 @@ def infrastructure_extension(
         confirm_within=restart_confirm,
         poll=restart_poll,
     )
-    actions = (retry, wait, restart)
+    engine_error = EngineErrorAction(clients, restart, retry)
+    actions = (retry, wait, restart, engine_error)
     return Extension(
         INFRASTRUCTURE, (INFRASTRUCTURE_RULE,), InfrastructureHandler(actions), actions
     )
