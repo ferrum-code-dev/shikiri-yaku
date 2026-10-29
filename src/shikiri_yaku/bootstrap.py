@@ -35,6 +35,7 @@ from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
+from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
@@ -48,12 +49,14 @@ from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind
+from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
+    JournalActions,
     JournalError,
     JournalEvents,
     JournalFinalEdits,
@@ -88,6 +91,7 @@ if TYPE_CHECKING:
         Clock,
         Destinations,
         Forwarder,
+        Guard,
         Outbox,
         Reporter,
         Reshower,
@@ -168,7 +172,13 @@ def compose(
     destinations = TelegramDestinations(
         topics, owners=settings.telegram.owners, group_id=group_id, reconciler=reconciler
     )
-    extensions = registered_extensions()
+    guard = LoopGuard(
+        JournalActions(OpStore(journal)),
+        clock,
+        retry_budget_per_day=settings.handlers.infrastructure.retry_budget_per_day,
+        restart_budget_per_hour=settings.handlers.infrastructure.restart_budget_per_hour,
+    )
+    extensions = registered_extensions(clients, guard)
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
         settings,
@@ -214,9 +224,9 @@ def compose(
     )
 
 
-def registered_extensions() -> list[Extension]:
+def registered_extensions(clients: Mapping[str, ShikiruClient], guard: Guard) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
-    return [product_extension()]
+    return [infrastructure_extension(clients, guard), product_extension()]
 
 
 def shikiru_client(

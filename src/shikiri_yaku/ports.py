@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.classification import Assessment, Classification
     from shikiri_yaku.domain.inbound import Batch, Inbound
-    from shikiri_yaku.domain.loop_guard import AutoOp, Cause
+    from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.schedule import Awaiting, Parked
     from shikiri_yaku.domain.signal import (
@@ -65,6 +65,7 @@ __all__ = [
     "EventJournal",
     "EventKinds",
     "Forwarder",
+    "Guard",
     "InboundLog",
     "LifecycleJournal",
     "LivenessJournal",
@@ -339,6 +340,12 @@ class ActionLog(Protocol):
     def record(self, op: AutoOp, now: datetime) -> int:
         """Journal the op before it happens and return its id; the identity must be new."""
         ...
+
+
+class Guard(Protocol):
+    """The loop guard as the actions see it: an automatic action asks before it runs (design §6)."""
+
+    def retry(self, project: str, task_id: str | None, reason: str) -> Granted | Refused: ...
 
 
 class ScheduleLog(Protocol):
