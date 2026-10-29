@@ -56,6 +56,7 @@ from shikiri_yaku.extensions.infrastructure.extension import infrastructure_exte
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
+from shikiri_yaku.extensions.review.handler import NOTICE_KEY as REVIEW_NOTICE_KEY
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
@@ -114,6 +115,7 @@ if TYPE_CHECKING:
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
 REMINDED_KINDS: Final = frozenset({Kind.PR_REVIEW})
+SILENCING_PREFIXES: Final = (f"{REVIEW_NOTICE_KEY}:",)
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -456,7 +458,7 @@ def inbound_job(
         outbox, clock, Status(clients, sources), opened, goal, channel=TELEGRAM_CHANNEL
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal), reminded_kinds=REMINDED_KINDS),
+        JournalReplies(journal, signals, OpStore(journal), silencing_prefixes=SILENCING_PREFIXES),
         outbox,
         clock,
         clients,

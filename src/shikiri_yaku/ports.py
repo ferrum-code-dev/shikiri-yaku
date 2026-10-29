@@ -880,8 +880,8 @@ class ReplyLog(Protocol):
         """Fail an issued op that Shikiru refused; return whether it was still issued."""
         ...
 
-    def acknowledge_notice(self, number: int, now: datetime) -> None:
-        """Close an informational signal without issuing a Shikiru resolution."""
+    def acknowledge_notice(self, number: int, notice_key: str | None, now: datetime) -> None:
+        """Silence the reminders of a silencing notice, or close the signal of any other notice."""
         ...
 
 

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 TITLE: Final = "Pull request ready for review"
 OPEN_PR_LABEL: Final = "Open PR"
 ACKNOWLEDGE_LABEL: Final = "Acknowledge"
-# keep: the verb the replies read as Acknowledge (design §7), so the same tap silences the reminders
+# keep: the verb the replies read as Acknowledge (design §7); its notice key makes it silence
 ACKNOWLEDGE_TAP: Final = "k"
 
 

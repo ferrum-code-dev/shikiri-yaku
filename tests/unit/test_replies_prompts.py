@@ -122,6 +122,29 @@ def test_information_acknowledgement_closes_signal_without_shikiru_resolution(h:
     assert h.ops.non_final() == []
 
 
+@pytest.mark.parametrize(
+    ("key", "silenced"),
+    [("review", True), ("forward", False)],
+    ids=["review notice silences and stays open", "product fallback closes"],
+)
+def test_acknowledging_a_review_silences_it_but_a_product_fallback_for_one_closes(
+    h: Harness, key: str, *, silenced: bool
+) -> None:
+    h.number = h.signals.insert_if_absent(
+        NewSignal("api:pr_review:T-1", "api", "pr_review", "x", "x", "T-1"), NOW
+    ).row_id
+    h.signals.transition(h.number, SignalState.NEW, SignalState.FORWARDED, NOW)
+    h.origin("1001/45", Purpose.NOTICE, (f"k:{h.number}",), key=f"{key}:{h.number}")
+    h.handle(ref="1001/45", data=f"k:{h.number}")
+    h.handle(ref="1001/45", data=f"k:{h.number}")
+    stored = h.signals.get(h.number)
+    assert stored is not None
+    assert stored.state == (SignalState.FORWARDED if silenced else SignalState.CLOSED)
+    rows = h.database.connection.execute("SELECT identity FROM ops")
+    assert [row["identity"] for row in rows] == ([f"ack:{h.number}"] if silenced else [])
+    assert h.client.calls == []
+
+
 @pytest.mark.parametrize("secret", list(SECRETS.values()))
 def test_secret_crossing_a_details_part_boundary_is_refused_before_splitting(
     h: Harness,

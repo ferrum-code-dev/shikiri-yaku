@@ -224,8 +224,8 @@ def test_an_acknowledged_review_is_not_reminded_and_stays_forwarded(world: _Worl
         world.database,
         world.signals,
         OpStore(world.database),
-        reminded_kinds=frozenset({"pr_review"}),
-    ).acknowledge_notice(number, START)
+        silencing_prefixes=("review:",),
+    ).acknowledge_notice(number, f"review:{number}", START)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
 

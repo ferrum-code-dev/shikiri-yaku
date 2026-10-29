@@ -69,17 +69,17 @@ def test_choices_share_numbers_including_unknown_resolution_gaps() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "state"),
-    [("pr_review", SignalState.FORWARDED), ("health", SignalState.CLOSED)],
-    ids=["reminded kind stays open", "other kind closes"],
+    ("key", "state"),
+    [("review:1", SignalState.FORWARDED), ("forward:1", SignalState.CLOSED)],
+    ids=["silencing prefix stays open", "other notice closes"],
 )
-def test_acknowledging_a_notice_keeps_a_reminded_kind_open_and_closes_the_others(
-    kind: str, state: SignalState, memory: Database
+def test_acknowledging_a_notice_silences_only_a_silencing_prefix(
+    key: str, state: SignalState, memory: Database
 ) -> None:
     database = memory
     signals = SignalStore(database)
     number = signals.insert_if_absent(
-        NewSignal(f"api:{kind}:1", "api", kind, "x", "x", "T-1"), NOW
+        NewSignal("api:pr_review:1", "api", "pr_review", "x", "x", "T-1"), NOW
     ).row_id
     signals.classify(
         number, category="product", classified_by="rule", verdict=None, handler="p", now=NOW
@@ -87,9 +87,8 @@ def test_acknowledging_a_notice_keeps_a_reminded_kind_open_and_closes_the_others
     signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
     signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
 
-    JournalReplies(
-        database, signals, OpStore(database), reminded_kinds=frozenset({"pr_review"})
-    ).acknowledge_notice(number, NOW)
+    replies = JournalReplies(database, signals, OpStore(database), silencing_prefixes=("review:",))
+    replies.acknowledge_notice(number, key, NOW)
 
     stored = signals.get(number)
     assert stored is not None

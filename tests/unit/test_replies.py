@@ -13,7 +13,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
-from shikiri_yaku.bootstrap import goal_command
+from shikiri_yaku.bootstrap import SILENCING_PREFIXES, goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
@@ -124,6 +124,8 @@ class Harness:
         ref: str,
         purpose: Purpose,
         data: tuple[str, ...] = ("a:1:1", "a:1:2", "a:1:3", "a:1:4"),
+        *,
+        key: str | None = None,
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.number,
@@ -131,13 +133,18 @@ class Harness:
             chat="1001",
             purpose=purpose,
             body=Message("question", tuple(Button("Choice", value) for value in data)),
-            notice_key=None,
+            notice_key=key,
             now=NOW,
         )
         self.messages.confirm_delivery(row.row_id, ref)
 
     def log(self) -> JournalReplies:
-        return JournalReplies(self.database, self.signals, OpStore(self.database))
+        return JournalReplies(
+            self.database,
+            self.signals,
+            OpStore(self.database),
+            silencing_prefixes=SILENCING_PREFIXES,
+        )
 
     def commands(self, at: datetime) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)

@@ -32,9 +32,10 @@ _BODY = TypeAdapter(Message)
 
 
 class JournalReplies:
-    """Acknowledging a notice of a reminded kind silences its reminders and keeps the signal open.
+    """Acknowledging a notice whose key starts with a silencing prefix silences its reminders.
 
-    The silence is an op named `ack:<number>`, which the Scheduler reads (design §6.4).
+    The silence keeps the signal open: it is an op named `ack:<number>`, which the Scheduler reads
+    (design §6.4). Any other notice is information, and its Acknowledge closes the signal (§6.1).
     """
 
     def __init__(
@@ -43,12 +44,12 @@ class JournalReplies:
         signals: SignalStore,
         ops: OpStore,
         *,
-        reminded_kinds: frozenset[str] = frozenset(),
+        silencing_prefixes: tuple[str, ...] = (),
     ) -> None:
         self._database = database
         self._signals = signals
         self._ops = ops
-        self._reminded_kinds = reminded_kinds
+        self._silencing_prefixes = silencing_prefixes
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None:
         row = self._database.connection.execute(
@@ -165,11 +166,11 @@ class JournalReplies:
     def reject_resolve(self, op_id: int, now: datetime) -> bool:
         return self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now)
 
-    def acknowledge_notice(self, number: int, now: datetime) -> None:
+    def acknowledge_notice(self, number: int, notice_key: str | None, now: datetime) -> None:
         stored = self._signals.get(number)
         if stored is None:
             return
-        if stored.kind in self._reminded_kinds:
+        if notice_key is not None and notice_key.startswith(self._silencing_prefixes):
             op = NewOp(
                 f"{ACKNOWLEDGE}:{number}",
                 ACKNOWLEDGE,

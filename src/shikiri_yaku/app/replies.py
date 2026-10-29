@@ -131,7 +131,7 @@ class Replies:
         elif verb == _DETAILS and origin.purpose == Purpose.QUESTION:
             await self._details(item, origin)
         elif verb == _ACKNOWLEDGE and origin.purpose == Purpose.NOTICE:
-            self._log.acknowledge_notice(origin.number, self._clock.now())
+            self._log.acknowledge_notice(origin.number, origin.key, self._clock.now())
 
     async def _open_escalation(self, item: Inbound, origin: ReplyOrigin) -> EscalationView | None:
         signal = origin.signal
