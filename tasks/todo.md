@@ -40,7 +40,7 @@ merged and `uv run poe check` passes.
 - [x] A12a. Rejected, queued and command-id confirmation
 - [x] A12b. Start-up reconcile and lost commands
 - [x] A12c. Resolved elsewhere (after A11c4)
-- [ ] A13. Status, open, help and measures
+- [x] A13. Status, open, help and measures
 - [ ] A14. `/goal`
 
 ## Later

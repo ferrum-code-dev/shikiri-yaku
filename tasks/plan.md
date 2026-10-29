@@ -472,9 +472,9 @@ A13c, which is independent and reads the journal only. One part per change, each
 `uv run poe check`. Part status is kept here, not in `tasks/todo.md`; the A13 line there is ticked
 only when all three parts pass. `docs/design.md` stays unchanged.
 
-Status: A13a done (43a975b). A13b done after its consultation 06 follow-up (0561921). A13c implemented
-and gated (not pushed), but it is over the size limit, with no exception granted. A13 therefore stays
-unchecked in `tasks/todo.md` until the PO accepts A13c at its size or approves a split.
+Status: A13a done (43a975b). A13b done after its consultation 06 follow-up (0561921). A13c done (141a9d0),
+accepted at its size as a third explicit exception under consultation 10-consult-i1. A13 is complete and
+its line in `tasks/todo.md` is ticked. Nothing is pushed.
 
 Size: A13a (43a975b) is 459 changed lines including tests (443 added, 16 deleted), over the ~300
 target. Consultation 04 accepted it as a one-time size exception; the commit is not rewritten. A13b
@@ -482,11 +482,15 @@ target. Consultation 04 accepted it as a one-time size exception; the commit is 
 edits, against an estimate of 330 to 360 and the ~300 target. It is the second size exception, recorded
 by consultation 06; the commit is not rewritten. The ~300-line limit still applies to later changes.
 The follow-up that corrects 7ffef86 is a separate commit and is under that limit.
-A13c (its commit) is 487 changed lines including trackers (472 added, 15 deleted): 464 are code and
-tests, 23 are tracker edits. The pre-edit estimate of 330 was too low. That is about 60% over the
-~300 limit of consultation 08, which does not grant another exception. The options are to accept it
-as a third exception, or to split it. A split would not shrink it much: the journal query, the measures
-and their tests form about 380 lines, and the CLI wiring about 75.
+A13c (141a9d0) is 487 changed lines including trackers (472 added, 15 deleted): 464 are code and tests,
+23 are tracker edits. The pre-edit estimate of 330 was too low, and the change is about 60% over the
+~300 limit of consultation 08. Consultation 10-consult-i1 accepted it as a third, explicit size
+exception. That does not excuse the estimate miss or grant a larger budget for later tasks. The commit
+is not rewritten and was not split: the journal queries, calculations, reporting port and CLI
+integration form one reviewable change.
+A13c's journal read uses `Database.open`, which sets WAL and applies pending migrations, so a stats run
+can write to the journal file. It is not a read-only open and is not described as one. Consultation
+10-consult-i1 accepted this; a read-only open would need a new opening mode, which A13 does not add.
 
 Design dependency: Reasoner rung status (§8, "`/status` and `doctor` show the state of each rung") waits
 for the Reasoner phase. No rung is implemented yet, so no part of A13 shows rung status.
@@ -534,8 +538,10 @@ Acceptance:
 
 ### A13c. Stats command (normal)
 
-Status: implemented and gated (not pushed); the size is an open decision (see A13, Size). The acceptance
-criteria below are covered by tests/unit/test_stats.py.
+Status: done (141a9d0), accepted at 487 lines under consultation 10-consult-i1 (see A13, Size). The
+acceptance criteria below are covered by tests/unit/test_stats.py. Gaps that remain by design: PO wait
+is a journal-observed proxy; action attribution and the install outcome counters are unavailable until
+recorded; misroutes are a manual review, not a printed measure.
 
 `shikiri-yaku stats <product>` reads the journal only, reached through the composition root (`cli.py`
 cannot import the journal). It starts no service job and touches no live Shikiru, Telegram or token file.
