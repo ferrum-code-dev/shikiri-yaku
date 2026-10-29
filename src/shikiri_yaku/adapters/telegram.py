@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
@@ -26,9 +26,18 @@ SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 DELETE_MESSAGE: Final = "deleteMessage"
 GET_ME: Final = "getMe"
+GET_CHAT: Final = "getChat"
+GET_CHAT_MEMBER: Final = "getChatMember"
+GET_CHAT_MEMBER_COUNT: Final = "getChatMemberCount"
 CREATE_FORUM_TOPIC: Final = "createForumTopic"
 CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
 REF_SEPARATOR: Final = "/"
+SUPERGROUP: Final = "supergroup"
+CREATOR: Final = "creator"
+ADMINISTRATOR: Final = "administrator"
+MEMBER: Final = "member"
+RESTRICTED: Final = "restricted"
+MEMBER_STATUSES: Final = frozenset({CREATOR, ADMINISTRATOR, MEMBER})
 
 # keep: Telegram's error codes (Bot API, "Making requests"); the rest are transient
 BAD_REQUEST: Final = 400
@@ -40,6 +49,15 @@ BUTTON_DATA_TOO_LONG: Final = "button_data_too_long"
 PLATFORM_REFUSED: Final = "platform_refused"
 NOT_ACCEPTED: Final = "the Bot API did not accept the request"
 UNEXPECTED_REPLY: Final = "the Bot API replied in a shape the Channel does not read"
+BOT_NOT_IDENTIFIED: Final = "getMe did not identify a Telegram bot"
+GROUP_NOT_READABLE: Final = "the Bot API could not read the configured group"
+GROUP_NOT_FORUM: Final = "the configured group is not a forum supergroup"
+BOT_TOPIC_RIGHTS: Final = "the bot must be an administrator with the manage-topics right"
+OWNER_NOT_MEMBER: Final = "a configured owner is not a member of the group"
+GROUP_HAS_OTHER_MEMBERS: Final = (
+    "the group contains members other than its configured owners and bot"
+)
+GROUP_MEMBER_COUNT_UNAVAILABLE: Final = "the Bot API could not verify group membership"
 
 
 class BotApi(Protocol):
@@ -92,21 +110,74 @@ class _Failed(BaseModel):
 _REPLY: Final[TypeAdapter[_Ok | _Failed]] = TypeAdapter(_Ok | _Failed)
 
 
+class _User(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: StrictInt
+    is_bot: bool
+    first_name: str
+
+
 class _Accepted(BaseModel):
-    """A successful reply to `getMe`, whose User object the probe does not read."""
+    """The fields of the bot's User object used by group validation."""
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     ok: Literal[True]
+    result: _User
+
+
+class _ChatInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    type: str
+    is_forum: bool | None = None
+
+
+class _ChatReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: _ChatInfo
+
+
+class _ChatMember(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    status: str
+    user: _User
+    can_manage_topics: bool | None = None
+    is_member: bool | None = None
+
+
+class _ChatMemberReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: _ChatMember
+
+
+class _ChatMemberCountReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: StrictInt
 
 
 _PROBE_REPLY: Final[TypeAdapter[_Accepted | _Failed]] = TypeAdapter(_Accepted | _Failed)
+_CHAT_REPLY: Final[TypeAdapter[_ChatReply | _Failed]] = TypeAdapter(_ChatReply | _Failed)
+_CHAT_MEMBER_REPLY: Final[TypeAdapter[_ChatMemberReply | _Failed]] = TypeAdapter(
+    _ChatMemberReply | _Failed
+)
+_CHAT_MEMBER_COUNT_REPLY: Final[TypeAdapter[_ChatMemberCountReply | _Failed]] = TypeAdapter(
+    _ChatMemberCountReply | _Failed
+)
 
 
 class _ForumTopic(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    message_thread_id: int
+    message_thread_id: StrictInt
 
 
 class _CreatedTopic(BaseModel):
@@ -231,15 +302,18 @@ def _content(message: Message) -> dict[str, object]:
     return {"text": message.text, "reply_markup": {"inline_keyboard": keyboard}}
 
 
-async def probe_bot(api: BotApi) -> None:
-    """Ask the Bot API who the bot is, for `doctor`; raises ChannelError if it refuses the call."""
+async def probe_bot(
+    api: BotApi, group_id: int | None = None, owners: tuple[int, ...] = ()
+) -> None:
+    """Check bot authentication and the configured group's topic and membership requirements."""
     body = await api.call(GET_ME, {})
-    try:
-        reply = _PROBE_REPLY.validate_python(body)
-    except ValidationError as error:
-        raise ChannelError(UNEXPECTED_REPLY) from error
+    reply = _validated(body, _PROBE_REPLY)
     if isinstance(reply, _Failed):
         raise ChannelError(NOT_ACCEPTED)
+    if not reply.result.is_bot:
+        raise ChannelError(BOT_NOT_IDENTIFIED)
+    if group_id is not None:
+        await _probe_group(api, group_id, owners, reply.result.id)
 
 
 class TelegramForumTopics(ForumTopics):
@@ -253,10 +327,7 @@ class TelegramForumTopics(ForumTopics):
         body = await self._api.call(
             CREATE_FORUM_TOPIC, {"chat_id": self._group_id, "name": name}
         )
-        try:
-            reply = _CREATE_TOPIC_REPLY.validate_python(body)
-        except ValidationError as error:
-            raise ChannelError(UNEXPECTED_REPLY) from error
+        reply = _validated(body, _CREATE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
         return reply.result.message_thread_id
@@ -266,9 +337,61 @@ class TelegramForumTopics(ForumTopics):
             CLOSE_FORUM_TOPIC,
             {"chat_id": self._group_id, "message_thread_id": thread_id},
         )
-        try:
-            reply = _CLOSE_TOPIC_REPLY.validate_python(body)
-        except ValidationError as error:
-            raise ChannelError(UNEXPECTED_REPLY) from error
+        reply = _validated(body, _CLOSE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
+
+
+async def _probe_group(api: BotApi, group_id: int, owners: tuple[int, ...], bot_id: int) -> None:
+    group = _validated(await api.call(GET_CHAT, {"chat_id": group_id}), _CHAT_REPLY)
+    if isinstance(group, _Failed):
+        raise ChannelError(GROUP_NOT_READABLE)
+    if group.result.type != SUPERGROUP or group.result.is_forum is not True:
+        raise ChannelError(GROUP_NOT_FORUM)
+
+    bot = await _chat_member(api, group_id, bot_id, BOT_TOPIC_RIGHTS)
+    if bot.user.id != bot_id or not bot.user.is_bot or not _has_topic_right(bot):
+        raise ChannelError(BOT_TOPIC_RIGHTS)
+    for owner_id in set(owners) - {bot_id}:
+        owner = await _chat_member(api, group_id, owner_id, OWNER_NOT_MEMBER)
+        if not _is_member(owner, owner_id):
+            raise ChannelError(OWNER_NOT_MEMBER)
+
+    count = _validated(
+        await api.call(GET_CHAT_MEMBER_COUNT, {"chat_id": group_id}), _CHAT_MEMBER_COUNT_REPLY
+    )
+    if isinstance(count, _Failed):
+        raise ChannelError(GROUP_MEMBER_COUNT_UNAVAILABLE)
+    if count.result != len(set(owners) | {bot_id}):
+        raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
+
+
+async def _chat_member(api: BotApi, group_id: int, user_id: int, failure: str) -> _ChatMember:
+    reply = _validated(
+        await api.call(GET_CHAT_MEMBER, {"chat_id": group_id, "user_id": user_id}),
+        _CHAT_MEMBER_REPLY,
+    )
+    if isinstance(reply, _Failed):
+        raise ChannelError(failure)
+    return reply.result
+
+
+def _has_topic_right(member: _ChatMember) -> bool:
+    return member.status == CREATOR or (
+        member.status == ADMINISTRATOR and member.can_manage_topics is True
+    )
+
+
+def _is_member(member: _ChatMember, user_id: int) -> bool:
+    if member.user.id != user_id or member.user.is_bot:
+        return False
+    return member.status in MEMBER_STATUSES or (
+        member.status == RESTRICTED and member.is_member is True
+    )
+
+
+def _validated[T](body: object, adapter: TypeAdapter[T]) -> T:
+    try:
+        return adapter.validate_python(body)
+    except ValidationError as error:
+        raise ChannelError(UNEXPECTED_REPLY) from error

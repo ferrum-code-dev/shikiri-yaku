@@ -200,7 +200,13 @@ def compose(
             asyncio.run(topic_reconciler.run())
 
     return Composition(
-        settings, clock, journal, probes, partial(probe_bot, bot_api), jobs, recover
+        settings,
+        clock,
+        journal,
+        probes,
+        partial(probe_bot, bot_api, settings.telegram.group_id, settings.telegram.owners),
+        jobs,
+        recover,
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import signal
@@ -26,7 +27,7 @@ from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
-from tests.support.telegram_bot import FakeBotApi
+from tests.support.telegram_bot import FIXTURES, FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Mapping
@@ -41,6 +42,8 @@ _ATTEMPTS: Final = 100
 _ATTEMPT_WAIT_S: Final = 0.1
 _HTTP_OK: Final = 200
 _UNAUTHORIZED: Final = 401
+_GROUP_ID: Final = -1009
+_BOT_ID: Final = 4242
 
 type _Breakage = Callable[[Path], None]
 
@@ -68,6 +71,18 @@ def _instance(home: Path) -> Path:
     token = directory / "secrets" / "telegram.token"
     token.write_text("", encoding="utf-8")
     token.chmod(0o600)
+    return directory
+
+
+def _group_instance(home: Path) -> Path:
+    directory = _instance(home)
+    config = directory / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "owners = [123456789]", f"owners = [123456789]\ngroup_id = {_GROUP_ID}"
+        ),
+        encoding="utf-8",
+    )
     return directory
 
 
@@ -171,6 +186,49 @@ def _accepting_bot(_settings: Settings) -> FakeBotApi:
     return FakeBotApi()
 
 
+class _GroupBot(FakeBotApi):
+    def __init__(
+        self,
+        *,
+        forum: bool = True,
+        bot_admin: bool = True,
+        manage_topics: bool = True,
+        extra_member: bool = False,
+    ) -> None:
+        super().__init__()
+        self.forum = forum
+        self.bot_admin = bot_admin
+        self.manage_topics = manage_topics
+        self.extra_member = extra_member
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == "getChat":
+            reply = _telegram_fixture("forum_group.json")
+            reply["result"]["is_forum"] = self.forum
+            return reply
+        if method == "getChatMember":
+            if payload["user_id"] == _BOT_ID:
+                if not self.bot_admin:
+                    reply = _telegram_fixture("forum_owner_member.json")
+                    reply["result"]["user"]["id"] = _BOT_ID
+                    reply["result"]["user"]["is_bot"] = True
+                    return reply
+                reply = _telegram_fixture("forum_bot_member.json")
+                reply["result"]["can_manage_topics"] = self.manage_topics
+                return reply
+            return _telegram_fixture("forum_owner_member.json")
+        if method == "getChatMemberCount":
+            reply = _telegram_fixture("forum_member_count.json")
+            if self.extra_member:
+                reply["result"] += 1
+            return reply
+        return await super().call(method, payload)
+
+
+def _telegram_fixture(name: str) -> Any:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
 def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
     """The real Bot API transport, with its network replaced by `transport`."""
     return lambda settings: HttpBotApi(
@@ -190,6 +248,43 @@ def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert _run_doctor(tmp_path) == 0
     assert _failed(capsys.readouterr().out) == set()
+
+
+@pytest.mark.parametrize(
+    ("forum", "bot_admin", "manage_topics", "extra_member", "expected"),
+    [
+        (True, True, True, False, 0),
+        (True, True, True, True, 1),
+        (True, True, False, False, 1),
+        (True, False, True, False, 1),
+        (False, True, True, False, 1),
+    ],
+)
+def test_doctor_checks_topic_group_configuration(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    forum: bool,
+    bot_admin: bool,
+    manage_topics: bool,
+    extra_member: bool,
+    expected: int,
+) -> None:
+    _group_instance(tmp_path)
+
+    assert (
+        _run_doctor(
+            tmp_path,
+            bot=lambda _settings: _GroupBot(
+                forum=forum,
+                bot_admin=bot_admin,
+                manage_topics=manage_topics,
+                extra_member=extra_member,
+            ),
+        )
+        == expected
+    )
+    assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"telegram"})
 
 
 @pytest.mark.parametrize(
