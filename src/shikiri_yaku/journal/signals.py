@@ -204,6 +204,10 @@ class SignalStore:
         ).fetchone()
         return None if row is None else _signal(row)
 
+    def number_of(self, signal: Signal) -> int | None:
+        stored = self.by_id(signal.id)
+        return None if stored is None else stored.number
+
     def classify(
         self,
         number: int,

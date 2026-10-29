@@ -100,6 +100,7 @@ __all__ = [
     "ShikiruRejectedError",
     "ShikiruTask",
     "SignalLog",
+    "SignalNumbers",
     "StartAttempt",
     "StartLog",
     "StatsLog",
@@ -355,6 +356,12 @@ class SignalLog(Protocol):
     def has_open(self, project: str, kind: Kind, reason: str | None = None) -> bool: ...
 
     def close(self, closing: Closing, now: datetime) -> None: ...
+
+
+class SignalNumbers(Protocol):
+    """The number the journal gave a signal, which a handler puts in the message it sends."""
+
+    def number_of(self, signal: Signal) -> int | None: ...
 
 
 class ActionLog(Protocol):

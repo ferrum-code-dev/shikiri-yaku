@@ -55,6 +55,7 @@ from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
+from shikiri_yaku.extensions.review.extension import review_extension
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
@@ -103,6 +104,7 @@ if TYPE_CHECKING:
         Reshower,
         RetryLog,
         ShikiruClient,
+        SignalNumbers,
         StartLog,
         WaitLog,
     )
@@ -215,6 +217,10 @@ def compose(
         quota_wait_margin=timedelta(minutes=infrastructure.quota_wait_margin_min),
         restart_confirm=timedelta(seconds=infrastructure.restart_confirm_s),
         restart_poll=timedelta(seconds=infrastructure.restart_poll_s),
+        product=settings.product,
+        numbers=SignalStore(journal),
+        outbox=outbox,
+        destinations=destinations,
     )
     forwarder = ProductForwarder(settings.product, clients, outbox, clock, destinations)
     jobs += routing_jobs(
@@ -276,6 +282,10 @@ def registered_extensions(
     quota_wait_margin: timedelta,
     restart_confirm: timedelta,
     restart_poll: timedelta,
+    product: str,
+    numbers: SignalNumbers,
+    outbox: Outbox,
+    destinations: Destinations,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
     infrastructure = infrastructure_extension(
@@ -291,7 +301,10 @@ def registered_extensions(
         restart_confirm=restart_confirm,
         restart_poll=restart_poll,
     )
-    return [infrastructure, product_extension()]
+    review = review_extension(
+        clients, numbers, outbox, clock, product=product, destinations=destinations
+    )
+    return [infrastructure, review, product_extension()]
 
 
 def shikiru_client(
