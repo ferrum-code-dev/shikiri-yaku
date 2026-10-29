@@ -9,6 +9,7 @@ from shikiri_yaku.journal.database import Inserted, stamp
 
 if TYPE_CHECKING:
     import sqlite3
+    from collections.abc import Collection
     from datetime import datetime
 
     from shikiri_yaku.domain.signal import Closing
@@ -143,6 +144,33 @@ class SignalStore:
                 "reason": closing.reason,
             },
         ).rowcount
+
+    def close_removed(self, configured: Collection[str], note: str, now: datetime) -> int:
+        """Close open signals of projects not in `configured`, with the note; return the count."""
+        closed = 0
+        with self._database.transaction() as connection:
+            projects = connection.execute(
+                "SELECT DISTINCT project FROM signals WHERE state NOT IN (?, ?)",
+                (SignalState.RESOLVED, SignalState.CLOSED),
+            ).fetchall()
+            for row in projects:
+                if row["project"] not in configured:
+                    closed += connection.execute(
+                        """
+                        UPDATE signals SET state = :closed, updated_at = :now,
+                            notes = CASE WHEN notes IS NULL THEN :note
+                                         ELSE notes || char(10) || :note END
+                        WHERE project = :project AND state NOT IN (:resolved, :closed)
+                        """,
+                        {
+                            "closed": SignalState.CLOSED,
+                            "resolved": SignalState.RESOLVED,
+                            "now": stamp(now),
+                            "note": note,
+                            "project": row["project"],
+                        },
+                    ).rowcount
+        return closed
 
     def has_open(self, project: str, kind: str, reason: str | None = None) -> bool:
         """Say whether the project has a non-final signal of the kind (and reason, if given)."""

@@ -33,11 +33,19 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
+    from shikiri_yaku.journal import StoredSignal
+
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 PROJECT = "api"
 BATCH_SIZE = 3
 RACERS = 2
 ROUNDS = 25
+
+
+def _stored(signals: SignalStore, number: int) -> StoredSignal:
+    stored = signals.get(number)
+    assert stored is not None
+    return stored
 
 
 def _signal(source_id: str) -> NewSignal:
@@ -136,6 +144,29 @@ def test_signal_transition_is_conditional_and_parked_signals_wake(memory: Databa
     assert not signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
     assert signals.parked_due(NOW) == []
     assert [s.number for s in signals.parked_due(wake)] == [number]
+
+
+def test_a_removed_projects_open_signals_close_with_the_note_and_the_rest_stay(
+    memory: Database,
+) -> None:
+    signals = SignalStore(memory)
+    gone = NewSignal("old:escalation:E1", "old", "escalation", "decision_required", "which?")
+    parked = NewSignal("old:escalation:E2", "old", "escalation", "decision_required", "which?")
+    resolved = NewSignal("old:escalation:E3", "old", "escalation", "decision_required", "which?")
+    gone_number = signals.insert_if_absent(gone, NOW).row_id
+    parked_number = signals.insert_if_absent(parked, NOW).row_id
+    resolved_number = signals.insert_if_absent(resolved, NOW).row_id
+    assert signals.transition(parked_number, SignalState.NEW, SignalState.PARKED, NOW, note="wait")
+    assert signals.transition(resolved_number, SignalState.NEW, SignalState.RESOLVED, NOW)
+    kept = signals.insert_if_absent(_signal("E1"), NOW).row_id
+
+    assert signals.close_removed([PROJECT], "removed", NOW) == 2
+
+    gone_after = _stored(signals, gone_number)
+    assert (gone_after.state, gone_after.notes) == (SignalState.CLOSED, "removed")
+    assert _stored(signals, parked_number).notes == "wait\nremoved"
+    assert _stored(signals, resolved_number).state == SignalState.RESOLVED
+    assert _stored(signals, kept).state == SignalState.NEW
 
 
 def test_non_final_ops_exclude_confirmed_and_failed(memory: Database) -> None:

@@ -92,8 +92,8 @@ def _reconciler(journal: Database, client: StartClient, clock: FakeClock) -> Sta
     )
 
 
-def _state(journal: Database) -> str | None:
-    attempt = _starts(journal).existing(SIGNAL)
+def _state(journal: Database, signal: Signal = SIGNAL) -> str | None:
+    attempt = _starts(journal).existing(signal)
     return None if attempt is None else attempt.state
 
 
@@ -195,3 +195,27 @@ def test_a_start_outside_the_recovery_snapshot_is_left_alone(journal: Database) 
     reconciler = _reconciler(journal, client, FakeClock(START + CONFIRM_WITHIN))
     asyncio.run(reconciler.tick(set()))
     assert _state(journal) == AttemptState.ISSUED
+
+
+def test_a_removed_components_start_is_left_alone_and_the_others_settle(journal: Database) -> None:
+    removed = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
+    kept = Signal("web", Kind.ENGINE_DOWN, "status", "", "engine is down")
+    signals = SignalStore(journal)
+    for signal in (removed, kept):
+        signals.insert_if_absent(
+            NewSignal(signal.id, signal.project, "engine_down", "", "engine is down"), START
+        )
+        _starts(journal).issue(signal, START)
+    client = StartClient(engine_up=True)
+    reconciler = StartReconciler(
+        _starts(journal),
+        {"web": cast("ShikiruClient", client)},
+        FakeClock(START),
+        confirm_within=CONFIRM_WITHIN,
+        interval_s=1,
+    )
+    with pytest.raises(StoppedError):
+        asyncio.run(reconciler.run())
+    assert reconciler.settled.is_set()
+    assert _state(journal, kept) == AttemptState.CONFIRMED
+    assert _state(journal, removed) == AttemptState.ISSUED

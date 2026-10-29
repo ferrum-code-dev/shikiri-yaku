@@ -110,6 +110,7 @@ if TYPE_CHECKING:
 
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
+REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -246,6 +247,7 @@ def compose(
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
 
     def recover() -> None:
+        SignalStore(journal).close_removed(clients.keys(), REMOVED_NOTE, clock.now())
         goal.recover()
         asyncio.run(destinations.prepare())
 

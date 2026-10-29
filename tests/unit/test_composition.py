@@ -16,7 +16,7 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
-from shikiri_yaku.bootstrap import compose
+from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
@@ -25,6 +25,7 @@ from shikiri_yaku.journal import (
     JournalStarts,
     NewSignal,
     OpStore,
+    SignalState,
     SignalStore,
 )
 from shikiri_yaku.journal.submits import JournalSubmits
@@ -49,6 +50,8 @@ _FAILED_HANDLER: Final = "handler failed"
 _LINK_DELAY_S: Final = 1
 _ENGINE_DOWN: Final = Signal("api", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "engine is down")
+_REMOVED_DOWN: Final = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
+_REMOVED_DOWN_NEW: Final = NewSignal(_REMOVED_DOWN.id, "old", "engine_down", "", "engine is down")
 TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 
 
@@ -116,14 +119,14 @@ def _instance(home: Path) -> Path:
     return directory
 
 
-def _interrupted_restart(directory: Path) -> None:
-    """Journal a restart that was issued and then cut short, with its engine-down signal open."""
+def _interrupted_restart(directory: Path, signal: Signal, new: NewSignal) -> None:
+    """Journal a restart of `signal` that was issued and then cut short, with the signal open."""
     now = SystemClock().now()
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
         signals = SignalStore(database)
-        signals.insert_if_absent(_ENGINE_DOWN_NEW, now)
-        JournalStarts(database, OpStore(database), signals).issue(_ENGINE_DOWN, now)
+        signals.insert_if_absent(new, now)
+        JournalStarts(database, OpStore(database), signals).issue(signal, now)
     finally:
         database.close()
 
@@ -290,7 +293,7 @@ def test_an_interrupted_start_is_settled_before_its_signal_is_handled(
     # keep: no command can run here, so a start or doctor that should not happen fails instead
     monkeypatch.setenv("PATH", str(tmp_path))
     directory = _instance(tmp_path)
-    _interrupted_restart(directory)
+    _interrupted_restart(directory, _ENGINE_DOWN, _ENGINE_DOWN_NEW)
     session = _ShikiruSession(asyncio.Event())
     bot = _MarkingBot(_RESTARTED)
     composition = compose(
@@ -320,3 +323,42 @@ def test_an_interrupted_start_is_settled_before_its_signal_is_handled(
         database.close()
     assert attempt is not None
     assert (attempt.state, row["notices"]) == (AttemptState.CONFIRMED, 1)
+
+
+def test_a_removed_component_neither_stops_recovery_nor_holds_back_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # keep: no command can run here, so a start of the removed component fails instead
+    monkeypatch.setenv("PATH", str(tmp_path))
+    directory = _instance(tmp_path)
+    _interrupted_restart(directory, _ENGINE_DOWN, _ENGINE_DOWN_NEW)
+    _interrupted_restart(directory, _REMOVED_DOWN, _REMOVED_DOWN_NEW)
+    session = _ShikiruSession(asyncio.Event())
+    bot = _MarkingBot(_RESTARTED)
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session, delay_s=_LINK_DELAY_S),
+        bot=lambda _settings: bot,
+    )
+    try:
+        composition.recover()
+        asyncio.run(_deliver(composition.jobs, bot.marked))
+    finally:
+        composition.close()
+
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        signals = SignalStore(database)
+        removed = signals.by_id(_REMOVED_DOWN.id)
+        attempt = JournalStarts(database, OpStore(database), signals).existing(_REMOVED_DOWN)
+        row = database.connection.execute(
+            "SELECT COUNT(*) AS notices FROM messages WHERE notice_key = ?",
+            (f"restart:{_ENGINE_DOWN.id}",),
+        ).fetchone()
+    finally:
+        database.close()
+    assert removed is not None
+    assert (removed.state, removed.notes) == (SignalState.CLOSED, REMOVED_NOTE)
+    assert attempt is not None
+    assert (attempt.state, row["notices"]) == (AttemptState.ISSUED, 1)

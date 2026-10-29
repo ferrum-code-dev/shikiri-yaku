@@ -22,6 +22,7 @@ class StartReconciler:
     engine seen up confirms the start; one still down `confirm_within` after it was issued fails
     it. A failed start then answers later restart requests with its history, so an uncertain start
     never leads to a second blind start. Its restart budget was already spent when it was granted.
+    A start of a component no longer configured is left as it is: neither settled nor waited for.
 
     `settled` is set once every project's link is up and no such start is pending, or once
     `confirm_within` has passed since this run began, so a link that stays down cannot hold the
@@ -47,7 +48,7 @@ class StartReconciler:
 
     async def run(self) -> None:
         # keep: taken first, so a start this process issues later is in flight, not uncertain
-        uncertain = {start.signal.id for start in self._log.unsettled()}
+        uncertain = {start.signal.id for start in self._watched()}
         deadline = self._clock.now() + self._confirm_within
         while True:
             await self.tick(uncertain)
@@ -56,7 +57,7 @@ class StartReconciler:
             await self._clock.sleep(self._interval_s)
 
     async def tick(self, uncertain: set[str]) -> None:
-        for start in self._log.unsettled():
+        for start in self._watched():
             if start.signal.id in uncertain:
                 # keep: a link outage leaves this start for the next tick
                 with contextlib.suppress(ShikiruError):
@@ -67,7 +68,10 @@ class StartReconciler:
         return linked and not self._pending(uncertain)
 
     def _pending(self, uncertain: set[str]) -> bool:
-        return any(start.signal.id in uncertain for start in self._log.unsettled())
+        return any(start.signal.id in uncertain for start in self._watched())
+
+    def _watched(self) -> list[UnsettledStart]:
+        return [start for start in self._log.unsettled() if start.signal.project in self._clients]
 
     async def _settle(self, start: UnsettledStart) -> None:
         now = self._clock.now()
