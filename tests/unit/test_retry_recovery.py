@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.reconciler import RETRY_AGAIN_NOTE, ResolveReconciler
 from shikiri_yaku.app.router import Router
@@ -50,10 +51,18 @@ class RetryClient(Client):
     def __init__(self) -> None:
         super().__init__()
         self.engine_up = True
+        self.attempts = 0
+        self.entered: asyncio.Event | None = None
+        self.release: asyncio.Event | None = None
 
     async def resolve_escalation(
         self, escalation_id: str, kind: str, text: str | None = None
     ) -> Ack:
+        self.attempts += 1
+        if self.entered is not None:
+            self.entered.set()
+            assert self.release is not None
+            await self.release.wait()
         return await super().resolve_escalation(escalation_id, kind, text)
 
     async def status(self) -> EngineStatus:
@@ -116,19 +125,50 @@ class World:
         self.fallback = Fallback()
         retries = JournalRetries(self.database, self.ops)
         guard = LoopGuard(JournalActions(self.ops), self.clock, 1, 1)
-        extensions = [
-            infrastructure_extension(self.clients, guard, retries, self.clock),
-            product_extension(),
-        ]
+        self.infrastructure = infrastructure_extension(self.clients, guard, retries, self.clock)
+        extensions = [self.infrastructure, product_extension()]
+        self.classifier = RuleClassifier(extensions)
+        self.routing = JournalRouting(self.database, self.signals)
         self.router = Router(
-            RuleClassifier(extensions),
+            self.classifier,
             {extension.category: extension.handler for extension in extensions},
             self.fallback,
-            JournalRouting(self.database, self.signals),
+            self.routing,
             self.clock,
             handler_timeout_s=60,
             forward_retry_s=60,
         )
+
+    async def begin_retry(self) -> None:
+        classification = await self.classifier.classify(SIGNAL)
+        assert self.routing.begin(
+            self.number, classification, self.infrastructure.category, self.clock.now()
+        )
+        await self.infrastructure.handler.handle(SIGNAL)
+
+    def crash_before_ack(self) -> None:
+        async def run() -> None:
+            self.client.entered = asyncio.Event()
+            self.client.release = asyncio.Event()
+            task = asyncio.create_task(self.begin_retry())
+            await self.client.entered.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(run())
+
+    def crash_after_ack(self) -> None:
+        asyncio.run(self.begin_retry())
+
+    def recover_and_dispatch(self) -> None:
+        async def run() -> None:
+            self.routing.recover(self.clock.now())
+            dispatcher = Dispatcher(self.routing, self.router, self.clock, interval_s=60)
+            dispatcher.tick()
+            await self.router.join()
+
+        asyncio.run(run())
 
     def route(self) -> None:
         async def run() -> None:
@@ -211,18 +251,54 @@ def test_the_event_naming_the_retry_confirms_it_and_nothing_is_shown_later(world
     assert (world.retry_op().state, world.reshower.shown) == (OpState.CONFIRMED, [])
 
 
-def test_a_retry_cut_off_before_its_acknowledgement_is_shown_again_while_open(
-    world: World,
-) -> None:
-    world.client.fail = True
-    world.route()
+def test_recovered_retry_without_ack_is_reshown_by_the_reconciler_once(world: World) -> None:
+    world.crash_before_ack()
+    assert world.signal_state() == SignalState.HANDLING
     uncertain = world.restart()
     assert len(uncertain) == 1
+    world.recover_and_dispatch()
+    assert (world.client.attempts, world.signal_state(), world.fallback.forwarded) == (
+        1,
+        SignalState.RESOLVED,
+        [],
+    )
     world.tick(uncertain)
     assert (world.retry_op().state, world.reshower.shown) == (
         OpState.FAILED,
         [(world.number, RETRY_AGAIN_NOTE)],
     )
+
+
+@pytest.mark.parametrize("resolution", ["retry", "answer"])
+def test_recovered_queued_retry_is_not_reissued_and_is_settled_once(
+    world: World, resolution: str
+) -> None:
+    world.crash_after_ack()
+    assert world.signal_state() == SignalState.HANDLING
+    assert world.retry_op().acknowledgement == Ack(
+        id=12, status="queued", result=None, message=None
+    )
+    world.recover_and_dispatch()
+    assert (world.client.attempts, world.signal_state(), world.fallback.forwarded) == (
+        1,
+        SignalState.RESOLVED,
+        [],
+    )
+
+    if resolution == "retry":
+        world.confirm_by_event(resolution)
+        world.tick()
+        assert (world.retry_op().state, world.reshower.shown) == (OpState.CONFIRMED, [])
+        return
+
+    world.clock.at = STARTED + timedelta(minutes=LOST_MIN)
+    world.tick()
+    world.tick()
+    assert (world.retry_op().state, world.signal_state()) == (
+        OpState.FAILED,
+        SignalState.FORWARDED,
+    )
+    assert world.reshower.shown == [(world.number, RETRY_AGAIN_NOTE)]
 
 
 @pytest.mark.parametrize(

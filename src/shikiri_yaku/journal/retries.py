@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.journal.ops import NewOp, OpState
-from shikiri_yaku.ports import ResolutionKind, ResolvePayload
+from shikiri_yaku.ports import (
+    ResolutionKind,
+    ResolvePayload,
+    RetryAttempt,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -22,6 +26,13 @@ class JournalRetries:
     def __init__(self, database: Database, ops: OpStore) -> None:
         self._database = database
         self._ops = ops
+
+    def existing(self, signal: Signal) -> RetryAttempt | None:
+        row = self._database.connection.execute(
+            "SELECT state FROM ops WHERE identity = ? AND kind = ?",
+            (f"retry:{signal.id}", _RESOLVE),
+        ).fetchone()
+        return None if row is None else RetryAttempt(row["state"])
 
     def issue(self, signal: Signal, escalation_id: str, now: datetime) -> int | None:
         row = self._database.connection.execute(

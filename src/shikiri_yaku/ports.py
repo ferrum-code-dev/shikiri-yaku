@@ -83,6 +83,8 @@ __all__ = [
     "Reshower",
     "ResolutionKind",
     "ResolvePayload",
+    "RetryAttempt",
+    "RetryAttemptState",
     "RetryLog",
     "RoutingLog",
     "ScheduleLog",
@@ -863,6 +865,10 @@ class ReconcileLog(Protocol):
 class RetryLog(Protocol):
     """Automatic retries, journaled as resolve ops so the events and the reconciler settle them."""
 
+    def existing(self, signal: Signal) -> RetryAttempt | None:
+        """Find the signal-keyed retry, if this signal already caused one."""
+        ...
+
     def issue(self, signal: Signal, escalation_id: str, now: datetime) -> int | None:
         """Journal the retry as issued before Shikiru is called; None if already journaled."""
         ...
@@ -874,6 +880,21 @@ class RetryLog(Protocol):
     def reject(self, op_id: int, now: datetime) -> None:
         """Fail a retry Shikiru refused."""
         ...
+
+
+class RetryAttemptState:
+    """Retry states visible across the RetryLog port."""
+
+    ISSUED: Final = "issued"
+    CONFIRMED: Final = "confirmed"
+    FAILED: Final = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class RetryAttempt:
+    """The journal state of a retry already keyed to a signal."""
+
+    state: str
 
 
 class SubmitStatus:

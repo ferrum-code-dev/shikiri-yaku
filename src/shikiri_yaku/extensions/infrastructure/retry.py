@@ -13,7 +13,11 @@ from shikiri_yaku.extensions.infrastructure.rules import (
     INTEGRATION_BLOCKED,
     INTEGRATION_CONFLICT,
 )
-from shikiri_yaku.ports import ResolutionKind, ShikiruRejectedError
+from shikiri_yaku.ports import (
+    ResolutionKind,
+    RetryAttemptState,
+    ShikiruRejectedError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,6 +32,7 @@ RETRY_REASONS: Final = frozenset(
 RETRIED: Final = "retried once; Shikiru takes the task back"
 NO_ESCALATION: Final = "nothing to retry: the signal names no escalation"
 ALREADY_RETRIED: Final = "nothing to retry: this escalation was already given back to Shikiru"
+RETRY_FAILED: Final = "the automatic retry did not complete; please decide"
 
 
 class RetryAction:
@@ -58,12 +63,18 @@ class RetryAction:
         # keep: checked before the guard, so a signal with no escalation spends no retry
         if signal.escalation_id is None:
             return Forward(NO_ESCALATION)
+        existing = self._retries.existing(signal)
+        if existing is not None:
+            return _previous_attempt(existing.state)
         decision = self._guard.retry(signal.project, signal.task_id, signal.reason)
         if isinstance(decision, Refused):
             return Forward(decision.note)
         op_id = self._retries.issue(signal, signal.escalation_id, self._clock.now())
         if op_id is None:
-            return Forward(ALREADY_RETRIED)
+            existing = self._retries.existing(signal)
+            return (
+                Forward(ALREADY_RETRIED) if existing is None else _previous_attempt(existing.state)
+            )
         try:
             ack = await self._clients[signal.project].resolve_escalation(
                 signal.escalation_id, ResolutionKind.RETRY
@@ -73,3 +84,9 @@ class RetryAction:
             raise
         self._retries.acknowledge(op_id, ack, self._clock.now())
         return Resolved(RETRIED)
+
+
+def _previous_attempt(state: str) -> Outcome:
+    if state == RetryAttemptState.FAILED:
+        return Forward(RETRY_FAILED)
+    return Resolved(RETRIED)
