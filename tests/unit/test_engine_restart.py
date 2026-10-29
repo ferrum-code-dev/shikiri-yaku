@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from shikiri_yaku.app.loop_guard import LoopGuard
+from shikiri_yaku.app.start_reconciler import StartReconciler
 from shikiri_yaku.domain.outcome import Forward, Resolved
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
@@ -45,6 +46,10 @@ TMUX_DOWN = DoctorCheck(name="tmux", ok=False, detail="no session")
 AGENT_CLI_DOWN = DoctorCheck(name="agent_cli", ok=False, detail="claude not on PATH")
 
 
+class CrashError(Exception):
+    """Ends a run where the process would die; the next run knows only what the journal holds."""
+
+
 class StepClock:
     """Time moves only when the action sleeps, so the confirm window is exact."""
 
@@ -68,16 +73,22 @@ class RestartClient:
         self.doctor_error: Exception | None = None
         self.checks: list[DoctorCheck] = []
         self.starts = 0
+        self.crash_before_command = False
+        self.crash_after_command = False
 
     async def status(self) -> EngineStatus:
         return EngineStatus(engine_up=self.engine_up, quotas={})
 
     async def start_engine(self) -> None:
+        if self.crash_before_command:
+            raise CrashError
         self.starts += 1
         if self.failure is not None:
             raise self.failure
         if self.starts_up:
             self.engine_up = True
+        if self.crash_after_command:
+            raise CrashError
 
     async def doctor(self) -> list[DoctorCheck]:
         if self.doctor_error is not None:
@@ -86,7 +97,7 @@ class RestartClient:
 
 
 class World:
-    """One process's services over one journal."""
+    """One process's services over one journal; a second World on the same journal is a restart."""
 
     def __init__(self, database: Database, client: RestartClient, clock: StepClock) -> None:
         ops = OpStore(database)
@@ -110,6 +121,20 @@ class World:
 
     def handle(self, signal: Signal) -> Outcome:
         return asyncio.run(self.handler.handle(signal))
+
+
+def recover(database: Database, client: RestartClient, clock: StepClock) -> None:
+    """Settle the starts an earlier run left unsettled, as a new process does before its signals."""
+    starts = JournalStarts(database, OpStore(database), SignalStore(database))
+    reconciler = StartReconciler(
+        starts,
+        {"api": cast("ShikiruClient", client)},
+        clock,
+        confirm_within=CONFIRM_WITHIN,
+        interval_s=5,
+    )
+    uncertain = {start.signal.id for start in starts.unsettled()}
+    asyncio.run(reconciler.tick(uncertain))
 
 
 @pytest.fixture
@@ -229,3 +254,63 @@ def test_a_signal_whose_start_failed_earlier_is_never_started_again(
     assert isinstance(outcome, Forward)
     assert "tmux" in outcome.note
     assert client.starts == 0
+
+
+@pytest.mark.parametrize(
+    ("command_ran", "engine_up", "outcome"),
+    [
+        (False, True, Resolved),
+        (False, False, Forward),
+        (True, True, Resolved),
+        (True, False, Forward),
+    ],
+)
+def test_a_crash_mid_restart_is_settled_by_the_engine_and_never_started_again(
+    database: Database,
+    client: RestartClient,
+    clock: StepClock,
+    *,
+    command_ran: bool,
+    engine_up: bool,
+    outcome: type[Outcome],
+) -> None:
+    signal = engine_signal(Kind.ENGINE_DOWN, "S1")
+    client.starts_up = engine_up
+    client.engine_up = engine_up
+    client.crash_before_command = not command_ran
+    client.crash_after_command = command_ran
+    first = World(database, client, clock)
+
+    with pytest.raises(CrashError):
+        first.handle(signal)
+    assert first.starts.existing(signal) == StartAttempt(AttemptState.ISSUED)
+
+    client.crash_before_command = False
+    client.crash_after_command = False
+    recover(database, client, clock)
+    second = World(database, client, clock)
+
+    assert isinstance(second.handle(signal), outcome)
+    assert client.starts == (1 if command_ran else 0)
+    assert len(second.outbox.pending()) == (1 if outcome is Resolved else 0)
+
+
+@pytest.mark.parametrize("command_ran", [False, True])
+def test_an_unconfirmed_start_still_spends_the_restart_budget(
+    database: Database, client: RestartClient, clock: StepClock, *, command_ran: bool
+) -> None:
+    client.starts_up = False
+    client.crash_before_command = not command_ran
+    client.crash_after_command = command_ran
+    with pytest.raises(CrashError):
+        World(database, client, clock).handle(engine_signal(Kind.ENGINE_DOWN, "S1"))
+
+    client.crash_before_command = False
+    client.crash_after_command = False
+    recover(database, client, clock)
+    client.checks = [AGENT_CLI_DOWN]
+    outcome = World(database, client, clock).handle(engine_signal(Kind.ENGINE_DOWN, "S2"))
+
+    assert isinstance(outcome, Forward)
+    assert "agent_cli" in outcome.note
+    assert client.starts == (1 if command_ran else 0)
