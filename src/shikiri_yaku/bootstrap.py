@@ -149,10 +149,12 @@ def compose(
     *,
     link: LinkFactory = stdio_connector,
     bot: BotFactory = http_bot,
+    clock: Clock | None = None,
 ) -> Composition:
     """Build the objects of one instance; the caller closes the result.
 
     `link` opens a project's MCP link and `bot` makes the Telegram transport; tests give fakes.
+    `clock` is the system clock unless a test gives one whose waits are short.
     """
     try:
         journal = Database.open(directory / JOURNAL_FILE_NAME)
@@ -163,7 +165,7 @@ def compose(
         component.name: partial(probe_link, link(SHIKIRU_EXECUTABLE, component.path), timeout_s)
         for component in settings.components
     }
-    clock = SystemClock()
+    clock = SystemClock() if clock is None else clock
     reporter = StderrReporter()
     clients = {
         component.name: shikiru_client(settings, component, clock, link)

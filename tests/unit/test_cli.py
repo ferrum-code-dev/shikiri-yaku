@@ -19,7 +19,6 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku import cli
-from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import compose, main, stats_report
@@ -27,6 +26,7 @@ from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
+from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, FakeBotApi
 
 if TYPE_CHECKING:
@@ -155,7 +155,7 @@ def _token_path_and_lock_broken(home: Path) -> None:
 class _StatusSession:
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name in {"wait_for_events", "list_escalations"}:
-            await SystemClock().sleep(arguments.get("timeout_s", 0))
+            await NapClock().sleep(arguments.get("timeout_s", 0))
             return CallToolResult(content=[], structuredContent={"result": []}, isError=False)
         assert name == "status"
         return CallToolResult(
@@ -490,7 +490,11 @@ def _stop_when_signaled(journal_file: Path) -> None:
     os.kill(os.getpid(), signal.SIGTERM)
 
 
-def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) -> None:
+def test_run_checks_liveness_and_signals_an_engine_that_is_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # keep: no command can run here, so the restart that the engine's signal starts fails instead
+    monkeypatch.setenv("PATH", str(tmp_path))
     directory = _instance(tmp_path)
     journal_file = directory / JOURNAL_FILE_NAME
     stopper = threading.Thread(target=_stop_when_signaled, args=(journal_file,))
@@ -499,6 +503,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) 
         compose,
         link=lambda _executable, _project: _engine_down_link,
         bot=_accepting_bot,
+        clock=NapClock(),
     )
 
     assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed, stats_report) == 0

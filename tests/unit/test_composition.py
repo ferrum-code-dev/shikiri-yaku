@@ -31,6 +31,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import AttemptState, SubmitStatus
 from shikiri_yaku.settings import load_settings
+from tests.support.clock import NapClock
 from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
@@ -47,7 +48,6 @@ _DELIVERY_TIMEOUT_S: Final = 20
 _ASKED: Final = "I may have submitted this already"
 _RESTARTED: Final = "the engine was restarted"
 _FAILED_HANDLER: Final = "handler failed"
-_LINK_DELAY_S: Final = 1
 _ENGINE_DOWN: Final = Signal("api", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "engine is down")
 _REMOVED_DOWN: Final = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
@@ -71,7 +71,7 @@ class _ShikiruSession:
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name == "wait_for_events":
-            await SystemClock().sleep(arguments["timeout_s"])
+            await NapClock().sleep(arguments["timeout_s"])
             payload: dict[str, Any] = {"result": []}
         elif name == "status":
             payload = {"engine_up": True, "quotas": {}}
@@ -91,14 +91,14 @@ class _ShikiruSession:
 
 
 def _shikiru_link(
-    session: _ShikiruSession, *, delay_s: float = 0
+    session: _ShikiruSession, *, delayed: bool = False
 ) -> Callable[[], AbstractAsyncContextManager[ToolSession]]:
-    """Return a link that comes up after `delay_s`, as a Shikiru that is still starting does."""
+    """Return a link that comes up after one wait when `delayed`, as a starting Shikiru does."""
 
     @asynccontextmanager
     async def link() -> AsyncGenerator[ToolSession]:
-        if delay_s:
-            await SystemClock().sleep(delay_s)
+        if delayed:
+            await NapClock().sleep(0)
         yield session  # pyright: ignore[reportReturnType]
 
     return link
@@ -166,6 +166,7 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
         directory,
         link=lambda _executable, _project: _shikiru_link(session),
         bot=lambda _settings: bot,
+        clock=NapClock(),
     )
     try:
         asyncio.run(_deliver(composition.jobs, bot.called))
@@ -197,6 +198,7 @@ def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> No
         directory,
         link=lambda _executable, _project: _shikiru_link(session),
         bot=lambda _settings: bot,
+        clock=NapClock(),
     )
     try:
         asyncio.run(_deliver(composition.jobs, session.resolved))
@@ -244,6 +246,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
         directory,
         link=lambda _executable, _project: _shikiru_link(crashed),
         bot=lambda _settings: FakeBotApi([_goal_update()], after_send=False),
+        clock=NapClock(),
     )
     try:
         asyncio.run(_deliver(composition.jobs, crashed.submitted))
@@ -265,6 +268,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
         directory,
         link=lambda _executable, _project: _shikiru_link(restarted),
         bot=lambda _settings: bot,
+        clock=NapClock(),
     )
     try:
         composition.recover()
@@ -299,8 +303,9 @@ def test_an_interrupted_start_is_settled_before_its_signal_is_handled(
     composition = compose(
         load_settings(directory),
         directory,
-        link=lambda _executable, _project: _shikiru_link(session, delay_s=_LINK_DELAY_S),
+        link=lambda _executable, _project: _shikiru_link(session, delayed=True),
         bot=lambda _settings: bot,
+        clock=NapClock(),
     )
     try:
         asyncio.run(_deliver(composition.jobs, bot.marked))
@@ -338,8 +343,9 @@ def test_a_removed_component_neither_stops_recovery_nor_holds_back_the_others(
     composition = compose(
         load_settings(directory),
         directory,
-        link=lambda _executable, _project: _shikiru_link(session, delay_s=_LINK_DELAY_S),
+        link=lambda _executable, _project: _shikiru_link(session, delayed=True),
         bot=lambda _settings: bot,
+        clock=NapClock(),
     )
     try:
         composition.recover()
