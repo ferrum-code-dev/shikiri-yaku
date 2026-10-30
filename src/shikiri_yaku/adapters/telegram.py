@@ -116,7 +116,6 @@ class _User(BaseModel):
 
     id: StrictInt
     is_bot: bool
-    first_name: str
 
 
 class _Accepted(BaseModel):
