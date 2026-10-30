@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final
@@ -31,15 +31,18 @@ from tests.support.telegram_bot import FIXTURES, FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Mapping
+    from multiprocessing.synchronize import Event
     from pathlib import Path
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
-    from shikiri_yaku.bootstrap import BotFactory
+    from shikiri_yaku.bootstrap import BotFactory, Composition
     from shikiri_yaku.settings import Settings
 
 _PRODUCT: Final = "shop"
 _ATTEMPTS: Final = 100
 _ATTEMPT_WAIT_S: Final = 0.1
+_SERVING_TIMEOUT_S: Final = 30
+_EXIT_TIMEOUT_S: Final = 30
 _HTTP_OK: Final = 200
 _UNAUTHORIZED: Final = 401
 _GROUP_ID: Final = -1009
@@ -392,33 +395,46 @@ def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> N
     assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
 
 
-def _exit_with(argv: list[str]) -> None:
-    composed = partial(
-        compose, link=lambda _executable, _project: _answering_link, bot=_accepting_bot
-    )
+def _exit_when_serving(argv: list[str], serving: Event) -> None:
+    """Run the CLI; `serving` is set once its jobs start, after the stop handler is installed."""
+
+    def composed(settings: Settings, directory: Path) -> Composition:
+        composition = compose(
+            settings,
+            directory,
+            link=lambda _executable, _project: _answering_link,
+            bot=_accepting_bot,
+        )
+        return replace(composition, jobs=[_announced(job, serving) for job in composition.jobs])
+
     sys.exit(cli.main(argv, composed, stats_report))
 
 
+def _announced(job: cli.Job, serving: Event) -> cli.Job:
+    async def run() -> None:
+        serving.set()
+        await job()
+
+    return run
+
+
 def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path: Path) -> None:
-    """The child inherits an ignored SIGTERM from the parent, so a signal that arrives before
-    the child installs its handler is dropped, and the parent sends it again until the child stops.
+    """The stop is sent once, after the child serves, so it reaches the stop handler.
+
+    The event loop restores the default action for SIGTERM when it closes. A second signal sent
+    while the child is still shutting down would end it by signal, not with exit code zero.
     """
     directory = _instance(tmp_path)
-    process = multiprocessing.get_context("spawn").Process(
-        target=_exit_with, args=(["run", _PRODUCT, "--home", str(tmp_path)],)
+    context = multiprocessing.get_context("spawn")
+    serving = context.Event()
+    process = context.Process(
+        target=_exit_when_serving, args=(["run", _PRODUCT, "--home", str(tmp_path)], serving)
     )
-    inherited = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    process.start()
     try:
-        process.start()
-    finally:
-        signal.signal(signal.SIGTERM, inherited)
-    assert process.pid is not None
-    try:
-        for _ in range(_ATTEMPTS):
-            os.kill(process.pid, signal.SIGTERM)
-            process.join(_ATTEMPT_WAIT_S)
-            if not process.is_alive():
-                break
+        assert serving.wait(_SERVING_TIMEOUT_S)
+        process.terminate()
+        process.join(_EXIT_TIMEOUT_S)
     finally:
         if process.is_alive():
             process.kill()
