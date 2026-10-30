@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
@@ -199,6 +199,21 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
         assert destinations.for_signal("general", Kind.ESCALATION) == [
             Destination("telegram", "-1009", 75)
         ]
+    finally:
+        database.close()
+
+
+def test_only_an_open_topic_names_its_component() -> None:
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        topics.save("api", 73, TOPIC_OPEN)
+        topics.save("web", 74, TOPIC_CLOSED)
+        destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
+
+        assert destinations.component_of(73) == "api"
+        assert destinations.component_of(74) is None
+        assert destinations.component_of(99) is None
     finally:
         database.close()
 
