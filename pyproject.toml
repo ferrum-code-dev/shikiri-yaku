@@ -179,4 +179,3 @@ timeout = 60
 [tool.vulture]
 paths = ["src/shikiri_yaku", "tests"]
 min_confidence = 80
-ignore_names = ["destination", "message_ref", "timeout_s"]  # parameters of ports whose adapters come later
