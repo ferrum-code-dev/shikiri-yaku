@@ -12,8 +12,7 @@ from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.messages import MessageStore
-from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
-from shikiri_yaku.journal.reconcile import JournalReconcile
+from shikiri_yaku.journal.ops import OpState, OpStore
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore
 from shikiri_yaku.ports import (
@@ -235,38 +234,4 @@ def test_an_unconfirmed_attempt_never_displaces_the_confirmed_winner() -> None:
         replies.acknowledge_resolve(op_id, ack, NOW)
     assert ops.confirm_command("api", "11", LATER)
     assert replies.recorded_resolution(PAYLOAD.number) == RecordedResolution("Keep", LATER)
-    database.close()
-
-
-def test_rows_journaled_before_the_label_stay_claimable_and_recorded_by_their_text() -> None:
-    database = Database.open(":memory:")
-    signals = SignalStore(database)
-    ops = OpStore(database)
-    replies = JournalReplies(database, signals, ops)
-    number = signals.insert_if_absent(
-        NewSignal(
-            "api:escalation:E-1", "api", "escalation", "decision_required", "question", "T-1", "E-1"
-        ),
-        NOW,
-    ).row_id
-    legacy = PAYLOAD.model_copy(update={"number": number}).model_dump_json(exclude={"label"})
-    op_id = ops.intend(
-        NewOp(
-            identity="telegram:resolve:700",
-            kind="resolve",
-            project="api",
-            task_id="T-1",
-            reason="decision_required",
-            payload=legacy,
-        ),
-        NOW,
-    ).row_id
-    assert replies.claim_resolve(op_id, NOW) == ResolvePayload.model_validate_json(legacy)
-    (unsettled,) = JournalReconcile(database, signals, ops).unsettled()
-    assert unsettled.op_id == op_id
-    replies.acknowledge_resolve(op_id, Ack(id=12, status="queued", result=None, message=None), NOW)
-    assert ops.confirm_command("api", "12", LATER)
-    assert replies.recorded_resolution(number) == RecordedResolution(
-        "Keep (preserves behavior)", LATER
-    )
     database.close()

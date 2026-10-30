@@ -95,9 +95,7 @@ class JournalReplies:
         if row is None:
             return None
         payload = ResolvePayload.model_validate_json(row["payload"])
-        # keep: rows journaled before the label existed are named by their text, or else their kind
-        label = payload.label or payload.text or payload.kind
-        return RecordedResolution(label, datetime.fromisoformat(row["updated_at"]))
+        return RecordedResolution(payload.label, datetime.fromisoformat(row["updated_at"]))
 
     def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         form = secret_form([payload.text or ""])

@@ -814,8 +814,7 @@ def escalation_choices(view: EscalationView) -> list[Choice]:
 class ResolvePayload(BaseModel):
     """The stored command arguments; issuance reads these rather than rebuilding a choice.
 
-    `label` is what the PO chose, as the Operator says it again to a later answer; rows journaled
-    before it existed have none.
+    `label` is what the PO chose, as the Operator says it again to a later answer.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -826,7 +825,7 @@ class ResolvePayload(BaseModel):
     escalation_id: str
     kind: str
     text: str | None
-    label: str | None = None
+    label: str
 
 
 @dataclass(frozen=True, slots=True)
