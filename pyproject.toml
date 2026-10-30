@@ -147,6 +147,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "The journal does not import adapters; bootstrap wires them (docs/design.md §12)"
+type = "forbidden"
+source_modules = ["shikiri_yaku.journal"]
+forbidden_modules = ["shikiri_yaku.adapters"]
+
+[[tool.importlinter.contracts]]
 name = "Only bootstrap builds concrete objects (docs/design.md §12)"
 type = "forbidden"
 source_modules = ["shikiri_yaku.ports", "shikiri_yaku.cli"]

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TopicRecord
 
 if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
+
+
+@dataclass(frozen=True, slots=True)
+class TopicRecord:
+    """A row of the topics table. The Channel adapter decides what each state means."""
+
+    component: str | None
+    thread_id: int
+    state: str
 
 
 class TopicStore:
@@ -20,7 +28,7 @@ class TopicStore:
             return None
         return TopicRecord(row["component"], row["thread_id"], row["state"])
 
-    def save(self, component: str | None, thread_id: int, state: str = TOPIC_OPEN) -> None:
+    def save(self, component: str | None, thread_id: int, state: str) -> None:
         self._database.connection.execute(
             """
             INSERT INTO topics (component, thread_id, state) VALUES (?, ?, ?)
@@ -36,9 +44,11 @@ class TopicStore:
         )
         return [TopicRecord(row["component"], row["thread_id"], row["state"]) for row in rows]
 
-    def component_of(self, thread_id: int) -> str | None:
+    def by_thread(self, thread_id: int) -> TopicRecord | None:
+        # keep: a closed topic keeps its thread, so the caller reads the state to tell if it is live
         row = self._database.connection.execute(
-            "SELECT component FROM topics WHERE thread_id = ? AND state = ?",
-            (thread_id, TOPIC_OPEN),
+            "SELECT component, thread_id, state FROM topics WHERE thread_id = ?", (thread_id,)
         ).fetchone()
-        return None if row is None else row["component"]
+        if row is None:
+            return None
+        return TopicRecord(row["component"], row["thread_id"], row["state"])

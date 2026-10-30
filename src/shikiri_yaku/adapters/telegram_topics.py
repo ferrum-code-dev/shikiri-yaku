@@ -6,7 +6,6 @@ escalations go to its topic, and every other signal goes to the general topic (d
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL
@@ -26,27 +25,30 @@ GENERAL_TOPIC: Final = "general"
 GENERAL_TOPIC_NAME: Final = "General"
 
 
-@dataclass(frozen=True, slots=True)
-class TopicRecord:
-    component: str | None
-    thread_id: int
-    state: str
+class TopicEntry(Protocol):
+    """A topic row as the journal stores it; this adapter decides what each state means."""
+
+    @property
+    def component(self) -> str | None: ...
+
+    @property
+    def thread_id(self) -> int: ...
+
+    @property
+    def state(self) -> str: ...
 
 
 class TopicLog(Protocol):
     """The journal's mapping of each component, and of the general signals, to its topic."""
 
-    def get(self, component: str | None) -> TopicRecord | None: ...
+    def get(self, component: str | None) -> TopicEntry | None: ...
 
-    def save(self, component: str | None, thread_id: int, state: str = TOPIC_OPEN) -> None: ...
+    def save(self, component: str | None, thread_id: int, state: str) -> None: ...
 
-    def all(self) -> list[TopicRecord]: ...
+    def all(self) -> Sequence[TopicEntry]: ...
 
-    def component_of(self, thread_id: int) -> str | None:
-        """Return the component of the open topic `thread_id`.
-
-        None for the general topic, and for a topic that is unknown or not open.
-        """
+    def by_thread(self, thread_id: int) -> TopicEntry | None:
+        """Return the topic that has `thread_id` in any state, or None."""
         ...
 
 
@@ -86,7 +88,8 @@ class TelegramDestinations:
         return [Destination(TELEGRAM_CHANNEL, str(self._group_id), topic.thread_id)]
 
     def component_of(self, thread: int | None) -> str | None:
-        return None if thread is None else self._log.component_of(thread)
+        topic = None if thread is None else self._log.by_thread(thread)
+        return None if topic is None or topic.state != TOPIC_OPEN else topic.component
 
     async def prepare(self) -> None:
         if self._reconciler is not None:

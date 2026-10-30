@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
@@ -174,9 +174,9 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
     database = Database.open(":memory:")
     try:
         topics = TopicStore(database)
-        topics.save("api", 73)
-        topics.save("general", 75)
-        topics.save(None, 74)
+        topics.save("api", 73, TOPIC_OPEN)
+        topics.save("general", 75, TOPIC_OPEN)
+        topics.save(None, 74, TOPIC_OPEN)
         destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
         outbox = _Outbox()
         forwarder = ProductForwarder(

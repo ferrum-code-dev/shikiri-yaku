@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram_topics import TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -201,7 +201,7 @@ def test_submit_again_tapped_in_the_group_retries_and_reports_in_the_group(goal:
 def test_a_goal_in_a_component_topic_is_submitted_to_that_component_in_that_topic(
     goal: _Goal,
 ) -> None:
-    goal.topics.save("api", TOPIC)
+    goal.topics.save("api", TOPIC, TOPIC_OPEN)
     goal.send("/goal Add the export", chat=GROUP, thread=TOPIC)
     [pending] = goal.outbox.pending()
     assert pending.destination == Destination("telegram", str(GROUP), TOPIC)
@@ -211,7 +211,7 @@ def test_a_goal_in_a_component_topic_is_submitted_to_that_component_in_that_topi
 def test_a_goal_in_the_general_topic_without_a_component_gets_usage_and_submits_nothing(
     goal: _Goal,
 ) -> None:
-    goal.topics.save(None, GENERAL_THREAD)
+    goal.topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
     goal.send("/goal fix the export", chat=GROUP, thread=GENERAL_THREAD)
     [pending] = goal.outbox.pending()
     assert "/goal" in pending.message.text
