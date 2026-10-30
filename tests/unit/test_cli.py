@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final
@@ -19,7 +19,6 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku import cli
-from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import compose, main, stats_report
@@ -27,19 +26,23 @@ from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
+from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Mapping
+    from multiprocessing.synchronize import Event
     from pathlib import Path
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
-    from shikiri_yaku.bootstrap import BotFactory
+    from shikiri_yaku.bootstrap import BotFactory, Composition
     from shikiri_yaku.settings import Settings
 
 _PRODUCT: Final = "shop"
 _ATTEMPTS: Final = 100
 _ATTEMPT_WAIT_S: Final = 0.1
+_SERVING_TIMEOUT_S: Final = 30
+_EXIT_TIMEOUT_S: Final = 30
 _HTTP_OK: Final = 200
 _UNAUTHORIZED: Final = 401
 _GROUP_ID: Final = -1009
@@ -152,7 +155,7 @@ def _token_path_and_lock_broken(home: Path) -> None:
 class _StatusSession:
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name in {"wait_for_events", "list_escalations"}:
-            await SystemClock().sleep(arguments.get("timeout_s", 0))
+            await NapClock().sleep(arguments.get("timeout_s", 0))
             return CallToolResult(content=[], structuredContent={"result": []}, isError=False)
         assert name == "status"
         return CallToolResult(
@@ -392,33 +395,46 @@ def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> N
     assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
 
 
-def _exit_with(argv: list[str]) -> None:
-    composed = partial(
-        compose, link=lambda _executable, _project: _answering_link, bot=_accepting_bot
-    )
+def _exit_when_serving(argv: list[str], serving: Event) -> None:
+    """Run the CLI; `serving` is set once its jobs start, after the stop handler is installed."""
+
+    def composed(settings: Settings, directory: Path) -> Composition:
+        composition = compose(
+            settings,
+            directory,
+            link=lambda _executable, _project: _answering_link,
+            bot=_accepting_bot,
+        )
+        return replace(composition, jobs=[_announced(job, serving) for job in composition.jobs])
+
     sys.exit(cli.main(argv, composed, stats_report))
 
 
+def _announced(job: cli.Job, serving: Event) -> cli.Job:
+    async def run() -> None:
+        serving.set()
+        await job()
+
+    return run
+
+
 def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path: Path) -> None:
-    """The child inherits an ignored SIGTERM from the parent, so a signal that arrives before
-    the child installs its handler is dropped, and the parent sends it again until the child stops.
+    """The stop is sent once, after the child serves, so it reaches the stop handler.
+
+    The event loop restores the default action for SIGTERM when it closes. A second signal sent
+    while the child is still shutting down would end it by signal, not with exit code zero.
     """
     directory = _instance(tmp_path)
-    process = multiprocessing.get_context("spawn").Process(
-        target=_exit_with, args=(["run", _PRODUCT, "--home", str(tmp_path)],)
+    context = multiprocessing.get_context("spawn")
+    serving = context.Event()
+    process = context.Process(
+        target=_exit_when_serving, args=(["run", _PRODUCT, "--home", str(tmp_path)], serving)
     )
-    inherited = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    process.start()
     try:
-        process.start()
-    finally:
-        signal.signal(signal.SIGTERM, inherited)
-    assert process.pid is not None
-    try:
-        for _ in range(_ATTEMPTS):
-            os.kill(process.pid, signal.SIGTERM)
-            process.join(_ATTEMPT_WAIT_S)
-            if not process.is_alive():
-                break
+        assert serving.wait(_SERVING_TIMEOUT_S)
+        process.terminate()
+        process.join(_EXIT_TIMEOUT_S)
     finally:
         if process.is_alive():
             process.kill()
@@ -474,7 +490,11 @@ def _stop_when_signaled(journal_file: Path) -> None:
     os.kill(os.getpid(), signal.SIGTERM)
 
 
-def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) -> None:
+def test_run_checks_liveness_and_signals_an_engine_that_is_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # keep: no command can run here, so the restart that the engine's signal starts fails instead
+    monkeypatch.setenv("PATH", str(tmp_path))
     directory = _instance(tmp_path)
     journal_file = directory / JOURNAL_FILE_NAME
     stopper = threading.Thread(target=_stop_when_signaled, args=(journal_file,))
@@ -483,6 +503,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(tmp_path: Path) 
         compose,
         link=lambda _executable, _project: _engine_down_link,
         bot=_accepting_bot,
+        clock=NapClock(),
     )
 
     assert cli.main(["run", _PRODUCT, "--home", str(tmp_path)], composed, stats_report) == 0
