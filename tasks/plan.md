@@ -892,6 +892,25 @@ Acceptance criteria:
 * A table-driven test of the engine note: refused restart with and without failed checks, a restart from today and from an earlier day; no raw timestamp, no `.;`, no event kind in any of them.
 * The gate passes.
 
+### C11. A message in a topic is not a reply to the topic (normal)
+
+Found in the live run: `/help`, `/status`, `/open`, `/stats` and `/goal` sent in a topic of the group
+were stored as inbound kind `reply` and got no answer. In a forum topic Telegram puts a
+`reply_to_message` on every message, pointing at the topic's first message, whose `message_id` equals
+the message's `message_thread_id` (journal: `reply_to_ref` = `<chat>/173` with `thread` = 173). The
+parser in `adapters/telegram_updates.py` takes it for a real reply, so Replies looks for an origin message
+that does not exist and does nothing. Commands never worked in a topic, and so would free-text goals.
+
+Treat a `reply_to_message` whose `message_id` equals the message's `message_thread_id` as no reply (the
+item is `text`). A reply to any other message stays a reply. Check the other places that read
+`reply_to_ref` for the same assumption and report them.
+
+Acceptance criteria:
+* Table-driven over payload fixtures in the shape Telegram sends in a forum topic: a command in a topic, a plain message in a topic, a reply to a message of the bot in a topic (stays a reply), a command in a private chat, and a command in a group without topics.
+* A composed test (as in C7): `/help` sent in a component topic gets an answer in the same topic; it fails without the fix.
+* The fixtures hold no real user ids or tokens: use the ids already in `tests/fixtures/telegram`.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
