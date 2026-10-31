@@ -106,7 +106,8 @@ class _CliRung(ABC):
     """The run every CLI shares: the prompt, the scratch directory, the call and the checks.
 
     A subclass gives the argument list and reads the answer. A ValidationError from `_answer`
-    means the output does not fit the schema; any other failure is raised through `_fail`.
+    means the output does not fit the schema. An OSError while the scratch directory is made,
+    written or removed is a failure of this rung too, so every failure goes through `_fail`.
     """
 
     _adapter: str
@@ -130,15 +131,10 @@ class _CliRung(ABC):
 
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
         prompt = _prompt(signal, host_facts, self._lookups, self._input_max_chars)
-        self._scratch_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=self._scratch_root) as scratch:
-            scratch_dir = Path(scratch)
-            (scratch_dir / _SCHEMA_FILE).write_text(_SCHEMA, encoding="utf-8")
-            result = await self._execute(self._argv(prompt, scratch_dir), scratch_dir)
-            try:
-                answer = self._answer(result, scratch_dir)
-            except ValidationError:
-                self._fail("its answer does not match the schema")
+        try:
+            answer = await self._ask(prompt)
+        except OSError as error:
+            self._fail(f"its scratch directory could not be used: {error}")
         return Assessment(
             verdict=answer.verdict,
             note=answer.suggestion,
@@ -147,6 +143,17 @@ class _CliRung(ABC):
             package=answer.package,
             why=answer.why,
         )
+
+    async def _ask(self, prompt: str) -> BlockerAnswer:
+        self._scratch_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=self._scratch_root) as scratch:
+            scratch_dir = Path(scratch)
+            (scratch_dir / _SCHEMA_FILE).write_text(_SCHEMA, encoding="utf-8")
+            result = await self._execute(self._argv(prompt, scratch_dir), scratch_dir)
+            try:
+                return self._answer(result, scratch_dir)
+            except ValidationError:
+                self._fail("its answer does not match the schema")
 
     async def _execute(self, argv: list[str], scratch: Path) -> CommandResult:
         try:

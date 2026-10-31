@@ -287,3 +287,16 @@ def test_escalation_text_is_capped_before_it_reaches_the_prompt(cli: str, tmp_pa
 
     assert "Q" * 100 in prompt
     assert "Q" * 101 not in prompt
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex"])
+def test_a_scratch_directory_that_cannot_be_made_is_a_reasoner_error(
+    cli: str, tmp_path: Path
+) -> None:
+    occupied = tmp_path / "AGENTS.md"
+    occupied.write_text("a file where the scratch directory should go", encoding="utf-8")
+    runner = _success(cli)
+
+    with pytest.raises(ReasonerError, match=re.escape(f"{cli}:{_MODEL}")):
+        _assess(_rung(cli, runner, occupied))
+    assert runner.argv == []
