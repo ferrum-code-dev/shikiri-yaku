@@ -964,23 +964,40 @@ Acceptance criteria:
 * An escalation text that looks like an instruction (for example "ignore the schema") is passed as evidence inside the prompt template and changes no flag.
 * The gate passes.
 
-### D3. Ladder, host facts, health and doctor (normal)
+### D3. Ladder and the safe tool list (normal)
 
-`app/reasoner_ladder.py`: `LadderReasoner` implements `Reasoner` over the rungs of `reasoner.ladder`
-(`adapter:model:effort`, parsed by the settings model; an unknown adapter fails at start). A failed rung
-is skipped for `cooldown_min`; at most `reasoner.max_parallel` calls run at once; every rung failing
-raises `ReasonerError` with each rung's reason. `app/host_facts.py` collects OS, which of the five
-managers exist and the login-shell PATH, through `CommandRunner`. In `bootstrap.py` the Reasoner, when
-configured, becomes the `assess` function of `RuleClassifier`; it never raises: a failure becomes
-`Assessment(OTHER, "Reasoner failed: …")`. The health source raises one `health` signal while the whole
-ladder fails and closes it on the next success. `doctor` and `/status` show each rung's state and `doctor`
-probes that each rung's CLI exists.
+Found in the D2 review. (1) Remove `Read` from the Claude tool list in `adapters/reasoner_cli.py`: `Read`
+cannot be limited to the scratch directory, and a model that can read any host file and fetch web pages
+is an exfiltration path for injected escalation text. Keep the web lookups and the two `brew` queries and
+`command -v`. Change design §8 to say the same (the tool list has no file reading), and keep
+`tasks/reasoner-spike.md` in step. (2) Rungs take `adapter:model:effort`: parse it in the settings model
+(an unknown adapter fails at start) and pass the effort to the CLI where it has a flag, else ignore it
+and say so in the spike note. (3) Record usage and duration per call when the CLI reports them, in the
+signal's verdict record (design §8). (4) `app/reasoner_ladder.py`: `LadderReasoner` implements `Reasoner`
+over the rungs, tried in order; a failed rung is skipped for `cooldown_min`; at most `reasoner.max_parallel`
+calls run at once; every rung failing raises `ReasonerError` with each rung's reason.
 
 Acceptance criteria:
-* A first rung that fails is skipped on the next call within the cooldown and tried again after it (test-time clock).
-* All rungs failing returns the `Reasoner failed` assessment, forwards the signal to `product` with that note, and raises one `health` signal, not one per call; a later success closes it.
-* Without a `[reasoner]` section nothing changes: `decision_required` goes to `product` as today.
+* The Claude argument list holds no `Read`; a test pins the whole tool list.
+* `claude:haiku:xhigh`, a rung without effort, and an unknown adapter parse as specified.
+* A first rung that fails is skipped within the cooldown and tried again after it (test-time clock); all rungs failing raises `ReasonerError` naming every rung.
 * More than `max_parallel` simultaneous calls wait.
+* The gate passes.
+
+### D3b. Wiring, host facts, health and doctor (normal)
+
+`app/host_facts.py` collects OS, which of the five managers exist and the login-shell PATH through
+`CommandRunner`. In `bootstrap.py` the Reasoner, when configured, becomes the `assess` function of
+`RuleClassifier` (host facts go into the prompt); it never raises: a failure becomes `Assessment(OTHER,
+"Reasoner failed: …")`, which the classifier sends to `product` with that note. The health source raises
+one `health` signal while the whole ladder fails and closes it on the next success. `doctor` probes that
+each rung's CLI exists and `/status` shows each rung's state.
+
+Acceptance criteria:
+* All rungs failing forwards the signal to `product` with the `Reasoner failed` note and raises one `health` signal, not one per call; a later success closes it.
+* Without a `[reasoner]` section nothing changes: `decision_required` goes to `product` as today.
+* A `decision_required` signal with a fake Reasoner verdict `host_tool` is classified `infrastructure` once D5 registers its action, and the host facts reach the prompt.
+* `doctor` fails for a missing CLI and names the rung.
 * The gate passes.
 
 ### D4. Names, recipes and the existence check (normal)
