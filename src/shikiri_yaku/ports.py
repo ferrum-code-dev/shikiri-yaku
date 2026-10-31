@@ -744,10 +744,11 @@ class Reporter(Protocol):
 class Reasoner(Protocol):
     """The Reasoner's one job, `assess_blocker` (design §8). Its ladder sits behind this interface.
 
-    Raises ReasonerError when no rung gives a usable answer.
+    `host_facts` are the lines the prompt gives the model about this host. Raises ReasonerError
+    when no rung gives a usable answer.
     """
 
-    async def assess_blocker(self, signal: Signal) -> Assessment: ...
+    async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment: ...
 
 
 class ReasonerRung(Protocol):

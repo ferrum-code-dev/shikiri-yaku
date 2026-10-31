@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection
     from datetime import datetime
 
+    from shikiri_yaku.domain.classification import CallRecord
     from shikiri_yaku.domain.signal import Closing
     from shikiri_yaku.journal.database import Database
 
@@ -223,15 +225,27 @@ class SignalStore:
         handler: str | None,
         now: datetime,
         note: str = "",
+        call: CallRecord | None = None,
     ) -> None:
+        verdict_call = None if call is None else json.dumps(asdict(call), sort_keys=True)
         self._database.connection.execute(
             """
             UPDATE signals SET category = ?, classified_by = ?, verdict = ?,
                                classification_note = ?, classified_at = ?, handler = ?,
-                               updated_at = ?
+                               verdict_call = ?, updated_at = ?
             WHERE number = ?
             """,
-            (category, classified_by, verdict, note, stamp(now), handler, stamp(now), number),
+            (
+                category,
+                classified_by,
+                verdict,
+                note,
+                stamp(now),
+                handler,
+                verdict_call,
+                stamp(now),
+                number,
+            ),
         )
 
     def transition(

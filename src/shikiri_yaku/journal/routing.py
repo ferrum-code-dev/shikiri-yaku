@@ -40,6 +40,7 @@ class JournalRouting:
                     note=classification.note,
                     handler=handler,
                     now=now,
+                    call=classification.call,
                 )
             return True
 

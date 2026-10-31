@@ -51,18 +51,20 @@ class RuleClassifier:
             if assessment is None:
                 assessment = await self._assess(signal)
             if assessment.verdict in rule.verdicts:
-                return Classification(
-                    category, Source.REASONER, assessment.note, assessment.verdict
-                )
+                return _reasoned(category, Source.REASONER, assessment)
         if assessment is None:
             return Classification(self._catch_all, Source.RULE)
-        return Classification(self._catch_all, Source.RULE, assessment.note, assessment.verdict)
+        return _reasoned(self._catch_all, Source.RULE, assessment)
 
 
 def _claims(rule: Rule, signal: Signal) -> bool:
     if signal.kind is Kind.ESCALATION:
         return signal.reason in rule.reasons
     return signal.kind in rule.kinds
+
+
+def _reasoned(category: Category, source: Source, assessment: Assessment) -> Classification:
+    return Classification(category, source, assessment.note, assessment.verdict, assessment.call)
 
 
 def _check_claims(entries: list[_Entry]) -> None:

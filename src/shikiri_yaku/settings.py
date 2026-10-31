@@ -68,6 +68,9 @@ REASONER_TIMEOUT_S: Final = 120
 REASONER_COOLDOWN_MIN: Final = 5
 REASONER_MAX_PARALLEL: Final = 2
 REASONER_INPUT_MAX_CHARS: Final = 4000
+REASONER_ADAPTERS: Final = frozenset({"claude", "codex"})
+_RUNG_PARTS: Final = ("adapter", "model", "effort")
+_MIN_RUNG_PARTS: Final = 2
 
 _MISSING: Final = "missing"
 _EXTRA: Final = "extra_forbidden"
@@ -183,8 +186,40 @@ class HandlersSettings(_FrozenModel):
     product: ProductHandlerSettings = Field(default_factory=ProductHandlerSettings)
 
 
+def _known_adapter(value: str) -> str:
+    if value not in REASONER_ADAPTERS:
+        message = "unknown adapter '{adapter}'; the adapters are {known}"
+        known = ", ".join(sorted(REASONER_ADAPTERS))
+        raise PydanticCustomError(_RULE, message, {"adapter": value, "known": known})
+    return value
+
+
+def _split_rung(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    parts = value.split(":")
+    if not _MIN_RUNG_PARTS <= len(parts) <= len(_RUNG_PARTS):
+        message = "must be written adapter:model or adapter:model:effort"
+        raise PydanticCustomError(_RULE, message)
+    return dict(zip(_RUNG_PARTS, parts, strict=False))
+
+
+class LadderRung(_FrozenModel):
+    """One rung of the Reasoner's ladder, written `adapter:model` or `adapter:model:effort`.
+
+    The effort is optional, and an adapter whose CLI has no flag for it ignores it (design §8).
+    """
+
+    adapter: Annotated[str, AfterValidator(_known_adapter)]
+    model: Annotated[str, Field(min_length=1)]
+    effort: Annotated[str, Field(min_length=1)] | None = None
+
+
+type _Rung = Annotated[LadderRung, BeforeValidator(_split_rung)]
+
+
 class ReasonerSettings(_FrozenModel):
-    ladder: Annotated[tuple[str, ...], _AT_LEAST_ONE]
+    ladder: Annotated[tuple[_Rung, ...], _AT_LEAST_ONE]
     timeout_s: PositiveInt = REASONER_TIMEOUT_S
     cooldown_min: PositiveInt = REASONER_COOLDOWN_MIN
     max_parallel: PositiveInt = REASONER_MAX_PARALLEL

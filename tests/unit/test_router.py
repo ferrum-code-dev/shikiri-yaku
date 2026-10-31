@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,13 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
-from shikiri_yaku.domain.classification import Category, Classification, Source, Verdict
+from shikiri_yaku.domain.classification import (
+    CallRecord,
+    Category,
+    Classification,
+    Source,
+    Verdict,
+)
 from shikiri_yaku.domain.outcome import Forward, Notified, Resolved, WaitUntil
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal import (
@@ -42,18 +49,26 @@ class _Clock:
 
 class _Classifier:
     def __init__(
-        self, category: Category = INFRA, *, failing: bool = False, note: str = ""
+        self,
+        category: Category = INFRA,
+        *,
+        failing: bool = False,
+        note: str = "",
+        call: CallRecord | None = None,
     ) -> None:
         self.category = category
         self.failing = failing
         self.note = note
+        self.call = call
 
     async def classify(self, signal: Signal) -> Classification:
         del signal
         if self.failing:
             message = "model is down"
             raise RuntimeError(message)
-        return Classification(self.category, Source.REASONER, self.note, Verdict.HOST_TOOL)
+        return Classification(
+            self.category, Source.REASONER, self.note, Verdict.HOST_TOOL, self.call
+        )
 
 
 class _Handler:
@@ -287,3 +302,20 @@ def test_the_classification_note_reaches_the_forward_also_after_a_park(world: _W
     assert world.stored(number).classification_note == note
     assert world.stored(number).classified_by == "reasoner"
     assert world.fallback.suggestions == [note]
+
+
+def test_the_call_record_of_a_reasoner_verdict_is_kept_in_the_verdict_record(world: _World) -> None:
+    number, signal = world.new("E3")
+    call = CallRecord(duration_ms=900, cost_usd=0.01, usage={"output_tokens": 35})
+    router = world.router(_Classifier(call=call), infrastructure=_Handler(Forward("refused")))
+
+    asyncio.run(_route(router, number, signal))
+
+    row = world.database.connection.execute(
+        "SELECT verdict_call FROM signals WHERE number = ?", (number,)
+    ).fetchone()
+    assert json.loads(row["verdict_call"]) == {
+        "duration_ms": 900,
+        "cost_usd": 0.01,
+        "usage": {"output_tokens": 35},
+    }

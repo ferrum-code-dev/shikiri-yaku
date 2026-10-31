@@ -12,6 +12,7 @@ from shikiri_yaku.settings import (
     Component,
     HandlersSettings,
     InfrastructureSettings,
+    LadderRung,
     OperatorSettings,
     ProductHandlerSettings,
     ReasonerSettings,
@@ -121,6 +122,12 @@ _BAD_VALUES: list[tuple[str, str]] = [
     ("components[1].name", _edit('name = "web"', 'name = "we/b"')),
     ("channels.telegram.owners", _edit("owners = [123456789]", "owners = []")),
     ("reasoner.ladder", _edit(_LADDER, "ladder = []")),
+    ("reasoner.ladder[0].adapter", _edit(_LADDER, 'ladder = ["gemini:haiku:xhigh"]')),
+    ("reasoner.ladder[0].adapter", _edit(_LADDER, 'ladder = ["Claude:haiku"]')),
+    ("reasoner.ladder[0]", _edit(_LADDER, 'ladder = ["claude"]')),
+    ("reasoner.ladder[0]", _edit(_LADDER, 'ladder = ["claude:haiku:xhigh:extra"]')),
+    ("reasoner.ladder[0].model", _edit(_LADDER, 'ladder = ["claude::xhigh"]')),
+    ("reasoner.ladder[0].effort", _edit(_LADDER, 'ladder = ["claude:haiku:"]')),
     ("operator.liveness_interval_s", _edit("liveness_interval_s = 60", "liveness_interval_s = 0")),
     ("operator.stop_grace_min", _edit("stop_grace_min = 2", "stop_grace_min = -1")),
     ("operator.lost_command_min", _edit("lost_command_min = 2", "lost_command_min = 0")),
@@ -194,7 +201,10 @@ def test_the_design_sample_loads_with_its_documented_values(tmp_path: Path) -> N
             product=ProductHandlerSettings(reminder_first_h=4, reminder_repeat_h=24),
         ),
         reasoner=ReasonerSettings(
-            ladder=("claude:<model>:<effort>", "codex:<model>:<effort>"),
+            ladder=(
+                LadderRung(adapter="claude", model="<model>", effort="<effort>"),
+                LadderRung(adapter="codex", model="<model>", effort="<effort>"),
+            ),
             timeout_s=120,
             cooldown_min=5,
             max_parallel=2,
@@ -242,6 +252,22 @@ def test_a_value_outside_its_rule_is_rejected_with_its_key(
         load_settings(_write(tmp_path, config))
 
     assert f"'{key}'" in str(raised.value)
+
+
+_RUNGS: Final[list[tuple[str, LadderRung]]] = [
+    ("claude:haiku:xhigh", LadderRung(adapter="claude", model="haiku", effort="xhigh")),
+    ("codex:gpt-5", LadderRung(adapter="codex", model="gpt-5")),
+]
+
+
+@pytest.mark.parametrize(("text", "rung"), _RUNGS)
+def test_a_rung_is_adapter_model_and_an_optional_effort(
+    tmp_path: Path, text: str, rung: LadderRung
+) -> None:
+    settings = load_settings(_write(tmp_path, _edit(_LADDER, f'ladder = ["{text}"]')))
+
+    assert settings.reasoner is not None
+    assert settings.reasoner.ladder == (rung,)
 
 
 @pytest.mark.parametrize("name", ["shop", "Shop-2_b", "2fast"])

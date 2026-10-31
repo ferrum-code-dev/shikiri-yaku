@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import itertools
 import json
 import re
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Final, override
 import pytest
 
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
-from shikiri_yaku.domain.classification import Assessment, Verdict
+from shikiri_yaku.domain.classification import Assessment, CallRecord, Verdict
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner, ReasonerError
 
@@ -24,9 +25,8 @@ if TYPE_CHECKING:
 _MODEL: Final = "haiku"
 _TIMEOUT_S: Final = 120
 _INPUT_MAX_CHARS: Final = 4000
-_CLAUDE_TOOLS: Final = (
-    "WebSearch,WebFetch,Read,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
-)
+_CLAUDE_TOOLS: Final = "WebSearch,WebFetch,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
+_USAGE: Final[dict[str, object]] = {"input_tokens": 120, "output_tokens": 35}
 _FIELDS: Final = {"verdict", "tool", "manager", "package", "why", "suggestion"}
 _FACTS: Final = ["OS: macOS 15", "package managers: brew"]
 _ANSWER: Final = {
@@ -145,6 +145,7 @@ def _claude_stdout(structured: object, *, is_error: bool = False) -> str:
             "structured_output": structured,
             "total_cost_usd": 0.01,
             "duration_api_ms": 900,
+            "usage": _USAGE,
         }
     )
 
@@ -156,12 +157,18 @@ def _success(cli: str, answer: object = _ANSWER) -> _Fake:
 
 
 def _rung(
-    cli: str, runner: CommandRunner, root: Path, *, input_max_chars: int = _INPUT_MAX_CHARS
+    cli: str,
+    runner: CommandRunner,
+    root: Path,
+    *,
+    effort: str | None = None,
+    input_max_chars: int = _INPUT_MAX_CHARS,
 ) -> ReasonerRung:
     rung = ClaudeRung if cli == "claude" else CodexRung
     return rung(
         _MODEL,
         runner,
+        effort=effort,
         timeout_s=_TIMEOUT_S,
         input_max_chars=input_max_chars,
         scratch_root=root,
@@ -212,7 +219,9 @@ _FAILURES: Final = [
 
 @pytest.mark.parametrize("cli", ["claude", "codex"])
 def test_both_clis_give_the_same_assessment(cli: str, tmp_path: Path) -> None:
-    assert _assess(_rung(cli, _success(cli), tmp_path)) == _ASSESSED
+    assessed = _assess(_rung(cli, _success(cli), tmp_path))
+
+    assert dataclasses.replace(assessed, call=None) == _ASSESSED
 
 
 @pytest.mark.parametrize("cli", ["claude", "codex"])
@@ -223,6 +232,39 @@ def test_each_cli_gets_its_fixed_flags_with_the_prompt_last(cli: str, tmp_path: 
     assert runner.argv[0] == cli
     assert all(_has_pair(runner.argv, flag, value) for flag, value in _FLAGS[cli])
     assert runner.argv[-1].startswith("You assess one blocker")
+
+
+def test_the_claude_tool_list_is_pinned_and_has_no_file_reading(tmp_path: Path) -> None:
+    runner = _success("claude")
+    _assess(_rung("claude", runner, tmp_path))
+
+    assert _value(runner.argv, "--tools") == (
+        "WebSearch,WebFetch,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
+    )
+    assert "Read" not in _value(runner.argv, "--tools").split(",")
+
+
+def test_the_claude_effort_is_a_flag_and_codex_passes_none(tmp_path: Path) -> None:
+    claude = _success("claude")
+    _assess(_rung("claude", claude, tmp_path, effort="xhigh"))
+    codex = _success("codex")
+    _assess(_rung("codex", codex, tmp_path, effort="xhigh"))
+    plain = _success("claude")
+    _assess(_rung("claude", plain, tmp_path))
+
+    assert _has_pair(claude.argv, "--effort", "xhigh")
+    assert claude.argv[-1].startswith("You assess one blocker")
+    assert "--effort" not in plain.argv
+    assert "--effort" not in codex.argv
+    assert "xhigh" not in codex.argv
+
+
+def test_claude_reports_its_usage_and_duration_and_codex_reports_none(tmp_path: Path) -> None:
+    claude = _assess(_rung("claude", _success("claude"), tmp_path))
+    codex = _assess(_rung("codex", _success("codex"), tmp_path))
+
+    assert claude.call == CallRecord(duration_ms=900, cost_usd=0.01, usage=_USAGE)
+    assert codex.call is None
 
 
 @pytest.mark.parametrize("cli", ["claude", "codex"])

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Final, NoReturn, override
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from shikiri_yaku.domain.classification import Assessment, Verdict
+from shikiri_yaku.domain.classification import Assessment, CallRecord, Verdict
 from shikiri_yaku.ports import CommandError, CommandResult, ReasonerError
 
 if TYPE_CHECKING:
@@ -29,9 +29,7 @@ _SCHEMA_FILE: Final = "schema.json"
 _ANSWER_FILE: Final = "answer.json"
 _BEGIN: Final = "<<< evidence"
 _END: Final = ">>> evidence"
-_CLAUDE_TOOLS: Final = (
-    "WebSearch,WebFetch,Read,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
-)
+_CLAUDE_TOOLS: Final = "WebSearch,WebFetch,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
 _CLAUDE_LOOKUPS: Final = (
     "You may look things up with your tools: a web search, a documentation page and read-only "
     "package queries. Install and change nothing."
@@ -80,6 +78,17 @@ class _ClaudeEnvelope(BaseModel):
 
     is_error: bool
     structured_output: BlockerAnswer | None
+    total_cost_usd: float | None = None
+    duration_api_ms: int | None = None
+    usage: dict[str, object] | None = None
+
+
+def _call_of(envelope: _ClaudeEnvelope) -> CallRecord:
+    return CallRecord(
+        duration_ms=envelope.duration_api_ms,
+        cost_usd=envelope.total_cost_usd,
+        usage=envelope.usage,
+    )
 
 
 def _clean(text: str, limit: int) -> str:
@@ -118,11 +127,13 @@ class _CliRung(ABC):
         model: str,
         runner: CommandRunner,
         *,
+        effort: str | None,
         timeout_s: float,
         input_max_chars: int,
         scratch_root: Path,
     ) -> None:
         self._model = model
+        self._effort = effort
         self._runner = runner
         self._timeout_s = timeout_s
         self._input_max_chars = input_max_chars
@@ -132,7 +143,7 @@ class _CliRung(ABC):
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
         prompt = _prompt(signal, host_facts, self._lookups, self._input_max_chars)
         try:
-            answer = await self._ask(prompt)
+            answer, call = await self._ask(prompt)
         except OSError as error:
             self._fail(f"its scratch directory could not be used: {error}")
         return Assessment(
@@ -142,9 +153,10 @@ class _CliRung(ABC):
             manager=answer.manager,
             package=answer.package,
             why=answer.why,
+            call=call,
         )
 
-    async def _ask(self, prompt: str) -> BlockerAnswer:
+    async def _ask(self, prompt: str) -> tuple[BlockerAnswer, CallRecord | None]:
         self._scratch_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=self._scratch_root) as scratch:
             scratch_dir = Path(scratch)
@@ -172,17 +184,23 @@ class _CliRung(ABC):
     def _argv(self, prompt: str, scratch: Path) -> list[str]: ...
 
     @abstractmethod
-    def _answer(self, result: CommandResult, scratch: Path) -> BlockerAnswer: ...
+    def _answer(
+        self, result: CommandResult, scratch: Path
+    ) -> tuple[BlockerAnswer, CallRecord | None]: ...
 
 
 class ClaudeRung(_CliRung):
-    """One Claude model, headless, with its tools limited to the lookups of design §8."""
+    """One Claude model, headless, with its tools limited to the lookups of design §8.
+
+    The effort, when the rung names one, is passed as `--effort`; the call reports its usage.
+    """
 
     _adapter = "claude"
     _lookups = _CLAUDE_LOOKUPS
 
     @override
     def _argv(self, prompt: str, scratch: Path) -> list[str]:
+        effort = [] if self._effort is None else ["--effort", self._effort]
         return [
             "claude",
             "-p",
@@ -199,19 +217,26 @@ class ClaudeRung(_CliRung):
             "--setting-sources",
             "",
             "--no-session-persistence",
+            *effort,
             prompt,
         ]
 
     @override
-    def _answer(self, result: CommandResult, scratch: Path) -> BlockerAnswer:
+    def _answer(
+        self, result: CommandResult, scratch: Path
+    ) -> tuple[BlockerAnswer, CallRecord | None]:
         envelope = _ClaudeEnvelope.model_validate_json(result.stdout)
         if envelope.is_error or envelope.structured_output is None:
             self._fail("its call reported an error or gave no structured answer")
-        return envelope.structured_output
+        return envelope.structured_output, _call_of(envelope)
 
 
 class CodexRung(_CliRung):
-    """One Codex model, read-only in the scratch directory, with no lookups (design §8)."""
+    """One Codex model, read-only in the scratch directory, with no lookups (design §8).
+
+    `codex exec` has no flag for the effort, so the effort of a rung is not passed to it, and the
+    call reports no usage that is read here (tasks/reasoner-spike.md).
+    """
 
     _adapter = "codex"
     _lookups = _CODEX_LOOKUPS
@@ -237,9 +262,11 @@ class CodexRung(_CliRung):
         ]
 
     @override
-    def _answer(self, result: CommandResult, scratch: Path) -> BlockerAnswer:
+    def _answer(
+        self, result: CommandResult, scratch: Path
+    ) -> tuple[BlockerAnswer, CallRecord | None]:
         try:
             text = (scratch / _ANSWER_FILE).read_text(encoding="utf-8")
         except OSError, UnicodeDecodeError:
             self._fail("it wrote no answer file")
-        return BlockerAnswer.model_validate_json(text)
+        return BlockerAnswer.model_validate_json(text), None
