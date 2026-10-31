@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
@@ -30,13 +30,16 @@ if TYPE_CHECKING:
         ShikiruClient,
     )
 
+_NOTHING: Final = "Nothing is waiting for you."
+
 
 class OpenCommand:
     """Re-shows what the PO can still answer, to the owners and the sender's chat.
 
     A question is shown again by the Reshower from Shikiru's current view. An approval is rebuilt
     from that view too, and each copy's key names the op and the update, so the Confirm of every
-    copy approves the same op. Nothing is created, approved or issued here: a tap does that.
+    copy approves the same op. Nothing is created, approved or issued here: a tap does that. When
+    nothing was shown and every project answered, the sender is told that nothing is waiting.
     """
 
     def __init__(
@@ -63,11 +66,32 @@ class OpenCommand:
         if self._outbox.command_reply_queued(unreachable_key):
             return
         listed, unreachable = await self._listed()
+        shown = await self._reshow_questions(item.update_id, listed)
+        shown += self._queue_approvals(item.update_id, listed)
+        if unreachable:
+            self._reply(
+                item, f"Shikiru did not answer for {', '.join(unreachable)}.", unreachable_key
+            )
+        elif shown == 0:
+            self._reply(item, _NOTHING, f"open:{item.update_id}:nothing")
+
+    async def _reshow_questions(
+        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+    ) -> int:
+        """Re-show each forwarded question that Shikiru still lists; return how many were queued."""
+        shown = 0
         for number, signal in self._log.forwarded():
-            if (signal.project, signal.escalation_id) in listed:
-                await self._reshower.reshow(
-                    number, signal, "", key=f"open:{item.update_id}:{number}"
-                )
+            if (signal.project, signal.escalation_id) not in listed:
+                continue
+            if await self._reshower.reshow(number, signal, "", key=f"open:{update_id}:{number}"):
+                shown += 1
+        return shown
+
+    def _queue_approvals(
+        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+    ) -> int:
+        """Queue each approval that Shikiru still offers; return how many were queued."""
+        queued = 0
         for approval in self._log.pending_approvals():
             view = listed.get((approval.project, approval.escalation_id))
             option = None if view is None else _option(view, approval.kind)
@@ -80,16 +104,19 @@ class OpenCommand:
                 confirm_message(
                     approval.number, approval.kind, answer_data(approval.number, option)
                 ),
-                key=confirm_key(approval.op_id, item.update_id),
+                key=confirm_key(approval.op_id, update_id),
             )
-        if unreachable:
-            queue_command_reply(
-                self._outbox,
-                [item_destination(self._channel, item)],
-                f"Shikiru did not answer for {', '.join(unreachable)}.",
-                key=unreachable_key,
-                now=self._clock.now(),
-            )
+            queued += 1
+        return queued
+
+    def _reply(self, item: Inbound, text: str, key: str) -> None:
+        queue_command_reply(
+            self._outbox,
+            [item_destination(self._channel, item)],
+            text,
+            key=key,
+            now=self._clock.now(),
+        )
 
     async def _listed(self) -> tuple[dict[tuple[str, str], EscalationView], list[str]]:
         """Return the open escalations by project and id, and the projects that did not answer."""

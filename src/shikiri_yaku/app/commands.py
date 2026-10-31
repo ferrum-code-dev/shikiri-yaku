@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.domain.outbound import fit
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.goal import GoalCommand
@@ -16,17 +17,23 @@ if TYPE_CHECKING:
 _STATUS: Final = "/status"
 _OPEN: Final = "/open"
 _GOAL: Final = "/goal"
+_HELP_NAME: Final = "/help"
 _HELP: Final = (
     f"{_STATUS} · each component's engine, tasks and quota blocks\n"
     f"{_OPEN} · open escalations and pending approvals, shown again\n"
     f"{_GOAL} <component> <request> · submit a goal to a component's Shikiru\n"
-    "/help · this list"
+    f"{_HELP_NAME} · this list"
 )
+_UNKNOWN: Final = "Unknown command {name}.\n{help}"
 _KEY_PREFIX: Final = "command:"
 
 
 class Commands:
-    """Answers `/open` and `/status`, passes `/goal` on; any other text gets the command list.
+    """Answers `/status` and `/help`, passes `/open` and `/goal` on.
+
+    Free text gets the command list. A message that starts with `/` and names no known command gets
+    the name as typed, cut to `name_max_chars`, and the list. Names match without case (a phone
+    keyboard capitalises the first letter) and without the `@bot` of Telegram's addressed form.
 
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
@@ -41,6 +48,7 @@ class Commands:
         goal: GoalCommand,
         *,
         channel: str,
+        name_max_chars: int,
     ) -> None:
         self._outbox = outbox
         self._clock = clock
@@ -48,28 +56,41 @@ class Commands:
         self._open = open_command
         self._goal = goal
         self._channel = channel
+        self._name_max_chars = name_max_chars
 
     async def handle(self, item: Inbound) -> None:
-        command = (item.text or "").strip()
-        if command == _OPEN:
+        word = _first_word(item.text)
+        name = _command_name(word)
+        if name == _OPEN:
             await self._open.handle(item)
             return
-        if _is_goal(command):
+        if name == _GOAL:
             await self._goal.handle(item)
             return
         key = f"{_KEY_PREFIX}{item.update_id}"
         if self._outbox.command_reply_queued(key):
             return
-        text = await self._status.report() if command == _STATUS else _HELP
         queue_command_reply(
             self._outbox,
             [item_destination(self._channel, item)],
-            text,
+            await self._answer(word, name),
             key=key,
             now=self._clock.now(),
         )
 
+    async def _answer(self, word: str, name: str) -> str:
+        if not word.startswith("/") or name == _HELP_NAME:
+            return _HELP
+        if name == _STATUS:
+            return await self._status.report()
+        return _UNKNOWN.format(name=fit(word, self._name_max_chars), help=_HELP)
 
-def _is_goal(command: str) -> bool:
-    words = command.split(maxsplit=1)
-    return bool(words) and words[0] == _GOAL
+
+def _first_word(text: str | None) -> str:
+    words = (text or "").split(maxsplit=1)
+    return words[0] if words else ""
+
+
+def _command_name(word: str) -> str:
+    """Return the command a word names: lower case, without the `@bot` of the addressed form."""
+    return word.split("@", 1)[0].lower()

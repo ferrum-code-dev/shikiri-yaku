@@ -27,17 +27,22 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import Ack, AckStatus, EngineStatus, ShikiruLinkDownError
-from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import (
+    BUTTON_LABEL_MAX_CHARS,
+    COMMAND_NAME_MAX_CHARS,
+    MESSAGE_TITLE_MAX_CHARS,
+)
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
-    from shikiri_yaku.ports import ShikiruClient, ShikiruTask
+    from shikiri_yaku.ports import EscalationView, ShikiruClient, ShikiruTask
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
 COMMANDS = ("/status", "/open", "/goal", "/help")
+NOTHING = "Nothing is waiting for you."
 DONE = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 
 
@@ -65,6 +70,9 @@ class _Client:
         return EngineStatus(engine_up=True, quotas={})
 
     async def list_tasks(self, _statuses: Sequence[str] | None = None) -> list[ShikiruTask]:
+        return []
+
+    async def list_escalations(self) -> list[EscalationView]:
         return []
 
     async def submit_task(self, request: str) -> Ack:
@@ -104,7 +112,13 @@ class Harness:
         )
         goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
         commands = Commands(
-            self.outbox, _Clock(), Status(self.clients, sources), opened, goal, channel="telegram"
+            self.outbox,
+            _Clock(),
+            Status(self.clients, sources),
+            opened,
+            goal,
+            channel="telegram",
+            name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
         return Replies(
             JournalReplies(self.database, self.signals, OpStore(self.database)),
@@ -142,12 +156,59 @@ def test_status_is_answered_once_in_the_senders_chat_with_no_signal(h: Harness) 
     assert (stored.signal_number, stored.purpose) == (None, Purpose.NOTICE)
 
 
-@pytest.mark.parametrize("text", ["hello", "/start", None])
-def test_text_that_is_not_a_command_gets_the_list_of_commands(h: Harness, text: str | None) -> None:
+@pytest.mark.parametrize("text", ["hello", "/help", None])
+def test_free_text_and_help_get_the_list_of_commands(h: Harness, text: str | None) -> None:
     h.send(text)
 
     [pending] = h.outbox.pending()
     assert all(command in pending.message.text for command in COMMANDS)
+
+
+@pytest.mark.parametrize(
+    ("text", "first_line"),
+    [
+        ("/stats", "Unknown command /stats."),
+        ("/start", "Unknown command /start."),
+        ("/Open", NOTHING),
+        ("/open@bot", NOTHING),
+    ],
+)
+def test_a_slash_message_is_answered_by_the_command_it_names(
+    h: Harness, text: str, first_line: str
+) -> None:
+    h.send(text)
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text.split("\n")[0] == first_line
+
+
+def test_an_unknown_command_is_followed_by_the_list_of_commands(h: Harness) -> None:
+    h.send("/stats")
+
+    [pending] = h.outbox.pending()
+    assert all(command in pending.message.text for command in COMMANDS)
+
+
+def test_a_long_unknown_name_is_cut_to_the_limit(h: Harness) -> None:
+    text = "/" + "x" * COMMAND_NAME_MAX_CHARS * 3
+    h.send(text)
+
+    [pending] = h.outbox.pending()
+    assert (
+        text in pending.message.text,
+        "x" * (COMMAND_NAME_MAX_CHARS + 1) in pending.message.text,
+        pending.message.text.startswith("Unknown command /x"),
+    ) == (False, False, True)
+
+
+def test_open_with_nothing_open_is_answered_once_and_a_repeat_of_the_update_is_not(
+    h: Harness,
+) -> None:
+    h.send("/open", update=700)
+    h.send("/open", update=700)
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text == NOTHING
 
 
 def test_the_same_update_delivered_twice_queues_one_reply(h: Harness) -> None:

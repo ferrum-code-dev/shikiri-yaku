@@ -77,6 +77,10 @@ def _deliver(h: Harness) -> list[str]:
     return refs
 
 
+def _stored(h: Harness) -> list[tuple[int | None, Purpose | None]]:
+    return [(stored.signal_number, stored.purpose) for stored in h.messages.unconfirmed()]
+
+
 def test_replaying_the_same_open_update_re_shows_nothing_new(h: Harness) -> None:
     h.handle(data="a:1:4")
     _deliver(h)
@@ -107,7 +111,7 @@ def test_an_approval_already_issued_is_not_shown_again(h: Harness) -> None:
     [original] = _deliver(h)
     h.handle(update=701, ref=original, data="a:1:4")
     _open(h)
-    assert h.messages.unconfirmed() == []
+    assert _stored(h) == [(None, Purpose.NOTICE)]
 
 
 def test_an_escalation_resolved_elsewhere_is_not_shown_open(h: Harness) -> None:
@@ -115,7 +119,7 @@ def test_an_escalation_resolved_elsewhere_is_not_shown_open(h: Harness) -> None:
     _deliver(h)
     h.resolve_in_shikiru()
     _open(h)
-    assert h.outbox.pending() == []
+    assert _stored(h) == [(None, Purpose.NOTICE)]
 
 
 def test_a_tap_on_a_copy_of_an_escalation_resolved_elsewhere_does_not_resolve(h: Harness) -> None:
@@ -179,12 +183,12 @@ def test_an_approval_left_approved_by_a_crash_is_shown_again_and_issues_once(
 def test_a_question_listed_open_but_resolved_on_its_detail_is_not_shown(h: Harness) -> None:
     h.clients["api"] = cast("ShikiruClient", _Raced(h.client.view, _resolved(h.client.view)))
     _open(h)
-    assert h.outbox.pending() == []
+    assert _stored(h) == [(None, Purpose.NOTICE)]
 
 
-def test_a_question_missing_on_its_detail_fetch_is_not_shown_and_sends_no_notice(
+def test_a_question_missing_on_its_detail_fetch_is_not_shown_and_only_the_nothing_answer_is_sent(
     h: Harness,
 ) -> None:
     h.clients["api"] = cast("ShikiruClient", _Raced(h.client.view, None))
     _open(h)
-    assert h.outbox.pending() == []
+    assert _stored(h) == [(None, Purpose.NOTICE)]

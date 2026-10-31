@@ -1128,7 +1128,9 @@ class SubmitLog(Protocol):
 class Reshower(Protocol):
     """Shows a signal's question again as a new message, once per key, while Shikiru has it open."""
 
-    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None: ...
+    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> bool:
+        """Return whether the question was queued; it is not when Shikiru no longer has it open."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

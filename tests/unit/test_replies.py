@@ -44,7 +44,11 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
     TaskDetail,
 )
-from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import (
+    BUTTON_LABEL_MAX_CHARS,
+    COMMAND_NAME_MAX_CHARS,
+    MESSAGE_TITLE_MAX_CHARS,
+)
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -175,7 +179,15 @@ class Harness:
         goal = goal_command(
             self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
         )
-        return Commands(self.outbox, Clock(at), status, opened, goal, channel="telegram")
+        return Commands(
+            self.outbox,
+            Clock(at),
+            status,
+            opened,
+            goal,
+            channel="telegram",
+            name_max_chars=COMMAND_NAME_MAX_CHARS,
+        )
 
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})

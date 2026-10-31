@@ -469,7 +469,13 @@ def inbound_job(
         channel=TELEGRAM_CHANNEL,
     )
     commands = Commands(
-        outbox, clock, Status(clients, sources), opened, goal, channel=TELEGRAM_CHANNEL
+        outbox,
+        clock,
+        Status(clients, sources),
+        opened,
+        goal,
+        channel=TELEGRAM_CHANNEL,
+        name_max_chars=operator.command_name_max_chars,
     )
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal), silencing_prefixes=SILENCING_PREFIXES),

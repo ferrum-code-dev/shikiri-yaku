@@ -39,7 +39,11 @@ from shikiri_yaku.ports import (
     Message,
     ShikiruLinkDownError,
 )
-from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import (
+    BUTTON_LABEL_MAX_CHARS,
+    COMMAND_NAME_MAX_CHARS,
+    MESSAGE_TITLE_MAX_CHARS,
+)
 from tests.support.destinations import FixedDestinations
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
@@ -157,7 +161,13 @@ class _Stack:
         )
         goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
         self.commands = Commands(
-            self.outbox, _Clock(), self.status, opened, goal, channel="telegram"
+            self.outbox,
+            _Clock(),
+            self.status,
+            opened,
+            goal,
+            channel="telegram",
+            name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
 
     def __enter__(self) -> Self:

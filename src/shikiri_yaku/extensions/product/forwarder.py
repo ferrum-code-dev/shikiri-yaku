@@ -61,17 +61,19 @@ class ProductForwarder:
             key=f"forward:{number}",
         )
 
-    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
+    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> bool:
         """Queue the signal's question again as a new message, once per key, if still open.
 
         The view that is checked is the one rendered. A missing or closed view queues nothing,
-        because the list that named the escalation was read before this fetch.
+        because the list that named the escalation was read before this fetch. Returns whether
+        the question was queued.
         """
         view = await self._view(signal)
         if view is None or view.escalation.status != EscalationStatus.OPEN:
-            return
+            return False
         title = await self._title(signal)
         self._show(number, signal, view, title=title, note=note, suggestion="", key=key)
+        return True
 
     def _show(
         self,

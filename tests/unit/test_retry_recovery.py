@@ -109,9 +109,9 @@ class Reshower:
         self._forwarder = forwarder
         self.shown: list[tuple[int, str]] = []
 
-    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
+    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> bool:
         self.shown.append((number, note))
-        await self._forwarder.reshow(number, signal, note, key=key)
+        return await self._forwarder.reshow(number, signal, note, key=key)
 
 
 class Fallback:
