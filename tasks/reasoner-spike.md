@@ -17,8 +17,7 @@ claude -p --model <model> --output-format json --json-schema '<schema>' \
 * `--tools` limits the tools to the list, with command patterns for Bash. `dontAsk` refuses what is not
   listed instead of waiting for a person. `--setting-sources ""` loads no settings, hooks or CLAUDE.md.
 * `Read` is not in the list (D3). It cannot be limited to the scratch directory, and a model that can
-  read any host file is an exfiltration path for injected escalation text. Design §8 still lists reading
-  the scratch directory; that is open for the PO (see `tasks/plan.md`, D3).
+  read any host file is an exfiltration path for injected escalation text.
 * `--effort <level>` takes `low`, `medium`, `high`, `xhigh` or `max` (`claude --help`, 2.1.316). A rung's
   effort is passed as this flag, and a rung without one passes no flag.
 * Usage is `total_cost_usd`, `usage` and `duration_api_ms` in the same object. They go into the signal's
