@@ -11,7 +11,7 @@ from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import JournalFinalEdits
 from shikiri_yaku.journal.signals import NewSignal, SignalState
-from shikiri_yaku.ports import ShikiruClient, ShikiruLinkDownError
+from shikiri_yaku.ports import EscalationStatus, ShikiruClient, ShikiruLinkDownError
 from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import NOW, Client, Clock, Harness
 
@@ -81,12 +81,52 @@ def _stored(h: Harness) -> list[tuple[int | None, Purpose | None]]:
     return [(stored.signal_number, stored.purpose) for stored in h.messages.unconfirmed()]
 
 
+def _reopen_in_shikiru(h: Harness) -> None:
+    record = h.client.view.escalation.model_copy(update={"status": EscalationStatus.OPEN})
+    h.client.view = h.client.view.model_copy(update={"escalation": record})
+
+
 def test_replaying_the_same_open_update_re_shows_nothing_new(h: Harness) -> None:
     h.handle(data="a:1:4")
     _deliver(h)
     _open(h, update=700)
     _open(h, update=700)
     assert len(h.outbox.pending()) == 2
+
+
+def test_a_replayed_open_update_answers_nothing_more_after_its_question_is_resolved(
+    h: Harness,
+) -> None:
+    _open(h, update=700)
+    h.resolve_in_shikiru()
+    _open(h, update=700)
+    assert _stored(h) == [(h.number, Purpose.QUESTION)]
+
+
+def test_a_replayed_open_update_does_not_add_a_question_opened_after_its_nothing_answer(
+    h: Harness,
+) -> None:
+    h.resolve_in_shikiru()
+    _open(h, update=700)
+    _reopen_in_shikiru(h)
+    _open(h, update=700)
+    assert _stored(h) == [(None, Purpose.NOTICE)]
+
+
+def test_an_open_interrupted_before_it_is_answered_is_finished_by_its_replay(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue = h.outbox.queue
+
+    def interrupt(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(h.outbox, "queue", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        _open(h, update=700)
+    monkeypatch.setattr(h.outbox, "queue", queue)
+    _open(h, update=700)
+    assert _stored(h) == [(h.number, Purpose.QUESTION)]
 
 
 def test_a_later_open_shows_the_open_items_again(h: Harness) -> None:

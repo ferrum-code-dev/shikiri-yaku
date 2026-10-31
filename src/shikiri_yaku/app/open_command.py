@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 _NOTHING: Final = "Nothing is waiting for you."
 
 
+def _done_key(update_id: int) -> str:
+    return f"open:{update_id}:done"
+
+
 class OpenCommand:
     """Re-shows what the PO can still answer, to the owners and the sender's chat.
 
@@ -40,6 +44,10 @@ class OpenCommand:
     from that view too, and each copy's key names the op and the update, so the Confirm of every
     copy approves the same op. Nothing is created, approved or issued here: a tap does that. When
     nothing was shown and every project answered, the sender is told that nothing is waiting.
+
+    An update is answered once. Its completion is journaled after every part, so a repeat of the
+    update queues nothing even if Shikiru has changed since. An answer interrupted before that is
+    finished by its replay, and each part's own key keeps the replay from sending it twice.
     """
 
     def __init__(
@@ -62,18 +70,20 @@ class OpenCommand:
         self._channel = channel
 
     async def handle(self, item: Inbound) -> None:
-        unreachable_key = f"open:{item.update_id}:unreachable"
-        if self._outbox.command_reply_queued(unreachable_key):
+        if self._outbox.command_reply_queued(_done_key(item.update_id)):
             return
         listed, unreachable = await self._listed()
         shown = await self._reshow_questions(item.update_id, listed)
         shown += self._queue_approvals(item.update_id, listed)
         if unreachable:
             self._reply(
-                item, f"Shikiru did not answer for {', '.join(unreachable)}.", unreachable_key
+                item,
+                f"Shikiru did not answer for {', '.join(unreachable)}.",
+                f"open:{item.update_id}:unreachable",
             )
         elif shown == 0:
             self._reply(item, _NOTHING, f"open:{item.update_id}:nothing")
+        self._complete(item)
 
     async def _reshow_questions(
         self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
@@ -116,6 +126,12 @@ class OpenCommand:
             text,
             key=key,
             now=self._clock.now(),
+        )
+
+    def _complete(self, item: Inbound) -> None:
+        """Journal that the update's answer is whole; a claim with no parts marks it."""
+        self._outbox.queue_command_reply(
+            [], [], key=_done_key(item.update_id), now=self._clock.now()
         )
 
     async def _listed(self) -> tuple[dict[tuple[str, str], EscalationView], list[str]]:
