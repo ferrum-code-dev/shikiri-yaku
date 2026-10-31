@@ -67,6 +67,7 @@ BUTTON_LABEL_MAX_CHARS: Final = 30
 REASONER_TIMEOUT_S: Final = 120
 REASONER_COOLDOWN_MIN: Final = 5
 REASONER_MAX_PARALLEL: Final = 2
+REASONER_INPUT_MAX_CHARS: Final = 4000
 
 _MISSING: Final = "missing"
 _EXTRA: Final = "extra_forbidden"
@@ -187,6 +188,7 @@ class ReasonerSettings(_FrozenModel):
     timeout_s: PositiveInt = REASONER_TIMEOUT_S
     cooldown_min: PositiveInt = REASONER_COOLDOWN_MIN
     max_parallel: PositiveInt = REASONER_MAX_PARALLEL
+    input_max_chars: PositiveInt = REASONER_INPUT_MAX_CHARS
 
 
 class ChannelsSettings(_FrozenModel):

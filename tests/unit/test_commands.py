@@ -7,15 +7,13 @@ import os
 import signal
 import sys
 import threading
-from typing import TYPE_CHECKING, Final
+from pathlib import Path
+from typing import Final
 
 import pytest
 
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.ports import CommandError
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _TIMEOUT_S: Final = 10
 _START_WAIT_S: Final = 3
@@ -31,14 +29,36 @@ time.sleep(60)
 """
 
 
-def _run(argv: list[str], timeout_s: float = _TIMEOUT_S):
-    return asyncio.run(ProcessCommandRunner().run(argv, timeout_s=timeout_s))
+def _run(
+    argv: list[str],
+    timeout_s: float = _TIMEOUT_S,
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+):
+    return asyncio.run(ProcessCommandRunner().run(argv, timeout_s=timeout_s, cwd=cwd, env=env))
 
 
 def test_a_successful_command_returns_its_output() -> None:
     result = _run(["echo", "hello"])
 
     assert (result.returncode, result.stdout) == (0, "hello\n")
+
+
+def test_a_command_starts_in_the_given_directory(tmp_path: Path) -> None:
+    result = _run([sys.executable, "-c", "import os; print(os.getcwd())"], cwd=tmp_path)
+
+    assert Path(result.stdout.strip()).resolve() == tmp_path.resolve()
+
+
+def test_extra_environment_is_added_for_the_command_only() -> None:
+    result = _run(
+        [sys.executable, "-c", "import os; print(os.environ['SHIKIRI_TEST_VALUE'])"],
+        env={"SHIKIRI_TEST_VALUE": "set"},
+    )
+
+    assert (result.returncode, result.stdout) == (0, "set\n")
+    assert "SHIKIRI_TEST_VALUE" not in os.environ
 
 
 def test_a_nonzero_exit_code_and_stderr_are_returned_not_raised() -> None:

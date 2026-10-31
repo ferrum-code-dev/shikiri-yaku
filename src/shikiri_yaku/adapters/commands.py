@@ -10,11 +10,20 @@ from typing import TYPE_CHECKING
 from shikiri_yaku.ports import CommandError, CommandResult
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
 
 
 class ProcessCommandRunner:
-    async def run(self, argv: Sequence[str], *, timeout_s: float) -> CommandResult:
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        merged = None if env is None else {**os.environ, **env}
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -22,6 +31,8 @@ class ProcessCommandRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
+                cwd=cwd,
+                env=merged,
             )
         except OSError as error:
             message = f"{argv[0]} could not be started: {error}"

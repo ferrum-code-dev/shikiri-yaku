@@ -7,7 +7,7 @@ import json
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, override
 
 import pytest
 from mcp import types
@@ -20,6 +20,7 @@ from shikiri_yaku.ports import (
     AckStatus,
     CommandError,
     CommandResult,
+    CommandRunner,
     DoctorCheck,
     ShikiruLinkDownError,
     ShikiruProtocolError,
@@ -28,7 +29,7 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
     from datetime import timedelta
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
@@ -100,12 +101,20 @@ class FakeClock:
         self.sleeps.append(seconds)
 
 
-class FakeRunner:
+class FakeRunner(CommandRunner):
     def __init__(self, result: CommandResult | CommandError) -> None:
         self.result = result
         self.calls: list[tuple[list[str], float]] = []
 
-    async def run(self, argv: Sequence[str], *, timeout_s: float) -> CommandResult:
+    @override
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
         self.calls.append((list(argv), timeout_s))
         if isinstance(self.result, CommandError):
             raise self.result

@@ -27,10 +27,18 @@ class Source(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Assessment:
-    """The Reasoner's answer for one signal: its verdict and the one-line suggestion for the PO."""
+    """The Reasoner's answer for one signal: its verdict and the one-line suggestion for the PO.
+
+    `tool`, `manager`, `package` and `why` are the model's words as it gave them, None when it
+    named none. Code checks the names before any of them is used (design §6.3).
+    """
 
     verdict: Verdict
     note: str
+    tool: str | None = None
+    manager: str | None = None
+    package: str | None = None
+    why: str | None = None
 
 
 type AssessFn = Callable[[Signal], Awaitable[Assessment]]

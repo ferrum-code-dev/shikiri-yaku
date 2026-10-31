@@ -18,6 +18,7 @@ from shikiri_yaku.domain.schedule import Destination  # noqa: TC001 -- pydantic 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from pathlib import Path
 
     from shikiri_yaku.domain.classification import Assessment, Classification
     from shikiri_yaku.domain.inbound import Batch, Inbound
@@ -80,6 +81,7 @@ __all__ = [
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
+    "ReasonerRung",
     "ReconcileLog",
     "RecordedResolution",
     "ReplyLog",
@@ -748,6 +750,17 @@ class Reasoner(Protocol):
     async def assess_blocker(self, signal: Signal) -> Assessment: ...
 
 
+class ReasonerRung(Protocol):
+    """One rung of the ladder: one agent CLI and model (design §8). Raises ReasonerError on failure.
+
+    `host_facts` are the lines the prompt gives the model about this host: OS, package managers.
+    """
+
+    name: str
+
+    async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment: ...
+
+
 @dataclass(frozen=True, slots=True)
 class CommandResult:
     returncode: int
@@ -758,11 +771,19 @@ class CommandResult:
 class CommandRunner(Protocol):
     """Runs one stored argument list on this host, for at most `timeout_s` (design §6.3, §12).
 
-    The list runs as given: no shell, and nothing a model wrote. Raises CommandError when the
-    command cannot be run to its end.
+    The list runs as given: no shell, and nothing a model wrote. `cwd` is the directory it starts
+    in, and `env` is added to this process's environment. Raises CommandError when the command
+    cannot be run to its end.
     """
 
-    async def run(self, argv: Sequence[str], *, timeout_s: float) -> CommandResult: ...
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult: ...
 
 
 class Clock(Protocol):

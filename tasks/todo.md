@@ -63,7 +63,7 @@ merged and `uv run poe check` passes.
 - [x] C12. Commands answer when they have nothing to show
 - [ ] Phase D: Install
   - [x] D1. Reasoner spike (`tasks/reasoner-spike.md`)
-  - [ ] D2. Reasoner adapters and `assess_blocker`
+  - [x] D2. Reasoner adapters and `assess_blocker`
   - [ ] D3. Ladder, host facts, health and doctor
   - [ ] D4. Names, recipes and the existence check
   - [ ] D5. Install approval
