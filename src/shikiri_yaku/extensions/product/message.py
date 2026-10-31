@@ -137,7 +137,7 @@ def _resolution_choice(
     label = _RESOLUTION_LABELS[resolution.kind]
     mark = f"{RECOMMENDED} " if marked and resolution.recommended else ""
     line = _with_consequences(f"{mark}{label}", resolution.consequences)
-    return _Choice(option_no, f"{mark}{label}", line)
+    return _Choice(option_no, label, line)
 
 
 def _with_consequences(text: str, consequences: str) -> str:

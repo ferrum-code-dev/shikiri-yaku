@@ -357,8 +357,19 @@ def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its
     assert message.buttons == (Button("Retry", "a:41:2"),)
 
 
-def test_recommended_resolution_is_marked_only_when_there_are_no_agent_options() -> None:
-    view = _view(resolutions=[_resolution("retry", recommended=True)])
+@pytest.mark.parametrize(
+    ("kind", "label"),
+    [
+        ("answer", "Reply with text"),
+        ("retry", "Retry"),
+        ("accept", "Accept"),
+        ("cancel", "Cancel task"),
+    ],
+)
+def test_recommended_resolution_keeps_its_button_label_and_is_marked_on_its_line(
+    kind: str, label: str
+) -> None:
+    view = _view(resolutions=[_resolution(kind, recommended=True)])
     message = escalation_message(
         NUMBER,
         ESCALATION,
@@ -369,6 +380,8 @@ def test_recommended_resolution_is_marked_only_when_there_are_no_agent_options()
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
+    assert message.buttons == (Button(label, "a:41:1"),)
+    assert f"{RECOMMENDED} {label}" in message.text
     assert message.text.count(RECOMMENDED) == 1
 
 
