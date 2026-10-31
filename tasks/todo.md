@@ -57,5 +57,6 @@ merged and `uv run poe check` passes.
 - [x] C6. Notice handler
 - [x] C7. Phase C paths through the composed app
 - [ ] C8. Fixes from the first live run
+- [ ] C9. Readable messages
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening

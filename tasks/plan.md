@@ -830,6 +830,31 @@ Acceptance criteria:
 * The test for item 4 fails without the fix.
 * The gate passes.
 
+### C9. Readable messages (normal)
+
+The first live messages were one block of plain text, and the recommended option was marked only in
+the text. Design §6.1 now has the layout (**Layout** bullet and the example). Do not edit
+`docs/design.md`. Run this after C8, which changes the header.
+
+1. `Message` gains `heading: str = ""` (a core type; it knows nothing of Telegram). The Telegram adapter
+   sends the heading in bold and the rest as plain text, with `parse_mode` HTML and every character of
+   every text escaped (`&`, `<`, `>`), so a question that contains `<b>` shows as typed. The final edits
+   of a message (A11c4) and `Details` use the same rendering. The 4096 limit counts the characters Telegram
+   shows, not the markup.
+2. The Product handler builds escalation and information messages with the header as the `heading` and a
+   blank line between blocks. An option line is `★ 1. Label (consequences)` as today.
+3. An answer button carries the option number, the ★ when the option is recommended, and the label,
+   cut to a new setting `button_label_max_chars` (default 30, with `…`). Button data does not change. The
+   buttons for `Reply with text`, `Cancel task` and the rest keep their labels.
+4. Other handlers' messages (review, notice) are not restyled. If one of them needs the heading to look
+   right, report it.
+
+Acceptance criteria:
+* Table-driven: an escalation with a recommended option, without one, with a long label, and an information message; each checks the heading, the blank lines and the button labels.
+* A question containing `<b>` and `&` is delivered escaped, in a send and in a final edit.
+* A recommended option has the ★ on its button and on its line; no other button has one.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
