@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
+from shikiri_yaku.domain.recipes import RECIPES
 from shikiri_yaku.ports import CommandError
 
 if TYPE_CHECKING:
     from shikiri_yaku.ports import CommandRunner
 
-PACKAGE_MANAGERS: Final = ("brew", "uv", "npm", "pipx", "cargo")
+PACKAGE_MANAGERS: Final = tuple(RECIPES)
 _OS_TAG: Final = "os="
 _MANAGER_TAG: Final = "manager="
 _PATH_TAG: Final = "path="

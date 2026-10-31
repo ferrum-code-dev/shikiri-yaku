@@ -66,7 +66,7 @@ merged and `uv run poe check` passes.
   - [x] D2. Reasoner adapters and `assess_blocker`
   - [x] D3. Ladder and the safe tool list
   - [x] D3b. Wiring, host facts, health and doctor
-  - [ ] D4. Names, recipes and the existence check
+  - [x] D4. Names, recipes and the existence check
   - [ ] D5. Install approval
   - [ ] D6. Executor and resolution
   - [ ] D7. Interrupted installs and measures
