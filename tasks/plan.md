@@ -865,13 +865,24 @@ reminders running. Design §6.1 says these signals close when the engine is up a
 Close every open `engine_down` and `engine_fault` signal of a project when the liveness check sees
 `status.engine_up` true: use the existing `Closing` path with a final line ("Engine is up again") so the
 message is edited, its buttons removed and its reminders stopped. A signal that a handler has parked or
-is handling is left to that handler. Also, the note of a forward that lists the doctor's failed checks
-should leave the clause out when none failed (today: "failed checks: none").
+is handling is left to that handler.
+
+Also fix the wording of a forwarded `engine_down`, which the live run showed as: "The engine of api is
+down; its last event was engine_started. What I tried: No more automatic restart within 1:00:00; already
+done at 2026-10-31T18:11:51.603935+00:00.; failed checks: none". It names an internal event, shows a raw
+timestamp and a duration as `1:00:00`, ends with a stray `.;`, says "failed checks: none", and does not
+say what the PO should do. Make it read, for example: "The engine of api stopped unexpectedly. I restarted
+it at 18:11 UTC, and I restart at most once per hour, so please start it yourself with `shikiru start`
+in the api project." Rules: a time as `HH:MM UTC` (the date only when it is not today), a duration in
+words ("1 hour"), no event kinds, the doctor's failed checks listed only when there are some, and one
+sentence per fact. The same rule applies to the other notes that the loop guard and the restart action
+write; report any you find that read badly.
 
 Acceptance criteria:
 * Table-driven over the signal states (`new`, `handling`, `parked`, `forwarded`) and kinds (`engine_down`, `engine_fault`, another kind): only a `forwarded` signal of those two kinds is closed, and only when the engine is up.
 * The message of a closed signal is edited to the final line with the buttons removed, and the Scheduler sends no reminder for it afterwards.
 * A composed test (as in C7) that forwards an `engine_down` and then reports the engine up ends with the signal closed and the message edited; it fails without the fix.
+* A table-driven test of the engine note: refused restart with and without failed checks, a restart from today and from an earlier day; no raw timestamp, no `.;`, no event kind in any of them.
 * The gate passes.
 
 ## Later phases (outline)
