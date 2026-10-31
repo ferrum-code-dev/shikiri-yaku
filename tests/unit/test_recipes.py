@@ -56,6 +56,11 @@ def test_a_hostile_or_malformed_executable_name_is_refused(name: str) -> None:
     [
         ("npm", "ruff", True),
         ("npm", "@scope/pkg", True),
+        ("npm", "user/repo", False),
+        ("npm", "/pkg", False),
+        ("npm", "@scope/pkg/x", False),
+        ("npm", "@/pkg", False),
+        ("npm", "@scope/-pkg", False),
         ("brew", "@scope/pkg", False),
         ("npm", "a b", False),
         ("npm", "-pkg", False),
@@ -89,6 +94,8 @@ def test_the_package_pattern_depends_on_the_manager(
         ("ffmpeg", "brew", "ffmpeg\n", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "@scope/ffmpeg", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "x" * (NAME_MAX_LENGTH + 1), RefusalReason.BAD_PACKAGE),
+        ("ffmpeg", "npm", "user/repo", RefusalReason.BAD_PACKAGE),
+        ("ffmpeg", "npm", "/pkg", RefusalReason.BAD_PACKAGE),
     ],
 )
 def test_a_hostile_or_unknown_name_is_refused_with_its_reason(

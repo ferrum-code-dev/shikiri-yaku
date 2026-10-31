@@ -16,8 +16,10 @@ from pydantic import StringConstraints, TypeAdapter, ValidationError
 
 NAME_MAX_LENGTH: Final = 100
 _NAME_CHARS: Final = "A-Za-z0-9._+"
-_PLAIN_PATTERN: Final = rf"^[{_NAME_CHARS}][{_NAME_CHARS}-]*$"
-_SCOPED_PATTERN: Final = rf"^[{_NAME_CHARS}@/][{_NAME_CHARS}@/-]*$"
+_NAME: Final = rf"[{_NAME_CHARS}][{_NAME_CHARS}-]*"
+_PLAIN_PATTERN: Final = rf"^{_NAME}$"
+# keep: npm reads `user/repo` as a GitHub repository, so a slash is allowed only inside a scope
+_SCOPED_PATTERN: Final = rf"^(?:{_NAME}|@{_NAME}/{_NAME})$"
 _PLAIN: Final[TypeAdapter[str]] = TypeAdapter(
     Annotated[str, StringConstraints(pattern=_PLAIN_PATTERN, max_length=NAME_MAX_LENGTH)]
 )
