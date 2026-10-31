@@ -855,6 +855,25 @@ Acceptance criteria:
 * A recommended option has the ★ on its button and on its line; no other button has one.
 * The gate passes.
 
+### C10. An engine that is up again closes its signal (normal)
+
+Found in the live run: the engine was killed twice. The first `engine_down` was restarted and
+resolved. The second was forwarded (the loop guard refused a second restart within the hour), and after the
+PO started the engine by hand the signal stayed `forwarded` for minutes, with its message unedited and its
+reminders running. Design §6.1 says these signals close when the engine is up again, and nothing does.
+
+Close every open `engine_down` and `engine_fault` signal of a project when the liveness check sees
+`status.engine_up` true: use the existing `Closing` path with a final line ("Engine is up again") so the
+message is edited, its buttons removed and its reminders stopped. A signal that a handler has parked or
+is handling is left to that handler. Also, the note of a forward that lists the doctor's failed checks
+should leave the clause out when none failed (today: "failed checks: none").
+
+Acceptance criteria:
+* Table-driven over the signal states (`new`, `handling`, `parked`, `forwarded`) and kinds (`engine_down`, `engine_fault`, another kind): only a `forwarded` signal of those two kinds is closed, and only when the engine is up.
+* The message of a closed signal is edited to the final line with the buttons removed, and the Scheduler sends no reminder for it afterwards.
+* A composed test (as in C7) that forwards an `engine_down` and then reports the engine up ends with the signal closed and the message edited; it fails without the fix.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
