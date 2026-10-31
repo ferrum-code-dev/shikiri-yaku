@@ -27,6 +27,7 @@ _TIMEOUT_S: Final = 120
 _INPUT_MAX_CHARS: Final = 4000
 _CLAUDE_TOOLS: Final = "WebSearch,WebFetch,Bash(command -v:*),Bash(brew info:*),Bash(brew search:*)"
 _USAGE: Final[dict[str, object]] = {"input_tokens": 120, "output_tokens": 35}
+_CODEX_USAGE: Final[dict[str, object]] = {"tokens_used": 15607}
 _FIELDS: Final = {"verdict", "tool", "manager", "package", "why", "suggestion"}
 _FACTS: Final = ["OS: macOS 15", "package managers: brew"]
 _ANSWER: Final = {
@@ -100,11 +101,13 @@ class _Fake(CommandRunner):
         self,
         *,
         stdout: str = "",
+        stderr: str = "",
         answer_text: str | None = None,
         returncode: int = 0,
         error: CommandError | None = None,
     ) -> None:
         self.stdout = stdout
+        self.stderr = stderr
         self.answer_text = answer_text
         self.returncode = returncode
         self.error = error
@@ -132,7 +135,7 @@ class _Fake(CommandRunner):
         if self.answer_text is not None:
             path = _value(self.argv, "--output-last-message")
             await asyncio.to_thread(_write, path, self.answer_text)
-        return CommandResult(returncode=self.returncode, stdout=self.stdout, stderr="")
+        return CommandResult(returncode=self.returncode, stdout=self.stdout, stderr=self.stderr)
 
 
 def _claude_stdout(structured: object, *, is_error: bool = False) -> str:
@@ -259,12 +262,38 @@ def test_the_claude_effort_is_a_flag_and_codex_passes_none(tmp_path: Path) -> No
     assert "xhigh" not in codex.argv
 
 
-def test_claude_reports_its_usage_and_duration_and_codex_reports_none(tmp_path: Path) -> None:
+def test_claude_reports_its_usage_and_duration_and_codex_without_a_count_reports_none(
+    tmp_path: Path,
+) -> None:
     claude = _assess(_rung("claude", _success("claude"), tmp_path))
     codex = _assess(_rung("codex", _success("codex"), tmp_path))
 
     assert claude.call == CallRecord(duration_ms=900, cost_usd=0.01, usage=_USAGE)
     assert codex.call is None
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_codex_reports_the_tokens_it_prints_and_no_duration_or_cost(
+    stream: str, tmp_path: Path
+) -> None:
+    printed = f"codex\n{json.dumps(_ANSWER)}\ntokens used\n15,607\n"
+    runner = _Fake(answer_text=json.dumps(_ANSWER))
+    if stream == "stdout":
+        runner.stdout = printed
+    else:
+        runner.stderr = printed
+
+    codex = _assess(_rung("codex", runner, tmp_path))
+
+    assert codex.call == CallRecord(duration_ms=None, cost_usd=None, usage=_CODEX_USAGE)
+
+
+def test_codex_takes_the_count_printed_last_not_one_quoted_before_it(tmp_path: Path) -> None:
+    runner = _Fake(answer_text=json.dumps(_ANSWER), stderr="tokens used 99\ntokens used\n15,607\n")
+
+    codex = _assess(_rung("codex", runner, tmp_path))
+
+    assert codex.call == CallRecord(duration_ms=None, cost_usd=None, usage=_CODEX_USAGE)
 
 
 @pytest.mark.parametrize("cli", ["claude", "codex"])

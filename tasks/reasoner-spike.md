@@ -29,8 +29,14 @@ claude -p --model <model> --output-format json --json-schema '<schema>' \
 codex exec --ephemeral --skip-git-repo-check -s read-only -C <scratch> --output-schema <file> "<prompt>"
 ```
 
-* The schema must be a file. The answer is the last line of stdout (`--output-last-message <file>` also
-  exists). Token use is printed after it.
+* The schema must be a file. The adapter reads the answer from the `--output-last-message <file>`.
+* Usage: in the spike's merged output (`2>&1`), a `tokens used` line and its count (`15,607`) came
+  before the final answer line. The adapter reads the last such count from stderr or stdout (the
+  spike did not separate the streams) and records it as `tokens_used`. Codex prints no duration or
+  cost, so those fields stay unset.
+* Effort: `codex exec --help` (codex-cli 0.166.0) has no effort flag; its only match for "effort",
+  "reasoning", "usage" or "token" is the word "Usage:". A Codex rung's effort is therefore not passed
+  and is ignored. A Claude rung's effort goes to `--effort`.
 * Codex cannot limit its shell to named commands. `-s read-only` stops writes only; web search is off
   unless `--search` is given, and the adapter does not give it. The adapter therefore runs with no
   lookups at all (design §8: an adapter whose CLI cannot restrict tools runs with none).

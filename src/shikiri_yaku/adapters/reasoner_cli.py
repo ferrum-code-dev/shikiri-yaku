@@ -9,6 +9,7 @@ prompt. The answer is validated here, and the names in it are checked by code be
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -35,6 +36,7 @@ _CLAUDE_LOOKUPS: Final = (
     "package queries. Install and change nothing."
 )
 _CODEX_LOOKUPS: Final = "Answer from the facts above alone. Run no command and look nothing up."
+_CODEX_TOKENS: Final = re.compile(r"tokens used:?\s+(\d[\d,]*)(?![\w.])")
 _PROMPT: Final = """You assess one blocker that a Shikiru project's agent hit on this host.
 Answer with the JSON object of the schema, and nothing else.
 
@@ -89,6 +91,14 @@ def _call_of(envelope: _ClaudeEnvelope) -> CallRecord:
         cost_usd=envelope.total_cost_usd,
         usage=envelope.usage,
     )
+
+
+def _codex_call(result: CommandResult) -> CallRecord | None:
+    counts = _CODEX_TOKENS.findall(f"{result.stderr}\n{result.stdout}")
+    if not counts:
+        return None
+    usage: dict[str, object] = {"tokens_used": int(counts[-1].replace(",", ""))}
+    return CallRecord(duration_ms=None, cost_usd=None, usage=usage)
 
 
 def _clean(text: str, limit: int) -> str:
@@ -234,8 +244,8 @@ class ClaudeRung(_CliRung):
 class CodexRung(_CliRung):
     """One Codex model, read-only in the scratch directory, with no lookups (design §8).
 
-    `codex exec` has no flag for the effort, so the effort of a rung is not passed to it, and the
-    call reports no usage that is read here (tasks/reasoner-spike.md).
+    `codex exec` has no flag for the effort, so the effort of a rung is not passed to it. The call
+    reports the token count Codex prints, and no duration or cost (tasks/reasoner-spike.md).
     """
 
     _adapter = "codex"
@@ -269,4 +279,4 @@ class CodexRung(_CliRung):
             text = (scratch / _ANSWER_FILE).read_text(encoding="utf-8")
         except OSError, UnicodeDecodeError:
             self._fail("it wrote no answer file")
-        return BlockerAnswer.model_validate_json(text), None
+        return BlockerAnswer.model_validate_json(text), _codex_call(result)

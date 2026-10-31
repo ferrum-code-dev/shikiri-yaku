@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, override
 
 import pytest
 
+from shikiri_yaku.adapters.reasoner_cli import CodexRung
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
@@ -18,7 +20,9 @@ from shikiri_yaku.domain.classification import (
     Source,
     Verdict,
 )
+from shikiri_yaku.domain.extension import Extension, Rule
 from shikiri_yaku.domain.outcome import Forward, Notified, Resolved, WaitUntil
+from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal import (
     Database,
@@ -27,10 +31,12 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
+from shikiri_yaku.ports import CommandResult, CommandRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping, Sequence
 
+    from shikiri_yaku.domain.classification import Assessment, Classifier
     from shikiri_yaku.domain.outcome import Outcome
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -128,7 +134,7 @@ class _World:
         self.signals = SignalStore(database)
         self.fallback = _Fallback()
 
-    def router(self, classifier: _Classifier, **handlers: object) -> Router:
+    def router(self, classifier: Classifier, **handlers: object) -> Router:
         return Router(
             classifier,
             {Category(name): handler for name, handler in handlers.items()},  # type: ignore[misc]
@@ -318,4 +324,71 @@ def test_the_call_record_of_a_reasoner_verdict_is_kept_in_the_verdict_record(wor
         "duration_ms": 900,
         "cost_usd": 0.01,
         "usage": {"output_tokens": 35},
+    }
+
+
+_CODEX_ANSWER: Final = json.dumps(
+    {
+        "verdict": "host_tool",
+        "tool": "ffmpeg",
+        "manager": "brew",
+        "package": "ffmpeg",
+        "why": "ffmpeg is not on the PATH",
+        "suggestion": "install ffmpeg with brew",
+    }
+)
+
+
+class _CodexRunner(CommandRunner):
+    """Plays `codex exec`: writes the answer file, and prints the token count as Codex does."""
+
+    @override
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        del timeout_s, cwd, env
+        answer = Path(argv[argv.index("--output-last-message") + 1])
+        await asyncio.to_thread(answer.write_text, _CODEX_ANSWER, encoding="utf-8")
+        return CommandResult(returncode=0, stdout="", stderr="tokens used\n15,607\n")
+
+
+def test_the_tokens_codex_prints_reach_the_verdict_record(world: _World, tmp_path: Path) -> None:
+    number, signal = world.new("E5")
+    rung = CodexRung(
+        "gpt-5",
+        _CodexRunner(),
+        effort=None,
+        timeout_s=TIMEOUT_S,
+        input_max_chars=4000,
+        scratch_root=tmp_path,
+    )
+
+    async def assess(escalation: Signal) -> Assessment:
+        return await rung.assess_blocker(escalation, [])
+
+    host_tool = Rule(reasons=frozenset({"agent_error"}), verdicts=frozenset({Verdict.HOST_TOOL}))
+    classifier = RuleClassifier(
+        [
+            Extension(INFRA, (host_tool,), _Handler(Forward("refused"))),
+            Extension(Category("product"), (Rule(catch_all=True),), _Handler()),
+        ],
+        assess,
+    )
+    router = world.router(classifier, infrastructure=_Handler(Forward("refused")))
+
+    asyncio.run(_route(router, number, signal))
+
+    assert world.stored(number).category == INFRA
+    row = world.database.connection.execute(
+        "SELECT verdict_call FROM signals WHERE number = ?", (number,)
+    ).fetchone()
+    assert json.loads(row["verdict_call"]) == {
+        "duration_ms": None,
+        "cost_usd": None,
+        "usage": {"tokens_used": 15607},
     }
