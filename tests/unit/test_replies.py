@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -14,9 +14,14 @@ from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.bootstrap import SILENCING_PREFIXES, goal_command
+from shikiri_yaku.domain.callback import decline_data, install_data
+from shikiri_yaku.domain.classification import InstallProposal, Verdict
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
+from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
@@ -27,6 +32,7 @@ from shikiri_yaku.journal import (
     MessageStore,
     OpState,
     OpStore,
+    SignalState,
     SignalStore,
 )
 from shikiri_yaku.journal.open import JournalOpen
@@ -48,11 +54,14 @@ from shikiri_yaku.settings import (
     BUTTON_LABEL_MAX_CHARS,
     COMMAND_NAME_MAX_CHARS,
     MESSAGE_TITLE_MAX_CHARS,
+    InfrastructureSettings,
 )
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from shikiri_yaku.ports import InstallReplyHandler
 
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
 ANSWERED_AT = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
@@ -136,6 +145,7 @@ class Harness:
         data: tuple[str, ...] = ("a:1:1", "a:1:2", "a:1:3", "a:1:4"),
         *,
         key: str | None = None,
+        at: datetime = NOW,
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.number,
@@ -144,7 +154,7 @@ class Harness:
             purpose=purpose,
             body=Message("question", tuple(Button("Choice", value) for value in data)),
             notice_key=key,
-            now=NOW,
+            now=at,
         )
         self.messages.confirm_delivery(row.row_id, ref)
 
@@ -203,6 +213,8 @@ class Harness:
         data: str | None = None,
         text: str | None = None,
         at: datetime = NOW,
+        *,
+        install_replies: InstallReplyHandler | None = None,
     ) -> None:
         replies = Replies(
             self.log(),
@@ -214,6 +226,7 @@ class Harness:
             goal=goal_command(
                 self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
             ),
+            install_replies=install_replies,
         )
         item = Inbound(
             update,
@@ -226,6 +239,64 @@ class Harness:
             data=data,
         )
         asyncio.run(replies.handle(item))
+
+    def install_replies(
+        self,
+        *,
+        clock_at: datetime = NOW,
+        message_at: datetime = NOW,
+        origin_key: str | None = None,
+    ) -> tuple[InstallApprovalReplies, int]:
+        self.signals.classify(
+            self.number,
+            category=INFRASTRUCTURE,
+            classified_by="reasoner",
+            verdict=Verdict.HOST_TOOL,
+            handler="infrastructure",
+            now=NOW,
+            note="model suggestion",
+            install_proposal=InstallProposal(
+                tool="ffmpeg", manager="brew", package="ffmpeg", why="needed by the build"
+            ),
+        )
+        stored = self.signals.get(self.number)
+        assert stored is not None
+        signal = stored.to_signal()
+        payload = InstallOpPayload(
+            number=self.number,
+            escalation_id="E-1",
+            tool="ffmpeg",
+            manager="brew",
+            package="ffmpeg",
+            why="needed by the build",
+            argv=("brew", "install", "ffmpeg"),
+        )
+        operation = self.ops.intend_install(f"install:{signal.id}", signal, payload, NOW)
+        approval_key = origin_key or f"install:{operation.id}"
+        self.origin(
+            "1001/43",
+            Purpose.APPROVAL,
+            (install_data(self.number, operation.id), decline_data(self.number, operation.id)),
+            key=approval_key,
+            at=message_at,
+        )
+        forwarder = ProductForwarder(
+            MESSAGE_TITLE_MAX_CHARS,
+            self.clients,
+            self.outbox,
+            Clock(clock_at),
+            FixedDestinations([OWNER]),
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        )
+        replies = InstallApprovalReplies(
+            self.ops,
+            self.clients,
+            forwarder,
+            self.outbox,
+            Clock(clock_at),
+            approval_expiry_h=InfrastructureSettings().approval_expiry_h,
+        )
+        return replies, operation.id
 
 
 @pytest.fixture
@@ -240,6 +311,74 @@ def test_text_reply_to_a_question_answers_and_queues_no_command_reply(h: Harness
 
     assert h.client.calls
     assert h.outbox.pending() == []
+
+
+def test_install_tap_approves_a_stored_op_once(h: Harness) -> None:
+    handler, op_id = h.install_replies()
+    data = install_data(h.number, op_id)
+
+    h.handle(ref="1001/43", data=data, install_replies=handler)
+    h.handle(ref="1001/43", data=data, install_replies=handler)
+
+    operation = h.ops.get(op_id)
+    assert operation is not None
+    assert operation.state is OpState.APPROVED
+    assert h.outbox.pending() == []
+
+
+def test_expiry_uses_original_op_creation_after_a_resent_message(h: Harness) -> None:
+    expiry = InfrastructureSettings().approval_expiry_h
+    resent_at = NOW + timedelta(hours=expiry - 1)
+    now = NOW + timedelta(hours=expiry + 1)
+    handler, op_id = h.install_replies(clock_at=now, message_at=resent_at)
+    data = decline_data(h.number, op_id)
+
+    h.handle(ref="1001/43", data=data, at=now, install_replies=handler)
+    h.handle(ref="1001/43", data=data, at=now, install_replies=handler)
+
+    operation = h.ops.get(op_id)
+    assert operation is not None
+    assert operation.state is OpState.EXPIRED
+    [pending] = h.outbox.pending()
+    assert "expired" in pending.message.text
+    assert h.client.calls == []
+
+
+def test_resolved_elsewhere_invalidates_even_before_the_event_is_journaled(h: Harness) -> None:
+    handler, op_id = h.install_replies()
+    h.resolve_in_shikiru()
+
+    h.handle(ref="1001/43", data=install_data(h.number, op_id), install_replies=handler)
+
+    operation = h.ops.get(op_id)
+    signal = h.signals.get(h.number)
+    assert operation is not None
+    assert signal is not None
+    assert operation.state is OpState.VOID
+    assert signal.state is SignalState.NEW
+    [pending] = h.outbox.pending()
+    assert "no longer open" in pending.message.text
+
+
+def test_decline_is_durable_and_product_forward_is_replay_safe(h: Harness) -> None:
+    handler, op_id = h.install_replies()
+    data = decline_data(h.number, op_id)
+
+    h.handle(ref="1001/43", data=data, install_replies=handler)
+    h.handle(ref="1001/43", data=data, install_replies=handler)
+
+    operation = h.ops.get(op_id)
+    forwards = [
+        message
+        for message in h.messages.for_signal(h.number)
+        if message.body is not None and "declined the install approval" in message.body.text
+    ]
+    assert operation is not None
+    assert operation.state is OpState.DECLINED
+    assert len(forwards) == 1
+    assert forwards[0].purpose is Purpose.QUESTION
+    assert forwards[0].body is not None
+    assert "Model note: model suggestion" in forwards[0].body.text
 
 
 @pytest.mark.parametrize("text", [None, "Use the other approach"])
