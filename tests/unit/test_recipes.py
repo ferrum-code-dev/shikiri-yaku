@@ -14,7 +14,6 @@ from shikiri_yaku.domain.recipes import (
     InstallPlan,
     Refusal,
     RefusalReason,
-    is_package_name,
     is_tool_name,
     validate_install,
 )
@@ -53,20 +52,24 @@ def test_a_hostile_or_malformed_executable_name_is_refused(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "scoped", "valid"),
+    ("manager", "package", "valid"),
     [
-        ("ruff", False, True),
-        ("@scope/pkg", True, True),
-        ("@scope/pkg", False, False),
-        ("a b", True, False),
-        ("-pkg", True, False),
-        ("x" * 101, True, False),
+        ("npm", "ruff", True),
+        ("npm", "@scope/pkg", True),
+        ("brew", "@scope/pkg", False),
+        ("npm", "a b", False),
+        ("npm", "-pkg", False),
+        ("npm", "x" * NAME_MAX_LENGTH, True),
+        ("npm", "x" * (NAME_MAX_LENGTH + 1), False),
+        ("brew", "x" * NAME_MAX_LENGTH, True),
     ],
 )
-def test_the_npm_characters_are_allowed_only_for_scoped_packages(
-    name: str, *, scoped: bool, valid: bool
+def test_the_package_pattern_depends_on_the_manager(
+    manager: str, package: str, *, valid: bool
 ) -> None:
-    assert is_package_name(name, scoped=scoped) is valid
+    result = validate_install("ffmpeg", manager, package, ALL_MANAGERS)
+
+    assert isinstance(result, InstallPlan) is valid
 
 
 @pytest.mark.parametrize(
@@ -83,6 +86,7 @@ def test_the_npm_characters_are_allowed_only_for_scoped_packages(
         ("ffmpeg", "brew", "ff mpeg", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "-ffmpeg", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "$(echo)", RefusalReason.BAD_PACKAGE),
+        ("ffmpeg", "brew", "ffmpeg\n", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "@scope/ffmpeg", RefusalReason.BAD_PACKAGE),
         ("ffmpeg", "brew", "x" * (NAME_MAX_LENGTH + 1), RefusalReason.BAD_PACKAGE),
     ],

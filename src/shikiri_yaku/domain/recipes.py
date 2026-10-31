@@ -1,22 +1,29 @@
 """The names and recipes of an install (design §6.3): the only argument lists that may run.
 
-The Reasoner names a tool, a manager and a package. Code accepts them only inside a strict pattern,
-and builds the argument list from a fixed row of the recipe table, so no model text becomes a word
-of a command. The table is also the allow-list: a manager without a row is refused.
+The Reasoner names a tool, a manager and a package. Pydantic accepts them only inside a strict
+pattern, and code builds the argument list from a fixed row of the recipe table, so no model text
+becomes a word of a command. The table is also the allow-list: a manager without a row is refused.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Final
+from typing import Annotated, Final
+
+from pydantic import StringConstraints, TypeAdapter, ValidationError
 
 NAME_MAX_LENGTH: Final = 100
 _NAME_CHARS: Final = "A-Za-z0-9._+"
-_PLAIN: Final = re.compile(rf"[{_NAME_CHARS}][{_NAME_CHARS}-]*")
-_SCOPED: Final = re.compile(rf"[{_NAME_CHARS}@/][{_NAME_CHARS}@/-]*")
+_PLAIN_PATTERN: Final = rf"^[{_NAME_CHARS}][{_NAME_CHARS}-]*$"
+_SCOPED_PATTERN: Final = rf"^[{_NAME_CHARS}@/][{_NAME_CHARS}@/-]*$"
+_PLAIN: Final[TypeAdapter[str]] = TypeAdapter(
+    Annotated[str, StringConstraints(pattern=_PLAIN_PATTERN, max_length=NAME_MAX_LENGTH)]
+)
+_SCOPED: Final[TypeAdapter[str]] = TypeAdapter(
+    Annotated[str, StringConstraints(pattern=_SCOPED_PATTERN, max_length=NAME_MAX_LENGTH)]
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,16 +74,15 @@ class InstallPlan:
 
 def is_tool_name(name: str) -> bool:
     """Return whether `name` is a valid executable name: no path, scope or space in it."""
-    return _valid(name, _PLAIN)
+    return _is_valid(_PLAIN, name)
 
 
-def is_package_name(name: str, *, scoped: bool) -> bool:
-    """Return whether `name` is a valid package name; `scoped` also allows `@` and `/`."""
-    return _valid(name, _SCOPED if scoped else _PLAIN)
-
-
-def _valid(name: str, pattern: re.Pattern[str]) -> bool:
-    return len(name) <= NAME_MAX_LENGTH and pattern.fullmatch(name) is not None
+def _is_valid(adapter: TypeAdapter[str], value: str) -> bool:
+    try:
+        adapter.validate_python(value)
+    except ValidationError:
+        return False
+    return True
 
 
 def validate_install(
@@ -91,7 +97,7 @@ def validate_install(
     recipe = RECIPES.get(manager)
     if recipe is None:
         return Refusal(RefusalReason.MANAGER_NOT_ALLOWED)
-    if not is_package_name(package, scoped=recipe.scoped):
+    if not _is_valid(_SCOPED if recipe.scoped else _PLAIN, package):
         return Refusal(RefusalReason.BAD_PACKAGE)
     if manager not in host_managers:
         return Refusal(RefusalReason.MANAGER_MISSING)
