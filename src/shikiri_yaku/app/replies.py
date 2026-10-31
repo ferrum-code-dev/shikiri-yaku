@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import PositiveInt, TypeAdapter, ValidationError
 
-from shikiri_yaku.domain.callback import decode_callback
+from shikiri_yaku.domain.callback import DECLINE_VERB, INSTALL_VERB, decode_callback
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import (
         Clock,
         EscalationView,
+        InstallReplyHandler,
         Outbox,
         ReplyLog,
         ReplyOrigin,
@@ -88,6 +89,7 @@ class Replies:
         channel: str,
         commands: Commands,
         goal: GoalCommand,
+        install_replies: InstallReplyHandler | None = None,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -96,6 +98,7 @@ class Replies:
         self._channel = channel
         self._commands = commands
         self._goal = goal
+        self._install_replies = install_replies
 
     async def handle(self, item: Inbound) -> None:
         if item.kind == InboundKind.TEXT:
@@ -132,6 +135,18 @@ class Replies:
             await self._details(item, origin)
         elif verb == _ACKNOWLEDGE and origin.purpose == Purpose.NOTICE:
             self._log.acknowledge_notice(origin.number, origin.key, self._clock.now())
+        elif origin.purpose == Purpose.APPROVAL:
+            await self._install_tap(item, origin, verb, options[0] if options else None)
+
+    async def _install_tap(
+        self, item: Inbound, origin: ReplyOrigin, verb: str, op_id: int | None
+    ) -> None:
+        if self._install_replies is None or op_id is None:
+            return
+        if verb == INSTALL_VERB:
+            await self._install_replies.handle(item, origin, verb=INSTALL_VERB, op_id=op_id)
+        elif verb == DECLINE_VERB:
+            await self._install_replies.handle(item, origin, verb=DECLINE_VERB, op_id=op_id)
 
     async def _open_escalation(self, item: Inbound, origin: ReplyOrigin) -> EscalationView | None:
         signal = origin.signal

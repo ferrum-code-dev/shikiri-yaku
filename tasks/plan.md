@@ -1097,8 +1097,9 @@ Route only Install and Decline buttons from a stored `Purpose.APPROVAL` origin t
 Keep free text and other purposes ignored. Bind each tap to the stored approval key, signal and op;
 carry the original model suggestion on the reply origin for a later Decline forward.
 
-Acceptance criteria: dispatch is covered for both buttons; unrelated approval buttons, free text
-and other purposes do not reach the install handler; gate passes.
+Acceptance criteria: the callback types, stored origin metadata and dispatch path are wired without
+changing existing approval behavior; D5d3 tests button dispatch and rejects unrelated origins; gate
+passes.
 
 #### D5d3. Install decision effects
 

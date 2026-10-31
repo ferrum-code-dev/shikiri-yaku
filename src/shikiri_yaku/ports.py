@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 -- pydantic reads the annotations at runtime
-from typing import TYPE_CHECKING, Any, Final, Protocol
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, PositiveInt
 
@@ -39,6 +39,10 @@ if TYPE_CHECKING:
 __all__ = [
     "BLOCK_SEPARATOR",
     "CALLBACK_DATA_LIMIT",
+    "INSTALL_DECLINED",
+    "INSTALL_EXPIRED",
+    "INSTALL_INTENDED",
+    "INSTALL_VOID",
     "MESSAGE_TEXT_LIMIT",
     "Ack",
     "AckStatus",
@@ -81,6 +85,7 @@ __all__ = [
     "InstallOp",
     "InstallPreparer",
     "InstallProposalLog",
+    "InstallReplyHandler",
     "InstallToolCheck",
     "LifecycleJournal",
     "LivenessJournal",
@@ -135,6 +140,11 @@ __all__ = [
     "join_blocks",
     "text_room",
 ]
+
+INSTALL_DECLINED: Final = "declined"
+INSTALL_EXPIRED: Final = "expired"
+INSTALL_INTENDED: Final = "intended"
+INSTALL_VOID: Final = "void"
 
 
 class _ShikiruPayload(BaseModel):
@@ -1006,6 +1016,20 @@ class ReplyOrigin:
     message: Message
     key: str | None
     destination: Destination
+    suggestion: str = ""
+
+
+class InstallReplyHandler(Protocol):
+    """Handle an already origin-bound Install or Decline tap for a stored approval."""
+
+    async def handle(
+        self,
+        item: Inbound,
+        origin: ReplyOrigin,
+        *,
+        verb: Literal["i", "x"],
+        op_id: int,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)

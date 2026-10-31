@@ -10,6 +10,8 @@ type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
 type Callback = AnswerTap | DetailsTap | AcknowledgeTap | SubmitTap | InstallTap
 
 SUBMIT_VERB: Final = "s"
+INSTALL_VERB: Final = "i"
+DECLINE_VERB: Final = "x"
 _CALLBACK = TypeAdapter[Callback](Callback)
 
 
@@ -20,12 +22,12 @@ def submit_data(op_id: int) -> str:
 
 def install_data(number: int, op_id: int) -> str:
     """Return the numeric callback that asks Replies to approve this stored install op."""
-    return f"i:{number}:{op_id}"
+    return f"{INSTALL_VERB}:{number}:{op_id}"
 
 
 def decline_data(number: int, op_id: int) -> str:
     """Return the numeric callback that asks Replies to decline this stored install op."""
-    return f"x:{number}:{op_id}"
+    return f"{DECLINE_VERB}:{number}:{op_id}"
 
 
 def decode_callback(data: str) -> Callback:
