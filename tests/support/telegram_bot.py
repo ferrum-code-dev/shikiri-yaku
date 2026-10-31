@@ -14,14 +14,16 @@ if TYPE_CHECKING:
 FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 SEND_OK: Final = FIXTURES / "send_ok.json"
 GET_ME_OK: Final = FIXTURES / "get_me_ok.json"
+GET_WEBHOOK_INFO_OK: Final = FIXTURES / "get_webhook_info.json"
 GET_ME: Final = "getMe"
 GET_UPDATES: Final = "getUpdates"
+GET_WEBHOOK_INFO: Final = "getWebhookInfo"
 # keep: the message id the sendMessage fixture carries, so the first message sent is 1001/42
 FIRST_MESSAGE_ID: Final = 42
 
 
 class FakeBotApi:
-    """Answers getMe with its fixture and every other method with the sendMessage fixture.
+    """Answers getMe and getWebhookInfo with their fixtures and every other method with sendMessage.
 
     Each reply carries the next message id, as Telegram gives each message its own.
     getUpdates gives `updates` once a message was sent and nothing before or after, or at the
@@ -47,6 +49,8 @@ class FakeBotApi:
         self.called.set()
         if method == GET_ME:
             return json.loads(GET_ME_OK.read_text(encoding="utf-8"))
+        if method == GET_WEBHOOK_INFO:
+            return json.loads(GET_WEBHOOK_INFO_OK.read_text(encoding="utf-8"))
         reply: dict[str, Any] = json.loads(SEND_OK.read_text(encoding="utf-8"))
         reply["result"]["message_id"] = next(self._message_ids)
         return reply

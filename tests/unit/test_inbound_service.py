@@ -3,26 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal import CursorStore, Database, JournalInbound, JournalSources, SignalStore
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError, ShikiruLinkDownError
+from tests.support.telegram_bot import FIXTURES
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
 
     from shikiri_yaku.app.replies import Replies
+    from shikiri_yaku.ports import Updates
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = 1001
 TAP: Final = Inbound(700, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
+CONFLICT: Final[dict[str, Any]] = json.loads(
+    (FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
+)
 
 
 class _Clock:
@@ -58,7 +65,7 @@ class _Replies:
 
 
 class Harness:
-    def __init__(self, database: Database, *script: Batch | Exception) -> None:
+    def __init__(self, database: Database, updates: Updates) -> None:
         self.database = database
         self.log = JournalInbound(database)
         self.replies = _Replies()
@@ -66,7 +73,7 @@ class Harness:
         sources = JournalSources(CursorStore(database, signals), signals)
         health = HealthSource(OPERATOR_SCOPE, sources, _Clock(), 10)
         poller = InboundPoller(
-            _Updates(*script), self.log, _Clock(), channel="telegram", owners=[OWNER], wait_s=1
+            updates, self.log, _Clock(), channel="telegram", owners=[OWNER], wait_s=1
         )
         replies: Replies = self.replies  # pyright: ignore[reportAssignmentType]
         self.service = InboundService(poller, self.log, replies, health, _Clock(), interval_s=1)
@@ -81,6 +88,12 @@ class Harness:
         )
         return [(row["state"], row["reason"]) for row in rows]
 
+    def health_texts(self) -> list[str]:
+        rows = self.database.connection.execute(
+            "SELECT text FROM signals WHERE kind = 'health' AND project = ?", (OPERATOR_SCOPE,)
+        )
+        return [row["text"] for row in rows]
+
 
 @pytest.fixture
 def database() -> Generator[Database]:
@@ -89,14 +102,23 @@ def database() -> Generator[Database]:
     database.close()
 
 
+class _RefusingApi:
+    """Answers every call with the Bot API's refusal of getUpdates while a webhook is set."""
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:  # noqa: ARG002
+        return CONFLICT
+
+
 def test_an_unreadable_batch_opens_one_signal_that_the_next_good_batch_closes(
     database: Database,
 ) -> None:
     harness = Harness(
         database,
-        ChannelProtocolError("unreadable"),
-        ChannelProtocolError("unreadable"),
-        Batch(None, ()),
+        _Updates(
+            ChannelProtocolError("unreadable"),
+            ChannelProtocolError("unreadable"),
+            Batch(None, ()),
+        ),
     )
     harness.tick()
     harness.tick()
@@ -108,8 +130,19 @@ def test_an_unreadable_batch_opens_one_signal_that_the_next_good_batch_closes(
     assert [state for state, _ in harness.health_signals()] == ["closed"]
 
 
+def test_a_refused_poll_puts_its_code_and_telegrams_description_in_the_health_message(
+    database: Database,
+) -> None:
+    harness = Harness(database, TelegramUpdates(_RefusingApi(), group_id=None))
+    harness.tick()
+
+    [text] = harness.health_texts()
+    assert "409" in text
+    assert CONFLICT["description"] in text
+
+
 def test_a_transport_failure_is_retried_without_a_signal(database: Database) -> None:
-    harness = Harness(database, ChannelError("offline"), Batch(701, (TAP,)))
+    harness = Harness(database, _Updates(ChannelError("offline"), Batch(701, (TAP,))))
     harness.tick()
     assert harness.health_signals() == []
     harness.tick()
@@ -117,7 +150,7 @@ def test_a_transport_failure_is_retried_without_a_signal(database: Database) -> 
 
 
 def test_an_item_stays_pending_while_shikiru_is_down(database: Database) -> None:
-    harness = Harness(database, Batch(700, (TAP,)), Batch(None, ()))
+    harness = Harness(database, _Updates(Batch(700, (TAP,)), Batch(None, ())))
     harness.replies.down = True
     harness.tick()
     assert [item.update_id for item in harness.log.pending()] == [700]

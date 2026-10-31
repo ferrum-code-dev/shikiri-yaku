@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import ChannelError, ChannelProtocolError
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FIXTURES
 
@@ -115,8 +116,21 @@ def test_a_supported_update_missing_a_required_field_fails_the_whole_batch(
         _read(body)
 
 
+CONFLICT: Final[dict[str, Any]] = json.loads(
+    (FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
+)
+
+
+def test_a_refused_poll_names_the_code_and_telegrams_description() -> None:
+    with pytest.raises(ChannelProtocolError) as raised:
+        _read(CONFLICT)
+
+    assert "409" in str(raised.value)
+    assert CONFLICT["description"] in str(raised.value)
+
+
 _UNREADABLE: Final[list[object]] = [
-    {"ok": False, "error_code": 409, "description": "Conflict"},
+    {"ok": False, "description": "Conflict"},
     {"ok": True, "result": [{"message": {}}]},
     {"ok": True},
     [],
@@ -141,5 +155,5 @@ def test_a_failed_poll_does_not_carry_the_payload_in_its_traceback(body: object)
 
 @pytest.mark.parametrize("body", _UNREADABLE)
 def test_a_reply_that_is_not_a_list_of_updates_fails_the_poll(body: object) -> None:
-    with pytest.raises(ChannelError):
+    with pytest.raises(ChannelProtocolError, match=UNEXPECTED_REPLY):
         _read(body)

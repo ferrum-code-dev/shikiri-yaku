@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from typing import TYPE_CHECKING, Final, Literal, Protocol
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
@@ -30,6 +31,7 @@ GET_ME: Final = "getMe"
 GET_CHAT: Final = "getChat"
 GET_CHAT_MEMBER: Final = "getChatMember"
 GET_CHAT_MEMBER_COUNT: Final = "getChatMemberCount"
+GET_WEBHOOK_INFO: Final = "getWebhookInfo"
 CREATE_FORUM_TOPIC: Final = "createForumTopic"
 CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
 REF_SEPARATOR: Final = "/"
@@ -59,6 +61,9 @@ GROUP_HAS_OTHER_MEMBERS: Final = (
     "the group contains members other than its configured owners and bot"
 )
 GROUP_MEMBER_COUNT_UNAVAILABLE: Final = "the Bot API could not verify group membership"
+# keep: the host only; a webhook URL can carry a path that is a secret
+WEBHOOK_SET: Final = "a webhook is set, so getUpdates cannot read the PO's replies; host: {host}"
+UNKNOWN_HOST: Final = "unknown"
 
 
 class BotApi(Protocol):
@@ -164,7 +169,21 @@ class _ChatMemberCountReply(BaseModel):
     result: StrictInt
 
 
+class _WebhookInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    url: str
+
+
+class _WebhookReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: _WebhookInfo
+
+
 _PROBE_REPLY: Final[TypeAdapter[_Accepted | _Failed]] = TypeAdapter(_Accepted | _Failed)
+_WEBHOOK_REPLY: Final[TypeAdapter[_WebhookReply | _Failed]] = TypeAdapter(_WebhookReply | _Failed)
 _CHAT_REPLY: Final[TypeAdapter[_ChatReply | _Failed]] = TypeAdapter(_ChatReply | _Failed)
 _CHAT_MEMBER_REPLY: Final[TypeAdapter[_ChatMemberReply | _Failed]] = TypeAdapter(
     _ChatMemberReply | _Failed
@@ -313,8 +332,19 @@ async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int,
         raise ChannelError(NOT_ACCEPTED)
     if not reply.result.is_bot:
         raise ChannelError(BOT_NOT_IDENTIFIED)
+    await _probe_webhook(api)
     if group_id is not None:
         await _probe_group(api, group_id, owners, reply.result.id)
+
+
+async def _probe_webhook(api: BotApi) -> None:
+    # keep: getUpdates is refused while a webhook is set, so the PO's replies would never be read
+    reply = _validated(await api.call(GET_WEBHOOK_INFO, {}), _WEBHOOK_REPLY)
+    if isinstance(reply, _Failed):
+        raise ChannelError(NOT_ACCEPTED)
+    if reply.result.url:
+        host = urlsplit(reply.result.url).hostname or UNKNOWN_HOST
+        raise ChannelError(WEBHOOK_SET.format(host=host))
 
 
 class TelegramForumTopics:

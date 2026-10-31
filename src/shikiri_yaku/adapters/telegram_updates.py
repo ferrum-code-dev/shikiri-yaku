@@ -60,7 +60,13 @@ class _Result(_Payload):
     result: list[_Update]
 
 
-_RESULT: Final[TypeAdapter[_Result]] = TypeAdapter(_Result)
+class _Refused(_Payload):
+    ok: Literal[False]
+    error_code: StrictInt
+    description: str
+
+
+_REPLY: Final[TypeAdapter[_Result | _Refused]] = TypeAdapter(_Result | _Refused)
 
 
 class TelegramUpdates:
@@ -81,9 +87,11 @@ class TelegramUpdates:
             {"offset": offset, "timeout": wait_s, "allowed_updates": list(ALLOWED_UPDATES)},
         )
         try:
-            reply = _RESULT.validate_python(body)
+            reply = _REPLY.validate_python(body)
         except ValidationError:
             raise ChannelProtocolError(UNEXPECTED_REPLY) from None
+        if isinstance(reply, _Refused):
+            raise ChannelProtocolError(_refusal(reply))
         items: list[Inbound] = []
         last: int | None = None
         for update in reply.result:
@@ -119,6 +127,11 @@ def _item(update: _Update) -> Inbound | None:
             thread=sent.message_thread_id,
         )
     return None
+
+
+def _refusal(reply: _Refused) -> str:
+    # keep: the description is Telegram's own text and says why (a webhook conflict, a bad token)
+    return f"{GET_UPDATES} was refused with {reply.error_code}: {reply.description}"
 
 
 def _ref(chat: int, message_id: int) -> str:

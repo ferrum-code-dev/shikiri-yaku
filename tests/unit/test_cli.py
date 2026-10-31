@@ -27,7 +27,7 @@ from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.service import service_file
 from tests.support.clock import NapClock
-from tests.support.telegram_bot import FIXTURES, FakeBotApi
+from tests.support.telegram_bot import FIXTURES, GET_WEBHOOK_INFO, FakeBotApi
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Mapping
@@ -336,6 +336,43 @@ def test_doctor_names_a_telegram_bot_that_refuses_the_token(
 
     assert _run_doctor(tmp_path, bot=lambda _settings: _RefusingBotApi()) == 1
     assert _failed(capsys.readouterr().out) == {"telegram"}
+
+
+_WEBHOOK_URL: Final = "https://hooks.example.net/shikiri/secret-path-7f3a"
+
+
+class _WebhookBot(FakeBotApi):
+    def __init__(self, url: str) -> None:
+        super().__init__()
+        self.url = url
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == GET_WEBHOOK_INFO:
+            reply = _telegram_fixture("get_webhook_info.json")
+            reply["result"]["url"] = self.url
+            return reply
+        return await super().call(method, payload)
+
+
+@pytest.mark.parametrize(("url", "failed"), [("", set[str]()), (_WEBHOOK_URL, {"telegram"})])
+def test_doctor_fails_a_bot_with_a_webhook_and_passes_one_without(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], url: str, failed: set[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, bot=lambda _settings: _WebhookBot(url)) == (1 if failed else 0)
+    assert _failed(capsys.readouterr().out) == failed
+
+
+def test_doctor_names_the_webhook_host_and_never_its_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, bot=lambda _settings: _WebhookBot(_WEBHOOK_URL)) == 1
+    output = capsys.readouterr().out
+    assert "hooks.example.net" in output
+    assert "secret-path-7f3a" not in output
 
 
 def test_doctor_names_a_missing_token_file_and_the_telegram_check_that_needs_it(
