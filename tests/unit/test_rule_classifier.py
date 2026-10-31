@@ -5,7 +5,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from shikiri_yaku.domain.classification import Assessment, Category, Classification, Source, Verdict
+from shikiri_yaku.domain.classification import (
+    Assessment,
+    Category,
+    Classification,
+    InstallProposal,
+    Source,
+    Verdict,
+)
 from shikiri_yaku.domain.extension import Extension, Rule
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.rule_classifier import RegistrationError, RuleClassifier
@@ -137,7 +144,14 @@ def test_decision_required_follows_the_verdict(
     result = _classify(
         RuleClassifier(_extensions(), assess), _signal(Kind.ESCALATION, DECISION_REQUIRED)
     )
-    assert result == Classification(category, source, "add the tool", verdict)
+    proposal = (
+        InstallProposal(tool=None, manager=None, package=None, why=None)
+        if verdict is Verdict.HOST_TOOL
+        else None
+    )
+    assert result == Classification(
+        category, source, "add the tool", verdict, install_proposal=proposal
+    )
 
 
 def test_decision_required_without_an_assessment_function_is_product() -> None:

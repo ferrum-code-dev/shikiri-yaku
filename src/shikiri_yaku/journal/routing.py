@@ -41,6 +41,7 @@ class JournalRouting:
                     handler=handler,
                     now=now,
                     call=classification.call,
+                    install_proposal=classification.install_proposal,
                 )
             return True
 

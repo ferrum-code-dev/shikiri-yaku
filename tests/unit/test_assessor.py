@@ -19,7 +19,7 @@ from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.status import Status
-from shikiri_yaku.domain.classification import Assessment, Source, Verdict
+from shikiri_yaku.domain.classification import Assessment, InstallProposal, Source, Verdict
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind, Signal
@@ -30,7 +30,14 @@ from shikiri_yaku.extensions.infrastructure.rules import (
     INFRASTRUCTURE,
 )
 from shikiri_yaku.extensions.product.extension import PRODUCT, product_extension
-from shikiri_yaku.journal import CursorStore, Database, JournalSources, SignalStore
+from shikiri_yaku.journal import (
+    CursorStore,
+    Database,
+    JournalRouting,
+    JournalSources,
+    NewSignal,
+    SignalStore,
+)
 from shikiri_yaku.ports import CommandResult, CommandRunner, ReasonerError
 from tests.support.clock import NapClock
 
@@ -232,6 +239,34 @@ def test_host_facts_reach_the_prompt_of_the_call(memory: Database) -> None:
     _classify(wiring)
 
     assert any("Darwin 25.3.0" in line for line in wiring.rung.facts[0])
+
+
+def test_host_tool_proposal_round_trips_from_assessment_to_signal_row(memory: Database) -> None:
+    wiring = _wire(memory, answer=HOST_TOOL_ANSWER)
+    classification = asyncio.run(wiring.classifier.classify(DECISION))
+    number = wiring.signals.insert_if_absent(
+        NewSignal(
+            DECISION.id,
+            DECISION.project,
+            DECISION.kind.value,
+            DECISION.reason,
+            DECISION.text,
+            DECISION.task_id,
+            DECISION.escalation_id,
+        ),
+        wiring.clock.now(),
+    ).row_id
+
+    JournalRouting(memory, wiring.signals).begin(
+        number, classification, "infrastructure", wiring.clock.now()
+    )
+
+    assert wiring.signals.install_proposal(DECISION.id) == InstallProposal(
+        tool="ffmpeg",
+        manager="brew",
+        package="ffmpeg",
+        why="ffmpeg is not on the PATH",
+    )
 
 
 @pytest.mark.parametrize(

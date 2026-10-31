@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.domain.classification import InstallProposal
 from shikiri_yaku.domain.signal import Kind, PullRequest, Signal
 from shikiri_yaku.journal.database import Inserted, stamp
 
@@ -226,13 +227,15 @@ class SignalStore:
         now: datetime,
         note: str = "",
         call: CallRecord | None = None,
+        install_proposal: InstallProposal | None = None,
     ) -> None:
         verdict_call = None if call is None else json.dumps(asdict(call), sort_keys=True)
+        proposal = None if install_proposal is None else install_proposal.model_dump_json()
         self._database.connection.execute(
             """
             UPDATE signals SET category = ?, classified_by = ?, verdict = ?,
                                classification_note = ?, classified_at = ?, handler = ?,
-                               verdict_call = ?, updated_at = ?
+                               verdict_call = ?, install_proposal = ?, updated_at = ?
             WHERE number = ?
             """,
             (
@@ -243,9 +246,21 @@ class SignalStore:
                 stamp(now),
                 handler,
                 verdict_call,
+                proposal,
                 stamp(now),
                 number,
             ),
+        )
+
+    def install_proposal(self, signal_id: str) -> InstallProposal | None:
+        """Read the typed host-tool proposal stored with a signal's classification."""
+        row = self._database.connection.execute(
+            "SELECT install_proposal FROM signals WHERE id = ?", (signal_id,)
+        ).fetchone()
+        return (
+            None
+            if row is None or row["install_proposal"] is None
+            else InstallProposal.model_validate_json(row["install_proposal"])
         )
 
     def transition(

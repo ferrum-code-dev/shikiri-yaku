@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, NewType, Protocol
 
+from pydantic import BaseModel, ConfigDict
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -23,6 +25,17 @@ class Verdict(StrEnum):
 class Source(StrEnum):
     RULE = "rule"
     REASONER = "reasoner"
+
+
+class InstallProposal(BaseModel):
+    """The Reasoner's typed proposal, kept with its classification for the Install action."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tool: str | None
+    manager: str | None
+    package: str | None
+    why: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +77,7 @@ class Classification:
     note: str = ""
     verdict: Verdict | None = None
     call: CallRecord | None = None
+    install_proposal: InstallProposal | None = None
 
 
 class Classifier(Protocol):

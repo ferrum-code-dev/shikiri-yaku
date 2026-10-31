@@ -38,7 +38,7 @@ class Assessor:
             async with deadline:
                 host_facts = await self._facts.collect()
                 assessment = await self._reasoner.assess_blocker(
-                    signal, host_facts, deadline=deadline
+                    signal, host_facts.prompt, deadline=deadline
                 )
         except ReasonerError as error:
             return self._failed(str(error))

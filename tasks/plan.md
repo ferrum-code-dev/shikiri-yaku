@@ -1018,6 +1018,12 @@ Acceptance criteria:
 
 ### D5. Install approval (normal)
 
+Split (decided): D5 is implemented as D5b to D5e, one gate-green change each. D5 stays unchecked
+until D5e and every original acceptance criterion below pass. The approval payload lives with the
+signal's classification in a numbered journal migration; the Install action reads it by signal id.
+The host-manager set is collected by the same typed login-shell probe as the Reasoner's prompt.
+Approved install ops remain approved and await D6; D5 does not execute package managers.
+
 The **Install** action in `extensions/infrastructure` for `decision_required` with verdict `host_tool`
 (the rule is added with the verdict, and the product catch-all stays last). It validates (D4), checks the
 tool is missing (found: forward with the path), stores an `install` op in state `intended` with the exact
@@ -1035,6 +1041,64 @@ Acceptance criteria:
 * The stored argument list is the one shown in the message.
 * From the D4 review, in `domain/recipes.py`: an npm package is either a plain name or `@scope/name` with one slash. `user/repo` (npm reads it as a GitHub repository) and a leading `/` are refused as `bad_package`; add them to the D4 table test.
 * The gate passes.
+
+#### D5b. Proposal persistence and host managers
+
+Carry the typed proposal from the Reasoner's `Assessment` through `Classification` and
+`JournalRouting`, persist it on the signal row, and expose a read port keyed by signal id. Extend the
+read-only host-facts probe to return its prompt lines and typed observed-manager set from the tagged
+probe output.
+
+Acceptance criteria: proposal round-trips through the classification and journal; manager
+availability is based on the host probe and prompt facts remain available to the Reasoner; gate
+passes.
+
+#### D5c1. Install op payload, journal port and callbacks
+
+Add the typed stored install payload, the injected journal port and the journal's install-op access.
+Add the numeric Install and Decline callback forms. Do not add approval transitions yet.
+
+Acceptance criteria: in-memory SQLite proves `intended`, payload round-trip and repeated intention
+preserving the first stored argv; valid callback forms decode and malformed forms are refused; gate
+passes.
+
+#### D5c2. Install preparation
+
+Read the stored proposal and host-manager observation, validate through D4, then run the read-only
+existence check. Return a validated plan or a forwarding outcome. This part creates no op and queues
+no message.
+
+Acceptance criteria: hostile and incomplete proposals, unknown or absent managers, and existing
+tools forward with a reason; refused names never reach `ToolCheck`; gate passes.
+
+#### D5c3. Persisted approval and outbox delivery
+
+Integrate successful preparation into the Install action. Persist the stable install op before
+queueing `Purpose.APPROVAL` with the signal number. Render the approval from the stored payload and
+argv, including all §6.3 fields. Replays use that payload and queue one logical approval per
+destination; do not offer Install for an approved or final op. No package-manager command runs.
+
+Acceptance criteria: composed action/journal/outbox tests cover initial delivery, repeat handling
+and recovery after the op is persisted before queueing; the command shown equals the stored argv;
+gate passes.
+
+#### D5d. Install and Decline replies
+
+Bind Install and Decline taps to the approval's stored origin, signal and op. A valid Install tap
+conditionally approves once before the original approval expiry; stale or resolved escalations are
+explained and ignored. Decline invalidates the pending op before forwarding the original escalation.
+
+Acceptance criteria: duplicate taps, expiry, resolved-elsewhere, decline and replay are covered; gate
+passes.
+
+#### D5e. Composition, `/open` and end-to-end approval
+
+Register the action in bootstrap, dispatch install approvals through Replies, and make `/open`
+re-show the same pending intended install op and buttons from its stored argv without extending its
+approval lifetime. Preserve current accept/cancel approvals and the generic host-tool rule.
+
+Acceptance criteria: the fake-Reasoner composed path reaches approval and Replies, including restart
+and `/open`; all D5 criteria pass; gate passes.
 
 ### D6. Executor and resolution (normal)
 

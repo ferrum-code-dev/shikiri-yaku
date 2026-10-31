@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
-    from shikiri_yaku.domain.classification import Assessment, Classification
+    from shikiri_yaku.domain.classification import Assessment, Classification, InstallProposal
     from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
@@ -72,7 +72,9 @@ __all__ = [
     "EventKinds",
     "Forwarder",
     "Guard",
+    "HostObservation",
     "InboundLog",
+    "InstallProposalLog",
     "LifecycleJournal",
     "LivenessJournal",
     "Message",
@@ -372,6 +374,14 @@ class SignalNumbers(Protocol):
     def number_of(self, signal: Signal) -> int | None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class HostObservation:
+    """The Reasoner's prompt lines and typed managers observed by the read-only host probe."""
+
+    prompt: tuple[str, ...]
+    managers: frozenset[str]
+
+
 class ActionLog(Protocol):
     """The automatic actions the loop guard counts and records (design §6, §9)."""
 
@@ -448,6 +458,12 @@ class RoutingLog(Protocol):
     def forwarded(self, number: int, note: str, now: datetime) -> None: ...
 
     def park(self, number: int, wake_at: datetime, note: str, now: datetime) -> None: ...
+
+
+class InstallProposalLog(Protocol):
+    """The classification proposal the Install action reads by the signal's stable id."""
+
+    def install_proposal(self, signal_id: str) -> InstallProposal | None: ...
 
 
 class DispatchLog(Protocol):

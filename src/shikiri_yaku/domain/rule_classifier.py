@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.classification import Classification, Source
+from shikiri_yaku.domain.classification import (
+    Classification,
+    InstallProposal,
+    Source,
+    Verdict,
+)
 from shikiri_yaku.domain.signal import Kind
 
 if TYPE_CHECKING:
@@ -64,7 +69,17 @@ def _claims(rule: Rule, signal: Signal) -> bool:
 
 
 def _reasoned(category: Category, source: Source, assessment: Assessment) -> Classification:
-    return Classification(category, source, assessment.note, assessment.verdict, assessment.call)
+    proposal = None
+    if assessment.verdict is Verdict.HOST_TOOL:
+        proposal = InstallProposal(
+            tool=assessment.tool,
+            manager=assessment.manager,
+            package=assessment.package,
+            why=assessment.why,
+        )
+    return Classification(
+        category, source, assessment.note, assessment.verdict, assessment.call, proposal
+    )
 
 
 def _check_claims(entries: list[_Entry]) -> None:
