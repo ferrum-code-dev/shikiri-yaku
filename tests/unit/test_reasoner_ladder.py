@@ -70,6 +70,9 @@ class _Rung:
         finally:
             self.inside -= 1
 
+    async def probe(self) -> None:
+        return
+
 
 def test_a_failed_rung_is_skipped_for_the_cooldown_and_tried_again_after_it() -> None:
     clock = _Clock()

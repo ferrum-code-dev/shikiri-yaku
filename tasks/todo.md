@@ -65,7 +65,7 @@ merged and `uv run poe check` passes.
   - [x] D1. Reasoner spike (`tasks/reasoner-spike.md`)
   - [x] D2. Reasoner adapters and `assess_blocker`
   - [x] D3. Ladder and the safe tool list
-  - [ ] D3b. Wiring, host facts, health and doctor
+  - [x] D3b. Wiring, host facts, health and doctor
   - [ ] D4. Names, recipes and the existence check
   - [ ] D5. Install approval
   - [ ] D6. Executor and resolution

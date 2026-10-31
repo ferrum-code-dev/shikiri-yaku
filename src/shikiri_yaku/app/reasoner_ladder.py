@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.ports import ReasonerError
+from shikiri_yaku.ports import ReasonerError, RungState
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,6 +54,17 @@ class LadderReasoner:
                 self._failed[index] = (self._clock.now() + self._cooldown, reason)
                 reasons.append(reason)
         raise ReasonerError("; ".join(reasons))
+
+    def rung_states(self) -> Sequence[RungState]:
+        return [self._state(index, rung) for index, rung in enumerate(self._rungs)]
+
+    def _state(self, index: int, rung: ReasonerRung) -> RungState:
+        failure = self._failed.get(index)
+        if failure is None:
+            return RungState(rung.name, last_failure=None, cooling_until=None)
+        until, reason = failure
+        cooling = until if self._clock.now() < until else None
+        return RungState(rung.name, last_failure=reason, cooling_until=cooling)
 
     def _cooling(self, index: int) -> bool:
         failure = self._failed.get(index)

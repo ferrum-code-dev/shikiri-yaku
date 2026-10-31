@@ -371,3 +371,30 @@ def test_a_scratch_directory_that_cannot_be_made_is_a_reasoner_error(
     with pytest.raises(ReasonerError, match=re.escape(f"{cli}:{_MODEL}")):
         _assess(_rung(cli, runner, occupied))
     assert runner.argv == []
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex"])
+def test_the_probe_runs_only_the_version_flag(cli: str, tmp_path: Path) -> None:
+    runner = _Fake()
+
+    asyncio.run(_rung(cli, runner, tmp_path).probe())
+
+    assert runner.argv == [cli, "--version"]
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex"])
+def test_a_probe_whose_cli_cannot_start_names_the_rung_with_its_effort(
+    cli: str, tmp_path: Path
+) -> None:
+    runner = _Fake(error=CommandError("no such file"))
+
+    with pytest.raises(ReasonerError, match=re.escape(f"{cli}:{_MODEL}:high")):
+        asyncio.run(_rung(cli, runner, tmp_path, effort="high").probe())
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex"])
+def test_a_probe_whose_version_flag_fails_is_a_reasoner_error(cli: str, tmp_path: Path) -> None:
+    runner = _Fake(returncode=127)
+
+    with pytest.raises(ReasonerError, match=re.escape(f"{cli}:{_MODEL}")):
+        asyncio.run(_rung(cli, runner, tmp_path).probe())

@@ -93,6 +93,8 @@ __all__ = [
     "RetryAttempt",
     "RetryLog",
     "RoutingLog",
+    "RungState",
+    "RungStates",
     "ScheduleLog",
     "SecretLog",
     "ShikiruClient",
@@ -760,6 +762,25 @@ class ReasonerRung(Protocol):
     name: str
 
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment: ...
+
+    async def probe(self) -> None:
+        """Check that the rung's CLI can be run at all; raises ReasonerError when it cannot."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class RungState:
+    """One rung as `/status` shows it: its last failure and, while it cools down, until when."""
+
+    name: str
+    last_failure: str | None
+    cooling_until: datetime | None
+
+
+class RungStates(Protocol):
+    """The state of each rung of the ladder, in ladder order (design §8)."""
+
+    def rung_states(self) -> Sequence[RungState]: ...
 
 
 @dataclass(frozen=True, slots=True)

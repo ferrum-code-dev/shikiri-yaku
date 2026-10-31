@@ -148,7 +148,8 @@ class _CliRung(ABC):
         self._timeout_s = timeout_s
         self._input_max_chars = input_max_chars
         self._scratch_root = scratch_root
-        self.name = f"{self._adapter}:{model}"
+        suffix = "" if effort is None else f":{effort}"
+        self.name = f"{self._adapter}:{model}{suffix}"
 
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
         prompt = _prompt(signal, host_facts, self._lookups, self._input_max_chars)
@@ -165,6 +166,18 @@ class _CliRung(ABC):
             why=answer.why,
             call=call,
         )
+
+    async def probe(self) -> None:
+        """Run the CLI's version flag: no login and no model call, so doctor can run it."""
+        argv = [self._adapter, "--version"]
+        try:
+            result = await self._runner.run(argv, timeout_s=self._timeout_s)
+        except CommandError as error:
+            message = f"{self.name}: {error}"
+            raise ReasonerError(message) from error
+        if result.returncode != 0:
+            message = f"{self.name}: {self._adapter} --version exited with {result.returncode}"
+            raise ReasonerError(message)
 
     async def _ask(self, prompt: str) -> tuple[BlockerAnswer, CallRecord | None]:
         self._scratch_root.mkdir(parents=True, exist_ok=True)

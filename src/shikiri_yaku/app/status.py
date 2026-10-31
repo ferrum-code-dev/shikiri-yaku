@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Final
 from shikiri_yaku.ports import ShikiruError, TaskStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
-    from shikiri_yaku.ports import LifecycleJournal, ShikiruClient
+    from shikiri_yaku.ports import LifecycleJournal, RungState, RungStates, ShikiruClient
 
 # keep: Shikiru's used_pct runs 0 to 100; design §6.2 counts 100 or more as exhausted
 EXHAUSTED_PCT: Final = 100.0
@@ -40,15 +40,24 @@ class ComponentStatus:
 class Status:
     """Reads each client's engine, tasks and quotas; the journal tells never-started apart."""
 
-    def __init__(self, clients: Mapping[str, ShikiruClient], lifecycles: LifecycleJournal) -> None:
+    def __init__(
+        self,
+        clients: Mapping[str, ShikiruClient],
+        lifecycles: LifecycleJournal,
+        rungs: RungStates | None = None,
+    ) -> None:
         self._clients = clients
         self._lifecycles = lifecycles
+        self._rungs = rungs
 
     async def components(self) -> list[ComponentStatus]:
         return [await self._component(project, client) for project, client in self._clients.items()]
 
     async def report(self) -> str:
-        return "\n\n".join(_render(component) for component in await self.components())
+        sections = [_render(component) for component in await self.components()]
+        if self._rungs is not None:
+            sections.append(_render_rungs(self._rungs.rung_states()))
+        return "\n\n".join(sections)
 
     async def _component(self, project: str, client: ShikiruClient) -> ComponentStatus:
         try:
@@ -77,6 +86,18 @@ class Status:
         if state is None or state.lifecycle is None:
             return Engine.NEVER_STARTED
         return Engine.DOWN
+
+
+def _render_rungs(states: Sequence[RungState]) -> str:
+    return "\n".join(["Reasoner", *(_rung_line(state) for state in states)])
+
+
+def _rung_line(state: RungState) -> str:
+    if state.cooling_until is not None:
+        return f"{state.name}: cooling until {state.cooling_until.isoformat(timespec='minutes')}"
+    if state.last_failure is not None:
+        return f"{state.name}: ready, last failure: {state.last_failure}"
+    return f"{state.name}: ready"
 
 
 def _render(component: ComponentStatus) -> str:

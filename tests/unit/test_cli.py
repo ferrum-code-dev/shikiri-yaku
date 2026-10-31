@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, override
 
 import httpx
 import pytest
@@ -25,12 +25,13 @@ from shikiri_yaku.bootstrap import compose, main, stats_report
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
+from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import service_file
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, GET_WEBHOOK_INFO, FakeBotApi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Mapping
+    from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
     from multiprocessing.synchronize import Event
     from pathlib import Path
 
@@ -239,10 +240,43 @@ def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
     )
 
 
+class _Clis(CommandRunner):
+    """Runs the CLIs' version flags, and fails to start each CLI named in `missing`."""
+
+    def __init__(self, missing: frozenset[str] = frozenset()) -> None:
+        self._missing = missing
+
+    @override
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        del timeout_s, cwd, env
+        if argv[0] in self._missing:
+            message = f"{argv[0]}: command not found"
+            raise CommandError(message)
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+
+def _with_reasoner(directory: Path) -> None:
+    config = directory / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + '\n[reasoner]\nladder = ["claude:haiku"]\n',
+        encoding="utf-8",
+    )
+
+
 def _run_doctor(
-    home: Path, link: Callable[[], Any] = _answering_link, bot: BotFactory = _accepting_bot
+    home: Path,
+    link: Callable[[], Any] = _answering_link,
+    bot: BotFactory = _accepting_bot,
+    commands: CommandRunner | None = None,
 ) -> int:
-    composed = partial(compose, link=lambda _executable, _project: link, bot=bot)
+    composed = partial(compose, link=lambda _executable, _project: link, bot=bot, commands=commands)
     return cli.main(["doctor", _PRODUCT, "--home", str(home)], composed, stats_report)
 
 
@@ -327,6 +361,24 @@ def test_doctor_names_a_component_whose_mcp_link_does_not_come_up(
 
     assert _run_doctor(tmp_path, _unreachable_link) == 1
     assert _failed(capsys.readouterr().out) == {"link api"}
+
+
+def test_doctor_names_a_reasoner_rung_whose_cli_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_reasoner(_instance(tmp_path))
+
+    assert _run_doctor(tmp_path, commands=_Clis(frozenset({"claude"}))) == 1
+    assert _failed(capsys.readouterr().out) == {"reasoner claude:haiku"}
+
+
+def test_doctor_passes_a_reasoner_rung_whose_cli_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_reasoner(_instance(tmp_path))
+
+    assert _run_doctor(tmp_path, commands=_Clis()) == 0
+    assert _failed(capsys.readouterr().out) == set()
 
 
 def test_doctor_names_a_telegram_bot_that_refuses_the_token(

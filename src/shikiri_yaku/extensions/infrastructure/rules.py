@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Final
 
-from shikiri_yaku.domain.classification import Category
+from shikiri_yaku.domain.classification import Category, Verdict
 from shikiri_yaku.domain.extension import Rule
 from shikiri_yaku.domain.signal import Kind
 
 INFRASTRUCTURE: Final = Category("infrastructure")
+DECISION_REQUIRED: Final = "decision_required"
 
 AGENT_ERROR: Final = "agent_error"
 AGENT_STUCK: Final = "agent_stuck"
@@ -34,3 +35,7 @@ REASONS: Final = frozenset(
 KINDS: Final = frozenset({Kind.ENGINE_DOWN, Kind.ENGINE_FAULT})
 
 INFRASTRUCTURE_RULE: Final = Rule(reasons=REASONS, kinds=KINDS)
+HOST_TOOL_RULE: Final = Rule(
+    reasons=frozenset({DECISION_REQUIRED}), verdicts=frozenset({Verdict.HOST_TOOL})
+)
+"""A decision the Reasoner judges a missing host tool is infrastructure (design §5, §6.3)."""

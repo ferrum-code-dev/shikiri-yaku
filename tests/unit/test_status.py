@@ -13,6 +13,7 @@ from shikiri_yaku.ports import (
     EngineStatus,
     EventKinds,
     QuotaWindow,
+    RungState,
     ShikiruLinkDownError,
     ShikiruTask,
 )
@@ -119,3 +120,28 @@ def test_a_component_that_does_not_answer_does_not_hide_the_others(database: Dat
 
     assert [component.engine for component in components] == [None, Engine.UP]
     assert components[1].running == 1
+
+
+class _Rungs:
+    """The ladder's rung states, fixed."""
+
+    def __init__(self, states: Sequence[RungState]) -> None:
+        self._states = states
+
+    def rung_states(self) -> Sequence[RungState]:
+        return self._states
+
+
+def test_the_report_lists_each_rung_with_its_cooling_time_or_that_it_is_ready(
+    database: Database,
+) -> None:
+    signals = SignalStore(database)
+    sources = JournalSources(CursorStore(database, signals), signals)
+    cooling = RungState("claude:haiku", last_failure="no usable answer", cooling_until=NOW)
+    ready = RungState("codex:gpt-5", last_failure=None, cooling_until=None)
+    clients = {"api": cast("ShikiruClient", _Client())}
+
+    report = asyncio.run(Status(clients, sources, _Rungs([cooling, ready])).report())
+
+    assert f"claude:haiku: cooling until {NOW.isoformat(timespec='minutes')}" in report
+    assert "codex:gpt-5: ready" in report

@@ -9,7 +9,11 @@ from shikiri_yaku.extensions.infrastructure.engine_error import EngineErrorActio
 from shikiri_yaku.extensions.infrastructure.handler import InfrastructureHandler
 from shikiri_yaku.extensions.infrastructure.restart import RestartAction
 from shikiri_yaku.extensions.infrastructure.retry import RetryAction
-from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE, INFRASTRUCTURE_RULE
+from shikiri_yaku.extensions.infrastructure.rules import (
+    HOST_TOOL_RULE,
+    INFRASTRUCTURE,
+    INFRASTRUCTURE_RULE,
+)
 from shikiri_yaku.extensions.infrastructure.wait import WaitAction
 
 if TYPE_CHECKING:
@@ -64,5 +68,8 @@ def infrastructure_extension(
     engine_error = EngineErrorAction(clients, restart, retry, starts)
     actions = (retry, wait, restart, engine_error)
     return Extension(
-        INFRASTRUCTURE, (INFRASTRUCTURE_RULE,), InfrastructureHandler(actions), actions
+        INFRASTRUCTURE,
+        (INFRASTRUCTURE_RULE, HOST_TOOL_RULE),
+        InfrastructureHandler(actions),
+        actions,
     )

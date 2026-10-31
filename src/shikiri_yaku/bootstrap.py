@@ -8,6 +8,7 @@ so the command line never imports this module and the concrete objects stay here
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
+from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import (
@@ -27,12 +29,14 @@ from shikiri_yaku.adapters.telegram import (
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_topics import TelegramDestinations, TopicReconciler
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
+from shikiri_yaku.app.assessor import Assessor
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
+from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.liveness_source import LivenessSource
@@ -41,6 +45,7 @@ from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
+from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.reconciler import ResolveReconciler
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
@@ -99,19 +104,22 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import (
         Channel,
         Clock,
+        CommandRunner,
         Destinations,
         Forwarder,
         Guard,
         Outbox,
+        ReasonerRung,
         Reporter,
         Reshower,
         RetryLog,
+        RungStates,
         ShikiruClient,
         SignalNumbers,
         StartLog,
         WaitLog,
     )
-    from shikiri_yaku.settings import Component, Settings
+    from shikiri_yaku.settings import Component, ReasonerSettings, Settings
 
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
@@ -119,6 +127,12 @@ REMOVED_NOTE: Final = "closed at startup: the component was removed from the con
 REMINDED_KINDS: Final = frozenset({Kind.PR_REVIEW})
 SILENCING_PREFIXES: Final = (f"{REVIEW_NOTICE_KEY}:",)
 ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_NOTICE_KEY}:",)
+REASONER_SCRATCH_DIR: Final = "reasoner-scratch"
+FALLBACK_SHELL: Final = "/bin/sh"
+RUNG_CLASSES: Final[Mapping[str, Callable[..., ReasonerRung]]] = {
+    "claude": ClaudeRung,
+    "codex": CodexRung,
+}
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -131,11 +145,21 @@ class Composition:
     journal: Database
     link_probes: Mapping[str, Callable[[], Awaitable[None]]]
     telegram_probe: Callable[[], Awaitable[None]]
+    rung_probes: Mapping[str, Callable[[], Awaitable[None]]]
     jobs: Sequence[Job]
     recover: Callable[[], None]
 
     def close(self) -> None:
         self.journal.close()
+
+
+@dataclass(frozen=True, slots=True)
+class Reasoning:
+    """The configured Reasoner: its rungs, the ladder over them and the assessment of a signal."""
+
+    rungs: Sequence[ReasonerRung]
+    ladder: LadderReasoner
+    assessor: Assessor
 
 
 def http_bot(settings: Settings) -> BotApi:
@@ -150,11 +174,14 @@ def compose(
     link: LinkFactory = stdio_connector,
     bot: BotFactory = http_bot,
     clock: Clock | None = None,
+    commands: CommandRunner | None = None,
 ) -> Composition:
     """Build the objects of one instance; the caller closes the result.
 
     `link` opens a project's MCP link and `bot` makes the Telegram transport; tests give fakes.
-    `clock` is the system clock unless a test gives one whose waits are short.
+    `clock` is the system clock unless a test gives one whose waits are short, and `commands`
+    runs the host commands of the Reasoner's CLIs, which are the process runner unless a test
+    gives a fake.
     """
     try:
         journal = Database.open(directory / JOURNAL_FILE_NAME)
@@ -166,6 +193,8 @@ def compose(
         for component in settings.components
     }
     clock = SystemClock() if clock is None else clock
+    commands = ProcessCommandRunner() if commands is None else commands
+    reasoning = build_reasoner(settings, directory, journal, clock, commands)
     reporter = StderrReporter()
     clients = {
         component.name: shikiru_client(settings, component, clock, link)
@@ -237,11 +266,12 @@ def compose(
         destinations,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
     )
+    assess = None if reasoning is None else reasoning.assessor.assess
     jobs += routing_jobs(
         settings,
         journal,
         clock,
-        classifier=RuleClassifier(extensions),
+        classifier=RuleClassifier(extensions, assess),
         handlers={extension.category: extension.handler for extension in extensions},
         fallback=forwarder,
         reporter=reporter,
@@ -261,6 +291,7 @@ def compose(
             bot_api=bot_api,
             goal=goal,
             destinations=destinations,
+            ladder=None if reasoning is None else reasoning.ladder,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -273,15 +304,59 @@ def compose(
         goal.recover()
         asyncio.run(destinations.prepare())
 
+    rung_probes = {} if reasoning is None else {rung.name: rung.probe for rung in reasoning.rungs}
     return Composition(
         settings,
         clock,
         journal,
         probes,
         partial(probe_bot, bot_api, settings.telegram.group_id, settings.telegram.owners),
+        rung_probes,
         jobs,
         recover,
     )
+
+
+def build_reasoner(
+    settings: Settings,
+    directory: Path,
+    journal: Database,
+    clock: Clock,
+    commands: CommandRunner,
+) -> Reasoning | None:
+    """Return the configured Reasoner, or None when the config has no `[reasoner]` section."""
+    config = settings.reasoner
+    if config is None:
+        return None
+    rungs = reasoner_rungs(config, commands, directory / REASONER_SCRATCH_DIR)
+    ladder = LadderReasoner(
+        rungs,
+        clock,
+        cooldown=timedelta(minutes=config.cooldown_min),
+        max_parallel=config.max_parallel,
+    )
+    signals = SignalStore(journal)
+    sources = JournalSources(CursorStore(journal, signals), signals)
+    health = HealthSource(OPERATOR_SCOPE, sources, clock, settings.operator.link_unreachable_min)
+    facts = HostFacts(commands, os.environ.get("SHELL", FALLBACK_SHELL), config.timeout_s)
+    return Reasoning(rungs, ladder, Assessor(ladder, facts, health))
+
+
+def reasoner_rungs(
+    config: ReasonerSettings, commands: CommandRunner, scratch_root: Path
+) -> list[ReasonerRung]:
+    """Return one rung per ladder entry, each built by the class of its adapter."""
+    return [
+        RUNG_CLASSES[rung.adapter](
+            rung.model,
+            commands,
+            effort=rung.effort,
+            timeout_s=config.timeout_s,
+            input_max_chars=config.input_max_chars,
+            scratch_root=scratch_root,
+        )
+        for rung in config.ladder
+    ]
 
 
 def registered_extensions(
@@ -445,6 +520,7 @@ def inbound_job(
     bot_api: BotApi,
     goal: GoalCommand,
     destinations: Destinations,
+    ladder: RungStates | None,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -471,7 +547,7 @@ def inbound_job(
     commands = Commands(
         outbox,
         clock,
-        Status(clients, sources),
+        Status(clients, sources, ladder),
         opened,
         goal,
         channel=TELEGRAM_CHANNEL,

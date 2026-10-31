@@ -24,6 +24,7 @@ from shikiri_yaku.ports import (
     ChannelError,
     ChannelStartupError,
     CompositionError,
+    ReasonerError,
     ShikiruError,
 )
 from shikiri_yaku.service import ServiceError, service_file, write_service_file
@@ -47,6 +48,9 @@ class Lifecycle(Protocol):
 
     @property
     def telegram_probe(self) -> Callable[[], Awaitable[None]]: ...
+
+    @property
+    def rung_probes(self) -> Mapping[str, Callable[[], Awaitable[None]]]: ...
 
     @property
     def jobs(self) -> Sequence[Job]: ...
@@ -225,16 +229,20 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
             _Check(f"link {name}", _probe_problem(probe))
             for name, probe in composition.link_probes.items()
         ]
+        rungs = [
+            _Check(f"reasoner {name}", _probe_problem(probe))
+            for name, probe in composition.rung_probes.items()
+        ]
         telegram = _Check("telegram", _probe_problem(composition.telegram_probe))
     finally:
         composition.close()
-    return [*links, telegram, _Check("journal")]
+    return [*links, *rungs, telegram, _Check("journal")]
 
 
 def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     try:
         asyncio.run(probe())
-    except (ShikiruError, ChannelError) as error:
+    except (ShikiruError, ChannelError, ReasonerError) as error:
         return str(error) or type(error).__name__
     return None
 

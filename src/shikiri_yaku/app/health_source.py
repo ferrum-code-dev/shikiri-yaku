@@ -15,7 +15,11 @@ if TYPE_CHECKING:
 LINK_SCOPE = "link"
 EVENTS_SCOPE = "events"
 LIVENESS_SCOPE = "liveness"
+REASONER_SCOPE = "reasoner"
 RECOVERED_LINE: Final = "Recovered"
+REASONER_DOWN_LINE: Final = (
+    "Reasoner unavailable: every rung failed; decisions are forwarded without a suggestion"
+)
 OUTAGE_ID_FORMAT = "%Y-%m-%dT%H:%MZ"
 SOURCE_ID_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
@@ -64,14 +68,7 @@ class HealthSource:
         self._since = None
 
     def source_failed(self, scope: str, error: Exception) -> None:
-        now = self._clock.now()
-        self._working.discard(scope)
-        if scope in self._failing:
-            return
-        self._failing.add(scope)
-        if not self._journal.has_open(self._project, Kind.HEALTH, scope):
-            text = f"The {scope} source of {self._project} fails: {error}"
-            self._journal.open(self._signal(scope, now, text, SOURCE_ID_FORMAT), now)
+        self._failed(scope, f"The {scope} source of {self._project} fails: {error}")
 
     def source_recovered(self, scope: str) -> None:
         if scope not in self._working:
@@ -81,6 +78,22 @@ class HealthSource:
             self._journal.close(closing, self._clock.now())
             self._working.add(scope)
         self._failing.discard(scope)
+
+    def reasoner_failed(self) -> None:
+        """Open the one signal for a call that every rung failed; later failures add none."""
+        self._failed(REASONER_SCOPE, REASONER_DOWN_LINE)
+
+    def reasoner_recovered(self) -> None:
+        self.source_recovered(REASONER_SCOPE)
+
+    def _failed(self, scope: str, text: str) -> None:
+        now = self._clock.now()
+        self._working.discard(scope)
+        if scope in self._failing:
+            return
+        self._failing.add(scope)
+        if not self._journal.has_open(self._project, Kind.HEALTH, scope):
+            self._journal.open(self._signal(scope, now, text, SOURCE_ID_FORMAT), now)
 
     def _signal(self, scope: str, since: datetime, text: str, id_format: str) -> Signal:
         stamp = since.astimezone(UTC).strftime(id_format)
