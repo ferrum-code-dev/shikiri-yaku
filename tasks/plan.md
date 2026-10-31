@@ -867,6 +867,12 @@ Close every open `engine_down` and `engine_fault` signal of a project when the l
 message is edited, its buttons removed and its reminders stopped. A signal that a handler has parked or
 is handling is left to that handler.
 
+Same flaw, second case, found in the same run: tapping *Acknowledge* on an information message closed
+its signal but left the message as it was, with the button still on it. `acknowledge_notice` in
+`journal/replies.py` moves the signal to `closed` with no final line, and the final edit only runs for a
+signal that has one. Close it with the final line "Acknowledged", so every copy of the message is edited
+and loses its buttons. A late tap on a signal that already ended still changes nothing.
+
 Also fix the wording of a forwarded `engine_down`, which the live run showed as: "The engine of api is
 down; its last event was engine_started. What I tried: No more automatic restart within 1:00:00; already
 done at 2026-10-31T18:11:51.603935+00:00.; failed checks: none". It names an internal event, shows a raw
@@ -881,6 +887,7 @@ write; report any you find that read badly.
 Acceptance criteria:
 * Table-driven over the signal states (`new`, `handling`, `parked`, `forwarded`) and kinds (`engine_down`, `engine_fault`, another kind): only a `forwarded` signal of those two kinds is closed, and only when the engine is up.
 * The message of a closed signal is edited to the final line with the buttons removed, and the Scheduler sends no reminder for it afterwards.
+* Acknowledging an information message edits it to "Acknowledged" with the buttons removed, in every copy; a second tap changes nothing.
 * A composed test (as in C7) that forwards an `engine_down` and then reports the engine up ends with the signal closed and the message edited; it fails without the fix.
 * A table-driven test of the engine note: refused restart with and without failed checks, a restart from today and from an earlier day; no raw timestamp, no `.;`, no event kind in any of them.
 * The gate passes.
