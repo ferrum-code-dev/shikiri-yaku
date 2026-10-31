@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal.database import Database
+from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.ops import OpState, OpStore
 from shikiri_yaku.journal.replies import JournalReplies
@@ -19,6 +20,7 @@ from shikiri_yaku.ports import (
     Ack,
     Button,
     EscalationView,
+    FinalEdit,
     Message,
     RecordedResolution,
     ResolvePayload,
@@ -92,6 +94,51 @@ def test_acknowledging_a_notice_silences_only_a_silencing_prefix(
     stored = signals.get(number)
     assert stored is not None
     assert stored.state is state
+
+
+def _settle_all(final: JournalFinalEdits) -> list[FinalEdit]:
+    for number, line in final.unsettled():
+        final.settle(number, line)
+    edits = final.to_edit()
+    for edit in edits:
+        final.confirm_edit(edit.message_ref)
+    return edits
+
+
+def test_acknowledged_information_message_is_edited_in_every_copy_once(memory: Database) -> None:
+    signals = SignalStore(memory)
+    number = signals.insert_if_absent(
+        NewSignal("api:engine_down:40", "api", "engine_down", "agent_error", "down"), NOW
+    ).row_id
+    signals.classify(
+        number, category="product", classified_by="rule", verdict=None, handler="p", now=NOW
+    )
+    signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
+    signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
+    messages = MessageStore(memory, _Reporter())
+    body = Message("The engine of api is down.", (Button("Acknowledge", f"k:{number}"),))
+    for chat, reference in (("1001", "1001/42"), ("1002", "1002/7")):
+        stored = messages.record_outbound(
+            signal_number=number,
+            channel="telegram",
+            chat=chat,
+            purpose=Purpose.NOTICE,
+            body=body,
+            notice_key=f"forward:{number}",
+            now=NOW,
+        )
+        messages.confirm_delivery(stored.row_id, reference)
+    replies = JournalReplies(memory, signals, OpStore(memory))
+    final = JournalFinalEdits(memory, replies)
+
+    replies.acknowledge_notice(number, f"forward:{number}", NOW)
+    edits = _settle_all(final)
+    assert sorted(edit.message_ref for edit in edits) == ["1001/42", "1002/7"]
+    assert all(edit.message.buttons == () for edit in edits)
+    assert all(edit.message.text.endswith("Acknowledged") for edit in edits)
+
+    replies.acknowledge_notice(number, f"forward:{number}", LATER)
+    assert _settle_all(final) == []
 
 
 @pytest.fixture

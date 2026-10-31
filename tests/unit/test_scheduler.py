@@ -10,6 +10,7 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
+from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.journal import (
     Database,
     Inserted,
@@ -173,6 +174,19 @@ def test_answered_signal_gets_no_reminder(world: _World) -> None:
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
     assert _queued(world) == []
+
+
+@pytest.mark.parametrize(("closed", "sent"), [(False, 1), (True, 0)])
+def test_an_engine_signal_closed_once_the_engine_is_up_gets_no_reminder(
+    world: _World, *, closed: bool, sent: int
+) -> None:
+    number = world.signal("e1", SignalState.FORWARDED, kind="engine_down")
+    world.ask(number)
+    if closed:
+        world.signals.close(Closing("api", Kind.ENGINE_DOWN, forwarded_only=True), START)
+    world.clock.moment = START + timedelta(hours=FIRST_H)
+    _tick(world)
+    assert len(_queued(world)) == sent
 
 
 def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_one(

@@ -19,12 +19,15 @@ from mcp.types import CallToolResult
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.app.event_source import MERGED_LINE
 from shikiri_yaku.app.health_source import RECOVERED_LINE
+from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
+from shikiri_yaku.domain.outbound import ENGINE_UP_LINE
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.rules import AGENT_ERROR, QUOTA_EXHAUSTED
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     Database,
+    JournalActions,
     JournalInbound,
     JournalStarts,
     NewSignal,
@@ -51,7 +54,7 @@ _OWNER: Final = 1001
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
 _ASKED: Final = "I may have submitted this already"
-_RESTARTED: Final = "the engine was restarted"
+_RESTARTED: Final = "The engine of api was restarted."
 _FAILED_HANDLER: Final = "handler failed"
 _ENGINE_DOWN: Final = Signal("api", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "engine is down")
@@ -68,6 +71,18 @@ _RESET_IN: Final = timedelta(hours=1)
 _PAST_RESET: Final = timedelta(hours=1, minutes=2)
 _PR_URL: Final = "https://github.com/acme/shop/pull/7"
 _REVIEW_MARKER: Final = "Pull request ready for review"
+_ENGINE_DOWN_TEXT: Final = "The engine of api is down."
+_ENGINE_DOWN_ID: Final = "api:engine_down:40"
+_LAST_EVENT: Final = 40
+# keep: a liveness check runs once its interval has passed, which a test moves the clock past for
+_LIVENESS_GAP: Final = timedelta(minutes=2)
+# keep: a refused restart asks doctor for the failed checks, and this fake is the only command
+_DOCTOR_ONLY_SHIKIRU: Final = """#!/bin/sh
+case "$*" in
+  *doctor*) echo '{"checks": []}' ;;
+  *) exit 1 ;;
+esac
+"""
 
 
 def _recorded(name: str) -> dict[str, Any]:
@@ -152,6 +167,9 @@ class _ShikiruSession:
             await NapClock().sleep(timeout_s)
         return events
 
+    def restore_engine(self) -> None:
+        self._answers["status"] = {"engine_up": True, "quotas": {}}
+
 
 def _shikiru_link(
     session: _ShikiruSession, *, delayed: bool = False
@@ -180,6 +198,15 @@ def _instance(home: Path) -> Path:
         encoding="utf-8",
     )
     return directory
+
+
+def _spend_restart(directory: Path) -> None:
+    # keep: the hour's one automatic restart is used up first, so the engine's restart is refused
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        LoopGuard(JournalActions(OpStore(database)), NapClock(), 1, 1).restart("api")
+    finally:
+        database.close()
 
 
 def _interrupted_restart(directory: Path, signal: Signal, new: NewSignal) -> None:
@@ -617,3 +644,46 @@ def test_an_operator_health_message_is_edited_to_recovered_after_a_restart(
 
     [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
     assert str(edit["text"]).endswith(RECOVERED_LINE)
+
+
+def test_an_engine_down_forwarded_for_want_of_a_restart_closes_once_the_engine_is_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shikiru = bin_dir / "shikiru"
+    shikiru.write_text(_DOCTOR_ONLY_SHIKIRU, encoding="utf-8")
+    shikiru.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    directory = _instance(tmp_path)
+    _spend_restart(directory)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"status": {"engine_up": False, "quotas": {}}},
+        events=[_recorded_event(EventKinds.ENGINE_STARTED, _LAST_EVENT, {})],
+    )
+    bot = _MarkingBot(_ENGINE_DOWN_TEXT)
+    clock = NapClock()
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=clock,
+    )
+
+    async def engine_comes_back() -> None:
+        await bot.marked.wait()
+        session.restore_engine()
+        clock.advance(_LIVENESS_GAP)
+        await _until(lambda: _edited(bot, ENGINE_UP_LINE))
+
+    try:
+        asyncio.run(_deliver(composition.jobs, engine_comes_back()))
+    finally:
+        composition.close()
+
+    assert _signal_state(directory, _ENGINE_DOWN_ID) is SignalState.CLOSED
+    [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
+    final = (str(edit["text"]).endswith(ENGINE_UP_LINE), edit["reply_markup"])
+    assert final == (True, {"inline_keyboard": []})

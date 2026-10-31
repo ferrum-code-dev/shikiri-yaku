@@ -240,7 +240,7 @@ def test_a_second_quota_wait_for_the_same_task_forwards_naming_the_first_retry(
     outcome = handle(shop.handler(), second)
 
     assert isinstance(outcome, Forward)
-    assert WAKE.isoformat() in outcome.note
+    assert "was at 12:01 UTC." in outcome.note
     assert client.resolved == [("E1", "retry")]
     assert shop.notices() == 2
 

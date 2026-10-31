@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.outbound import ENGINE_UP_LINE
+from shikiri_yaku.domain.signal import Closing, Kind, Signal
 from shikiri_yaku.ports import EventKinds
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.event_source import EventSource
     from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
     from shikiri_yaku.ports import Clock, LivenessJournal, ShikiruClient
+
+_ENGINE_KINDS: Final = (Kind.ENGINE_DOWN, Kind.ENGINE_FAULT)
 
 
 class LivenessSource:
@@ -42,6 +45,7 @@ class LivenessSource:
 
     async def check(self) -> None:
         if (await self._client.status()).engine_up:
+            self._close_engine_signals()
             return
         while await self._events.poll(wait_s=0):
             pass
@@ -53,6 +57,13 @@ class LivenessSource:
             self._engine_is_down(state, lifecycle)
         elif not lifecycle.has_reason and lifecycle.event_id != state.respected_stop_id:
             self._clean_stop(state, lifecycle)
+
+    def _close_engine_signals(self) -> None:
+        # keep: only what the PO was shown closes; a parked or handled signal is its handler's
+        now = self._clock.now()
+        for kind in _ENGINE_KINDS:
+            closing = Closing(self._project, kind, forwarded_only=True, final_line=ENGINE_UP_LINE)
+            self._journal.close(closing, now)
 
     def _clean_stop(self, state: LifecycleState, lifecycle: Lifecycle) -> None:
         now = self._clock.now()
@@ -67,6 +78,6 @@ class LivenessSource:
             Kind.ENGINE_DOWN,
             str(state.last_event_id),
             lifecycle.kind,
-            f"The engine of {self._project} is down; its last event was {lifecycle.kind}.",
+            f"The engine of {self._project} is down.",
         )
         self._journal.open(signal, self._clock.now())

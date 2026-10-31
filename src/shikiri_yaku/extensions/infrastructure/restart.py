@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, DoctorCheck, Guard, Notifier, ShikiruClient, StartLog
 
 RESTART_REASONS: Final = frozenset({Kind.ENGINE_DOWN.value, Kind.ENGINE_FAULT.value})
-RESTARTED: Final = "engine restarted; Shikiru resumes its tasks"
-EARLIER_FAILED: Final = "nothing restarted: an earlier engine start for this signal failed"
-NOT_UP: Final = "the engine is still not up when the confirm time is over"
+RESTARTED: Final = "The engine was restarted and is up."
+EARLIER_FAILED: Final = "An earlier start of the engine for this signal failed."
+NOT_UP: Final = "The engine is still not up when the confirm time is over."
 
 
 class RestartFailedError(Exception):
@@ -62,11 +62,11 @@ class RestartAction:
         existing = self._starts.existing(signal)
         if existing is not None:
             if existing.state == AttemptState.FAILED:
-                return Forward(await self._with_checks(signal.project, EARLIER_FAILED))
+                return Forward(await self._give_up(signal.project, EARLIER_FAILED))
             return await self._confirm(signal)
         decision = self._guard.restart(signal.project)
         if isinstance(decision, Refused):
-            return Forward(await self._with_checks(signal.project, decision.note))
+            return Forward(await self._give_up(signal.project, decision.note))
         self._starts.issue(signal, self._clock.now())
         await self._start(signal)
         return await self._confirm(signal)
@@ -76,13 +76,11 @@ class RestartAction:
             await self._clients[signal.project].start_engine()
         except ShikiruRejectedError as error:
             self._starts.fail(signal, self._clock.now())
-            note = await self._with_checks(signal.project, f"shikiru start was refused: {error}")
+            note = await self._give_up(signal.project, f"Shikiru refused the start: {error}")
             raise RestartFailedError(note) from error
         # keep: an unknown outcome stays issued, so the next look at the op decides
         except CommandError as error:
-            note = await self._with_checks(
-                signal.project, f"shikiru start did not run to its end: {error}"
-            )
+            note = await self._give_up(signal.project, f"The start did not run to its end: {error}")
             raise RestartFailedError(note) from error
 
     async def _confirm(self, signal: Signal) -> Outcome:
@@ -91,23 +89,33 @@ class RestartAction:
             now = self._clock.now()
             if now >= deadline:
                 self._starts.fail(signal, now)
-                return Forward(await self._with_checks(signal.project, NOT_UP))
+                return Forward(await self._give_up(signal.project, NOT_UP))
             await self._clock.sleep(min(self._poll, deadline - now).total_seconds())
         self._starts.confirm(signal, self._clock.now())
-        self._notifier.tell(signal, _notice(signal), key=f"restart:{signal.id}")
+        self._notifier.tell(signal, _notice(signal.project), key=f"restart:{signal.id}")
         return Resolved(RESTARTED)
 
     async def _engine_up(self, project: str) -> bool:
         return (await self._clients[project].status()).engine_up
 
-    async def _with_checks(self, project: str, note: str) -> str:
+    async def _give_up(self, project: str, *sentences: str) -> str:
+        # keep: every forward leaves the engine down, so each one tells the PO what to do next
         failed = await self._clients[project].doctor()
-        return f"{note}; failed checks: {_describe(failed)}"
+        instruction = f"Please start it yourself with `shikiru start` in the {project} project."
+        return _join(*sentences, _checks(failed), instruction)
 
 
-def _describe(checks: Sequence[DoctorCheck]) -> str:
-    return "; ".join(f"{check.name} ({check.detail})" for check in checks) or "none"
+def _join(*sentences: str) -> str:
+    # keep: a sentence that already ends in a stop, such as one Shikiru wrote, gets only one
+    return " ".join(f"{sentence.rstrip('.')}." for sentence in sentences if sentence)
 
 
-def _notice(signal: Signal) -> str:
-    return f"{signal.project}: the engine was restarted; Shikiru resumes its tasks"
+def _checks(failed: Sequence[DoctorCheck]) -> str:
+    if not failed:
+        return ""
+    described = "; ".join(f"{check.name} ({check.detail})" for check in failed)
+    return f"The failed checks are: {described}"
+
+
+def _notice(project: str) -> str:
+    return f"The engine of {project} was restarted. Shikiru resumes its tasks."

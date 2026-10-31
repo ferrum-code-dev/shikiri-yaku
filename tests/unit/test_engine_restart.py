@@ -278,6 +278,54 @@ def test_a_second_restart_within_the_hour_is_refused_with_the_failed_checks(
     assert client.starts == 1
 
 
+LAST_EVENING = datetime(2026, 10, 27, 23, 55, tzinfo=UTC)
+JUST_AFTER_MIDNIGHT = datetime(2026, 10, 28, 0, 5, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("first", "refused", "when", "checks"),
+    [
+        (START, START + timedelta(minutes=5), "09:00 UTC", []),
+        (START, START + timedelta(minutes=5), "09:00 UTC", [TMUX_DOWN]),
+        (LAST_EVENING, JUST_AFTER_MIDNIGHT, "23:55 UTC on 2026-10-27", []),
+        (LAST_EVENING, JUST_AFTER_MIDNIGHT, "23:55 UTC on 2026-10-27", [TMUX_DOWN]),
+    ],
+    ids=["today", "today with failed checks", "earlier day", "earlier day with failed checks"],
+)
+def test_a_refused_restart_says_when_the_last_one_was_and_what_the_po_does(
+    world: World,
+    client: RestartClient,
+    clock: StepClock,
+    *,
+    first: datetime,
+    refused: datetime,
+    when: str,
+    checks: list[DoctorCheck],
+) -> None:
+    clock.current = first
+    assert isinstance(world.handle(engine_signal(Kind.ENGINE_DOWN, "S1")), Resolved)
+    clock.current = refused
+    client.engine_up = False
+    client.starts_up = False
+    client.checks = checks
+
+    outcome = world.handle(engine_signal(Kind.ENGINE_DOWN, "S2"))
+
+    assert isinstance(outcome, Forward)
+    note = outcome.note
+    assert f"was at {when}." in note
+    assert "once per hour" in note
+    assert "shikiru start" in note
+    assert ("failed checks" in note) is bool(checks)
+    assert ".;" not in note
+    assert "+00:00" not in note
+    assert "engine_" not in note
+    assert "+00:00" not in note
+    assert ".;" not in note
+    assert not any(kind in note for kind in ("engine_started", "engine_stopped", "engine_down"))
+    assert client.starts == 1
+
+
 def test_a_signal_whose_start_failed_earlier_is_never_started_again(
     world: World, client: RestartClient
 ) -> None:

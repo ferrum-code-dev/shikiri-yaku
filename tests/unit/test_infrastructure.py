@@ -180,7 +180,7 @@ def test_a_second_retry_of_the_same_task_and_reason_forwards_naming_the_first(
 
     assert isinstance(first, Resolved)
     assert isinstance(second, Forward)
-    assert START.isoformat() in second.note
+    assert "was at 09:00 UTC." in second.note
     assert client.resolved == [("E1", "retry")]
 
 

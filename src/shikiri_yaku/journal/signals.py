@@ -138,6 +138,7 @@ class SignalStore:
             UPDATE signals SET state = :closed, updated_at = :now,
                 final_line = COALESCE(final_line, :final_line)
             WHERE project = :project AND state NOT IN (:resolved, :closed)
+                AND (:forwarded_only = 0 OR state = :forwarded)
                 AND (:kind IS NULL OR kind = :kind)
                 AND (:escalation_id IS NULL OR escalation_id = :escalation_id)
                 AND (:task_id IS NULL OR task_id = :task_id)
@@ -146,6 +147,8 @@ class SignalStore:
             {
                 "closed": SignalState.CLOSED,
                 "resolved": SignalState.RESOLVED,
+                "forwarded": SignalState.FORWARDED,
+                "forwarded_only": closing.forwarded_only,
                 "now": stamp(now),
                 "project": closing.project,
                 "kind": closing.kind,
@@ -240,14 +243,19 @@ class SignalStore:
         *,
         wake_at: datetime | None = None,
         note: str | None = None,
+        final_line: str | None = None,
     ) -> bool:
-        """Move a signal only if it is still in `expected`; False means someone else moved it."""
+        """Move a signal only if it is still in `expected`; False means someone else moved it.
+
+        `final_line` is recorded once, for the copies that end with it.
+        """
         moved = self._database.connection.execute(
             """
             UPDATE signals SET state = :new, wake_at = :wake_at, updated_at = :now,
                 notes = CASE WHEN :note IS NULL THEN notes
                              WHEN notes IS NULL THEN :note
-                             ELSE notes || char(10) || :note END
+                             ELSE notes || char(10) || :note END,
+                final_line = COALESCE(final_line, :final_line)
             WHERE number = :number AND state = :expected
             """,
             {
@@ -255,6 +263,7 @@ class SignalStore:
                 "wake_at": None if wake_at is None else stamp(wake_at),
                 "now": stamp(now),
                 "note": note,
+                "final_line": final_line,
                 "number": number,
                 "expected": expected,
             },

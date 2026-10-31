@@ -83,7 +83,7 @@ def test_a_refusal_is_journaled_with_its_history_and_not_counted(
     second = guard.retry(PROJECT, "t1", REASON)
     assert isinstance(first, Refused)
     assert isinstance(second, Refused)
-    assert START.isoformat() in first.note
+    assert "was at 09:00 UTC." in first.note
     assert _refusals(memory) == 2
     guard.restart(PROJECT)
     assert isinstance(guard.restart(PROJECT), Refused)

@@ -5,8 +5,12 @@ The notice of a refusal is an outbound message too, and its wording is here (des
 
 from __future__ import annotations
 
+from datetime import UTC
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 class Purpose(StrEnum):
@@ -26,8 +30,19 @@ def refusal_notice(number: int | None) -> str:
     return f"{prefix}A message was refused and not sent. Its text was not kept."
 
 
+# keep: the last line of a message whose signal ended, so the PO sees why its buttons went
+ACKNOWLEDGED_LINE: Final = "Acknowledged"
+ENGINE_UP_LINE: Final = "Engine is up again"
 TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
 _CUT_MARK: Final = "…"
+
+
+def moment_text(moment: datetime, now: datetime) -> str:
+    """Say a moment as the PO reads it: its time, with its date only when it is not today."""
+    utc = moment.astimezone(UTC)
+    if utc.date() == now.astimezone(UTC).date():
+        return utc.strftime(TIME_FORMAT)
+    return f"{utc.strftime(TIME_FORMAT)} on {utc.date().isoformat()}"
 
 
 def fit(text: str, room: int) -> str:

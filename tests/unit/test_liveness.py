@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
@@ -11,6 +11,7 @@ from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.domain.signal import Kind, Lifecycle
 from shikiri_yaku.journal import CursorStore, Database, JournalSources, SignalState, SignalStore
+from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import EngineStatus, EventKinds, ShikiruLinkDownError
 
 if TYPE_CHECKING:
@@ -189,6 +190,59 @@ def test_engine_down_id_is_the_same_across_restarts_and_checks(world: _World) ->
     _check(source)
     _check(source)
     assert world.signals(Kind.ENGINE_DOWN) == [f"api:engine_down:{LAST_EVENT}"]
+
+
+# keep: the states a signal can be in when the engine comes back, and the way each is reached
+_ROUTE: Final = {
+    SignalState.NEW: (),
+    SignalState.HANDLING: (SignalState.HANDLING,),
+    SignalState.PARKED: (SignalState.HANDLING, SignalState.PARKED),
+    SignalState.FORWARDED: (SignalState.HANDLING, SignalState.FORWARDED),
+}
+
+
+def _signal_in(world: _World, kind: Kind, state: SignalState) -> int:
+    signals = SignalStore(world.database)
+    if kind is Kind.ESCALATION:
+        new = NewSignal(
+            f"{PROJECT}:escalation:E-1",
+            PROJECT,
+            kind,
+            "decision_required",
+            "question",
+            "T-1",
+            "E-1",
+        )
+    else:
+        new = NewSignal(f"{PROJECT}:{kind}:{LAST_EVENT}", PROJECT, kind, "agent_error", "down")
+    number = signals.insert_if_absent(new, RUN_START).row_id
+    previous = SignalState.NEW
+    for step in _ROUTE[state]:
+        assert signals.transition(number, previous, step, RUN_START)
+        previous = step
+    return number
+
+
+@pytest.mark.parametrize("state", list(_ROUTE))
+@pytest.mark.parametrize("kind", [Kind.ENGINE_DOWN, Kind.ENGINE_FAULT, Kind.ESCALATION])
+def test_engine_up_closes_only_a_forwarded_engine_signal(
+    world: _World, kind: Kind, state: SignalState
+) -> None:
+    number = _signal_in(world, kind, state)
+    world.engine.up = True
+    _check(world.operator())
+    stored = SignalStore(world.database).get(number)
+    assert stored is not None
+    closes = state is SignalState.FORWARDED and kind is not Kind.ESCALATION
+    assert (stored.state is SignalState.CLOSED) == closes
+
+
+def test_forwarded_engine_signal_stays_open_while_the_engine_is_down(world: _World) -> None:
+    number = _signal_in(world, Kind.ENGINE_DOWN, SignalState.FORWARDED)
+    _check(world.operator())
+    stored = SignalStore(world.database).get(number)
+    assert stored is not None
+    assert stored.state is SignalState.FORWARDED
 
 
 def test_outage_opens_one_health_signal_after_the_patience_and_closes_on_recovery(

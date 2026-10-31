@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import ACKNOWLEDGED_LINE, Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.messages import Delivery, Direction
@@ -179,4 +179,10 @@ class JournalReplies:
             )
             self._ops.intend(op, now)
             return
-        self._signals.transition(number, SignalState.FORWARDED, SignalState.CLOSED, now)
+        self._signals.transition(
+            number,
+            SignalState.FORWARDED,
+            SignalState.CLOSED,
+            now,
+            final_line=ACKNOWLEDGED_LINE,
+        )

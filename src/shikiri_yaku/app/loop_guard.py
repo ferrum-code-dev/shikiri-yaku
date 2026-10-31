@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.loop_guard import AutoAction, AutoOp, Cause, Granted, Refused
+from shikiri_yaku.domain.outbound import moment_text
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -15,6 +16,11 @@ if TYPE_CHECKING:
 DAY: Final = timedelta(days=1)
 HOUR: Final = timedelta(hours=1)
 REFUSED_SUFFIX: Final = "_refused"
+_UNITS: Final = {DAY: "day", HOUR: "hour"}
+_NOUNS: Final = {
+    AutoAction.RETRY: ("retry", "retries"),
+    AutoAction.RESTART: ("restart", "restarts"),
+}
 
 
 class LoopGuard:
@@ -57,7 +63,7 @@ class LoopGuard:
         used = self._log.times(action, project, cause, now - window)
         if len(used) < budget:
             return Granted(self._record(action, project, cause, None, now, refused=False))
-        note = _history(action, used, window)
+        note = _history(action, used, budget, window, now)
         self._record(f"{action}{REFUSED_SUFFIX}", project, cause, note, now, refused=True)
         return Refused(note)
 
@@ -77,6 +83,13 @@ class LoopGuard:
         return self._log.record(AutoOp(identity, kind, project, cause, payload, refused), now)
 
 
-def _history(action: AutoAction, used: list[datetime], window: timedelta) -> str:
-    when = ", ".join(moment.isoformat() for moment in used)
-    return f"No more automatic {action} within {window}; already done at {when}."
+def _history(
+    action: AutoAction, used: list[datetime], budget: int, window: timedelta, now: datetime
+) -> str:
+    noun, plural = _NOUNS[action]
+    last = moment_text(max(used), now)
+    allowed = "once" if budget == 1 else f"{budget} times"
+    return (
+        f"The last automatic {noun} was at {last}. "
+        f"Automatic {plural} are limited to {allowed} per {_UNITS[window]}."
+    )

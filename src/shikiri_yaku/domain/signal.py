@@ -69,6 +69,8 @@ class Closing:
     """Closes the open signals that match every field given: what a source learned has ended.
 
     `final_line`, when given, is the line the closed signals' messages end with.
+    `forwarded_only` leaves alone the signals the PO has not been shown yet or that are being
+    handled: a source that learns the cause is gone may only close what the PO was told about.
     """
 
     project: str
@@ -77,6 +79,7 @@ class Closing:
     task_id: str | None = None
     reason: str | None = None
     final_line: str | None = None
+    forwarded_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
