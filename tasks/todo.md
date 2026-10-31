@@ -61,5 +61,12 @@ merged and `uv run poe check` passes.
 - [x] C10. An engine that is up again closes its signal
 - [x] C11. A message in a topic is not a reply to the topic
 - [x] C12. Commands answer when they have nothing to show
-- [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
+- [ ] Phase D: Install
+  - [x] D1. Reasoner spike (`tasks/reasoner-spike.md`)
+  - [ ] D2. Reasoner adapters and `assess_blocker`
+  - [ ] D3. Ladder, host facts, health and doctor
+  - [ ] D4. Names, recipes and the existence check
+  - [ ] D5. Install approval
+  - [ ] D6. Executor and resolution
+  - [ ] D7. Interrupted installs and measures
 - [ ] Phase E: Hardening

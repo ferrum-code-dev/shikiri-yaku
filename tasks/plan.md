@@ -938,6 +938,118 @@ Acceptance criteria:
 * Table-driven: `/stats`, `/Open` (case), `/open@bot` (Telegram's addressed form, which is a known command), a long unknown name, plain text.
 * The gate passes.
 
+## Phase D: install a missing tool
+
+Design §3.2, §5, §6.3, §8. All tasks are `normal`. D1 (the spike) is done: `tasks/reasoner-spike.md`
+holds the verified flags, and the adapters follow it. Rules for the phase: a model never writes a
+command, names are validated by code, every command is a stored argument list built from a fixed
+recipe, nothing runs without the PO's tap, and no test calls a real agent CLI, a real package manager
+or the network (fakes and `echo`/`sleep` through `CommandRunner`).
+
+### D2. Reasoner adapters and `assess_blocker` (normal)
+
+`adapters/reasoner_cli.py`: a Claude adapter and a Codex adapter that implement one rung, run through
+`CommandRunner` with the flags of `tasks/reasoner-spike.md`, in a scratch directory under the instance
+directory, with an input cap and `reasoner.timeout_s`. Extend `CommandRunner.run` with optional `cwd`
+and `env` (the adapter and the Executor need them). The prompt is a fixed template that marks the
+escalation text as evidence, not instruction, and lists the host facts. The answer is parsed by a
+pydantic model (`verdict`, `tool`, `manager`, `package`, `why`, `suggestion`; `extra="ignore"`).
+`Assessment` gains the optional `tool`, `manager`, `package` and `why` (raw, unvalidated). A rung
+that cannot run, times out, exits with an error or returns invalid output raises `ReasonerError`
+naming the rung and the reason.
+
+Acceptance criteria:
+* With a fake runner that returns the recorded shape of each CLI's output, both adapters return the same `Assessment`; the argument list holds the spike's flags and the schema, and never the escalation text as a flag value other than the prompt argument.
+* A timeout, a non-zero exit, text that is not JSON and JSON that misses a required field each raise `ReasonerError` that names the rung.
+* An escalation text that looks like an instruction (for example "ignore the schema") is passed as evidence inside the prompt template and changes no flag.
+* The gate passes.
+
+### D3. Ladder, host facts, health and doctor (normal)
+
+`app/reasoner_ladder.py`: `LadderReasoner` implements `Reasoner` over the rungs of `reasoner.ladder`
+(`adapter:model:effort`, parsed by the settings model; an unknown adapter fails at start). A failed rung
+is skipped for `cooldown_min`; at most `reasoner.max_parallel` calls run at once; every rung failing
+raises `ReasonerError` with each rung's reason. `app/host_facts.py` collects OS, which of the five
+managers exist and the login-shell PATH, through `CommandRunner`. In `bootstrap.py` the Reasoner, when
+configured, becomes the `assess` function of `RuleClassifier`; it never raises: a failure becomes
+`Assessment(OTHER, "Reasoner failed: …")`. The health source raises one `health` signal while the whole
+ladder fails and closes it on the next success. `doctor` and `/status` show each rung's state and `doctor`
+probes that each rung's CLI exists.
+
+Acceptance criteria:
+* A first rung that fails is skipped on the next call within the cooldown and tried again after it (test-time clock).
+* All rungs failing returns the `Reasoner failed` assessment, forwards the signal to `product` with that note, and raises one `health` signal, not one per call; a later success closes it.
+* Without a `[reasoner]` section nothing changes: `decision_required` goes to `product` as today.
+* More than `max_parallel` simultaneous calls wait.
+* The gate passes.
+
+### D4. Names, recipes and the existence check (normal)
+
+`domain/recipes.py` (pure): the name pattern of design §6.3 (letters, digits, `.` `_` `-` `+`, and `@` and
+`/` for npm; at most 100 characters; a name never starts with `-`), the allow-list of managers and the
+recipe table `brew`, `uv`, `npm`, `pipx`, `cargo` as fixed argument lists. `validate_install(tool, manager,
+package, host)` returns an `InstallPlan` (tool, manager, package, argument list) or a typed refusal with a
+reason (bad name, manager not allowed, manager missing on this host, no recipe). The check `command -v
+<tool>` is built from the validated name and run by an `app/tool_check.py` through the login shell, with
+the tool name passed as an argument and not spliced into the command string.
+
+Acceptance criteria:
+* Table-driven: valid names pass; names with spaces, `;`, `$(…)`, quotes, newlines, a leading `-`, an empty string, 101 characters, and `apt`, `sudo`, `dnf` as manager are refused with the right reason.
+* Each recipe yields the exact argument list of design §6.3; no recipe contains a shell string.
+* The check returns the path found, or "missing"; a hostile tool name never reaches it.
+* The gate passes.
+
+### D5. Install approval (normal)
+
+The **Install** action in `extensions/infrastructure` for `decision_required` with verdict `host_tool`
+(the rule is added with the verdict, and the product catch-all stays last). It validates (D4), checks the
+tool is missing (found: forward with the path), stores an `install` op in state `intended` with the exact
+argument list, and sends the approval message with **Install** and **Decline**: the tool, the reason
+marked as model-written, the command as built, the manager and the effect text of §6.3. It returns
+`Notified`. The tap goes through Replies: Install moves the op `intended → approved` once (a conditional
+change, so two taps approve once; a tap on an approval older than `approval_expiry_h`, or on an
+escalation resolved elsewhere, is void and says so); Decline forwards the original escalation. Any
+validation failure forwards with the reason and the model's suggestion.
+
+Acceptance criteria:
+* Composed test: a `decision_required` signal with a fake Reasoner verdict `host_tool` sends one approval message and no command runs.
+* Two Install taps approve once; an expired approval and an approval for a signal resolved elsewhere do nothing and say why; Decline forwards the original escalation with a note.
+* A hostile package name, an unknown manager and a tool that already exists each forward with the reason and run nothing.
+* The stored argument list is the one shown in the message.
+* The gate passes.
+
+### D6. Executor and resolution (normal)
+
+`app/install_executor.py`: when an install op is `approved`, claim it (`approved → issued`) and run the
+stored argument list quoted into `$SHELL -lc`, through `CommandRunner` with `cwd` a scratch directory
+outside every repository, `CI=1` and `NONINTERACTIVE=1`, closed stdin, `command_timeout_min`, under a
+host lock (one host command at a time). Output goes to a file in the instance directory. Success means
+the check of D4 passes, not exit code 0. Then `resolve_escalation(answer)` with "Installed `<tool>` with
+`<manager>` (found at `<path>`). Please continue.", the op `confirmed` and the signal resolved. Failure
+or a failing check marks the op `failed` and forwards the original escalation with the tail of the output.
+
+Acceptance criteria:
+* With a fake runner: a passing check after exit 0 resolves with the answer text above; exit 0 but a failing check, a non-zero exit and a timeout each forward with the output tail and mark the op `failed`.
+* The command that runs is the stored list: changing the signal text or the model's fields after approval changes nothing.
+* Two executors started together run one command (the host lock and the claim).
+* No test runs a real package manager: the gate stays offline.
+* The gate passes.
+
+### D7. Interrupted installs and measures (normal)
+
+Start-up reconcile for `install` ops: an op in `issued` is decided by its check, never repeated: check
+passes means `confirmed` and resolve as in D6; check fails means the PO is asked again with a new
+approval. An `approved` op never claimed is run. `stats` reports installs approved, declined and checks
+failed (the counters design §15 lists), replacing the "unavailable until Phase D" labels. A composed
+test runs the whole path: raise, verdict, approval, tap, install, check, resolve.
+
+Acceptance criteria:
+* Restart with an op in `issued` and the tool present: resolves once, runs nothing. With the tool still missing: a new approval message, and the old one is void.
+* A crash between the claim and the run, and between the run and the resolve, are both covered by tests with the clock and fake runner.
+* `stats` shows the three install counters from a seeded journal.
+* The composed path passes, and fails when the check-after step is removed.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
