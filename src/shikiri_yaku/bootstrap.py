@@ -263,7 +263,8 @@ def compose(
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
 
     def recover() -> None:
-        SignalStore(journal).close_removed(clients.keys(), REMOVED_NOTE, clock.now())
+        # keep: operator health signals belong to no component; a restart must not close them
+        SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
         asyncio.run(destinations.prepare())
 

@@ -18,6 +18,7 @@ from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.app.event_source import MERGED_LINE
+from shikiri_yaku.app.health_source import RECOVERED_LINE
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.rules import AGENT_ERROR, QUOTA_EXHAUSTED
@@ -57,6 +58,9 @@ _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "
 _REMOVED_DOWN: Final = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _REMOVED_DOWN_NEW: Final = NewSignal(_REMOVED_DOWN.id, "old", "engine_down", "", "engine is down")
 TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
+_CONFLICT: Final[dict[str, Any]] = json.loads(
+    (TELEGRAM_FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
+)
 _E1_ID: Final = "api:escalation:E-1"
 _QUOTA_NOTICE: Final = "quota is used up"
 _RESET_IN: Final = timedelta(hours=1)
@@ -208,6 +212,29 @@ async def _until(holds: Callable[[], bool]) -> None:
         await NapClock().sleep(0)
 
 
+def _health_delivered(directory: Path) -> bool:
+    """Say whether the journal records a health message as sent, through a connection of its own."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            """
+            SELECT COUNT(*) AS sent FROM messages
+            JOIN signals ON signals.number = messages.signal_number
+            WHERE signals.kind = 'health' AND messages.platform_message_id IS NOT NULL
+            """
+        ).fetchone()
+    finally:
+        database.close()
+    return int(row["sent"]) > 0
+
+
+def _edited(bot: FakeBotApi, text: str) -> bool:
+    return any(
+        method == "editMessageText" and text in str(payload.get("text", ""))
+        for method, payload in bot.calls
+    )
+
+
 def _signal_state(directory: Path, signal_id: str) -> SignalState | None:
     """Return the journal's state of the signal, read through a connection of its own."""
     database = Database.open(directory / JOURNAL_FILE_NAME)
@@ -216,6 +243,19 @@ def _signal_state(directory: Path, signal_id: str) -> SignalState | None:
     finally:
         database.close()
     return None if stored is None else stored.state
+
+
+class _OutageBot(FakeBotApi):
+    """A fake Bot API that refuses getUpdates, as one with a webhook set does, while `refusing`."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refusing = True
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == "getUpdates" and self.refusing:
+            return _CONFLICT
+        return await super().call(method, payload)
 
 
 class _MarkingBot(FakeBotApi):
@@ -542,3 +582,38 @@ def test_a_pull_request_opened_is_sent_for_review_and_the_task_done_closes_its_m
     [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
     final = (edit["message_id"], edit["reply_markup"], MERGED_LINE in str(edit["text"]))
     assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
+
+
+def test_an_operator_health_message_is_edited_to_recovered_after_a_restart(
+    tmp_path: Path,
+) -> None:
+    directory = _instance(tmp_path)
+    bot = _OutageBot()
+    first = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(_ShikiruSession(asyncio.Event())),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    try:
+        asyncio.run(_deliver(first.jobs, _until(lambda: _health_delivered(directory))))
+    finally:
+        first.close()
+
+    bot.refusing = False
+    restarted = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(_ShikiruSession(asyncio.Event())),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    try:
+        restarted.recover()
+        asyncio.run(_deliver(restarted.jobs, _until(lambda: _edited(bot, RECOVERED_LINE))))
+    finally:
+        restarted.close()
+
+    [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
+    assert str(edit["text"]).endswith(RECOVERED_LINE)
