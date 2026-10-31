@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
@@ -9,6 +10,7 @@ from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.ports import (
+    INSTALL_INTENDED,
     EscalationResolution,
     EscalationStatus,
     ShikiruError,
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
         Clock,
         Destinations,
         EscalationView,
+        InstallApprovalRenderer,
         Message,
         OpenLog,
         Outbox,
@@ -60,6 +63,8 @@ class OpenCommand:
         *,
         destinations: Destinations,
         channel: str,
+        install_approval: InstallApprovalRenderer | None = None,
+        approval_expiry_h: int | None = None,
     ) -> None:
         self._log = log
         self._clients = clients
@@ -68,6 +73,8 @@ class OpenCommand:
         self._clock = clock
         self._destinations = destinations
         self._channel = channel
+        self._install_approval = install_approval
+        self._approval_expiry_h = approval_expiry_h
 
     async def handle(self, item: Inbound) -> None:
         if self._outbox.command_reply_queued(_done_key(item.update_id)):
@@ -75,6 +82,7 @@ class OpenCommand:
         listed, unreachable = await self._listed()
         shown = await self._reshow_questions(item.update_id, listed)
         shown += self._queue_approvals(item.update_id, listed)
+        shown += self._queue_install_approvals(item.update_id, listed)
         if unreachable:
             self._reply(
                 item,
@@ -115,6 +123,31 @@ class OpenCommand:
                     approval.number, approval.kind, answer_data(approval.number, option)
                 ),
                 key=confirm_key(approval.op_id, update_id),
+            )
+            queued += 1
+        return queued
+
+    def _queue_install_approvals(
+        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+    ) -> int:
+        if self._install_approval is None or self._approval_expiry_h is None:
+            return 0
+        queued = 0
+        now = self._clock.now()
+        for operation in self._log.pending_install_approvals():
+            payload = operation.payload
+            if (
+                operation.state != INSTALL_INTENDED
+                or (operation.project, payload.escalation_id) not in listed
+                or now - operation.created_at >= timedelta(hours=self._approval_expiry_h)
+            ):
+                continue
+            self._queue(
+                payload.number,
+                operation.project,
+                Purpose.APPROVAL,
+                self._install_approval.render(operation.id, payload),
+                key=f"install:{operation.id}:open:{update_id}",
             )
             queued += 1
         return queued

@@ -128,6 +128,13 @@ class OpStore:
         ).fetchone()
         return None if row is None else _install_op(row)
 
+    def intended_installs(self) -> list[InstallOp]:
+        rows = self._database.connection.execute(
+            "SELECT * FROM ops WHERE kind = ? AND state = ? ORDER BY id",
+            (INSTALL_KIND, OpState.INTENDED),
+        )
+        return [_install_op(row) for row in rows]
+
     def intend_install(
         self,
         identity: str,

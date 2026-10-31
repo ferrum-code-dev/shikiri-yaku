@@ -78,6 +78,8 @@ merged and `uv run poe check` passes.
       - [x] D5d2. Callback routing and origin binding
       - [x] D5d3. Install decision effects
     - [ ] D5e. Composition, `/open` and end-to-end approval
+      - [x] D5e1. Journaled install approval replay in `/open`
+      - [ ] D5e2. Production composition and end-to-end approval
   - [ ] D6. Executor and resolution
   - [ ] D7. Interrupted installs and measures
 - [ ] Phase E: Hardening

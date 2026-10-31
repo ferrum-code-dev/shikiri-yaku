@@ -1110,14 +1110,24 @@ explained and ignored. Decline invalidates the pending op before forwarding the 
 Acceptance criteria: duplicate taps, expiry, resolved-elsewhere, decline and replay are covered; gate
 passes.
 
-#### D5e. Composition, `/open` and end-to-end approval
+#### D5e1. Journaled install approval replay in `/open`
 
-Register the action in bootstrap, dispatch install approvals through Replies, and make `/open`
-re-show the same pending intended install op and buttons from its stored argv without extending its
-approval lifetime. Preserve current accept/cancel approvals and the generic host-tool rule.
+Extend the journal and `/open` to re-show only pending intended install ops from their stored
+payload, while the original approval lifetime still applies. Give each `/open` copy its own stable
+outbox key while binding its buttons to the same op. Preserve current accept/cancel approvals.
 
-Acceptance criteria: the fake-Reasoner composed path reaches approval and Replies, including restart
-and `/open`; all D5 criteria pass; gate passes.
+Acceptance criteria: in-memory SQLite and `/open` tests cover restart replay of one stored op,
+distinct and replayed update keys, expired and handled ops, and original payload/argv reuse; gate
+passes.
+
+#### D5e2. Production composition and end-to-end approval
+
+Register the Install action and its read-only probes in bootstrap, and inject Install approval reply
+handling. Preserve the generic host-tool rule and product catch-all. Exercise fake Reasoner through
+classification, Install, Telegram approval, `/open` after restart, and a tap of that copy.
+
+Acceptance criteria: the full fake-Reasoner composed path approves the same stored op after restart
+and `/open`; no package-manager command or network is run; all D5 criteria pass; gate passes.
 
 ### D6. Executor and resolution (normal)
 

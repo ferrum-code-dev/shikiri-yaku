@@ -140,7 +140,7 @@ def _bound(operation: InstallOp, item: Inbound, origin: ReplyOrigin, verb: str, 
     )
     return (
         origin.purpose == Purpose.APPROVAL
-        and origin.key == f"install:{op_id}"
+        and _install_key(origin.key, op_id)
         and item.data == expected
         and expected in {button.data for button in origin.message.buttons}
         and operation.identity == f"install:{origin.signal.id}"
@@ -150,4 +150,15 @@ def _bound(operation: InstallOp, item: Inbound, origin: ReplyOrigin, verb: str, 
         and operation.id == op_id
         and operation.payload.number == origin.number
         and origin.signal.escalation_id == operation.payload.escalation_id
+    )
+
+
+def _install_key(key: str | None, op_id: int) -> bool:
+    original = f"install:{op_id}"
+    if key == original:
+        return True
+    prefix = f"{original}:open:"
+    update_id = "" if key is None else key.removeprefix(prefix)
+    return (
+        key is not None and key.startswith(prefix) and update_id.isascii() and update_id.isdecimal()
     )

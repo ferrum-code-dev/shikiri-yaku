@@ -100,6 +100,14 @@ class InstallAction:
         return Notified("queued the install approval for the Product Owner")
 
 
+class InstallApprovalPresenter:
+    """Render an approval from an install op's already stored argument list."""
+
+    def render(self, op_id: int, payload: InstallOpPayload) -> Message:
+        """Return the approval message whose buttons name this persisted operation."""
+        return _approval(op_id, payload)
+
+
 def _approval(op_id: int, payload: InstallOpPayload) -> Message:
     text = "\n\n".join(
         (

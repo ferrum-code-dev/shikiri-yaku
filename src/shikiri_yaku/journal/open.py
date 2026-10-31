@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.journal.ops import OpState
-from shikiri_yaku.ports import PendingApproval, ResolutionKind, ResolvePayload
+from shikiri_yaku.journal.ops import OpState, OpStore
+from shikiri_yaku.ports import InstallOp, PendingApproval, ResolutionKind, ResolvePayload
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
@@ -21,6 +21,7 @@ class JournalOpen:
     def __init__(self, database: Database, signals: SignalStore) -> None:
         self._database = database
         self._signals = signals
+        self._ops = OpStore(database)
 
     def forwarded(self) -> list[tuple[int, Signal]]:
         return [
@@ -49,3 +50,6 @@ class JournalOpen:
                     )
                 )
         return found
+
+    def pending_install_approvals(self) -> list[InstallOp]:
+        return self._ops.intended_installs()

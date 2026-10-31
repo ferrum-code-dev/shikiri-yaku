@@ -80,6 +80,7 @@ __all__ = [
     "Guard",
     "HostObservation",
     "InboundLog",
+    "InstallApprovalRenderer",
     "InstallFacts",
     "InstallLog",
     "InstallOp",
@@ -415,6 +416,12 @@ class InstallPreparer(Protocol):
     """The validated plan, or a refusal to route back to Product, before any op is stored."""
 
     async def prepare(self, signal: Signal) -> InstallPlan | Forward: ...
+
+
+class InstallApprovalRenderer(Protocol):
+    """Render the Install approval buttons from one stored op and its validated payload."""
+
+    def render(self, op_id: int, payload: InstallOpPayload) -> Message: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -1313,6 +1320,10 @@ class OpenLog(Protocol):
 
     def pending_approvals(self) -> list[PendingApproval]:
         """Return the accept and cancel ops intended or approved but not issued, oldest first."""
+        ...
+
+    def pending_install_approvals(self) -> list[InstallOp]:
+        """Return intended install ops, oldest first, for `/open` to re-show from their payload."""
         ...
 
 

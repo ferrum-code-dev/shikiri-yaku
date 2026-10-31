@@ -20,6 +20,7 @@ from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
 from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
 from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
@@ -185,6 +186,8 @@ class Harness:
             Clock(at),
             destinations=FixedDestinations([OWNER]),
             channel="telegram",
+            install_approval=InstallApprovalPresenter(),
+            approval_expiry_h=InfrastructureSettings().approval_expiry_h,
         )
         goal = goal_command(
             self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
@@ -198,6 +201,10 @@ class Harness:
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
+
+    def open(self, update: int = 700, at: datetime = NOW) -> None:
+        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open")
+        asyncio.run(self.commands(at).handle(item))
 
     def resolve_in_shikiru(self) -> None:
         record = self.client.view.escalation.model_copy(update={"status": "resolved"})
@@ -379,6 +386,49 @@ def test_decline_is_durable_and_product_forward_is_replay_safe(h: Harness) -> No
     assert forwards[0].purpose is Purpose.QUESTION
     assert forwards[0].body is not None
     assert "Model note: model suggestion" in forwards[0].body.text
+
+
+def test_open_replays_the_same_intended_install_op_with_new_update_keys(h: Harness) -> None:
+    handler, op_id = h.install_replies()
+    stored = h.ops.install_op(op_id)
+    assert stored is not None
+
+    h.open(update=700)
+    [first] = h.outbox.pending()
+    h.open(update=701)
+    h.open(update=700)
+    copies = h.outbox.pending()
+
+    assert len(copies) == 2
+    assert copies[0].message.text == copies[1].message.text
+    assert copies[0].message.buttons == copies[1].message.buttons
+    assert f"Command: {' '.join(stored.payload.argv)}" in first.message.text
+    assert copies[0].message.buttons[0].data == install_data(h.number, op_id)
+    assert h.ops.install_op(op_id) == stored
+    h.outbox.confirm(copies[1].message_id, "1001/44")
+    h.handle(ref="1001/44", data=install_data(h.number, op_id), install_replies=handler)
+    decided = h.ops.install_op(op_id)
+    assert decided is not None
+    assert decided.state == OpState.APPROVED
+    assert decided.payload == stored.payload
+
+
+def test_open_does_not_renew_an_expired_install_approval(h: Harness) -> None:
+    h.install_replies()
+    expiry = InfrastructureSettings().approval_expiry_h
+
+    h.open(update=701, at=NOW + timedelta(hours=expiry))
+
+    assert all("Install approval" not in message.message.text for message in h.outbox.pending())
+
+
+def test_open_does_not_reoffer_an_approved_install(h: Harness) -> None:
+    _, op_id = h.install_replies()
+    assert h.ops.approve_install(op_id, h.number, NOW)
+
+    h.open(update=701)
+
+    assert all("Install approval" not in message.message.text for message in h.outbox.pending())
 
 
 @pytest.mark.parametrize("text", [None, "Use the other approach"])
