@@ -3,16 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.loop_guard import Cause
+from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.journal.database import Inserted, parse_stamp, stamp
-from shikiri_yaku.ports import Ack
+from shikiri_yaku.ports import Ack, InstallOp
 
 if TYPE_CHECKING:
     import sqlite3
 
     from shikiri_yaku.domain.loop_guard import AutoOp
+    from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.journal.database import Database
 
 
@@ -23,6 +25,9 @@ class OpState(StrEnum):
     CONFIRMED = "confirmed"
     FAILED = "failed"
     UNKNOWN = "unknown"
+
+
+INSTALL_KIND: Final = "install"
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,43 @@ class OpStore:
         ).fetchone()
         return None if row is None else _op(row)
 
+    def get_install(self, identity: str) -> InstallOp | None:
+        row = self._database.connection.execute(
+            "SELECT * FROM ops WHERE identity = ? AND kind = ?", (identity, INSTALL_KIND)
+        ).fetchone()
+        return None if row is None else _install_op(row)
+
+    def install_op(self, op_id: int) -> InstallOp | None:
+        row = self._database.connection.execute(
+            "SELECT * FROM ops WHERE id = ? AND kind = ?", (op_id, INSTALL_KIND)
+        ).fetchone()
+        return None if row is None else _install_op(row)
+
+    def intend_install(
+        self,
+        identity: str,
+        signal: Signal,
+        payload: InstallOpPayload,
+        now: datetime,
+    ) -> InstallOp:
+        """Persist the validated plan once and return the stored version, never a re-derived one."""
+        self.intend(
+            NewOp(
+                identity,
+                INSTALL_KIND,
+                signal.project,
+                signal.task_id,
+                signal.reason,
+                payload.model_dump_json(),
+            ),
+            now,
+        )
+        stored = self.get_install(identity)
+        if stored is None:
+            message = f"op identity '{identity}' belongs to a different operation"
+            raise ValueError(message)
+        return stored
+
     def transition(
         self,
         op_id: int,
@@ -192,6 +234,24 @@ class OpStore:
             arguments.append(stamp(since))
         rows = self._database.connection.execute(query + " ORDER BY id", arguments)
         return [moment for row in rows if (moment := parse_stamp(row["created_at"]))]
+
+
+def _install_op(row: sqlite3.Row) -> InstallOp:
+    payload = InstallOpPayload.model_validate_json(row["payload"])
+    created_at = parse_stamp(row["created_at"])
+    if created_at is None:
+        message = f"install op {row['id']} has no creation time"
+        raise ValueError(message)
+    return InstallOp(
+        id=row["id"],
+        identity=row["identity"],
+        project=row["project"],
+        task_id=row["task_id"],
+        reason=row["reason"],
+        payload=payload,
+        state=row["state"],
+        created_at=created_at,
+    )
 
 
 class JournalActions:

@@ -45,7 +45,14 @@ PAYLOAD: Final = ResolvePayload(
 
 
 @pytest.mark.parametrize(
-    ("data", "expected"), [("a:41:2", ("a", 41, 2)), ("d:41", ("d", 41)), ("k:41", ("k", 41))]
+    ("data", "expected"),
+    [
+        ("a:41:2", ("a", 41, 2)),
+        ("d:41", ("d", 41)),
+        ("k:41", ("k", 41)),
+        ("i:41:8", ("i", 41, 8)),
+        ("x:41:8", ("x", 41, 8)),
+    ],
 )
 def test_callback_verbs_decode_separately(data: str, expected: tuple[str | int, ...]) -> None:
     assert decode_callback(data) == expected

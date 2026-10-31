@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
+    from shikiri_yaku.domain.recipes import InstallOpPayload
     from shikiri_yaku.domain.schedule import Awaiting, Parked
     from shikiri_yaku.domain.signal import (
         Closing,
@@ -74,7 +75,11 @@ __all__ = [
     "Guard",
     "HostObservation",
     "InboundLog",
+    "InstallFacts",
+    "InstallLog",
+    "InstallOp",
     "InstallProposalLog",
+    "InstallToolCheck",
     "LifecycleJournal",
     "LivenessJournal",
     "Message",
@@ -380,6 +385,48 @@ class HostObservation:
 
     prompt: tuple[str, ...]
     managers: frozenset[str]
+
+
+class InstallFacts(Protocol):
+    """The current read-only host observation used to validate an install manager."""
+
+    async def collect(self) -> HostObservation: ...
+
+
+class InstallToolCheck(Protocol):
+    """The login-shell `command -v` check for one validated executable name."""
+
+    async def find(self, tool: str) -> str | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class InstallOp:
+    """One install operation as read from the journal, including its creation time."""
+
+    id: int
+    identity: str
+    project: str
+    task_id: str | None
+    reason: str | None
+    payload: InstallOpPayload
+    state: str
+    created_at: datetime
+
+
+class InstallLog(Protocol):
+    """The journal operations the Install action needs before the PO approves anything."""
+
+    def get_install(self, identity: str) -> InstallOp | None: ...
+
+    def intend_install(
+        self,
+        identity: str,
+        signal: Signal,
+        payload: InstallOpPayload,
+        now: datetime,
+    ) -> InstallOp: ...
+
+    def install_op(self, op_id: int) -> InstallOp | None: ...
 
 
 class ActionLog(Protocol):

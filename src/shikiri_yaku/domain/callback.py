@@ -6,7 +6,8 @@ type AnswerTap = tuple[Literal["a"], PositiveInt, PositiveInt]
 type DetailsTap = tuple[Literal["d"], PositiveInt]
 type AcknowledgeTap = tuple[Literal["k"], PositiveInt]
 type SubmitTap = tuple[Literal["s"], PositiveInt]
-type Callback = AnswerTap | DetailsTap | AcknowledgeTap | SubmitTap
+type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
+type Callback = AnswerTap | DetailsTap | AcknowledgeTap | SubmitTap | InstallTap
 
 SUBMIT_VERB: Final = "s"
 _CALLBACK = TypeAdapter[Callback](Callback)
@@ -15,6 +16,16 @@ _CALLBACK = TypeAdapter[Callback](Callback)
 def submit_data(op_id: int) -> str:
     """Return the callback data of *Submit again*; the op id is its journal reference."""
     return f"{SUBMIT_VERB}:{op_id}"
+
+
+def install_data(number: int, op_id: int) -> str:
+    """Return the numeric callback that asks Replies to approve this stored install op."""
+    return f"i:{number}:{op_id}"
+
+
+def decline_data(number: int, op_id: int) -> str:
+    """Return the numeric callback that asks Replies to decline this stored install op."""
+    return f"x:{number}:{op_id}"
 
 
 def decode_callback(data: str) -> Callback:

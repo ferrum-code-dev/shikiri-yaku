@@ -12,7 +12,14 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Annotated, Final
 
-from pydantic import StringConstraints, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PositiveInt,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+)
 
 NAME_MAX_LENGTH: Final = 100
 _NAME_CHARS: Final = "A-Za-z0-9._+"
@@ -71,6 +78,20 @@ class InstallPlan:
     tool: str
     manager: str
     package: str
+    argv: tuple[str, ...]
+
+
+class InstallOpPayload(BaseModel):
+    """The validated install plan and signal identity stored before approval is queued."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: PositiveInt
+    escalation_id: str
+    tool: str
+    manager: str
+    package: str
+    why: str
     argv: tuple[str, ...]
 
 
