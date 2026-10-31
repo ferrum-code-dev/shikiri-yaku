@@ -4,34 +4,42 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import Purpose, fit
 from shikiri_yaku.extensions.product.message import escalation_message, information_message
-from shikiri_yaku.ports import EscalationStatus
+from shikiri_yaku.ports import EscalationStatus, ShikiruError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import Clock, Destinations, EscalationView, Outbox, ShikiruClient
+    from shikiri_yaku.ports import (
+        Clock,
+        Destinations,
+        EscalationView,
+        Message,
+        Outbox,
+        ShikiruClient,
+    )
 
 
 class ProductForwarder:
     """The Router's Forwarder: queues the message of a forwarded signal for each destination.
 
     A signal with an escalation is shown as its structured view. A signal without one, or whose
-    escalation Shikiru no longer returns, is shown as information. A failure to read the view or to
+    escalation Shikiru no longer returns, is shown as information. The task's title is optional:
+    when Shikiru cannot give it, the header names the task alone. A failure to read the view or to
     queue propagates, so the Router retries the forward later.
     """
 
     def __init__(
         self,
-        product: str,
+        title_max_chars: int,
         clients: Mapping[str, ShikiruClient],
         outbox: Outbox,
         clock: Clock,
         destinations: Destinations,
     ) -> None:
-        self._product = product
+        self._title_max_chars = title_max_chars
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
@@ -39,7 +47,16 @@ class ProductForwarder:
 
     async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
         view = await self._view(signal)
-        self._show(number, signal, view, note, suggestion, key=f"forward:{number}")
+        title = await self._title(signal)
+        self._show(
+            number,
+            signal,
+            view,
+            title=title,
+            note=note,
+            suggestion=suggestion,
+            key=f"forward:{number}",
+        )
 
     async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> None:
         """Queue the signal's question again as a new message, once per key, if still open.
@@ -50,39 +67,71 @@ class ProductForwarder:
         view = await self._view(signal)
         if view is None or view.escalation.status != EscalationStatus.OPEN:
             return
-        self._show(number, signal, view, note, "", key=key)
+        title = await self._title(signal)
+        self._show(number, signal, view, title=title, note=note, suggestion="", key=key)
 
     def _show(
         self,
         number: int,
         signal: Signal,
         view: EscalationView | None,
+        *,
+        title: str,
         note: str,
         suggestion: str,
-        *,
         key: str,
     ) -> None:
-        if view is None:
-            purpose = Purpose.NOTICE
-            message = information_message(
-                number, signal, product=self._product, note=note, suggestion=suggestion
-            )
-        else:
-            purpose = Purpose.QUESTION
-            message = escalation_message(
-                number, signal, view, product=self._product, note=note, suggestion=suggestion
-            )
+        now = self._clock.now()
         # keep: a handler may run twice for one signal, and the key makes the second queue nothing
-        self._outbox.queue(
+        for destination in self._destinations.for_signal(signal.project, signal.kind):
+            in_topic = self._destinations.component_of(destination.thread) == signal.project
+            purpose, message = self._render(
+                number, signal, view, title, in_topic=in_topic, note=note, suggestion=suggestion
+            )
+            self._outbox.queue(number, purpose, [destination], message, key=key, now=now)
+
+    def _render(
+        self,
+        number: int,
+        signal: Signal,
+        view: EscalationView | None,
+        title: str,
+        *,
+        in_topic: bool,
+        note: str,
+        suggestion: str,
+    ) -> tuple[Purpose, Message]:
+        if view is None:
+            information = information_message(
+                number,
+                signal,
+                title=title,
+                in_topic=in_topic,
+                note=note,
+                suggestion=suggestion,
+            )
+            return Purpose.NOTICE, information
+        question = escalation_message(
             number,
-            purpose,
-            self._destinations.for_signal(signal.project, signal.kind),
-            message,
-            key=key,
-            now=self._clock.now(),
+            signal,
+            view,
+            title=title,
+            in_topic=in_topic,
+            note=note,
+            suggestion=suggestion,
         )
+        return Purpose.QUESTION, question
 
     async def _view(self, signal: Signal) -> EscalationView | None:
         if signal.escalation_id is None:
             return None
         return await self._clients[signal.project].get_escalation(signal.escalation_id)
+
+    async def _title(self, signal: Signal) -> str:
+        if signal.task_id is None:
+            return ""
+        try:
+            detail = await self._clients[signal.project].get_task(signal.task_id)
+        except ShikiruError:
+            return ""
+        return "" if detail is None else fit(detail.task.title, self._title_max_chars)

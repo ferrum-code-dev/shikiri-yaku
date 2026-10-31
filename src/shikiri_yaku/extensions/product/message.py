@@ -27,7 +27,6 @@ RECOMMENDED: Final = "★"
 CUT_MARK: Final = "…"
 DETAILS_LABEL: Final = "Details"
 ACKNOWLEDGE_LABEL: Final = "Acknowledge"
-TITLE_DECISION: Final = "Decision needed"
 TITLE_INFORMATION: Final = "For information"
 
 
@@ -69,7 +68,8 @@ def escalation_message(
     signal: Signal,
     view: EscalationView,
     *,
-    product: str,
+    title: str,
+    in_topic: bool,
     note: str,
     suggestion: str,
 ) -> Message:
@@ -78,7 +78,7 @@ def escalation_message(
         Button(choice.button, f"{Tap.ANSWER}:{number}:{choice.option}") for choice in choices
     )
     text = _text(
-        _header(number, signal, product, TITLE_DECISION),
+        _header(number, signal, title, in_topic=in_topic),
         view.question or view.escalation.headline,
         "\n".join(choice.line for choice in choices),
         _notes(note, suggestion),
@@ -94,12 +94,13 @@ def information_message(
     number: int,
     signal: Signal,
     *,
-    product: str,
+    title: str,
+    in_topic: bool,
     note: str,
     suggestion: str,
 ) -> Message:
     text = _text(
-        _header(number, signal, product, TITLE_INFORMATION),
+        _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION),
         signal.text,
         _notes(note, suggestion),
     )
@@ -140,8 +141,10 @@ def _with_consequences(text: str, consequences: str) -> str:
     return f"{text} ({consequences})" if consequences else text
 
 
-def _header(number: int, signal: Signal, product: str, title: str) -> str:
-    parts = (f"S{number}", product, signal.project, signal.task_id, title)
+def _header(number: int, signal: Signal, title: str, *, in_topic: bool, label: str = "") -> str:
+    # keep: a message in its component's topic already names the component, so it is left out
+    project = "" if in_topic else signal.project
+    parts = (project, signal.task_id or "", title, label, f"S{number}")
     return " · ".join(part for part in parts if part)
 
 

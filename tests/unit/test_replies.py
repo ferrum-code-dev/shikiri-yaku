@@ -42,7 +42,9 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
     ShikiruRejectedError,
+    TaskDetail,
 )
+from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -65,6 +67,10 @@ class Client:
     async def get_escalation(self, escalation_id: str) -> EscalationView:
         assert escalation_id == "E-1"
         return self.view
+
+    async def get_task(self, task_id: str) -> TaskDetail | None:
+        del task_id
+        return None
 
     async def list_escalations(self) -> list[EscalationView]:
         return [self.view]
@@ -150,7 +156,11 @@ class Harness:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources)
         reshower = ProductForwarder(
-            "product", self.clients, self.outbox, Clock(at), FixedDestinations([OWNER])
+            MESSAGE_TITLE_MAX_CHARS,
+            self.clients,
+            self.outbox,
+            Clock(at),
+            FixedDestinations([OWNER]),
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),

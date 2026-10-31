@@ -21,6 +21,7 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
 )
+from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import Client, Harness
 
@@ -82,7 +83,7 @@ class _World:
     def reconciler(self) -> ResolveReconciler:
         h = self.h
         forwarder = ProductForwarder(
-            "shop",
+            MESSAGE_TITLE_MAX_CHARS,
             h.clients,
             h.outbox,
             self.clock,

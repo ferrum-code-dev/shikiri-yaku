@@ -211,7 +211,8 @@ def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving
         h.number,
         stored_signal.to_signal(),
         h.client.view,
-        product="Shop",
+        title="A task",
+        in_topic=False,
         note="",
         suggestion="",
     )

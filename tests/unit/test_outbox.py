@@ -23,6 +23,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
+from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.support.secrets import SECRETS, secret_cases
 
@@ -208,7 +209,9 @@ def test_a_message_the_platform_refuses_for_good_is_never_offered_again_and_the_
 def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database) -> None:
     number = _signal(memory, Kind.PR_REVIEW)
     clock = _Clock()
-    forwarder = ProductForwarder("Shop", {}, _outbox(memory), clock, FixedDestinations([OWNER]))
+    forwarder = ProductForwarder(
+        MESSAGE_TITLE_MAX_CHARS, {}, _outbox(memory), clock, FixedDestinations([OWNER])
+    )
     signal = Signal("api", Kind.PR_REVIEW, "7", "review_ready", "A review is ready.")
     asyncio.run(forwarder.forward(number, signal, "note", ""))
     channel = _Channel()

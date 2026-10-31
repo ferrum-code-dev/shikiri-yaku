@@ -31,20 +31,25 @@ from shikiri_yaku.ports import (
     Pending,
     ShikiruClient,
     ShikiruLinkDownError,
+    TaskDetail,
 )
+from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Generator, Sequence
 
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 NUMBER: Final = 41
-PRODUCT: Final = "Shop"
+TITLE: Final = "Pick the layout"
 NOTE: Final = "nothing, this is a product question"
 SUGGESTION: Final = "add it to pyproject.toml"
 ESCALATION: Final = Signal(
     "api", Kind.ESCALATION, "E-1", "decision_required", "A product decision", "T-1", "E-1"
 )
+INFORMATION: Final = Signal("api", Kind.TASK_DONE, "event-1", "", "Task finished", "T-1")
+LONG_TITLE: Final = "W" * 100
+CUT_TITLE: Final = "W" * (MESSAGE_TITLE_MAX_CHARS - len(CUT_MARK)) + CUT_MARK
 
 
 def _fixture_view() -> EscalationView:
@@ -84,9 +89,18 @@ def _resolution(kind: str, *, recommended: bool = False) -> dict[str, object]:
 
 
 class _Client:
-    def __init__(self, view: EscalationView | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        view: EscalationView | None = None,
+        error: Exception | None = None,
+        *,
+        title: str = TITLE,
+        task_error: Exception | None = None,
+    ) -> None:
         self.view = view
         self.error = error
+        self.title = title
+        self.task_error = task_error
         self.asked: list[str] = []
 
     async def get_escalation(self, escalation_id: str) -> EscalationView | None:
@@ -94,6 +108,20 @@ class _Client:
         if self.error is not None:
             raise self.error
         return self.view
+
+    async def get_task(self, task_id: str) -> TaskDetail | None:
+        if self.task_error is not None:
+            raise self.task_error
+        return TaskDetail.model_validate(
+            {
+                "task": {
+                    "id": task_id,
+                    "parent_id": None,
+                    "status": "in_progress",
+                    "title": self.title,
+                }
+            }
+        )
 
 
 class _Outbox:
@@ -149,7 +177,7 @@ class _Clock:
 def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarder:
     destinations = [Destination("telegram", chat) for chat in chats]
     return ProductForwarder(
-        PRODUCT,
+        MESSAGE_TITLE_MAX_CHARS,
         {"api": cast("ShikiruClient", client)},
         outbox,
         _Clock(),
@@ -157,9 +185,19 @@ def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarde
     )
 
 
+@pytest.fixture
+def topics() -> Generator[TopicStore]:
+    database = Database.open(":memory:")
+    store = TopicStore(database)
+    store.save("api", 73, TOPIC_OPEN)
+    store.save(None, 74, TOPIC_OPEN)
+    yield store
+    database.close()
+
+
 def test_fixture_view_message_has_question_options_and_one_recommended_mark() -> None:
     message = escalation_message(
-        NUMBER, ESCALATION, _fixture_view(), product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, _fixture_view(), title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert "Which behavior should remain?" in message.text
     assert "Keep existing behavior" in message.text
@@ -180,7 +218,7 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
         destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
         outbox = _Outbox()
         forwarder = ProductForwarder(
-            PRODUCT,
+            MESSAGE_TITLE_MAX_CHARS,
             {"api": cast("ShikiruClient", _Client(_fixture_view()))},
             outbox,
             _Clock(),
@@ -220,7 +258,7 @@ def test_only_an_open_topic_names_its_component() -> None:
 
 def test_fixture_view_offers_options_then_resolutions_with_numbered_callback_data() -> None:
     message = escalation_message(
-        NUMBER, ESCALATION, _fixture_view(), product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, _fixture_view(), title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert message.buttons == (
         Button("1", "a:41:1"),
@@ -252,7 +290,7 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
 ) -> None:
     view = _view(resolutions=[_resolution(kind) for kind in kinds])
     message = escalation_message(
-        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert list(message.buttons) == expected
 
@@ -261,7 +299,7 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
 def test_option_that_needs_input_uses_the_same_callback_as_the_others(*, needs_input: bool) -> None:
     view = _view(options=[_option("Keep", needs_input=needs_input)])
     message = escalation_message(
-        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert message.buttons == (Button("1", "a:41:1"),)
 
@@ -269,7 +307,7 @@ def test_option_that_needs_input_uses_the_same_callback_as_the_others(*, needs_i
 def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its_number() -> None:
     view = _view(resolutions=[_resolution("skip"), _resolution("retry")])
     message = escalation_message(
-        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert message.buttons == (Button("Retry", "a:41:2"),)
 
@@ -277,7 +315,7 @@ def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its
 def test_recommended_resolution_is_marked_only_when_there_are_no_agent_options() -> None:
     view = _view(resolutions=[_resolution("retry", recommended=True)])
     message = escalation_message(
-        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert message.text.count(RECOMMENDED) == 1
 
@@ -291,14 +329,16 @@ def test_reason_hint_is_shown_only_where_retry_is_offered(
 ) -> None:
     signal = Signal("api", Kind.ESCALATION, "E-1", "agent_auth", "text", "T-1", "E-1")
     view = _view(resolutions=[_resolution(kind) for kind in kinds])
-    message = escalation_message(NUMBER, signal, view, product=PRODUCT, note=NOTE, suggestion="")
+    message = escalation_message(
+        NUMBER, signal, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+    )
     assert ("Log in to the agent again" in message.text) is hinted
 
 
 def test_message_over_the_limit_is_cut_with_a_details_button() -> None:
     view = _view(question="Q" * (2 * MESSAGE_TEXT_LIMIT), resolutions=[_resolution("retry")])
     message = escalation_message(
-        NUMBER, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert len(message.text) == MESSAGE_TEXT_LIMIT
     assert message.text.endswith(CUT_MARK)
@@ -310,23 +350,98 @@ def test_callback_data_fits_the_platform_limit() -> None:
     resolutions = [_resolution(kind) for kind in ("answer", "retry", "accept", "cancel")]
     view = _view(options=options, resolutions=resolutions)
     message = escalation_message(
-        123456, ESCALATION, view, product=PRODUCT, note=NOTE, suggestion=""
+        123456, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
     )
     assert message.buttons
     assert all(len(button.data.encode()) <= CALLBACK_DATA_LIMIT for button in message.buttons)
 
 
-def test_forwarder_queues_one_message_for_every_destination_keyed_by_the_signal() -> None:
+def test_forwarder_queues_one_message_per_destination_keyed_by_the_signal() -> None:
     outbox = _Outbox()
     forwarder = _forwarder(_Client(view=_fixture_view()), outbox, "1001", "1002")
     asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, SUGGESTION))
-    ((purpose, destinations, message, key),) = outbox.queued
-    assert purpose is Purpose.QUESTION
-    assert [where.chat for where in destinations] == ["1001", "1002"]
-    assert key == "forward:41"
+    assert [
+        (purpose, destinations[0].chat, key) for purpose, destinations, _, key in outbox.queued
+    ] == [(Purpose.QUESTION, "1001", "forward:41"), (Purpose.QUESTION, "1002", "forward:41")]
+    message = outbox.queued[0][2]
     assert "S41" in message.text
     assert "Which behavior should remain?" in message.text
     assert SUGGESTION in message.text
+
+
+@pytest.mark.parametrize(
+    ("private", "signal", "title", "title_fails", "header"),
+    [
+        pytest.param(
+            False,
+            ESCALATION,
+            TITLE,
+            False,
+            "T-1 · Pick the layout · S41",
+            id="component-topic",
+        ),
+        pytest.param(
+            False,
+            INFORMATION,
+            TITLE,
+            False,
+            "api · T-1 · Pick the layout · For information · S41",
+            id="general-topic-information",
+        ),
+        pytest.param(
+            True,
+            ESCALATION,
+            TITLE,
+            False,
+            "api · T-1 · Pick the layout · S41",
+            id="private-chat",
+        ),
+        pytest.param(False, ESCALATION, TITLE, True, "T-1 · S41", id="title-unavailable"),
+        pytest.param(
+            True,
+            ESCALATION,
+            TITLE,
+            True,
+            "api · T-1 · S41",
+            id="private-chat-title-unavailable",
+        ),
+        pytest.param(
+            False,
+            ESCALATION,
+            LONG_TITLE,
+            False,
+            f"T-1 · {CUT_TITLE} · S41",
+            id="title-over-the-limit",
+        ),
+    ],
+)
+def test_decision_header_names_the_project_only_outside_its_topic(
+    topics: TopicStore,
+    *,
+    private: bool,
+    signal: Signal,
+    title: str,
+    title_fails: bool,
+    header: str,
+) -> None:
+    group_id = None if private else -1009
+    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    client = _Client(
+        _fixture_view(),
+        title=title,
+        task_error=ShikiruLinkDownError("link down") if title_fails else None,
+    )
+    outbox = _Outbox()
+    forwarder = ProductForwarder(
+        MESSAGE_TITLE_MAX_CHARS,
+        {"api": cast("ShikiruClient", client)},
+        outbox,
+        _Clock(),
+        destinations,
+    )
+    asyncio.run(forwarder.forward(NUMBER, signal, NOTE, ""))
+    [(_, _, message, _)] = outbox.queued
+    assert message.text.splitlines()[0] == header
 
 
 def test_escalation_that_shikiru_no_longer_returns_is_shown_as_information() -> None:
