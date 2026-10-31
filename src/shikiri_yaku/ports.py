@@ -24,7 +24,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
-    from shikiri_yaku.domain.recipes import InstallOpPayload
+    from shikiri_yaku.domain.outcome import Forward
+    from shikiri_yaku.domain.recipes import InstallOpPayload, InstallPlan
     from shikiri_yaku.domain.schedule import Awaiting, Parked
     from shikiri_yaku.domain.signal import (
         Closing,
@@ -78,6 +79,7 @@ __all__ = [
     "InstallFacts",
     "InstallLog",
     "InstallOp",
+    "InstallPreparer",
     "InstallProposalLog",
     "InstallToolCheck",
     "LifecycleJournal",
@@ -397,6 +399,12 @@ class InstallToolCheck(Protocol):
     """The login-shell `command -v` check for one validated executable name."""
 
     async def find(self, tool: str) -> str | None: ...
+
+
+class InstallPreparer(Protocol):
+    """The validated plan, or a refusal to route back to Product, before any op is stored."""
+
+    async def prepare(self, signal: Signal) -> InstallPlan | Forward: ...
 
 
 @dataclass(frozen=True, slots=True)

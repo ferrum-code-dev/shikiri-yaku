@@ -69,10 +69,10 @@ merged and `uv run poe check` passes.
   - [x] D4. Names, recipes and the existence check
   - [ ] D5. Install approval
     - [x] D5b. Proposal persistence and host managers
-    - [ ] D5c. Install action and approval message
+    - [x] D5c. Install action and approval message
       - [x] D5c1. Install op payload, journal port and callbacks
       - [x] D5c2. Install preparation
-      - [ ] D5c3. Persisted approval and outbox delivery
+      - [x] D5c3. Persisted approval and outbox delivery
     - [ ] D5d. Install and Decline replies
     - [ ] D5e. Composition, `/open` and end-to-end approval
   - [ ] D6. Executor and resolution
