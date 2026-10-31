@@ -39,7 +39,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.ports import Ack, EngineStatus
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.support.notices import journal_notifier, journal_outbox
 from tests.unit.test_replies import Client
@@ -144,7 +144,12 @@ class World:
             [Destination("telegram", "owner-1"), Destination("telegram", "owner-2")]
         )
         forwarder = ProductForwarder(
-            MESSAGE_TITLE_MAX_CHARS, self.clients, outbox, self.clock, destinations
+            MESSAGE_TITLE_MAX_CHARS,
+            self.clients,
+            outbox,
+            self.clock,
+            destinations,
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         self.reshower = Reshower(forwarder)
         self.fallback = Fallback(forwarder)

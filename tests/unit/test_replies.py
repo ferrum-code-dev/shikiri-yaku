@@ -44,7 +44,7 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
     TaskDetail,
 )
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -161,6 +161,7 @@ class Harness:
             self.outbox,
             Clock(at),
             FixedDestinations([OWNER]),
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),

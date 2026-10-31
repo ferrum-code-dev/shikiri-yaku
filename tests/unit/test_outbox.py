@@ -23,7 +23,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.support.secrets import SECRETS, secret_cases
 
@@ -210,7 +210,12 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
     number = _signal(memory, Kind.PR_REVIEW)
     clock = _Clock()
     forwarder = ProductForwarder(
-        MESSAGE_TITLE_MAX_CHARS, {}, _outbox(memory), clock, FixedDestinations([OWNER])
+        MESSAGE_TITLE_MAX_CHARS,
+        {},
+        _outbox(memory),
+        clock,
+        FixedDestinations([OWNER]),
+        button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     signal = Signal("api", Kind.PR_REVIEW, "7", "review_ready", "A review is ready.")
     asyncio.run(forwarder.forward(number, signal, "note", ""))

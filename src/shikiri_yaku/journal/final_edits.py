@@ -8,7 +8,13 @@ from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.outbound import TIME_FORMAT, fit
 from shikiri_yaku.journal.messages import Delivery, Direction
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, FinalEdit, Message
+from shikiri_yaku.ports import (
+    BLOCK_SEPARATOR,
+    FinalEdit,
+    Message,
+    join_blocks,
+    text_room,
+)
 
 if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
@@ -16,7 +22,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import RecordedResolution
 
 _BODY = TypeAdapter(Message)
-_SEPARATOR = "\n\n"
 # keep: any copy with buttons ends too, so a review message is finished like a question
 # keep: a copy without buttons ends when its notice key starts with a prefix the caller names
 _SHOWS_BUTTONS = """
@@ -78,11 +83,7 @@ class JournalFinalEdits:
                 {**self._arguments(), "number": number},
             ).fetchall()
             for row in rows:
-                text = _BODY.validate_json(row["body"]).text
-                shown = fit(line, MESSAGE_TEXT_LIMIT)
-                room = MESSAGE_TEXT_LIMIT - len(_SEPARATOR) - len(shown)
-                head = f"{fit(text, room)}{_SEPARATOR}" if room > len(_SEPARATOR) else ""
-                final = Message(f"{head}{shown}")
+                final = _final(_BODY.validate_json(row["body"]), line)
                 connection.execute(
                     "UPDATE messages SET final_body = ? WHERE id = ?",
                     (_BODY.dump_json(final).decode(), row["id"]),
@@ -119,6 +120,15 @@ class JournalFinalEdits:
             """,
             (reason, message_ref, Direction.OUT),
         )
+
+
+def _final(original: Message, line: str) -> Message:
+    """Return a sent copy's final state: its heading, as much text as fits, then the line."""
+    room = text_room(original.heading)
+    shown = fit(line, room)
+    left = room - len(shown) - len(BLOCK_SEPARATOR)
+    kept = fit(original.text, left) if left > len(BLOCK_SEPARATOR) else ""
+    return Message(join_blocks(kept, shown), heading=original.heading)
 
 
 def _line(resolution: RecordedResolution) -> str:

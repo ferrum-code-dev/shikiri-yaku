@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "BLOCK_SEPARATOR",
     "CALLBACK_DATA_LIMIT",
     "MESSAGE_TEXT_LIMIT",
     "Ack",
@@ -117,6 +118,8 @@ __all__ = [
     "WaitLog",
     "WakeTarget",
     "escalation_choices",
+    "join_blocks",
+    "text_room",
 ]
 
 
@@ -478,6 +481,19 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
 # keep: Telegram's limits (design §7), named here because the Channel is the only user of them
 MESSAGE_TEXT_LIMIT: Final = 4096
 CALLBACK_DATA_LIMIT: Final = 64
+# keep: the blank line that sets each block of a message off from the next (design §6.1)
+BLOCK_SEPARATOR: Final = "\n\n"
+
+
+def join_blocks(*blocks: str) -> str:
+    """Join the non-empty blocks of a message, each set off from the next by a blank line."""
+    return BLOCK_SEPARATOR.join(block for block in blocks if block)
+
+
+def text_room(heading: str) -> int:
+    """Return how many characters of text fit in a message under this heading, within the limit."""
+    overhead = len(heading) + len(BLOCK_SEPARATOR) if heading else 0
+    return MESSAGE_TEXT_LIMIT - overhead
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,17 +515,26 @@ class Button:
 
 @dataclass(frozen=True, slots=True)
 class Message:
-    """What the Channel shows: a text and the buttons under it."""
+    """What the Channel shows: a heading, a text and the buttons under it (design §6.1).
+
+    The heading comes first, set off from the text by a blank line. The Channel decides how to show
+    the heading; the characters the PO reads, which the limit counts, are `shown()`.
+    """
 
     text: str
     buttons: tuple[Button, ...] = ()
+    heading: str = ""
+
+    def shown(self) -> str:
+        """Return the characters the PO reads: the heading, a blank line, then the text."""
+        return join_blocks(self.heading, self.text)
 
     def texts(self) -> tuple[str, ...]:
         """Every text the message puts in front of the PO or sends back in a tap or a link."""
         labels = [button.label for button in self.buttons]
         data = [button.data for button in self.buttons if button.data]
         urls = [button.url for button in self.buttons if button.url]
-        return (self.text, *labels, *data, *urls)
+        return (self.heading, self.text, *labels, *data, *urls)
 
 
 class Channel(Protocol):

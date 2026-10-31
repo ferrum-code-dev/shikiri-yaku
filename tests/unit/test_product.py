@@ -19,6 +19,7 @@ from shikiri_yaku.extensions.product.message import (
     CUT_MARK,
     RECOMMENDED,
     escalation_message,
+    information_message,
 )
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.topics import TopicStore
@@ -33,7 +34,7 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
     TaskDetail,
 )
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -80,8 +81,15 @@ def _view(
     )
 
 
-def _option(label: str, *, needs_input: bool = False) -> dict[str, object]:
-    return {"label": label, "consequences": "", "recommended": False, "needs_input": needs_input}
+def _option(
+    label: str, *, needs_input: bool = False, recommended: bool = False
+) -> dict[str, object]:
+    return {
+        "label": label,
+        "consequences": "",
+        "recommended": recommended,
+        "needs_input": needs_input,
+    }
 
 
 def _resolution(kind: str, *, recommended: bool = False) -> dict[str, object]:
@@ -182,6 +190,7 @@ def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarde
         outbox,
         _Clock(),
         FixedDestinations(destinations),
+        button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
 
 
@@ -197,7 +206,14 @@ def topics() -> Generator[TopicStore]:
 
 def test_fixture_view_message_has_question_options_and_one_recommended_mark() -> None:
     message = escalation_message(
-        NUMBER, ESCALATION, _fixture_view(), title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        _fixture_view(),
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert "Which behavior should remain?" in message.text
     assert "Keep existing behavior" in message.text
@@ -223,6 +239,7 @@ def test_group_escalations_use_the_component_topic_and_other_signals_use_general
             outbox,
             _Clock(),
             destinations,
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
 
         asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
@@ -258,11 +275,18 @@ def test_only_an_open_topic_names_its_component() -> None:
 
 def test_fixture_view_offers_options_then_resolutions_with_numbered_callback_data() -> None:
     message = escalation_message(
-        NUMBER, ESCALATION, _fixture_view(), title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        _fixture_view(),
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert message.buttons == (
-        Button("1", "a:41:1"),
-        Button("2", "a:41:2"),
+        Button("★ 1. Keep existing behavior", "a:41:1"),
+        Button("2. Change behavior", "a:41:2"),
         Button("Reply with text", "a:41:3"),
         Button("Cancel task", "a:41:4"),
     )
@@ -290,7 +314,14 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
 ) -> None:
     view = _view(resolutions=[_resolution(kind) for kind in kinds])
     message = escalation_message(
-        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert list(message.buttons) == expected
 
@@ -299,15 +330,29 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
 def test_option_that_needs_input_uses_the_same_callback_as_the_others(*, needs_input: bool) -> None:
     view = _view(options=[_option("Keep", needs_input=needs_input)])
     message = escalation_message(
-        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
-    assert message.buttons == (Button("1", "a:41:1"),)
+    assert message.buttons == (Button("1. Keep", "a:41:1"),)
 
 
 def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its_number() -> None:
     view = _view(resolutions=[_resolution("skip"), _resolution("retry")])
     message = escalation_message(
-        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert message.buttons == (Button("Retry", "a:41:2"),)
 
@@ -315,7 +360,14 @@ def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its
 def test_recommended_resolution_is_marked_only_when_there_are_no_agent_options() -> None:
     view = _view(resolutions=[_resolution("retry", recommended=True)])
     message = escalation_message(
-        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert message.text.count(RECOMMENDED) == 1
 
@@ -330,17 +382,98 @@ def test_reason_hint_is_shown_only_where_retry_is_offered(
     signal = Signal("api", Kind.ESCALATION, "E-1", "agent_auth", "text", "T-1", "E-1")
     view = _view(resolutions=[_resolution(kind) for kind in kinds])
     message = escalation_message(
-        NUMBER, signal, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        signal,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert ("Log in to the agent again" in message.text) is hinted
+
+
+# keep: the default limit of 30 cuts this label to 29 characters and the mark
+LONG_LABEL: Final = "Ship the export for new invoices now and the history later"
+LONG_LABEL_CUT: Final = "★ 1. Ship the export for new …"
+ESCALATION_HEADING: Final = "api · T-1 · Pick the layout · S41"
+INFORMATION_HEADING: Final = "api · T-1 · Pick the layout · For information · S41"
+NOTES_BLOCK: Final = f"What I tried: {NOTE}"
+
+
+def _asked(options: list[dict[str, object]], *, resolutions: list[dict[str, object]]) -> Message:
+    return escalation_message(
+        NUMBER,
+        ESCALATION,
+        _view(options=options, resolutions=resolutions),
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "heading", "labels", "blocks"),
+    [
+        pytest.param(
+            _asked(
+                [_option("Keep", recommended=True), _option("Change")],
+                resolutions=[_resolution("cancel")],
+            ),
+            ESCALATION_HEADING,
+            ["★ 1. Keep", "2. Change", "Cancel task"],
+            ["Which?", "★ 1. Keep\n2. Change\nCancel task", NOTES_BLOCK],
+            id="recommended-option",
+        ),
+        pytest.param(
+            _asked([_option("Keep"), _option("Change")], resolutions=[_resolution("cancel")]),
+            ESCALATION_HEADING,
+            ["1. Keep", "2. Change", "Cancel task"],
+            ["Which?", "1. Keep\n2. Change\nCancel task", NOTES_BLOCK],
+            id="no-recommended-option",
+        ),
+        pytest.param(
+            _asked([_option(LONG_LABEL, recommended=True)], resolutions=[]),
+            ESCALATION_HEADING,
+            [LONG_LABEL_CUT],
+            ["Which?", f"★ 1. {LONG_LABEL}", NOTES_BLOCK],
+            id="long-label",
+        ),
+        pytest.param(
+            information_message(
+                NUMBER, INFORMATION, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+            ),
+            INFORMATION_HEADING,
+            ["Acknowledge"],
+            ["Task finished", NOTES_BLOCK],
+            id="information",
+        ),
+    ],
+)
+def test_message_has_a_heading_then_blank_line_separated_blocks_and_short_labels(
+    message: Message, heading: str, labels: list[str], blocks: list[str]
+) -> None:
+    assert message.heading == heading
+    assert message.text.split("\n\n") == blocks
+    assert [button.label for button in message.buttons] == labels
 
 
 def test_message_over_the_limit_is_cut_with_a_details_button() -> None:
     view = _view(question="Q" * (2 * MESSAGE_TEXT_LIMIT), resolutions=[_resolution("retry")])
     message = escalation_message(
-        NUMBER, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        NUMBER,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
-    assert len(message.text) == MESSAGE_TEXT_LIMIT
+    assert len(message.shown()) == MESSAGE_TEXT_LIMIT
     assert message.text.endswith(CUT_MARK)
     assert message.buttons[-1] == Button("Details", "d:41")
 
@@ -350,7 +483,14 @@ def test_callback_data_fits_the_platform_limit() -> None:
     resolutions = [_resolution(kind) for kind in ("answer", "retry", "accept", "cancel")]
     view = _view(options=options, resolutions=resolutions)
     message = escalation_message(
-        123456, ESCALATION, view, title=TITLE, in_topic=False, note=NOTE, suggestion=""
+        123456,
+        ESCALATION,
+        view,
+        title=TITLE,
+        in_topic=False,
+        note=NOTE,
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert message.buttons
     assert all(len(button.data.encode()) <= CALLBACK_DATA_LIMIT for button in message.buttons)
@@ -364,7 +504,7 @@ def test_forwarder_queues_one_message_per_destination_keyed_by_the_signal() -> N
         (purpose, destinations[0].chat, key) for purpose, destinations, _, key in outbox.queued
     ] == [(Purpose.QUESTION, "1001", "forward:41"), (Purpose.QUESTION, "1002", "forward:41")]
     message = outbox.queued[0][2]
-    assert "S41" in message.text
+    assert "S41" in message.heading
     assert "Which behavior should remain?" in message.text
     assert SUGGESTION in message.text
 
@@ -438,10 +578,11 @@ def test_decision_header_names_the_project_only_outside_its_topic(
         outbox,
         _Clock(),
         destinations,
+        button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     asyncio.run(forwarder.forward(NUMBER, signal, NOTE, ""))
     [(_, _, message, _)] = outbox.queued
-    assert message.text.splitlines()[0] == header
+    assert message.heading == header
 
 
 def test_escalation_that_shikiru_no_longer_returns_is_shown_as_information() -> None:

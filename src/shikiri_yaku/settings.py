@@ -61,6 +61,7 @@ APPROVAL_EXPIRY_H: Final = 24
 REMINDER_FIRST_H: Final = 4
 REMINDER_REPEAT_H: Final = 24
 MESSAGE_TITLE_MAX_CHARS: Final = 80
+BUTTON_LABEL_MAX_CHARS: Final = 30
 
 REASONER_TIMEOUT_S: Final = 120
 REASONER_COOLDOWN_MIN: Final = 5
@@ -171,6 +172,7 @@ class ProductHandlerSettings(_FrozenModel):
     reminder_first_h: PositiveInt = REMINDER_FIRST_H
     reminder_repeat_h: PositiveInt = REMINDER_REPEAT_H
     message_title_max_chars: PositiveInt = MESSAGE_TITLE_MAX_CHARS
+    button_label_max_chars: PositiveInt = BUTTON_LABEL_MAX_CHARS
 
 
 class HandlersSettings(_FrozenModel):

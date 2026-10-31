@@ -39,7 +39,7 @@ from shikiri_yaku.ports import (
     Message,
     ShikiruLinkDownError,
 )
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
@@ -139,7 +139,12 @@ class _Stack:
         self.sender = OutboxSender(self.outbox, channel, _Clock(), interval_s=1)
         self.status = Status(self.clients, self.sources)
         reshower = ProductForwarder(
-            MESSAGE_TITLE_MAX_CHARS, self.clients, self.outbox, _Clock(), FixedDestinations([OWNER])
+            MESSAGE_TITLE_MAX_CHARS,
+            self.clients,
+            self.outbox,
+            _Clock(),
+            FixedDestinations([OWNER]),
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),

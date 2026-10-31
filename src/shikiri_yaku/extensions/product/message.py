@@ -1,6 +1,6 @@
 """The PO message of a forwarded signal, a template over Shikiru's structured view (§6.1, §7).
 
-Pure: it builds the text and the buttons and does no I/O.
+Pure: it builds the heading, the text and the buttons and does no I/O.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from shikiri_yaku.domain.outbound import fit
 from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
     AgentOption,
@@ -15,6 +16,8 @@ from shikiri_yaku.ports import (
     Message,
     ResolutionKind,
     escalation_choices,
+    join_blocks,
+    text_room,
 )
 
 if TYPE_CHECKING:
@@ -72,22 +75,24 @@ def escalation_message(
     in_topic: bool,
     note: str,
     suggestion: str,
+    label_max_chars: int,
 ) -> Message:
-    choices = _choices(view)
+    choices = _choices(view, label_max_chars)
     buttons = tuple(
         Button(choice.button, f"{Tap.ANSWER}:{number}:{choice.option}") for choice in choices
     )
-    text = _text(
-        _header(number, signal, title, in_topic=in_topic),
+    heading = _header(number, signal, title, in_topic=in_topic)
+    text = join_blocks(
         view.question or view.escalation.headline,
         "\n".join(choice.line for choice in choices),
         _notes(note, suggestion),
         _hint(signal, view),
     )
-    if len(text) <= MESSAGE_TEXT_LIMIT:
-        return Message(text, buttons)
+    message = Message(text, buttons, heading)
+    if len(message.shown()) <= MESSAGE_TEXT_LIMIT:
+        return message
     details = Button(DETAILS_LABEL, f"{Tap.DETAILS}:{number}")
-    return Message(_cut(text), (*buttons, details))
+    return Message(fit(text, text_room(heading)), (*buttons, details), heading)
 
 
 def information_message(
@@ -99,13 +104,10 @@ def information_message(
     note: str,
     suggestion: str,
 ) -> Message:
-    text = _text(
-        _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION),
-        signal.text,
-        _notes(note, suggestion),
-    )
+    heading = _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION)
+    text = join_blocks(signal.text, _notes(note, suggestion))
     acknowledge = Button(ACKNOWLEDGE_LABEL, f"{Tap.ACKNOWLEDGE}:{number}")
-    return Message(_cut(text), (acknowledge,))
+    return Message(fit(text, text_room(heading)), (acknowledge,), heading)
 
 
 def _hint(signal: Signal, view: EscalationView) -> str:
@@ -113,19 +115,20 @@ def _hint(signal: Signal, view: EscalationView) -> str:
     return REASON_HINTS.get(signal.reason, "") if offers_retry else ""
 
 
-def _choices(view: EscalationView) -> list[_Choice]:
+def _choices(view: EscalationView, label_max_chars: int) -> list[_Choice]:
     return [
-        _option_choice(choice.number, choice.value)
+        _option_choice(choice.number, choice.value, label_max_chars)
         if isinstance(choice.value, AgentOption)
         else _resolution_choice(choice.number, choice.value, marked=not view.agent_options)
         for choice in escalation_choices(view)
     ]
 
 
-def _option_choice(option_no: int, option: AgentOption) -> _Choice:
+def _option_choice(option_no: int, option: AgentOption, label_max_chars: int) -> _Choice:
     mark = f"{RECOMMENDED} " if option.recommended else ""
-    line = _with_consequences(f"{mark}{option_no}. {option.label}", option.consequences)
-    return _Choice(option_no, str(option_no), line)
+    numbered = f"{mark}{option_no}. {option.label}"
+    line = _with_consequences(numbered, option.consequences)
+    return _Choice(option_no, fit(numbered, label_max_chars), line)
 
 
 def _resolution_choice(
@@ -134,7 +137,7 @@ def _resolution_choice(
     label = _RESOLUTION_LABELS[resolution.kind]
     mark = f"{RECOMMENDED} " if marked and resolution.recommended else ""
     line = _with_consequences(f"{mark}{label}", resolution.consequences)
-    return _Choice(option_no, label, line)
+    return _Choice(option_no, f"{mark}{label}", line)
 
 
 def _with_consequences(text: str, consequences: str) -> str:
@@ -151,14 +154,4 @@ def _header(number: int, signal: Signal, title: str, *, in_topic: bool, label: s
 def _notes(note: str, suggestion: str) -> str:
     tried = f"What I tried: {note}" if note else ""
     model_note = f"Model note: {suggestion}" if suggestion else ""
-    return _text(tried, model_note)
-
-
-def _text(*blocks: str) -> str:
-    return "\n".join(block for block in blocks if block)
-
-
-def _cut(text: str) -> str:
-    if len(text) <= MESSAGE_TEXT_LIMIT:
-        return text
-    return text[: MESSAGE_TEXT_LIMIT - len(CUT_MARK)] + CUT_MARK
+    return "\n".join(block for block in (tried, model_note) if block)

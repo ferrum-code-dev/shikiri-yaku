@@ -206,14 +206,15 @@ def test_an_edit_the_platform_refuses_is_not_repeated(h: _Harness) -> None:
 
 
 def test_a_long_question_is_cut_so_its_final_state_still_fits(h: _Harness) -> None:
-    long = Message("Q" * MESSAGE_TEXT_LIMIT, QUESTION.buttons)
+    long = Message("Q" * MESSAGE_TEXT_LIMIT, QUESTION.buttons, heading=QUESTION.text)
     h.database.connection.execute("UPDATE messages SET body = ?", (_BODY.dump_json(long).decode(),))
     h.resolve()
     channel = _Channel(h.database)
     asyncio.run(h.editor(channel).tick())
     assert len(channel.edits) == len(REFS)
     for _, message, _ in channel.edits:
-        assert len(message.text) <= MESSAGE_TEXT_LIMIT
+        assert len(message.shown()) <= MESSAGE_TEXT_LIMIT
+        assert message.heading == QUESTION.text
         assert "Resolved: Keep" in message.text
 
 

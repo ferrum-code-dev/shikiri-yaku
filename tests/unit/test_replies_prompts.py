@@ -10,6 +10,7 @@ from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.extensions.product.message import escalation_message
 from shikiri_yaku.journal import NewSignal, OpState, SignalState
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS
 from tests.support.secrets import SECRETS
 from tests.unit.test_replies import ANSWERED_AT, LATER_AT, NOW, Harness
 
@@ -191,14 +192,47 @@ def test_replayed_selection_cannot_issue_stored_confirmation_before_approval(
 
 
 @pytest.mark.parametrize("form", list(SECRETS))
-@pytest.mark.parametrize("field", ["label", "consequences"])
+def test_secret_in_an_option_label_is_refused_before_journaling(h: Harness, form: str) -> None:
+    # keep: a label is on its button, so it reaches the PO even when the text around it is cut
+    option = h.client.view.agent_options[0]
+    hidden = option.model_copy(update={"label": SECRETS[form]})
+    h.client.view = h.client.view.model_copy(
+        update={"agent_options": [hidden, h.client.view.agent_options[1]]}
+    )
+    stored_signal = h.signals.get(h.number)
+    assert stored_signal is not None
+    rendered = escalation_message(
+        h.number,
+        stored_signal.to_signal(),
+        h.client.view,
+        title="A task",
+        in_topic=False,
+        note="",
+        suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
+    )
+    assert secret_form(rendered.texts()) == form
+    h.messages.record_outbound(
+        signal_number=h.number,
+        channel="telegram",
+        chat="1001",
+        purpose=Purpose.QUESTION,
+        body=rendered,
+        notice_key=None,
+        now=NOW,
+    )
+    assert secret_form(h.database.connection.iterdump()) is None
+    (notice,) = h.outbox.pending()
+    assert secret_form(notice.message.texts()) is None
+
+
+@pytest.mark.parametrize("form", list(SECRETS))
 def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving(
     h: Harness,
     form: str,
-    field: str,
 ) -> None:
     option = h.client.view.agent_options[0]
-    hidden = option.model_copy(update={field: SECRETS[form]})
+    hidden = option.model_copy(update={"consequences": SECRETS[form]})
     h.client.view = h.client.view.model_copy(
         update={
             "question": "Q" * MESSAGE_TEXT_LIMIT,
@@ -215,6 +249,7 @@ def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving
         in_topic=False,
         note="",
         suggestion="",
+        label_max_chars=BUTTON_LABEL_MAX_CHARS,
     )
     assert secret_form(rendered.texts()) is None
     row = h.messages.record_outbound(

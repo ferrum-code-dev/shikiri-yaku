@@ -230,7 +230,12 @@ def compose(
         destinations=destinations,
     )
     forwarder = ProductForwarder(
-        settings.handlers.product.message_title_max_chars, clients, outbox, clock, destinations
+        settings.handlers.product.message_title_max_chars,
+        clients,
+        outbox,
+        clock,
+        destinations,
+        button_label_max_chars=settings.handlers.product.button_label_max_chars,
     )
     jobs += routing_jobs(
         settings,

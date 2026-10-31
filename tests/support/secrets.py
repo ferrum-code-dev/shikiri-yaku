@@ -23,6 +23,7 @@ def _carriers(secret: str) -> list[Message]:
     """The places a secret can sit in a message: its text, a button label and its callback data."""
     return [
         Message(f"S1 · {secret}"),
+        Message("S1", heading=secret),
         Message("S1", (Button(secret, "a:1:1"),)),
         Message("S1", (Button("1", secret),)),
     ]

@@ -38,8 +38,11 @@ class ProductForwarder:
         outbox: Outbox,
         clock: Clock,
         destinations: Destinations,
+        *,
+        button_label_max_chars: int,
     ) -> None:
         self._title_max_chars = title_max_chars
+        self._button_label_max_chars = button_label_max_chars
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
@@ -119,6 +122,7 @@ class ProductForwarder:
             in_topic=in_topic,
             note=note,
             suggestion=suggestion,
+            label_max_chars=self._button_label_max_chars,
         )
         return Purpose.QUESTION, question
 

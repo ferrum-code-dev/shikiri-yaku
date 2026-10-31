@@ -18,6 +18,7 @@ from shikiri_yaku.adapters.telegram import (
 )
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
+    BLOCK_SEPARATOR,
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
     Button,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 SENT: Final = "1001/42"
 MESSAGE: Final = Message("S1 · Which way?", (Button("1", "a:1:1"),))
+HEADING: Final = "S1 · Which way? · decision"
 TOKEN: Final = SECRETS["telegram_bot_token"]
 
 
@@ -104,6 +106,7 @@ def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> 
             {
                 "chat_id": "1001",
                 "text": "S1 · Which way?",
+                "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": [[{"text": "1", "callback_data": "a:1:1"}]]},
             },
         )
@@ -163,9 +166,29 @@ def test_edit_targets_the_ref_and_clears_buttons_with_an_empty_keyboard() -> Non
                 "chat_id": "1001",
                 "message_id": 42,
                 "text": "S1 · Answered: option 1",
+                "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": []},
             },
         )
+    ]
+
+
+def test_a_question_is_sent_and_then_edited_with_its_text_escaped_and_its_heading_bold() -> None:
+    question = Message("Use <b>bold</b> & keep?", (Button("1", "a:1:1"),), heading="Q & <A>")
+    api = _Api([_recorded("send_ok.json"), _recorded("edit_ok.json")])
+    channel = TelegramChannel(api, _Clock(), _Copies(api))
+
+    ref = asyncio.run(channel.send(Destination("telegram", "1001"), question))
+    asyncio.run(channel.edit(ref, Message("Answered: <b> & more", heading="Q & <A>")))
+
+    escaped_heading = "<b>Q &amp; &lt;A&gt;</b>"
+    assert [(method, payload["text"], payload["parse_mode"]) for method, payload in api.calls] == [
+        (
+            "sendMessage",
+            f"{escaped_heading}\n\nUse &lt;b&gt;bold&lt;/b&gt; &amp; keep?",
+            "HTML",
+        ),
+        ("editMessageText", f"{escaped_heading}\n\nAnswered: &lt;b&gt; &amp; more", "HTML"),
     ]
 
 
@@ -242,6 +265,23 @@ def _sent_or_refused(message: Message) -> tuple[str, int]:
     [
         (Message("x" * MESSAGE_TEXT_LIMIT), SENT, 1),
         (Message("x" * (MESSAGE_TEXT_LIMIT + 1)), TEXT_TOO_LONG, 0),
+        # keep: an ampersand is five characters of markup and one character the PO reads
+        (Message("&" * MESSAGE_TEXT_LIMIT), SENT, 1),
+        (
+            Message(
+                "x" * (MESSAGE_TEXT_LIMIT - len(HEADING) - len(BLOCK_SEPARATOR)), heading=HEADING
+            ),
+            SENT,
+            1,
+        ),
+        (
+            Message(
+                "x" * (MESSAGE_TEXT_LIMIT - len(HEADING) - len(BLOCK_SEPARATOR) + 1),
+                heading=HEADING,
+            ),
+            TEXT_TOO_LONG,
+            0,
+        ),
         (Message("S1", (Button("1", "a" * CALLBACK_DATA_LIMIT),)), SENT, 1),
         (
             Message(

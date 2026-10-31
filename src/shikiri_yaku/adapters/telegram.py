@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import html
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 from urllib.parse import urlsplit
 
@@ -15,6 +16,7 @@ from shikiri_yaku.ports import (
     Button,
     ChannelError,
     ChannelRefusedError,
+    join_blocks,
 )
 
 if TYPE_CHECKING:
@@ -26,6 +28,8 @@ if TYPE_CHECKING:
 TELEGRAM_CHANNEL: Final = "telegram"
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
+# keep: the Bot API's parse mode for the markup a message carries (design §7)
+HTML_PARSE_MODE: Final = "HTML"
 DELETE_MESSAGE: Final = "deleteMessage"
 GET_ME: Final = "getMe"
 GET_CHAT: Final = "getChat"
@@ -308,14 +312,33 @@ def _content(message: Message) -> dict[str, object]:
 
     One button per row. An empty keyboard is what removes the buttons of a final state (design §7).
     A link button has no callback data, so only the tap buttons are measured against its limit.
+    The limit counts the characters the PO reads, not the markup that sets the heading in bold.
     """
-    if len(message.text) > MESSAGE_TEXT_LIMIT:
+    if len(message.shown()) > MESSAGE_TEXT_LIMIT:
         raise ChannelRefusedError(TEXT_TOO_LONG)
     for button in message.buttons:
         if not button.url and len(button.data.encode()) > CALLBACK_DATA_LIMIT:
             raise ChannelRefusedError(BUTTON_DATA_TOO_LONG)
     keyboard = [[_keyboard_button(button)] for button in message.buttons]
-    return {"text": message.text, "reply_markup": {"inline_keyboard": keyboard}}
+    return {
+        "text": _html_text(message),
+        "parse_mode": HTML_PARSE_MODE,
+        "reply_markup": {"inline_keyboard": keyboard},
+    }
+
+
+def _html_text(message: Message) -> str:
+    """Return the message in Telegram's HTML mode: the heading in bold, every text escaped.
+
+    Telegram reads only `&`, `<` and `>` in text as markup, so those are escaped. The bold tags
+    around the heading are the only markup the message adds.
+    """
+    heading = f"<b>{_escape(message.heading)}</b>" if message.heading else ""
+    return join_blocks(heading, _escape(message.text))
+
+
+def _escape(text: str) -> str:
+    return html.escape(text, quote=False)
 
 
 def _keyboard_button(button: Button) -> dict[str, str]:

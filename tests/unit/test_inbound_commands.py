@@ -27,7 +27,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import Ack, AckStatus, EngineStatus, ShikiruLinkDownError
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -86,7 +86,12 @@ class Harness:
     def replies(self) -> Replies:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         reshower = ProductForwarder(
-            MESSAGE_TITLE_MAX_CHARS, self.clients, self.outbox, _Clock(), FixedDestinations([OWNER])
+            MESSAGE_TITLE_MAX_CHARS,
+            self.clients,
+            self.outbox,
+            _Clock(),
+            FixedDestinations([OWNER]),
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),

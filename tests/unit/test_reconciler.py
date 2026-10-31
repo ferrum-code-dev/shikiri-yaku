@@ -21,7 +21,7 @@ from shikiri_yaku.ports import (
     ShikiruClient,
     ShikiruLinkDownError,
 )
-from shikiri_yaku.settings import MESSAGE_TITLE_MAX_CHARS
+from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import Client, Harness
 
@@ -88,6 +88,7 @@ class _World:
             h.outbox,
             self.clock,
             FixedDestinations([Destination("telegram", "1001")]),
+            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         return ResolveReconciler(
             JournalReconcile(h.database, h.signals, h.ops),
