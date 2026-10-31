@@ -234,7 +234,7 @@ class Replies:
     def _input(self, item: Inbound, origin: ReplyOrigin) -> None:
         self._queue(
             origin,
-            Message(f"S{origin.number} · Reply with your answer."),
+            Message(f"S{origin.number} · Reply with your answer.", expects_reply=True),
             Purpose.QUESTION,
             key=f"input:{item.update_id}",
         )

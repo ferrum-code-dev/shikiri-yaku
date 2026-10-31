@@ -519,11 +519,20 @@ class Message:
 
     The heading comes first, set off from the text by a blank line. The Channel decides how to show
     the heading; the characters the PO reads, which the limit counts, are `shown()`.
+
+    A message that waits for the PO's typed text (`expects_reply`) has no buttons: the Channel
+    opens the reply box in its place.
     """
 
     text: str
     buttons: tuple[Button, ...] = ()
     heading: str = ""
+    expects_reply: bool = False
+
+    def __post_init__(self) -> None:
+        if self.expects_reply and self.buttons:
+            message = "a message takes buttons or a reply, not both"
+            raise ValueError(message)
 
     def shown(self) -> str:
         """Return the characters the PO reads: the heading, a blank line, then the text."""

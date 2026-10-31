@@ -115,7 +115,7 @@ def _item(update: _Update) -> Inbound | None:
         )
     if update.message is not None and update.message.text is not None:
         sent = update.message
-        replied = sent.reply_to_message
+        replied = _replied(sent)
         return Inbound(
             update.update_id,
             InboundKind.TEXT if replied is None else InboundKind.REPLY,
@@ -127,6 +127,15 @@ def _item(update: _Update) -> Inbound | None:
             thread=sent.message_thread_id,
         )
     return None
+
+
+def _replied(sent: _Message) -> _Replied | None:
+    """Return the message a reply answers, or None when the message is no reply."""
+    replied = sent.reply_to_message
+    # keep: a forum topic's messages name its first message; that is the topic, not a reply
+    if replied is None or replied.message_id == sent.message_thread_id:
+        return None
+    return replied
 
 
 def _refusal(reply: _Refused) -> str:

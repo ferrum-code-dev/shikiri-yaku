@@ -24,11 +24,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 OWNER: Final = 1001
-GROUP: Final = -1005
+GROUP: Final = -1009
 WAIT_S: Final = 20
 UPDATES: Final = json.loads((FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
 TEXT, REPLY, TAP = 700, 701, 702
-TOPIC_TEXT: Final = 710
+TOPIC: Final = 73
+BOT_MESSAGE: Final = 42
 
 
 class _Api:
@@ -66,34 +67,56 @@ def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
     assert by_id[TAP] == Inbound(TAP, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
 
 
-def test_a_message_in_a_forum_topic_keeps_its_group_chat_and_its_topic() -> None:
-    body = {
-        "ok": True,
-        "result": [
-            {
-                "update_id": TOPIC_TEXT,
-                "message": {
-                    "message_id": 33,
-                    "from": {"id": OWNER},
-                    "chat": {"id": GROUP},
-                    "message_thread_id": 77,
-                    "text": "/goal Add the export",
-                },
-            }
-        ],
-    }
+_IN_PRIVATE: Final[dict[str, object]] = {"from": {"id": OWNER}, "chat": {"id": OWNER}}
+_IN_GROUP: Final[dict[str, object]] = {"from": {"id": OWNER}, "chat": {"id": GROUP}}
+_IN_TOPIC: Final[dict[str, object]] = {**_IN_GROUP, "message_thread_id": TOPIC}
+_TOPIC_FIRST: Final[dict[str, object]] = {"message_id": TOPIC}
+_BOT_QUESTION: Final[dict[str, object]] = {"message_id": BOT_MESSAGE}
+_TOPIC_SHAPES: Final = [
+    pytest.param(
+        {"message_id": 80, **_IN_TOPIC, "reply_to_message": _TOPIC_FIRST, "text": "/help"},
+        Inbound(710, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/80", text="/help", thread=TOPIC),
+        id="command in topic",
+    ),
+    pytest.param(
+        {"message_id": 81, **_IN_TOPIC, "reply_to_message": _TOPIC_FIRST, "text": "Use it"},
+        Inbound(711, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/81", text="Use it", thread=TOPIC),
+        id="plain message in topic",
+    ),
+    pytest.param(
+        {"message_id": 82, **_IN_TOPIC, "reply_to_message": _BOT_QUESTION, "text": "Use it"},
+        Inbound(
+            712,
+            InboundKind.REPLY,
+            OWNER,
+            GROUP,
+            f"{GROUP}/82",
+            reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
+            text="Use it",
+            thread=TOPIC,
+        ),
+        id="reply to a bot message in topic",
+    ),
+    pytest.param(
+        {"message_id": 83, **_IN_PRIVATE, "text": "/help"},
+        Inbound(713, InboundKind.TEXT, OWNER, OWNER, f"{OWNER}/83", text="/help"),
+        id="command in private chat",
+    ),
+    pytest.param(
+        {"message_id": 84, **_IN_GROUP, "text": "/help"},
+        Inbound(714, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/84", text="/help"),
+        id="command in group without topics",
+    ),
+]
 
-    [item] = _read(body).items
 
-    assert item == Inbound(
-        TOPIC_TEXT,
-        InboundKind.TEXT,
-        OWNER,
-        GROUP,
-        f"{GROUP}/33",
-        text="/goal Add the export",
-        thread=77,
-    )
+@pytest.mark.parametrize(("message", "expected"), _TOPIC_SHAPES)
+def test_a_message_is_a_reply_only_to_a_message_other_than_the_topics_first(
+    message: dict[str, object], expected: Inbound
+) -> None:
+    body = {"ok": True, "result": [{"update_id": expected.update_id, "message": message}]}
+
+    assert _read(body).items == (expected,)
 
 
 def test_a_kind_the_operator_does_not_read_moves_the_batch_but_gives_no_item() -> None:

@@ -140,6 +140,33 @@ def test_a_button_takes_exactly_one_of_data_or_url(data: str, url: str | None) -
         Button("1", data, url=url)
 
 
+@pytest.mark.parametrize(
+    ("message", "markup"),
+    [
+        (MESSAGE, {"inline_keyboard": [[{"text": "1", "callback_data": "a:1:1"}]]}),
+        (Message("S1 · Which way?"), {"inline_keyboard": []}),
+        (
+            Message("S1 · Reply with your answer.", expects_reply=True),
+            {"force_reply": True, "input_field_placeholder": "Your answer"},
+        ),
+    ],
+    ids=["buttons", "no buttons", "waits for text"],
+)
+def test_a_message_is_sent_with_its_buttons_or_with_the_reply_box_when_it_waits_for_text(
+    message: Message, markup: dict[str, object]
+) -> None:
+    api = _Api([_recorded("send_ok.json")])
+
+    _send(api, _Clock(), message)
+
+    assert api.calls[0][1]["reply_markup"] == markup
+
+
+def test_a_message_takes_buttons_or_a_reply_box_but_not_both() -> None:
+    with pytest.raises(ValueError, match="not both"):
+        Message("S1 · Which way?", (Button("1", "a:1:1"),), expects_reply=True)
+
+
 def test_send_posts_a_topic_thread_when_the_destination_has_one() -> None:
     api = _Api([_recorded("send_ok.json")])
 

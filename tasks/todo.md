@@ -59,6 +59,6 @@ merged and `uv run poe check` passes.
 - [x] C8. Fixes from the first live run
 - [x] C9. Readable messages
 - [x] C10. An engine that is up again closes its signal
-- [ ] C11. A message in a topic is not a reply to the topic
+- [x] C11. A message in a topic is not a reply to the topic
 - [ ] Phase D: Install (decide after the gate in `docs/plan.md` §2.3)
 - [ ] Phase E: Hardening

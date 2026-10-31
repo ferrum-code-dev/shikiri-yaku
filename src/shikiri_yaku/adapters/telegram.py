@@ -30,6 +30,7 @@ SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 # keep: the Bot API's parse mode for the markup a message carries (design §7)
 HTML_PARSE_MODE: Final = "HTML"
+INPUT_PLACEHOLDER: Final = "Your answer"
 DELETE_MESSAGE: Final = "deleteMessage"
 GET_ME: Final = "getMe"
 GET_CHAT: Final = "getChat"
@@ -308,9 +309,8 @@ def _refuse_secret(message: Message) -> None:
 
 
 def _content(message: Message) -> dict[str, object]:
-    """Refuse what Telegram would refuse before sending; then build the text and keyboard.
+    """Refuse what Telegram would refuse before sending; then build the text and its markup.
 
-    One button per row. An empty keyboard is what removes the buttons of a final state (design §7).
     A link button has no callback data, so only the tap buttons are measured against its limit.
     The limit counts the characters the PO reads, not the markup that sets the heading in bold.
     """
@@ -319,12 +319,23 @@ def _content(message: Message) -> dict[str, object]:
     for button in message.buttons:
         if not button.url and len(button.data.encode()) > CALLBACK_DATA_LIMIT:
             raise ChannelRefusedError(BUTTON_DATA_TOO_LONG)
-    keyboard = [[_keyboard_button(button)] for button in message.buttons]
     return {
         "text": _html_text(message),
         "parse_mode": HTML_PARSE_MODE,
-        "reply_markup": {"inline_keyboard": keyboard},
+        "reply_markup": _markup(message),
     }
+
+
+def _markup(message: Message) -> dict[str, object]:
+    """Return the reply box of a message that waits for text, else its keyboard.
+
+    One button per row. An empty keyboard is what removes the buttons of a final state (design §7).
+    Telegram takes one markup per message, so the reply box replaces the buttons.
+    """
+    if message.expects_reply:
+        return {"force_reply": True, "input_field_placeholder": INPUT_PLACEHOLDER}
+    keyboard = [[_keyboard_button(button)] for button in message.buttons]
+    return {"inline_keyboard": keyboard}
 
 
 def _html_text(message: Message) -> str:

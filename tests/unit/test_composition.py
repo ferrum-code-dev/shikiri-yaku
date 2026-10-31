@@ -7,6 +7,7 @@ The Shikiru link and the Bot API are fakes, so no process and no network take pa
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -51,6 +52,10 @@ if TYPE_CHECKING:
 
 _PRODUCT: Final = "shop"
 _OWNER: Final = 1001
+_GROUP: Final = -1009
+_TOPIC: Final = 73
+_PROMPT_ID: Final = FIRST_MESSAGE_ID + 1
+_HELP_LINE: Final = "/help · this list"
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
 _ASKED: Final = "I may have submitted this already"
@@ -61,6 +66,7 @@ _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "
 _REMOVED_DOWN: Final = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _REMOVED_DOWN_NEW: Final = NewSignal(_REMOVED_DOWN.id, "old", "engine_down", "", "engine is down")
 TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
+_FORUM_TOPIC: Final = TELEGRAM_FIXTURES / "forum_topic_created.json"
 _CONFLICT: Final[dict[str, Any]] = json.loads(
     (TELEGRAM_FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
 )
@@ -185,14 +191,15 @@ def _shikiru_link(
     return link
 
 
-def _instance(home: Path) -> Path:
+def _instance(home: Path, group_id: int | None = None) -> Path:
     component = home / "api"
     component.mkdir()
     directory = home / _PRODUCT
     directory.mkdir()
+    group = "" if group_id is None else f"group_id = {group_id}\n"
     (directory / "config.toml").write_text(
         f'product = "{_PRODUCT}"\n\n[[components]]\nname = "api"\npath = "{component}"\n\n'
-        f"[channels.telegram]\nowners = [{_OWNER}]\n\n"
+        f"[channels.telegram]\nowners = [{_OWNER}]\n{group}\n"
         "[operator]\ndispatch_interval_s = 1\noutbox_interval_s = 1\n\n"
         "[handlers.infrastructure]\nrestart_poll_s = 1\n",
         encoding="utf-8",
@@ -299,6 +306,55 @@ class _MarkingBot(FakeBotApi):
         return await super().call(method, payload)
 
 
+class _ForumBot(FakeBotApi):
+    """A fake Bot API that creates each forum topic under the next thread id, from `_TOPIC` on."""
+
+    def __init__(self, updates: list[dict[str, Any]]) -> None:
+        super().__init__(updates)
+        self._threads = itertools.count(_TOPIC)
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method != "createForumTopic":
+            return await super().call(method, payload)
+        self.calls.append((method, dict(payload)))
+        created = json.loads(_FORUM_TOPIC.read_text(encoding="utf-8"))
+        created["result"]["message_thread_id"] = next(self._threads)
+        return created
+
+
+class _StagedBot(FakeBotApi):
+    """A fake Bot API that gives its updates one at a time, each once one more message was sent.
+
+    The first update waits for the bot's first sent message and the second for its second, as a PO
+    who answers a question the bot has just asked does.
+    """
+
+    def __init__(self, updates: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._staged = updates
+        self._given = 0
+        self._sent = 0
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == "sendMessage":
+            self._sent += 1
+        elif method == "getUpdates" and self._given < min(self._sent, len(self._staged)):
+            self._updates = [self._staged[self._given]]
+            self._given += 1
+        return await super().call(method, payload)
+
+
+def _in_topic(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
+    """Return the messages the bot sent into the topic that carry `text`."""
+    return [
+        payload
+        for method, payload in bot.calls
+        if method == "sendMessage"
+        and payload.get("message_thread_id") == _TOPIC
+        and text in str(payload.get("text", ""))
+    ]
+
+
 def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path) -> None:
     directory = _instance(tmp_path)
     bot = FakeBotApi()
@@ -365,6 +421,69 @@ def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> No
     finally:
         database.close()
     assert (op["state"], op["command_id"], offset["next_offset"]) == ("issued", "12", 703)
+
+
+def test_help_in_a_component_topic_is_answered_in_that_topic(tmp_path: Path) -> None:
+    directory = _instance(tmp_path, group_id=_GROUP)
+    updates = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
+    command = updates["result"][0]
+    command["message"].update(
+        chat={"id": _GROUP},
+        message_thread_id=_TOPIC,
+        reply_to_message={"message_id": _TOPIC},
+        text="/help",
+    )
+    bot = _ForumBot([command])
+    session = _ShikiruSession(asyncio.Event())
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    try:
+        composition.recover()
+        asyncio.run(_deliver(composition.jobs, _until(lambda: bool(_in_topic(bot, _HELP_LINE)))))
+    finally:
+        composition.close()
+
+    [answer] = _in_topic(bot, _HELP_LINE)
+    assert answer["chat_id"] == str(_GROUP)
+
+
+def test_a_reply_to_the_prompt_resolves_the_escalation_with_its_text(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    updates = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
+    reply, tap = updates["result"][1], updates["result"][2]
+    reply["message"]["reply_to_message"]["message_id"] = _PROMPT_ID
+    tap["callback_query"]["data"] = "a:1:3"
+    bot = _StagedBot([tap, reply])
+    session = _ShikiruSession(asyncio.Event())
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    try:
+        asyncio.run(_deliver(composition.jobs, _until(session.resolved.is_set)))
+    finally:
+        composition.close()
+
+    assert session.resolutions == [
+        {
+            "escalation_id": "E-1",
+            "resolution": {"kind": "answer", "text": "Use the second way"},
+        }
+    ]
+    [prompt] = [
+        payload
+        for method, payload in bot.calls
+        if method == "sendMessage" and "Reply with your answer" in str(payload.get("text", ""))
+    ]
+    assert prompt["reply_markup"] == {"force_reply": True, "input_field_placeholder": "Your answer"}
 
 
 def _goal_update() -> dict[str, Any]:
