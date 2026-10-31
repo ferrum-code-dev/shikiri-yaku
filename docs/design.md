@@ -241,13 +241,14 @@ Each handler gets what it needs through its constructor (the Channel, the journa
 
 It forwards. The message is a template over Shikiru's fields, so it needs no model:
 
-> **Shop · api · T-12 · Decision needed**
+> **T-12 · Export invoices older than 90 days · S41**
 > *Export invoices older than 90 days?* The payment provider only keeps 90 days of invoices.
 > ★ A. Ship export for new invoices now (history later)
 > B. Add a second data source first (delivery moves)
 > *What I tried:* nothing, this is a product question.
 > [A] [B] [Reply with text] [Cancel task] [Details]
 
+* **Header.** The task's id and title (from `get_task`; the id alone if Shikiru does not answer) and the signal number last, as a reference (`S41`). The component name comes first only where the message is not already in that component's topic (the General topic, a private chat). The product name is never shown: an instance serves one product. A message for information keeps its "For information" label after the title.
 * **Content.** The question, the agent's options with consequences and the ★ come from the structured escalation view ([S1](#11-shikiru-what-is-used-what-is-needed)). For escalations that carry no agent options, the buttons are Shikiru's own resolutions (`retry`, `accept`, `cancel`, with their consequences), each offered only where the escalation allows it. A reason-specific hint is added for a few reasons, from a small table in code (for example `agent_auth`: log in again in a terminal, then tap Retry). The note of a forwarding handler is added as *What I tried*.
 * **Answers.** An option button resolves the escalation with `answer` and the option's label and consequences as text. An option that needs input asks for a reply first. A free-text reply to the message is sent as the answer. `accept` (integrates the work as it stands) and `cancel` ask for a confirming tap.
 * **Signals without an escalation** (a stopped engine that could not be restarted, or a notice, review or health message whose own handler failed) are shown as information with an *Acknowledge* button. They close when acknowledged or when the engine is up again, and do not repeat while the engine stays down without new events.

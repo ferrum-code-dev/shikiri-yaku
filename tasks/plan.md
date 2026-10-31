@@ -796,6 +796,40 @@ Acceptance criteria:
 * The suite stays under 10 seconds and no test waits on a real interval.
 * The gate passes.
 
+### C8. Fixes from the first live run (normal)
+
+The Operator was run for the first time against a real Shikiru project and a real Telegram bot. Four
+defects showed. Design §6.1 now describes the header (**Header** bullet). Do not edit `docs/design.md`.
+
+1. **A refused `getUpdates` is reported as unreadable.** The bot had a webhook, so Telegram answered
+   `{"ok":false,"error_code":409,"description":"Conflict: can't use getUpdates method while webhook is
+   active; use deleteWebhook to delete the webhook first"}`. The update parser accepts only `ok: true`, so
+   the health message said "the Bot API replied in a shape the Channel does not read". Read the failure
+   reply (as the other Bot API calls already do with `_Failed`) and raise the error with the code and
+   the description. A reply that is neither shape stays "unreadable".
+2. **`doctor` does not see a webhook.** Add a Telegram check with `getWebhookInfo`: a non-empty `url` fails
+   and says a webhook is set and the host it points at. Never print the rest of the URL.
+3. **Header of a decision message.** Today `S2 · shop · api · T-1 · Decision needed`. Make it
+   `T-1 · <title> · S2` in a component's topic and `api · T-1 · <title> · S2` anywhere else (General
+   topic, private chat). The title is `get_task(task_id).task.title`, cut to a setting (a new
+   `message_title_max_chars`, default 80); when `get_task` fails or the signal has no task, the header has
+   the task id only. The product name is no longer shown. An information message keeps "For information"
+   after the title. Whether a destination is a component topic comes from `Destinations`
+   (`component_of`); if the message is built once for all destinations, build it per destination. If this
+   needs much more than 100 lines, stop and report how to split it.
+4. **A health message was not edited when its signal closed.** In the live run the signal
+   `operator:health:telegram_inbound_batch:...` was `closed` after the Operator restarted and the source
+   worked, but its message stayed as it was: `final_edited = 0` and no `final_body` in the journal. C6 says it
+   becomes "Recovered". Find out why, with a test that closes the signal the way it closed in the live
+   run, and fix it. If the cause is a gap in the design, report it instead of inventing behavior.
+
+Acceptance criteria:
+* A 409 reply to `getUpdates` produces a health message that contains `409` and Telegram's description; a body that is neither shape still says it is unreadable.
+* `doctor` fails for a bot with a webhook and passes for one without; the failure names the host only.
+* Table-driven header test: in a component topic, in General, in a private chat, with `get_task` failing, with a title longer than the limit, and an information message.
+* The test for item 4 fails without the fix.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
