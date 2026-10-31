@@ -1098,8 +1098,8 @@ Keep free text and other purposes ignored. Bind each tap to the stored approval 
 carry the original model suggestion on the reply origin for a later Decline forward.
 
 Acceptance criteria: the callback types, stored origin metadata and dispatch path are wired without
-changing existing approval behavior; D5d3 tests button dispatch and rejects unrelated origins; gate
-passes.
+changing existing approval behavior; a focused Replies test proves button dispatch and rejects
+unrelated origins; gate passes.
 
 #### D5d3. Install decision effects
 
