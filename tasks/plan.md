@@ -843,16 +843,14 @@ the text. Design §6.1 now has the layout (**Layout** bullet and the example). D
    shows, not the markup.
 2. The Product handler builds escalation and information messages with the header as the `heading` and a
    blank line between blocks. An option line is `★ 1. Label (consequences)` as today.
-3. An answer button carries the option number, the ★ when the option is recommended, and the option's
-   title. Shikiru gives an option a `label` today and no separate short title, so the title is the label.
-   Never cut a label: when it is longer than a new setting `button_label_max_chars` (default 24) the
-   button has the number and the ★ only (`★ 1`), and the full label stays in the text. Button data does
-   not change. The buttons for `Reply with text`, `Cancel task` and the rest keep their labels.
+3. An answer button carries the option number, the ★ when the option is recommended, and the label,
+   cut to a new setting `button_label_max_chars` (default 30, with `…`). Button data does not change. The
+   buttons for `Reply with text`, `Cancel task` and the rest keep their labels.
 4. Other handlers' messages (review, notice) are not restyled. If one of them needs the heading to look
    right, report it.
 
 Acceptance criteria:
-* Table-driven: an escalation with a recommended option, without one, with a label that fits and one longer than the limit, and an information message; each checks the heading, the blank lines and the button labels. No button label ends in `…`.
+* Table-driven: an escalation with a recommended option, without one, with a long label, and an information message; each checks the heading, the blank lines and the button labels.
 * A question containing `<b>` and `&` is delivered escaped, in a send and in a final edit.
 * A recommended option has the ★ on its button and on its line; no other button has one.
 * The gate passes.
