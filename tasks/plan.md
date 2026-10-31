@@ -905,7 +905,17 @@ Treat a `reply_to_message` whose `message_id` equals the message's `message_thre
 item is `text`). A reply to any other message stays a reply. Check the other places that read
 `reply_to_ref` for the same assumption and report them.
 
+Second part, from the same run: tapping *Reply with text* sends "Reply with your answer." and the PO must then
+long-press it and choose Reply, or the text is not tied to the question (see above). Make the app open the
+reply box by itself. `Message` gains `expects_reply: bool = False` (a core type; it knows nothing of
+Telegram). The Telegram adapter sends such a message with `reply_markup` `{"force_reply": true,
+"input_field_placeholder": "Your answer"}` (and no keyboard), in a topic as well. The prompt that
+*Reply with text* sends, and any other prompt that waits for text, sets it. The PO's answer then arrives as
+a reply to that prompt, which Replies already ties to the question.
+
 Acceptance criteria:
+* A prompt that waits for text is sent with `force_reply`; an ordinary message and a message with buttons are not, and a message cannot have both buttons and `force_reply` (the Bot API takes one `reply_markup`).
+* A reply to the prompt resolves the escalation with the text (composed test as above, tap *Reply with text*, then the reply).
 * Table-driven over payload fixtures in the shape Telegram sends in a forum topic: a command in a topic, a plain message in a topic, a reply to a message of the bot in a topic (stays a reply), a command in a private chat, and a command in a group without topics.
 * A composed test (as in C7): `/help` sent in a component topic gets an answer in the same topic; it fails without the fix.
 * The fixtures hold no real user ids or tokens: use the ids already in `tests/fixtures/telegram`.
