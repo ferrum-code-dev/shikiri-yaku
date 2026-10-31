@@ -921,6 +921,23 @@ Acceptance criteria:
 * The fixtures hold no real user ids or tokens: use the ids already in `tests/fixtures/telegram`.
 * The gate passes.
 
+### C12. Commands answer when they have nothing to show (normal)
+
+Found in the live run: `/open` with no open question or approval sent nothing, so it looked broken, and
+`/stats` (a CLI command only) was treated as free text and answered with the `/help` list, which did not
+say the command is unknown.
+
+1. `/open` answers "Nothing is waiting for you." when it re-shows nothing and every project answered
+   (the unreachable-project line stays as it is, and is not repeated with it).
+2. A message that starts with `/` and is not a command the Operator knows is answered with
+   "Unknown command /stats." (the name as typed, cut to a named limit) followed by the help list. Free
+   text that does not start with `/` keeps today's answer.
+
+Acceptance criteria:
+* `/open` with nothing open answers once and a repeat of the same update answers nothing more; with one open question it re-shows it and does not say "nothing".
+* Table-driven: `/stats`, `/Open` (case), `/open@bot` (Telegram's addressed form, which is a known command), a long unknown name, plain text.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
