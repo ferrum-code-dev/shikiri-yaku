@@ -773,6 +773,29 @@ Acceptance criteria:
 * A task with no children produces one message at once.
 * A `health` signal is sent once, and its closing edits the message; the Notice handler failing forwards the original signal (the Router's rule).
 
+### C7. Phase C paths through the composed app (normal)
+
+`tests/unit/test_composition.py` runs one escalation from the Shikiru source to a sent message and one tap to a
+resolve. The Phase C paths are tested only one part at a time. Add composed tests, in the same style
+(`compose()` with the fake Shikiru session, the fake Bot API and `NapClock`), for three paths. Build each
+escalation in the test from the recorded fixture by changing its reason; add a fixture file only if that
+is not enough. Change production code only if a test shows a defect, and report the defect instead of
+working around it.
+
+* **Retry:** an `agent_error` escalation is resolved by the Operator with `resolve_escalation(retry)`, once, and
+  the PO gets no message.
+* **Quota wait:** a `quota_exhausted` escalation with an exhausted window makes the PO notice and no
+  resolve; when the clock passes the reset time plus the margin, `resolve_escalation(retry)` is sent once
+  and the notice is not sent again. The test needs a clock whose `now()` can be moved (extend
+  `tests/support/clock.py`); never wait in real time.
+* **Review:** a `pr_opened` event sends one review message with an *Open PR* link button and
+  *Acknowledge*; the task being done edits that message to its final state and removes the buttons.
+
+Acceptance criteria:
+* Each of the three tests fails when the part it exercises is broken: show it for one deliberate break per test (for example, leave the Router's `Resolved` handling out, skip `WaitUntil`, skip the final edit) and say which break you used in the report.
+* The suite stays under 10 seconds and no test waits on a real interval.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
