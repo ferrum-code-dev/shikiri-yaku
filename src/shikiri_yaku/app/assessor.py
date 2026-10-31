@@ -33,19 +33,19 @@ class Assessor:
         self._deadline_s = deadline_s
 
     async def assess(self, signal: Signal) -> Assessment:
+        deadline = asyncio.timeout(self._deadline_s)
         try:
-            async with asyncio.timeout(self._deadline_s):
-                assessment = await self._ask(signal)
+            async with deadline:
+                host_facts = await self._facts.collect()
+                assessment = await self._reasoner.assess_blocker(
+                    signal, host_facts, deadline=deadline
+                )
         except ReasonerError as error:
             return self._failed(str(error))
         except TimeoutError:
             return self._failed(f"no verdict within {self._deadline_s:g} seconds")
         self._health.reasoner_recovered()
         return assessment
-
-    async def _ask(self, signal: Signal) -> Assessment:
-        host_facts = await self._facts.collect()
-        return await self._reasoner.assess_blocker(signal, host_facts)
 
     def _failed(self, reason: str) -> Assessment:
         self._health.reasoner_failed()

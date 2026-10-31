@@ -18,6 +18,7 @@ from shikiri_yaku.app.health_source import REASONER_SCOPE, HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
+from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.classification import Assessment, Source, Verdict
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
@@ -137,6 +138,7 @@ class _Rung:
 class _Wiring:
     clock: NapClock
     rung: _Rung
+    ladder: LadderReasoner
     signals: SignalStore
     classifier: RuleClassifier
 
@@ -168,7 +170,7 @@ def _wire(
     infrastructure = Extension(INFRASTRUCTURE, (HOST_TOOL_RULE,), InfrastructureHandler(()))
     assess = assessor.assess if reasoner else None
     classifier = RuleClassifier([infrastructure, product_extension()], assess)
-    return _Wiring(clock, rung, signals, classifier)
+    return _Wiring(clock, rung, ladder, signals, classifier)
 
 
 def _open_reasoner_signals(signals: SignalStore) -> int:
@@ -299,3 +301,30 @@ def test_host_facts_that_never_return_are_cut_at_the_deadline_and_the_rung_is_no
     assert classification.category == PRODUCT
     assert classification.note.startswith(REASONER_FAILED_NOTE)
     assert wiring.rung.facts == []
+    assert wiring.ladder.rung_states()[0].last_failure is None
+
+
+def test_a_deadline_interrupted_rung_cools_down_and_recovers_after_the_cooldown(
+    memory: Database,
+) -> None:
+    wiring = _wire(memory, answer=HOST_TOOL_ANSWER, rung_hangs=True, deadline_s=SHORT_DEADLINE_S)
+
+    asyncio.run(_classify_before_cut(wiring.classifier))
+
+    (state,) = wiring.ladder.rung_states()
+    assert state.last_failure is not None
+    assert "timed out" in state.last_failure
+    assert state.cooling_until is not None
+    sources = JournalSources(CursorStore(memory, wiring.signals), wiring.signals)
+    report = asyncio.run(Status({}, sources, wiring.ladder).report())
+    assert "claude:haiku: cooling until" in report
+
+    _classify(wiring)
+    assert len(wiring.rung.facts) == 1
+
+    wiring.clock.advance(COOLDOWN + COOLDOWN)
+    wiring.rung.hangs = False
+    assert _classify(wiring) == (INFRASTRUCTURE, Verdict.HOST_TOOL)
+    assert len(wiring.rung.facts) == 2
+    assert wiring.ladder.rung_states()[0].cooling_until is None
+    assert _open_reasoner_signals(wiring.signals) == 0

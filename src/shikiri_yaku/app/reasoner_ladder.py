@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.classification import Assessment
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import Clock, ReasonerRung
+    from shikiri_yaku.ports import AssessmentDeadline, Clock, ReasonerRung
 
 
 class LadderReasoner:
@@ -37,11 +37,26 @@ class LadderReasoner:
         self._slots = asyncio.Semaphore(max_parallel)
         self._failed: dict[int, tuple[datetime, str]] = {}
 
-    async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
+    async def assess_blocker(
+        self,
+        signal: Signal,
+        host_facts: Sequence[str],
+        *,
+        deadline: AssessmentDeadline | None = None,
+    ) -> Assessment:
+        if deadline is None:
+            async with self._slots:
+                return await self._climb(signal, host_facts)
         async with self._slots:
-            return await self._climb(signal, host_facts)
+            return await self._climb(signal, host_facts, deadline=deadline)
 
-    async def _climb(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
+    async def _climb(
+        self,
+        signal: Signal,
+        host_facts: Sequence[str],
+        *,
+        deadline: AssessmentDeadline | None = None,
+    ) -> Assessment:
         reasons: list[str] = []
         for index, rung in enumerate(self._rungs):
             if self._cooling(index):
@@ -49,6 +64,11 @@ class LadderReasoner:
                 continue
             try:
                 return await rung.assess_blocker(signal, host_facts)
+            except asyncio.CancelledError:
+                if deadline is not None and deadline.expired():
+                    reason = f"{rung.name} timed out before the assessment deadline"
+                    self._failed[index] = (self._clock.now() + self._cooldown, reason)
+                raise
             except ReasonerError as error:
                 reason = str(error)
                 self._failed[index] = (self._clock.now() + self._cooldown, reason)

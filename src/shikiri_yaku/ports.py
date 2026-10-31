@@ -42,6 +42,7 @@ __all__ = [
     "AckStatus",
     "ActionLog",
     "AgentOption",
+    "AssessmentDeadline",
     "AttemptState",
     "Button",
     "Channel",
@@ -746,11 +747,24 @@ class Reporter(Protocol):
 class Reasoner(Protocol):
     """The Reasoner's one job, `assess_blocker` (design §8). Its ladder sits behind this interface.
 
-    `host_facts` are the lines the prompt gives the model about this host. Raises ReasonerError
-    when no rung gives a usable answer.
+    `host_facts` are the lines the prompt gives the model about this host. `deadline` represents
+    the overall assessment timeout, so the ladder can distinguish its expiry from cancellation.
+    Raises ReasonerError when no rung gives a usable answer.
     """
 
-    async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment: ...
+    async def assess_blocker(
+        self,
+        signal: Signal,
+        host_facts: Sequence[str],
+        *,
+        deadline: AssessmentDeadline | None = None,
+    ) -> Assessment: ...
+
+
+class AssessmentDeadline(Protocol):
+    """The assessment deadline reports whether it caused the current task's cancellation."""
+
+    def expired(self) -> bool: ...
 
 
 class ReasonerRung(Protocol):

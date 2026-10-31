@@ -11,13 +11,14 @@ import pytest
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.domain.classification import Assessment, Verdict
 from shikiri_yaku.domain.signal import Kind, Signal
-from shikiri_yaku.ports import ReasonerError
+from shikiri_yaku.ports import ReasonerError, RungState
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 START: Final = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
 COOLDOWN: Final = timedelta(minutes=5)
+SHORT_DEADLINE_S: Final = 0.05
 ANSWER: Final = Assessment(verdict=Verdict.OTHER, note="from the answering rung")
 _SIGNAL: Final = Signal(
     project="api",
@@ -52,11 +53,13 @@ class _Rung:
         self.inside = 0
         self.peak = 0
         self.two_inside = asyncio.Event()
+        self.entered = asyncio.Event()
 
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
         del signal, host_facts
         self.calls += 1
         self.inside += 1
+        self.entered.set()
         self.peak = max(self.peak, self.inside)
         if self.peak >= 2:
             self.two_inside.set()
@@ -120,3 +123,24 @@ def test_no_more_than_max_parallel_calls_run_at_once() -> None:
 
     assert peak == 2
     assert answers == [ANSWER] * 5
+
+
+def test_a_call_that_times_out_while_waiting_for_a_slot_does_not_fail_a_rung() -> None:
+    async def scenario() -> Sequence[RungState]:
+        gate = asyncio.Event()
+        rung = _Rung("claude:haiku", gate=gate)
+        ladder = LadderReasoner([rung], _Clock(), cooldown=COOLDOWN, max_parallel=1)
+        active = asyncio.create_task(ladder.assess_blocker(_SIGNAL, _FACTS))
+        await rung.entered.wait()
+        deadline = asyncio.timeout(SHORT_DEADLINE_S)
+        with pytest.raises(TimeoutError):
+            async with deadline:
+                await ladder.assess_blocker(_SIGNAL, _FACTS, deadline=deadline)
+        gate.set()
+        await active
+        return ladder.rung_states()
+
+    (state,) = asyncio.run(scenario())
+
+    assert state.last_failure is None
+    assert state.cooling_until is None
