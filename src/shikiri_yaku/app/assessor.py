@@ -1,12 +1,14 @@
 """The Reasoner as the classifier sees it: host facts in, an assessment out, and it never raises.
 
-A ladder that gives no answer becomes an `other` assessment whose note says the Reasoner failed,
-so the signal goes to the product category with that note. The health source hears about each
-call, so one signal opens while the ladder fails and closes on the next answer (design §5, §8).
+A ladder that gives no answer, or no verdict within the deadline, becomes an `other` assessment
+whose note says the Reasoner failed, so the signal goes to the product category with that note.
+The health source hears about each call, so one signal opens while the ladder fails and closes on
+the next answer (design §5, §8).
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.classification import Assessment, Verdict
@@ -22,17 +24,29 @@ REASONER_FAILED_NOTE = "Reasoner failed: "
 
 
 class Assessor:
-    def __init__(self, reasoner: Reasoner, facts: HostFacts, health: HealthSource) -> None:
+    def __init__(
+        self, reasoner: Reasoner, facts: HostFacts, health: HealthSource, *, deadline_s: float
+    ) -> None:
         self._reasoner = reasoner
         self._facts = facts
         self._health = health
+        self._deadline_s = deadline_s
 
     async def assess(self, signal: Signal) -> Assessment:
-        host_facts = await self._facts.collect()
         try:
-            assessment = await self._reasoner.assess_blocker(signal, host_facts)
+            async with asyncio.timeout(self._deadline_s):
+                assessment = await self._ask(signal)
         except ReasonerError as error:
-            self._health.reasoner_failed()
-            return Assessment(verdict=Verdict.OTHER, note=f"{REASONER_FAILED_NOTE}{error}")
+            return self._failed(str(error))
+        except TimeoutError:
+            return self._failed(f"no verdict within {self._deadline_s:g} seconds")
         self._health.reasoner_recovered()
         return assessment
+
+    async def _ask(self, signal: Signal) -> Assessment:
+        host_facts = await self._facts.collect()
+        return await self._reasoner.assess_blocker(signal, host_facts)
+
+    def _failed(self, reason: str) -> Assessment:
+        self._health.reasoner_failed()
+        return Assessment(verdict=Verdict.OTHER, note=f"{REASONER_FAILED_NOTE}{reason}")

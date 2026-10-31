@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING, Any, Final, override
 import pytest
 
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
+from shikiri_yaku.bootstrap import reasoner_rungs
 from shikiri_yaku.domain.classification import Assessment, CallRecord, Verdict
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner, ReasonerError
+from shikiri_yaku.settings import ReasonerSettings
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -398,3 +400,22 @@ def test_a_probe_whose_version_flag_fails_is_a_reasoner_error(cli: str, tmp_path
 
     with pytest.raises(ReasonerError, match=re.escape(f"{cli}:{_MODEL}")):
         asyncio.run(_rung(cli, runner, tmp_path).probe())
+
+
+def test_the_rungs_share_the_verdicts_wait_so_their_calls_add_up_to_at_most_that_wait(
+    tmp_path: Path,
+) -> None:
+    config = ReasonerSettings.model_validate(
+        {"ladder": ["claude:haiku", "codex:gpt-5"], "timeout_s": _TIMEOUT_S}
+    )
+    runner = _Fake()
+    timeouts: list[float] = []
+
+    for rung in reasoner_rungs(config, runner, tmp_path):
+        asyncio.run(rung.probe())
+        assert runner.timeout_s is not None
+        timeouts.append(runner.timeout_s)
+
+    assert len(timeouts) == len(config.ladder)
+    assert all(timeout > 0 for timeout in timeouts)
+    assert sum(timeouts) <= _TIMEOUT_S

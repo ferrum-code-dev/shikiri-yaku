@@ -1,8 +1,13 @@
-"""The CommandRunner on this host: one argument list, no shell, killed as a group on timeout."""
+"""The CommandRunner on this host: one argument list, no shell, and the group killed on early exit.
+
+A timeout or a cancelled call kills the group and reaps the leader, so no call leaves a process
+running (design §5, §8).
+"""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 from typing import TYPE_CHECKING
@@ -40,13 +45,21 @@ class ProcessCommandRunner:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout_s)
         except TimeoutError as error:
-            # keep: a child that ignores SIGTERM, and the children it started, die with the group
-            os.killpg(process.pid, signal.SIGKILL)
-            await process.wait()
+            await _kill_group(process)
             message = f"{argv[0]} did not finish in {timeout_s:g} seconds and was killed"
             raise CommandError(message) from error
+        except asyncio.CancelledError:
+            await _kill_group(process)
+            raise
         return CommandResult(
             returncode=process.returncode if process.returncode is not None else -1,
             stdout=stdout.decode(errors="replace"),
             stderr=stderr.decode(errors="replace"),
         )
+
+
+async def _kill_group(process: asyncio.subprocess.Process) -> None:
+    # keep: a child that ignores SIGTERM, and the children it started, die with the group
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    await process.wait()

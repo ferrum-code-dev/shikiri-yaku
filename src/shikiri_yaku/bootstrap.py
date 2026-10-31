@@ -339,19 +339,26 @@ def build_reasoner(
     sources = JournalSources(CursorStore(journal, signals), signals)
     health = HealthSource(OPERATOR_SCOPE, sources, clock, settings.operator.link_unreachable_min)
     facts = HostFacts(commands, os.environ.get("SHELL", FALLBACK_SHELL), config.timeout_s)
-    return Reasoning(rungs, ladder, Assessor(ladder, facts, health))
+    assessor = Assessor(ladder, facts, health, deadline_s=config.timeout_s)
+    return Reasoning(rungs, ladder, assessor)
 
 
 def reasoner_rungs(
     config: ReasonerSettings, commands: CommandRunner, scratch_root: Path
 ) -> list[ReasonerRung]:
-    """Return one rung per ladder entry, each built by the class of its adapter."""
+    """Return one rung per ladder entry, each built by the class of its adapter.
+
+    The rungs run one after another, so each gets an equal share of `reasoner.timeout_s`: a rung
+    that hangs cannot use up the whole wait for the verdict, and the next rung still gets its turn
+    (design §5, §8).
+    """
+    share_s = config.timeout_s / len(config.ladder)
     return [
         RUNG_CLASSES[rung.adapter](
             rung.model,
             commands,
             effort=rung.effort,
-            timeout_s=config.timeout_s,
+            timeout_s=share_s,
             input_max_chars=config.input_max_chars,
             scratch_root=scratch_root,
         )

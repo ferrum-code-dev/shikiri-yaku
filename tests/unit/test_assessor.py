@@ -37,11 +37,17 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Mapping, Sequence
     from pathlib import Path
 
-    from shikiri_yaku.domain.classification import Category
+    from shikiri_yaku.domain.classification import Category, Classification
 
 COOLDOWN: Final = timedelta(minutes=5)
 SHELL: Final = "/bin/zsh"
 TIMEOUT_S: Final = 5
+DEADLINE_S: Final = 30.0
+SHORT_DEADLINE_S: Final = 0.05
+# keep: the cap only stops a broken deadline from hanging the run; the assertions then fail
+HANG_CAP_S: Final = 10
+# keep: a call cut by its deadline finishes well inside this; a broken deadline does not
+CUT_BEFORE_S: Final = 5
 HOST_OUTPUT: Final = "os=Darwin 25.3.0\nmanager=brew\npath=/usr/bin\n"
 HOST_TOOL_ANSWER: Final = Assessment(
     verdict=Verdict.HOST_TOOL,
@@ -61,8 +67,21 @@ DECISION: Final = Signal(
 )
 
 
+async def _never_returns() -> None:
+    async with asyncio.timeout(HANG_CAP_S):
+        await asyncio.Event().wait()
+
+
+async def _classify_before_cut(classifier: RuleClassifier) -> Classification:
+    async with asyncio.timeout(CUT_BEFORE_S):
+        return await classifier.classify(DECISION)
+
+
 class _Host(CommandRunner):
-    """The host's login shell, which answers every command with the same facts."""
+    """The host's login shell, which answers every command with the same facts, or never."""
+
+    def __init__(self, *, hangs: bool = False) -> None:
+        self.hangs = hangs
 
     @override
     async def run(
@@ -74,21 +93,30 @@ class _Host(CommandRunner):
         env: Mapping[str, str] | None = None,
     ) -> CommandResult:
         del argv, timeout_s, cwd, env
+        if self.hangs:
+            await _never_returns()
         return CommandResult(returncode=0, stdout=HOST_OUTPUT, stderr="")
 
 
 class _Rung:
-    """A rung that gives `answer`, or fails each call when it is None, and keeps each prompt."""
+    """A rung that gives `answer`, or fails each call when it is None, and keeps each prompt.
+
+    A rung that hangs never answers; it records whether the deadline cancelled its call.
+    """
 
     name = "claude:haiku"
 
-    def __init__(self, answer: Assessment | None) -> None:
+    def __init__(self, answer: Assessment | None, *, hangs: bool = False) -> None:
         self.answer = answer
+        self.hangs = hangs
+        self.cancelled = False
         self.facts: list[list[str]] = []
 
     async def assess_blocker(self, signal: Signal, host_facts: Sequence[str]) -> Assessment:
         del signal
         self.facts.append(list(host_facts))
+        if self.hangs:
+            await self._hang()
         if self.answer is None:
             message = f"{self.name} gave no usable answer: its call exited with code 1"
             raise ReasonerError(message)
@@ -96,6 +124,13 @@ class _Rung:
 
     async def probe(self) -> None:
         return
+
+    async def _hang(self) -> None:
+        try:
+            await _never_returns()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,14 +148,23 @@ def memory() -> Generator[Database]:
     database.close()
 
 
-def _wire(journal: Database, answer: Assessment | None, *, reasoner: bool = True) -> _Wiring:
+def _wire(
+    journal: Database,
+    answer: Assessment | None,
+    *,
+    reasoner: bool = True,
+    rung_hangs: bool = False,
+    host_hangs: bool = False,
+    deadline_s: float = DEADLINE_S,
+) -> _Wiring:
     clock = NapClock()
     signals = SignalStore(journal)
     sources = JournalSources(CursorStore(journal, signals), signals)
     health = HealthSource(OPERATOR_SCOPE, sources, clock, link_unreachable_min=1)
-    rung = _Rung(answer)
+    rung = _Rung(answer, hangs=rung_hangs)
     ladder = LadderReasoner([rung], clock, cooldown=COOLDOWN, max_parallel=1)
-    assessor = Assessor(ladder, HostFacts(_Host(), SHELL, TIMEOUT_S), health)
+    facts = HostFacts(_Host(hangs=host_hangs), SHELL, TIMEOUT_S)
+    assessor = Assessor(ladder, facts, health, deadline_s=deadline_s)
     infrastructure = Extension(INFRASTRUCTURE, (HOST_TOOL_RULE,), InfrastructureHandler(()))
     assess = assessor.assess if reasoner else None
     classifier = RuleClassifier([infrastructure, product_extension()], assess)
@@ -214,4 +258,44 @@ def test_without_a_reasoner_a_decision_goes_to_product_and_the_ladder_is_not_ask
     assert classification.category == PRODUCT
     assert classification.source is Source.RULE
     assert classification.verdict is None
+    assert wiring.rung.facts == []
+
+
+def test_a_ladder_that_never_answers_is_cut_at_the_deadline_and_the_decision_goes_to_product(
+    memory: Database,
+) -> None:
+    wiring = _wire(memory, answer=HOST_TOOL_ANSWER, rung_hangs=True, deadline_s=SHORT_DEADLINE_S)
+
+    classification = asyncio.run(_classify_before_cut(wiring.classifier))
+
+    assert wiring.rung.cancelled
+    assert classification.category == PRODUCT
+    assert classification.note.startswith(REASONER_FAILED_NOTE)
+    assert _open_reasoner_signals(wiring.signals) == 1
+
+
+def test_calls_waiting_for_the_one_slot_are_cut_at_the_deadline_and_never_reach_the_rung(
+    memory: Database,
+) -> None:
+    wiring = _wire(memory, answer=HOST_TOOL_ANSWER, rung_hangs=True, deadline_s=SHORT_DEADLINE_S)
+
+    async def two_calls() -> None:
+        async with asyncio.timeout(CUT_BEFORE_S):
+            await asyncio.gather(*(wiring.classifier.classify(DECISION) for _ in range(2)))
+
+    asyncio.run(two_calls())
+
+    assert len(wiring.rung.facts) == 1
+    assert _open_reasoner_signals(wiring.signals) == 1
+
+
+def test_host_facts_that_never_return_are_cut_at_the_deadline_and_the_rung_is_not_asked(
+    memory: Database,
+) -> None:
+    wiring = _wire(memory, answer=HOST_TOOL_ANSWER, host_hangs=True, deadline_s=SHORT_DEADLINE_S)
+
+    classification = asyncio.run(_classify_before_cut(wiring.classifier))
+
+    assert classification.category == PRODUCT
+    assert classification.note.startswith(REASONER_FAILED_NOTE)
     assert wiring.rung.facts == []

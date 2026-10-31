@@ -106,3 +106,30 @@ def test_a_timeout_kills_a_child_that_ignores_sigterm(tmp_path: Path) -> None:
     else:
         os.kill(child, signal.SIGKILL)
         pytest.fail("the child of the killed command is still running")
+
+
+def _wait_for_file(path: Path) -> None:
+    for _ in range(_CHILD_PID_ATTEMPTS):
+        if path.exists():
+            return
+        threading.Event().wait(_CHILD_PID_WAIT_S)
+
+
+async def _cancel_once_started(pid_file: Path) -> None:
+    command = asyncio.create_task(
+        ProcessCommandRunner().run(
+            [sys.executable, "-c", _STUBBORN_CHILD, str(pid_file)], timeout_s=_TIMEOUT_S
+        )
+    )
+    await asyncio.to_thread(_wait_for_file, pid_file)
+    command.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await command
+
+
+def test_cancelling_a_command_kills_and_reaps_its_process(tmp_path: Path) -> None:
+    pid_file = tmp_path / "child.pid"
+
+    asyncio.run(_cancel_once_started(pid_file))
+
+    assert not _alive(int(pid_file.read_text(encoding="utf-8")))
