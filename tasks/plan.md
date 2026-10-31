@@ -1033,6 +1033,7 @@ Acceptance criteria:
 * Two Install taps approve once; an expired approval and an approval for a signal resolved elsewhere do nothing and say why; Decline forwards the original escalation with a note.
 * A hostile package name, an unknown manager and a tool that already exists each forward with the reason and run nothing.
 * The stored argument list is the one shown in the message.
+* From the D4 review, in `domain/recipes.py`: an npm package is either a plain name or `@scope/name` with one slash. `user/repo` (npm reads it as a GitHub repository) and a leading `/` are refused as `bad_package`; add them to the D4 table test.
 * The gate passes.
 
 ### D6. Executor and resolution (normal)
