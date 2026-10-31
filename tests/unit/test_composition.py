@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -16,8 +17,10 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
+from shikiri_yaku.app.event_source import MERGED_LINE
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
 from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.extensions.infrastructure.rules import AGENT_ERROR, QUOTA_EXHAUSTED
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     Database,
@@ -29,14 +32,15 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.submits import JournalSubmits
-from shikiri_yaku.ports import AttemptState, SubmitStatus
+from shikiri_yaku.ports import AttemptState, EventKinds, ResolutionKind, SubmitStatus
 from shikiri_yaku.settings import load_settings
 from tests.support.clock import NapClock
-from tests.support.telegram_bot import FakeBotApi
+from tests.support.telegram_bot import FIRST_MESSAGE_ID, FakeBotApi
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
     from contextlib import AbstractAsyncContextManager
+    from datetime import datetime
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
     from shikiri_yaku.cli import Job
@@ -53,28 +57,72 @@ _ENGINE_DOWN_NEW: Final = NewSignal(_ENGINE_DOWN.id, "api", "engine_down", "", "
 _REMOVED_DOWN: Final = Signal("old", Kind.ENGINE_DOWN, "status", "", "engine is down")
 _REMOVED_DOWN_NEW: Final = NewSignal(_REMOVED_DOWN.id, "old", "engine_down", "", "engine is down")
 TELEGRAM_FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
+_E1_ID: Final = "api:escalation:E-1"
+_QUOTA_NOTICE: Final = "quota is used up"
+_RESET_IN: Final = timedelta(hours=1)
+# keep: the reset plus the default one-minute margin, so the wait is due at this moment
+_PAST_RESET: Final = timedelta(hours=1, minutes=2)
+_PR_URL: Final = "https://github.com/acme/shop/pull/7"
+_REVIEW_MARKER: Final = "Pull request ready for review"
+
+
+def _recorded(name: str) -> dict[str, Any]:
+    """Return the payload Shikiru gave once for the tool `name`."""
+    return json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _listing(reason: str) -> dict[str, Any]:
+    """Return the recorded open escalation with its reason changed to `reason`."""
+    listing = _recorded("list_escalations")
+    listing["result"][0]["escalation"]["reason"] = reason
+    return listing
+
+
+def _exhausted(reset: datetime) -> dict[str, Any]:
+    """Return an engine status whose Claude five-hour window is used up until `reset`."""
+    window = {"name": "five_hour", "used_pct": 100.0, "resets_at": reset.isoformat()}
+    return {"engine_up": True, "quotas": {"claude": [window]}}
+
+
+def _recorded_event(kind: str, event_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    """Return the recorded event with its id, kind and data changed, as Shikiru gives them."""
+    event = _recorded("wait_for_events")["result"][0]
+    return {**event, "id": event_id, "kind": kind, "message": kind, "data": data}
 
 
 class _ShikiruSession:
-    """Answers the tools of one healthy project whose only event is an open escalation.
+    """Answers the tools of one healthy project from the recorded fixtures, or from `answers`.
 
     A submit is recorded and answered, unless `hangs_submit` keeps it from being answered, as a
-    process that dies inside the call leaves it.
+    process that dies inside the call leaves it. A poll is answered with `events` at once, and with
+    `later` as well once `gate` is set, as an event that comes after the first ones does.
     """
 
-    def __init__(self, resolved: asyncio.Event, *, hangs_submit: bool = False) -> None:
+    def __init__(
+        self,
+        resolved: asyncio.Event,
+        *,
+        hangs_submit: bool = False,
+        answers: Mapping[str, dict[str, Any]] | None = None,
+        events: Sequence[dict[str, Any]] = (),
+        later: Sequence[dict[str, Any]] = (),
+        gate: asyncio.Event | None = None,
+    ) -> None:
         self.resolved = resolved
         self.resolutions: list[dict[str, Any]] = []
         self.submits: list[str] = []
         self.submitted = asyncio.Event()
         self.hangs_submit = hangs_submit
+        self._answers: dict[str, dict[str, Any]] = {"status": {"engine_up": True, "quotas": {}}}
+        self._answers.update(answers or {})
+        self._events = list(events)
+        self._later = list(later)
+        self._gate = gate
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name == "wait_for_events":
-            await NapClock().sleep(arguments["timeout_s"])
-            payload: dict[str, Any] = {"result": []}
-        elif name == "status":
-            payload = {"engine_up": True, "quotas": {}}
+            events = await self._poll(arguments["since_id"], arguments["timeout_s"])
+            payload: dict[str, Any] = {"result": events}
         elif name == "resolve_escalation":
             self.resolutions.append(arguments)
             self.resolved.set()
@@ -86,8 +134,19 @@ class _ShikiruSession:
                 await asyncio.Event().wait()
             payload = {"id": 7, "status": "done", "result": {"task_id": "T-9"}, "message": None}
         else:
-            payload = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+            payload = self._answers[name] if name in self._answers else _recorded(name)
         return CallToolResult(content=[], structuredContent=payload, isError=False)
+
+    async def _poll(self, since_id: int, timeout_s: float) -> list[dict[str, Any]]:
+        """Answer the events after `since_id`; a long poll with none waits out its timeout."""
+        if timeout_s > 0 and self._gate is not None:
+            await self._gate.wait()
+        released = self._gate is not None and self._gate.is_set()
+        pool = [*self._events, *self._later] if released else self._events
+        events = [event for event in pool if event["id"] > since_id]
+        if not events and timeout_s > 0:
+            await NapClock().sleep(timeout_s)
+        return events
 
 
 def _shikiru_link(
@@ -131,16 +190,32 @@ def _interrupted_restart(directory: Path, signal: Signal, new: NewSignal) -> Non
         database.close()
 
 
-async def _deliver(jobs: Sequence[Job], done: asyncio.Event) -> None:
-    """Run the composed jobs until `done` is set, then stop every job."""
+async def _deliver(jobs: Sequence[Job], scenario: Awaitable[None]) -> None:
+    """Run the composed jobs while `scenario` plays out, then stop every job."""
     running = [asyncio.create_task(job()) for job in jobs]
     try:
         async with asyncio.timeout(_DELIVERY_TIMEOUT_S):
-            await done.wait()
+            await scenario
     finally:
         for task in running:
             task.cancel()
         await asyncio.gather(*running, return_exceptions=True)
+
+
+async def _until(holds: Callable[[], bool]) -> None:
+    """Let the composed jobs run until `holds`, which they make true."""
+    while not holds():
+        await NapClock().sleep(0)
+
+
+def _signal_state(directory: Path, signal_id: str) -> SignalState | None:
+    """Return the journal's state of the signal, read through a connection of its own."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        stored = SignalStore(database).by_id(signal_id)
+    finally:
+        database.close()
+    return None if stored is None else stored.state
 
 
 class _MarkingBot(FakeBotApi):
@@ -169,7 +244,7 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
         clock=NapClock(),
     )
     try:
-        asyncio.run(_deliver(composition.jobs, bot.called))
+        asyncio.run(_deliver(composition.jobs, _until(bot.called.is_set)))
     finally:
         composition.close()
 
@@ -201,7 +276,7 @@ def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> No
         clock=NapClock(),
     )
     try:
-        asyncio.run(_deliver(composition.jobs, session.resolved))
+        asyncio.run(_deliver(composition.jobs, _until(session.resolved.is_set)))
     finally:
         composition.close()
 
@@ -249,7 +324,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
         clock=NapClock(),
     )
     try:
-        asyncio.run(_deliver(composition.jobs, crashed.submitted))
+        asyncio.run(_deliver(composition.jobs, _until(crashed.submitted.is_set)))
     finally:
         composition.close()
     database = Database.open(directory / JOURNAL_FILE_NAME)
@@ -272,7 +347,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
     )
     try:
         composition.recover()
-        asyncio.run(_deliver(composition.jobs, bot.marked))
+        asyncio.run(_deliver(composition.jobs, _until(bot.marked.is_set)))
     finally:
         composition.close()
 
@@ -308,7 +383,7 @@ def test_an_interrupted_start_is_settled_before_its_signal_is_handled(
         clock=NapClock(),
     )
     try:
-        asyncio.run(_deliver(composition.jobs, bot.marked))
+        asyncio.run(_deliver(composition.jobs, _until(bot.marked.is_set)))
     finally:
         composition.close()
 
@@ -349,7 +424,7 @@ def test_a_removed_component_neither_stops_recovery_nor_holds_back_the_others(
     )
     try:
         composition.recover()
-        asyncio.run(_deliver(composition.jobs, bot.marked))
+        asyncio.run(_deliver(composition.jobs, _until(bot.marked.is_set)))
     finally:
         composition.close()
 
@@ -368,3 +443,102 @@ def test_a_removed_component_neither_stops_recovery_nor_holds_back_the_others(
     assert (removed.state, removed.notes) == (SignalState.CLOSED, REMOVED_NOTE)
     assert attempt is not None
     assert (attempt.state, row["notices"]) == (AttemptState.ISSUED, 1)
+
+
+def test_a_retry_is_given_back_to_shikiru_once_and_the_po_gets_no_message(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    bot = FakeBotApi()
+    session = _ShikiruSession(asyncio.Event(), answers={"list_escalations": _listing(AGENT_ERROR)})
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    resolved = _until(lambda: _signal_state(directory, _E1_ID) == SignalState.RESOLVED)
+    try:
+        asyncio.run(_deliver(composition.jobs, resolved))
+    finally:
+        composition.close()
+
+    retries = [(call["escalation_id"], call["resolution"]["kind"]) for call in session.resolutions]
+    assert retries == [("E-1", ResolutionKind.RETRY)]
+    assert [method for method, _payload in bot.calls if method == "sendMessage"] == []
+
+
+async def _quota_cycle(
+    directory: Path, bot: _MarkingBot, session: _ShikiruSession, clock: NapClock
+) -> None:
+    """Wait until the PO is told and the escalation is parked, then move the clock past the reset.
+
+    Only the move makes the wait due, so the retry comes after it and not before.
+    """
+    await _until(
+        lambda: bot.marked.is_set() and _signal_state(directory, _E1_ID) == SignalState.PARKED
+    )
+    assert session.resolutions == []
+    clock.advance(_PAST_RESET)
+    await _until(lambda: _signal_state(directory, _E1_ID) == SignalState.RESOLVED)
+
+
+def test_a_quota_wait_tells_the_po_then_retries_once_after_the_reset(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    clock = NapClock()
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={
+            "list_escalations": _listing(QUOTA_EXHAUSTED),
+            "status": _exhausted(clock.now() + _RESET_IN),
+        },
+    )
+    bot = _MarkingBot(_QUOTA_NOTICE)
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=clock,
+    )
+    try:
+        asyncio.run(_deliver(composition.jobs, _quota_cycle(directory, bot, session, clock)))
+    finally:
+        composition.close()
+
+    retries = [(call["escalation_id"], call["resolution"]["kind"]) for call in session.resolutions]
+    assert retries == [("E-1", ResolutionKind.RETRY)]
+    [notice] = [payload for method, payload in bot.calls if method == "sendMessage"]
+    assert _QUOTA_NOTICE in str(notice["text"])
+
+
+def test_a_pull_request_opened_is_sent_for_review_and_the_task_done_closes_its_message(
+    tmp_path: Path,
+) -> None:
+    directory = _instance(tmp_path)
+    bot = _MarkingBot(_REVIEW_MARKER)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"list_escalations": {"result": []}},
+        events=[_recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": 2})],
+        later=[_recorded_event(EventKinds.TASK_DONE, 42, {})],
+        gate=bot.marked,
+    )
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    edited = _until(lambda: any(method == "editMessageText" for method, _ in bot.calls))
+    try:
+        asyncio.run(_deliver(composition.jobs, edited))
+    finally:
+        composition.close()
+
+    [review] = [payload for method, payload in bot.calls if method == "sendMessage"]
+    [[open_pr], [acknowledge]] = review["reply_markup"]["inline_keyboard"]
+    assert (open_pr["url"], acknowledge["callback_data"].startswith("k:")) == (_PR_URL, True)
+    [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
+    final = (edit["message_id"], edit["reply_markup"], MERGED_LINE in str(edit["text"]))
+    assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
