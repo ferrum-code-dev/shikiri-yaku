@@ -8,7 +8,7 @@ import pytest
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal.database import Database
-from shikiri_yaku.journal.ops import OpStore
+from shikiri_yaku.journal.ops import OpState, OpStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -54,3 +54,24 @@ def test_install_op_round_trips_as_intended_and_keeps_first_argv(memory: Databas
     assert first.state == "intended"
     assert repeated.payload == PAYLOAD
     assert store.install_op(first.id) == first
+
+
+def test_install_decisions_are_conditional_signal_bound_and_final(memory: Database) -> None:
+    store = OpStore(memory)
+    decisions = (
+        (store.approve_install, OpState.APPROVED),
+        (store.decline_install, OpState.DECLINED),
+        (store.expire_install, OpState.EXPIRED),
+        (store.void_install, OpState.VOID),
+    )
+
+    for decision, expected in decisions:
+        operation = store.intend_install(f"install:{expected}", SIGNAL, PAYLOAD, NOW)
+        assert not decision(operation.id, PAYLOAD.number + 1, NOW)
+        assert decision(operation.id, PAYLOAD.number, NOW)
+        assert decision(operation.id, PAYLOAD.number, NOW) is (expected is OpState.DECLINED)
+        stored = store.get(operation.id)
+        assert stored is not None
+        assert stored.state is expected
+        pending_ids = {pending.id for pending in store.non_final()}
+        assert (operation.id in pending_ids) is (expected is OpState.APPROVED)

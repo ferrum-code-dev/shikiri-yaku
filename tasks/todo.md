@@ -74,6 +74,9 @@ merged and `uv run poe check` passes.
       - [x] D5c2. Install preparation
       - [x] D5c3. Persisted approval and outbox delivery
     - [ ] D5d. Install and Decline replies
+      - [x] D5d1. Conditional install decisions
+      - [ ] D5d2. Callback routing and origin binding
+      - [ ] D5d3. Install decision effects
     - [ ] D5e. Composition, `/open` and end-to-end approval
   - [ ] D6. Executor and resolution
   - [ ] D7. Interrupted installs and measures

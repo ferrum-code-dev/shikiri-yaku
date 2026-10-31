@@ -1082,7 +1082,25 @@ Acceptance criteria: composed action/journal/outbox tests cover initial delivery
 and recovery after the op is persisted before queueing; the command shown equals the stored argv;
 gate passes.
 
-#### D5d. Install and Decline replies
+#### D5d1. Conditional install decisions
+
+Add journal transitions from `intended` to `approved`, `declined`, `expired` or `void`, with
+the callback's signal number bound to the stored op. Declined, expired and void operations are
+final for reconciliation. No external effect belongs in this part.
+
+Acceptance criteria: in-memory SQLite proves each transition is conditional, final and bound to
+the op's signal number; gate passes.
+
+#### D5d2. Callback routing and origin binding
+
+Route only Install and Decline buttons from a stored `Purpose.APPROVAL` origin through Replies.
+Keep free text and other purposes ignored. Bind each tap to the stored approval key, signal and op;
+carry the original model suggestion on the reply origin for a later Decline forward.
+
+Acceptance criteria: dispatch is covered for both buttons; unrelated approval buttons, free text
+and other purposes do not reach the install handler; gate passes.
+
+#### D5d3. Install decision effects
 
 Bind Install and Decline taps to the approval's stored origin, signal and op. A valid Install tap
 conditionally approves once before the original approval expiry; stale or resolved escalations are

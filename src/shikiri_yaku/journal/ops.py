@@ -24,6 +24,9 @@ class OpState(StrEnum):
     ISSUED = "issued"
     CONFIRMED = "confirmed"
     FAILED = "failed"
+    DECLINED = "declined"
+    EXPIRED = "expired"
+    VOID = "void"
     UNKNOWN = "unknown"
 
 
@@ -150,6 +153,37 @@ class OpStore:
             raise ValueError(message)
         return stored
 
+    def approve_install(self, op_id: int, number: int, now: datetime) -> bool:
+        return self._transition_install(op_id, number, OpState.APPROVED, now)
+
+    def expire_install(self, op_id: int, number: int, now: datetime) -> bool:
+        return self._transition_install(op_id, number, OpState.EXPIRED, now)
+
+    def void_install(self, op_id: int, number: int, now: datetime) -> bool:
+        return self._transition_install(op_id, number, OpState.VOID, now)
+
+    def decline_install(self, op_id: int, number: int, now: datetime) -> bool:
+        with self._database.transaction():
+            operation = self.install_op(op_id)
+            if operation is None or operation.payload.number != number:
+                return False
+            if operation.state == OpState.DECLINED:
+                return True
+            if operation.state != OpState.INTENDED:
+                return False
+            return self.transition(op_id, OpState.INTENDED, OpState.DECLINED, now)
+
+    def _transition_install(self, op_id: int, number: int, new: OpState, now: datetime) -> bool:
+        with self._database.transaction():
+            operation = self.install_op(op_id)
+            if (
+                operation is None
+                or operation.payload.number != number
+                or operation.state != OpState.INTENDED
+            ):
+                return False
+            return self.transition(op_id, OpState.INTENDED, new, now)
+
     def transition(
         self,
         op_id: int,
@@ -209,10 +243,16 @@ class OpStore:
         return row is not None
 
     def non_final(self) -> list[StoredOp]:
-        """Ops to reconcile at start: everything but `confirmed` and `failed`."""
+        """Return ops whose effects still need observation or a decision."""
         rows = self._database.connection.execute(
-            "SELECT * FROM ops WHERE state NOT IN (?, ?) ORDER BY id",
-            (OpState.CONFIRMED, OpState.FAILED),
+            "SELECT * FROM ops WHERE state NOT IN (?, ?, ?, ?, ?) ORDER BY id",
+            (
+                OpState.CONFIRMED,
+                OpState.FAILED,
+                OpState.DECLINED,
+                OpState.EXPIRED,
+                OpState.VOID,
+            ),
         )
         return [_op(row) for row in rows]
 
