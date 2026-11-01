@@ -118,7 +118,7 @@ class InstallExecutor:
             result = await self._locked_run(argv)
         except CommandError as error:
             message = f"the command did not run to its end: {error}"
-            raise _RunError(message, str(error)) from error
+            raise _RunError(message, error.output) from error
         text = result.stdout + result.stderr
         if result.returncode != 0:
             message = f"the command exited with status {result.returncode}"

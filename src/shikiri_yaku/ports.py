@@ -1031,7 +1031,15 @@ class ReasonerError(Exception):
 
 
 class CommandError(Exception):
-    """A host command could not be run to its end: it did not start, or it timed out."""
+    """A host command could not be run to its end: it did not start, or it timed out.
+
+    `output` is what the command printed before it was stopped, stdout then stderr. It is empty
+    when the command never started.
+    """
+
+    def __init__(self, message: str, *, output: str = "") -> None:
+        super().__init__(message)
+        self.output = output
 
 
 class CompositionError(Exception):

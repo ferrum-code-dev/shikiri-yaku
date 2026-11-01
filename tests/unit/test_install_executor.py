@@ -303,8 +303,11 @@ def test_a_non_zero_exit_forwards_the_output_tail_and_fails(
     assert Path(stored.output_path).read_text(encoding="utf-8") == "a\nb\nc\nboom\n"
 
 
-def test_a_timeout_forwards_the_error_and_fails(memory: Database, tmp_path: Path) -> None:
-    commands = _Commands(error=CommandError("timed out after 900 s"))
+def test_a_timeout_forwards_the_error_and_the_output_printed_before_it(
+    memory: Database, tmp_path: Path
+) -> None:
+    error = CommandError("timed out after 900 s", output="step one\nstep two started")
+    commands = _Commands(error=error)
     check = _Check(FOUND)
     world = _world(memory, tmp_path, commands=commands, check=check)
     install = _Install(memory, "E-1")
@@ -315,6 +318,7 @@ def test_a_timeout_forwards_the_error_and_fails(memory: Database, tmp_path: Path
     assert check.asked == []
     [(_, _, note, _)] = world.forwarder.forwarded
     assert "timed out after 900 s" in note
+    assert "step two started" in note
 
 
 def test_the_command_is_the_stored_argv_run_in_scratch_non_interactively(
