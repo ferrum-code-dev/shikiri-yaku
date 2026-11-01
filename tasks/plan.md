@@ -1325,6 +1325,21 @@ Acceptance criteria:
 * The script's `--help` documents the token file and the chat; the gate does not import or run it.
 * The gate passes.
 
+### E4. Install path hardening from the security review (normal)
+
+Two findings, both low. (1) The install output file (`install-<op>.log`) is written with the default
+mode, and a package manager can print paths, tokens or other secrets there: create the output
+directory with mode 0700 and the file with mode 0600. (2) The Executor runs the stored argument list
+without checking it again: before it runs, check that the stored list is exactly the recipe of its
+manager plus a package that passes the name pattern. A mismatch marks the op `failed` and forwards
+with the reason; nothing runs. This is a check of the stored list, not a new derivation, so what
+the PO approved is still what runs.
+
+Acceptance criteria:
+* The output directory and file modes are 0700 and 0600 (test on a temporary instance directory).
+* An approved op whose stored list was changed in the journal (an extra word, a different manager's recipe, a package with `;`) does not run and forwards with a reason; an unchanged op runs as before.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.

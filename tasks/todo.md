@@ -86,3 +86,4 @@ merged and `uv run poe check` passes.
   - [ ] E1. Recovery of an uncertain topic creation
   - [ ] E2. Drills as tests
   - [ ] E3. Recording real Telegram replies
+  - [ ] E4. Install path hardening from the security review
