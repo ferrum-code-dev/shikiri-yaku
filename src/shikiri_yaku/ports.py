@@ -58,6 +58,7 @@ __all__ = [
     "ChannelError",
     "ChannelProtocolError",
     "ChannelRefusedError",
+    "ChannelRepairError",
     "ChannelStartupError",
     "Choice",
     "Classifier",
@@ -1083,6 +1084,13 @@ class ChannelRefusedError(Exception):
     """The platform will never take this message, however often it is sent.
 
     The text is the reason. It is not a ChannelError, so a sender never retries it.
+    """
+
+
+class ChannelRepairError(Exception):
+    """A channel refuses a change to its recorded state, because the state does not allow it.
+
+    The text is the reason. The command line prints it and changes nothing.
     """
 
 

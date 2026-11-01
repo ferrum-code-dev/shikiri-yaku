@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind
-from shikiri_yaku.ports import ChannelStartupError, CompositionError
+from shikiri_yaku.ports import ChannelRepairError, ChannelStartupError, CompositionError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -44,6 +44,12 @@ class TopicLog(Protocol):
     def get(self, component: str | None) -> TopicEntry | None: ...
 
     def save(self, component: str | None, thread_id: int, state: str) -> None: ...
+
+    def replace_if(
+        self, component: str | None, expected_state: str, thread_id: int, state: str
+    ) -> bool: ...
+
+    def delete_if(self, component: str | None, expected_state: str) -> bool: ...
 
     def all(self) -> Sequence[TopicEntry]: ...
 
@@ -99,16 +105,19 @@ class TelegramDestinations:
 class TopicReconciler:
     """Create missing topics and close topics for components removed from configuration."""
 
-    def __init__(self, log: TopicLog, forum: ForumTopics, components: Sequence[str]) -> None:
+    def __init__(
+        self, log: TopicLog, forum: ForumTopics, components: Sequence[str], *, product: str
+    ) -> None:
         self._log = log
         self._forum = forum
         self._components = tuple(components)
+        self._product = product
 
     async def run(self) -> None:
         active = set(self._components)
         for topic in self._log.all():
             if topic.state == TOPIC_CREATING:
-                raise ChannelStartupError(_uncertain_creation(topic.component))
+                raise ChannelStartupError(_uncertain_creation(self._product, topic.component))
             if (
                 topic.component is not None
                 and topic.component not in active
@@ -135,9 +144,42 @@ class TopicReconciler:
         self._log.save(component, thread_id, TOPIC_CLOSED)
 
 
-def _uncertain_creation(component: str | None) -> str:
+class TopicRepair:
+    """The PO's changes to a topic whose creation was uncertain: adopt its thread, or forget it."""
+
+    def __init__(self, log: TopicLog) -> None:
+        self._log = log
+
+    def adopt(self, name: str, thread_id: int) -> str:
+        component = _component(name)
+        if not self._log.replace_if(component, TOPIC_CREATING, thread_id, TOPIC_OPEN):
+            raise ChannelRepairError(self._refusal(name, component))
+        return f"Telegram topic {name!r} was creating; it is open with thread {thread_id}"
+
+    def forget(self, name: str) -> str:
+        component = _component(name)
+        if not self._log.delete_if(component, TOPIC_CREATING):
+            raise ChannelRepairError(self._refusal(name, component))
+        return (
+            f"Telegram topic {name!r} was creating; its journal row is removed, so start-up "
+            "creates a new topic. A forum topic that the uncertain creation made is not deleted."
+        )
+
+    def _refusal(self, name: str, component: str | None) -> str:
+        topic = self._log.get(component)
+        if topic is None:
+            return f"no Telegram topic {name!r} in the journal; nothing changed"
+        return f"Telegram topic {name!r} is {topic.state!r}, not creating; nothing changed"
+
+
+def _component(name: str) -> str | None:
+    return None if name == GENERAL_TOPIC else name
+
+
+def _uncertain_creation(product: str, component: str | None) -> str:
     name = GENERAL_TOPIC if component is None else component
     return (
-        f"Telegram topic creation for {name!r} has an uncertain result; "
-        "inspect the forum before changing its journal state."
+        f"Telegram topic creation for {name!r} has an uncertain result; inspect the forum. "
+        f"If the topic exists, run `shikiri-yaku topics adopt {product} {name} <thread-id>`; "
+        f"if it does not, run `shikiri-yaku topics forget {product} {name}`."
     )

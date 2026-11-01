@@ -29,7 +29,11 @@ from shikiri_yaku.adapters.telegram import (
     probe_bot,
 )
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
-from shikiri_yaku.adapters.telegram_topics import TelegramDestinations, TopicReconciler
+from shikiri_yaku.adapters.telegram_topics import (
+    TelegramDestinations,
+    TopicReconciler,
+    TopicRepair,
+)
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.assessor import Assessor
 from shikiri_yaku.app.commands import Commands
@@ -245,6 +249,7 @@ def compose(
             topics,
             TelegramForumTopics(bot_api, group_id),
             [component.name for component in settings.components],
+            product=settings.product,
         )
     )
     destinations = TelegramDestinations(
@@ -791,23 +796,46 @@ def start_reconciler(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
-    return cli.main(argv, compose, stats_report)
+    return cli.main(argv, compose, stats_report, adopt_topic, forget_topic)
 
 
 def stats_report(directory: Path) -> str:
     """Return the figures of one instance's journal, which must exist; nothing else is composed."""
+    journal = _existing_journal(directory)
+    try:
+        return Stats(JournalStats(journal)).report()
+    finally:
+        journal.close()
+
+
+def adopt_topic(directory: Path, component: str, thread_id: int) -> str:
+    """Mark the creating topic of a component, or of general, open with a thread of the forum."""
+    return _change_topics(directory, lambda repair: repair.adopt(component, thread_id))
+
+
+def forget_topic(directory: Path, component: str) -> str:
+    """Delete the creating topic of a component, or of general, so that start-up creates one."""
+    return _change_topics(directory, lambda repair: repair.forget(component))
+
+
+def _change_topics(directory: Path, change: Callable[[TopicRepair], str]) -> str:
+    journal = _existing_journal(directory)
+    try:
+        return change(TopicRepair(TopicStore(journal)))
+    finally:
+        journal.close()
+
+
+def _existing_journal(directory: Path) -> Database:
+    # keep: Database.open creates a missing file, which would make a journal out of a typo
     path = directory / JOURNAL_FILE_NAME
     if not path.exists():
         message = f"no journal at {path}"
         raise CompositionError(message)
     try:
-        journal = Database.open(path)
+        return Database.open(path)
     except JournalError as error:
         raise CompositionError(str(error)) from error
-    try:
-        return Stats(JournalStats(journal)).report()
-    finally:
-        journal.close()
 
 
 def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:

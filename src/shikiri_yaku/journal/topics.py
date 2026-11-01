@@ -38,6 +38,22 @@ class TopicStore:
             (component, thread_id, state),
         )
 
+    def replace_if(
+        self, component: str | None, expected_state: str, thread_id: int, state: str
+    ) -> bool:
+        cursor = self._database.connection.execute(
+            "UPDATE topics SET thread_id = ?, state = ? WHERE component IS ? AND state = ?",
+            (thread_id, state, component, expected_state),
+        )
+        return cursor.rowcount > 0
+
+    def delete_if(self, component: str | None, expected_state: str) -> bool:
+        cursor = self._database.connection.execute(
+            "DELETE FROM topics WHERE component IS ? AND state = ?",
+            (component, expected_state),
+        )
+        return cursor.rowcount > 0
+
     def all(self) -> list[TopicRecord]:
         rows = self._database.connection.execute(
             "SELECT component, thread_id, state FROM topics ORDER BY component"

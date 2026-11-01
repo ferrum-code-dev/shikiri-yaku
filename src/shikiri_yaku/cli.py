@@ -22,6 +22,7 @@ from shikiri_yaku.instance import (
 )
 from shikiri_yaku.ports import (
     ChannelError,
+    ChannelRepairError,
     ChannelStartupError,
     CompositionError,
     ReasonerError,
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 
 _PROGRAM = "shikiri-yaku"
 TOKEN_MODE: Final = 0o600
+_THREAD_ID_PATTERN: Final = r"[1-9][0-9]*"
 
 
 class Lifecycle(Protocol):
@@ -64,6 +66,8 @@ class Lifecycle(Protocol):
 type Job = Callable[[], Coroutine[Any, Any, None]]
 type Compose = Callable[[Settings, Path], Lifecycle]
 type Report = Callable[[Path], str]
+type AdoptTopic = Callable[[Path, str, int], str]
+type ForgetTopic = Callable[[Path, str], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +79,14 @@ class _Check:
     status: str = "ok"
 
 
-def main(argv: Sequence[str] | None, compose: Compose, report: Report) -> int:
-    """Run one command. The caller supplies the composition and report; it builds nothing."""
+def main(
+    argv: Sequence[str] | None,
+    compose: Compose,
+    report: Report,
+    adopt_topic: AdoptTopic,
+    forget_topic: ForgetTopic,
+) -> int:
+    """Run one command. The caller supplies the composition and the changes; it builds nothing."""
     parser = argparse.ArgumentParser(prog=_PROGRAM)
     parser.add_argument("--version", action="version", version=f"%(prog)s {version(_PROGRAM)}")
     commands = parser.add_subparsers(required=True)
@@ -92,6 +102,19 @@ def main(argv: Sequence[str] | None, compose: Compose, report: Report) -> int:
     stats = commands.add_parser("stats", help="print the figures of one product's journal")
     _add_product(stats)
     stats.set_defaults(command=partial(_stats, report=report))
+    topics = commands.add_parser(
+        "topics", help="repair the Telegram topic of a component or general"
+    )
+    topic_commands = topics.add_subparsers(required=True)
+    adopt = topic_commands.add_parser("adopt", help="mark an uncertain topic open with its thread")
+    _add_product(adopt)
+    adopt.add_argument("component", help="a component's name, or general")
+    adopt.add_argument("thread_id", type=_thread_id, help="the thread of the topic in the forum")
+    adopt.set_defaults(command=partial(_adopt, adopt_topic=adopt_topic))
+    forget = topic_commands.add_parser("forget", help="delete an uncertain topic's row")
+    _add_product(forget)
+    forget.add_argument("component", help="a component's name, or general")
+    forget.set_defaults(command=partial(_forget, forget_topic=forget_topic))
     arguments = parser.parse_args(argv)
     return arguments.command(arguments)
 
@@ -254,6 +277,36 @@ def _stats(arguments: argparse.Namespace, report: Report) -> int:
         sys.stderr.write(f"{error}\n")
         return 1
     sys.stdout.write(text)
+    return 0
+
+
+def _thread_id(value: str) -> int:
+    if re.fullmatch(_THREAD_ID_PATTERN, value) is None:
+        message = f"invalid thread id {value!r}: use a positive whole number"
+        raise argparse.ArgumentTypeError(message)
+    return int(value)
+
+
+def _adopt(arguments: argparse.Namespace, adopt_topic: AdoptTopic) -> int:
+    directory = instance_dir(arguments.product, arguments.home)
+    change = partial(adopt_topic, directory, arguments.component, arguments.thread_id)
+    return _changed(directory, change)
+
+
+def _forget(arguments: argparse.Namespace, forget_topic: ForgetTopic) -> int:
+    directory = instance_dir(arguments.product, arguments.home)
+    return _changed(directory, partial(forget_topic, directory, arguments.component))
+
+
+def _changed(directory: Path, change: Callable[[], str]) -> int:
+    """Make one topic change while holding the instance lock, so a running instance refuses it."""
+    try:
+        with instance_lock(directory):
+            message = change()
+    except (InstanceLockError, CompositionError, ChannelRepairError) as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
+    sys.stdout.write(f"{message}\n")
     return 0
 
 

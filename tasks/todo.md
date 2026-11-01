@@ -83,7 +83,7 @@ merged and `uv run poe check` passes.
   - [x] D6. Executor and resolution
   - [x] D7. Interrupted installs and measures (component removal, lost-ack, durable rejection retry)
 - [ ] Phase E: Hardening
-  - [ ] E1. Recovery of an uncertain topic creation
+  - [x] E1. Recovery of an uncertain topic creation
   - [ ] E2. Drills as tests
   - [ ] E3. Recording real Telegram replies
   - [ ] E4. Install path hardening from the security review

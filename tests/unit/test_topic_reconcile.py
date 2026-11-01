@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 GROUP_ID: Final = -1009
+PRODUCT: Final = "shop"
 
 
 class _FixtureBotApi:
@@ -76,7 +77,7 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         api = _FixtureBotApi(topics)
         forum = TelegramForumTopics(api, GROUP_ID)
 
-        asyncio.run(TopicReconciler(topics, forum, ["api"]).run())
+        asyncio.run(TopicReconciler(topics, forum, ["api"], product=PRODUCT).run())
         api_topic = topics.get("api")
         general_topic = topics.get(None)
         assert api_topic is not None
@@ -92,10 +93,10 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
             TOPIC_OPEN,
         )
 
-        asyncio.run(TopicReconciler(topics, forum, ["api"]).run())
+        asyncio.run(TopicReconciler(topics, forum, ["api"], product=PRODUCT).run())
         assert [method for method, _payload in api.calls].count("createForumTopic") == 2
 
-        asyncio.run(TopicReconciler(topics, forum, []).run())
+        asyncio.run(TopicReconciler(topics, forum, [], product=PRODUCT).run())
         assert [method for method, _payload in api.calls].count("closeForumTopic") == 1
         closed_topic = topics.get("api")
         assert closed_topic is not None
@@ -111,7 +112,9 @@ def test_restart_surfaces_uncertain_topic_creation_without_retrying() -> None:
     try:
         topics = TopicStore(database)
         api = _LostReplyBotApi(topics)
-        reconciler = TopicReconciler(topics, TelegramForumTopics(api, GROUP_ID), ["api"])
+        reconciler = TopicReconciler(
+            topics, TelegramForumTopics(api, GROUP_ID), ["api"], product=PRODUCT
+        )
 
         with pytest.raises(ChannelError):
             asyncio.run(reconciler.run())
