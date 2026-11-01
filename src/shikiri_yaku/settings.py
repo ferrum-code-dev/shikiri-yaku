@@ -58,6 +58,8 @@ RESTART_BUDGET_PER_HOUR: Final = 1
 RESTART_CONFIRM_S: Final = 60
 RESTART_POLL_S: Final = 5
 APPROVAL_EXPIRY_H: Final = 24
+HOST_LOCK_POLL_S: Final = 1
+INSTALL_OUTPUT_TAIL_LINES: Final = 20
 
 REMINDER_FIRST_H: Final = 4
 REMINDER_REPEAT_H: Final = 24
@@ -172,6 +174,8 @@ class InfrastructureSettings(_FrozenModel):
     restart_confirm_s: PositiveInt = RESTART_CONFIRM_S
     restart_poll_s: PositiveInt = RESTART_POLL_S
     approval_expiry_h: PositiveInt = APPROVAL_EXPIRY_H
+    host_lock_poll_s: PositiveInt = HOST_LOCK_POLL_S
+    install_output_tail_lines: PositiveInt = INSTALL_OUTPUT_TAIL_LINES
 
 
 class ProductHandlerSettings(_FrozenModel):

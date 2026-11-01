@@ -18,6 +18,7 @@ from shikiri_yaku.domain.schedule import Destination  # noqa: TC001 -- pydantic 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from contextlib import AbstractAsyncContextManager
     from pathlib import Path
 
     from shikiri_yaku.domain.classification import Assessment, Classification, InstallProposal
@@ -78,11 +79,13 @@ __all__ = [
     "EventKinds",
     "Forwarder",
     "Guard",
+    "HostLock",
     "HostObservation",
     "InboundLog",
     "InstallApprovalRenderer",
     "InstallClaim",
     "InstallFacts",
+    "InstallFiles",
     "InstallLog",
     "InstallOp",
     "InstallPreparer",
@@ -471,6 +474,17 @@ class InstallClaim:
     op: InstallOp
     signal: Signal
     suggestion: str
+
+
+class InstallFiles(Protocol):
+    """The files of an install run: a scratch directory outside every repository, and the output.
+
+    `save_output` writes the run's output for the op and returns the path the journal records.
+    """
+
+    def scratch_dir(self) -> Path: ...
+
+    def save_output(self, op_id: int, text: str) -> str: ...
 
 
 class InstallRunLog(Protocol):
@@ -926,6 +940,16 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
+
+
+class HostLock(Protocol):
+    """The lock under which one host command runs at a time, across instances (design §3.1, §6.3).
+
+    `hold` waits until the lock is free and releases it when the block ends, also when it is
+    cancelled while it waits.
+    """
+
+    def hold(self) -> AbstractAsyncContextManager[None]: ...
 
 
 class CommandRunner(Protocol):
