@@ -491,6 +491,7 @@ class InstallFiles(Protocol):
 class InstallRunLog(Protocol):
     """The journal steps of an install run (design §6.3, §9, §10.1): claimed, then one outcome.
 
+    A claim returns None, and voids an approved op, when its escalation is no longer forwarded.
     An acknowledged op stays issued until the `escalation_resolved` event that names its command
     confirms it, as it does for a reply's resolve. `final_line` is the line the signal ends with.
     """

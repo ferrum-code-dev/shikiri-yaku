@@ -1,8 +1,9 @@
 """Runs an approved install op (design §6.3, steps 4 to 6): the stored command, then the check.
 
-The op is claimed before any host command runs, so a second run for the same op finds nothing to
-claim. The host lock covers the command only: the check reads the host and needs no turn. A run the
-check does not confirm is forwarded to the PO with the tail of its output, and its op ends `failed`.
+The op is claimed under the host lock, before its command runs, so a second run for the same op
+finds nothing to claim, and an approval whose escalation was resolved elsewhere is void. The lock
+covers the claim and the command only: the check reads the host and needs no turn. A run the check
+does not confirm is forwarded to the PO with the tail of its output, and its op ends `failed`.
 A passing check leaves its op issued until the `escalation_resolved` event confirms it.
 """
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
@@ -27,7 +29,6 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.ports import (
         Clock,
-        CommandResult,
         CommandRunner,
         Forwarder,
         HostLock,
@@ -45,13 +46,10 @@ ANSWER: Final = "Installed {tool} with {manager} (found at {path}). Please conti
 FINAL_LINE: Final = "Installed {tool} with {manager}."
 
 
-class _RunError(Exception):
-    """A run that the check does not confirm; `text` is the output it left, possibly empty."""
-
-    def __init__(self, reason: str, text: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.text = text
+@dataclass(frozen=True, slots=True)
+class _Run:
+    text: str
+    failure: str | None
 
 
 class InstallExecutor:
@@ -97,54 +95,52 @@ class InstallExecutor:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def execute(self, op_id: int) -> None:
-        """Claim the op, run its stored command and check it; do nothing when the claim is lost.
+        """Claim the op and run its stored command under the host lock; then check it.
 
-        A lost link or a protocol error leaves the op `issued`: the answer may have reached Shikiru,
-        so the next start decides by the check whether it is still owed (design §10.1).
+        Nothing runs when the claim is lost, and a claim is lost when the op is no longer approved
+        or its escalation is no longer forwarded. A lost link or a protocol error leaves the op
+        `issued`: the answer may have reached Shikiru, so the next start decides by the check
+        whether it is still owed (design §10.1).
         """
-        claim = self._log.claim(op_id, self._clock.now())
-        if claim is None:
-            return
-        try:
-            text = await self._run(claim.op.payload.argv)
-            found = await self._find(claim.op.payload.tool, text)
-        except _RunError as error:
-            await self._fail(claim, error.text, error.reason)
-            return
-        await self._answer(claim, text, found)
-
-    async def _run(self, argv: tuple[str, ...]) -> str:
-        try:
-            result = await self._locked_run(argv)
-        except CommandError as error:
-            message = f"the command did not run to its end: {error}"
-            raise _RunError(message, error.output) from error
-        text = result.stdout + result.stderr
-        if result.returncode != 0:
-            message = f"the command exited with status {result.returncode}"
-            raise _RunError(message, text)
-        return text
-
-    async def _locked_run(self, argv: tuple[str, ...]) -> CommandResult:
-        command = [self._shell, "-lc", shlex.join(argv)]
         async with self._host.hold():
-            return await self._commands.run(
+            claim = self._log.claim(op_id, self._clock.now())
+            if claim is None:
+                return
+            run = await self._run(claim.op.payload.argv)
+        await self._settle(claim, run)
+
+    async def _run(self, argv: tuple[str, ...]) -> _Run:
+        command = [self._shell, "-lc", shlex.join(argv)]
+        try:
+            result = await self._commands.run(
                 command,
                 timeout_s=self._timeout_s,
                 cwd=self._files.scratch_dir(),
                 env=NONINTERACTIVE_ENV,
             )
+        except CommandError as error:
+            message = f"the command did not run to its end: {error}"
+            return _Run(error.output, message)
+        text = result.stdout + result.stderr
+        if result.returncode != 0:
+            return _Run(text, f"the command exited with status {result.returncode}")
+        return _Run(text, None)
 
-    async def _find(self, tool: str, text: str) -> str:
+    async def _settle(self, claim: InstallClaim, run: _Run) -> None:
+        if run.failure is not None:
+            await self._fail(claim, run.text, run.failure)
+            return
+        tool = claim.op.payload.tool
         try:
             found = await self._check.find(tool)
         except (CommandError, ToolNameError) as error:
             message = f"the check after the run did not run to its end: {error}"
-            raise _RunError(message, text) from error
+            await self._fail(claim, run.text, message)
+            return
         if found is None:
-            message = f"the check after the run did not find {tool}"
-            raise _RunError(message, text)
-        return found
+            await self._fail(claim, run.text, f"the check after the run did not find {tool}")
+            return
+        await self._answer(claim, run.text, found)
 
     async def _answer(self, claim: InstallClaim, text: str, found: str) -> None:
         operation = claim.op

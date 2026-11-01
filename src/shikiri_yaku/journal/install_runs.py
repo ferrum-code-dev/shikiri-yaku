@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.journal.ops import OpState
+from shikiri_yaku.journal.signals import SignalState
 from shikiri_yaku.ports import InstallClaim
 
 if TYPE_CHECKING:
@@ -35,6 +36,10 @@ class JournalInstallRuns:
                 return None
             stored = self._signals.get(operation.payload.number)
             if stored is None:
+                return None
+            if stored.state != SignalState.FORWARDED:
+                # keep: design §6.3: an approval for an escalation resolved elsewhere is void
+                self._ops.transition(op_id, OpState.APPROVED, OpState.VOID, now)
                 return None
             if not self._ops.transition(op_id, OpState.APPROVED, OpState.ISSUED, now):
                 return None

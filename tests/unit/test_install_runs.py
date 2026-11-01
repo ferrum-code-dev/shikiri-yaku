@@ -103,6 +103,15 @@ def test_only_an_approved_op_is_claimed_once(memory: Database) -> None:
     assert approved.runs.claim(approved.op_id, LATER) is None
 
 
+def test_a_claim_voids_an_approval_for_a_closed_escalation(memory: Database) -> None:
+    setup = _Setup(memory, approved=True)
+    _observe_resolved(memory, command_id="99", now=LATER)
+
+    assert setup.runs.claim(setup.op_id, LATER) is None
+    assert setup.state() == OpState.VOID
+    assert setup.signal_state() == SignalState.CLOSED
+
+
 def test_a_claim_runs_the_payload_stored_at_approval(memory: Database) -> None:
     setup = _Setup(memory, approved=True)
     replacement = setup.payload.model_copy(

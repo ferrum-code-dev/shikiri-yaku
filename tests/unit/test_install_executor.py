@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
@@ -11,7 +12,7 @@ from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import SCRATCH_DIR_NAME, InstanceInstallFiles
 from shikiri_yaku.app.install_executor import InstallExecutor
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, Signal
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.ops import OpState, OpStore
@@ -29,9 +30,9 @@ from shikiri_yaku.ports import (
 from tests.support.clock import NapClock
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
 
-    from shikiri_yaku.ports import Clock, ShikiruClient
+    from shikiri_yaku.ports import Clock, HostLock, ShikiruClient
 
 NOW: Final = datetime(2026, 10, 30, tzinfo=UTC)
 LATER: Final = datetime(2026, 10, 30, 12, tzinfo=UTC)
@@ -134,6 +135,18 @@ class _Shikiru:
         return self._ack
 
 
+class _ContendedLock:
+    """A host lock another run holds: `while_waiting` runs while this run waits for it."""
+
+    def __init__(self, while_waiting: Callable[[], None]) -> None:
+        self._while_waiting = while_waiting
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncGenerator[None]:
+        self._while_waiting()
+        yield
+
+
 class _World:
     """The executor over one journal and one instance directory, with fakes for outside calls."""
 
@@ -145,6 +158,7 @@ class _World:
         commands: _Commands,
         check: _Check,
         shikiru: _Shikiru,
+        host: HostLock | None = None,
     ) -> None:
         self.forwarder = _Forwarder()
         clock = NapClock()
@@ -155,7 +169,7 @@ class _World:
             self.forwarder,
             check,
             commands,
-            host=FileHostLock(directory / "host.lock", clock, POLL_S),
+            host=FileHostLock(directory / "host.lock", clock, POLL_S) if host is None else host,
             files=InstanceInstallFiles(directory),
             clock=clock,
             shell=SHELL,
@@ -240,6 +254,7 @@ def _world(
     commands: _Commands | None = None,
     check: _Check | None = None,
     shikiru: _Shikiru | None = None,
+    host: HostLock | None = None,
 ) -> _World:
     return _World(
         database,
@@ -247,7 +262,13 @@ def _world(
         commands=_Commands() if commands is None else commands,
         check=_Check(FOUND) if check is None else check,
         shikiru=_Shikiru() if shikiru is None else shikiru,
+        host=host,
     )
+
+
+def _close_elsewhere(database: Database) -> None:
+    """Close the escalation as Shikiru does when the PO resolves it in another channel."""
+    SignalStore(database).close(Closing("api", escalation_id="E-1"), LATER)
 
 
 def test_a_passing_check_after_a_clean_exit_answers_and_waits_for_its_event(
@@ -421,4 +442,34 @@ def test_a_lost_link_leaves_the_op_issued_for_the_reconcile(
     asyncio.run(world.run(install.op_id))
 
     assert install.state() == OpState.ISSUED
+    assert world.forwarder.forwarded == []
+
+
+def test_an_escalation_closed_before_the_run_voids_the_approval(
+    memory: Database, tmp_path: Path
+) -> None:
+    commands = _Commands()
+    world = _world(memory, tmp_path, commands=commands)
+    install = _Install(memory, "E-1")
+    _close_elsewhere(memory)
+
+    asyncio.run(world.run(install.op_id))
+
+    assert install.state() == OpState.VOID
+    assert commands.calls == []
+    assert world.forwarder.forwarded == []
+
+
+def test_an_escalation_closed_while_the_run_waits_for_the_host_lock_voids_the_approval(
+    memory: Database, tmp_path: Path
+) -> None:
+    commands = _Commands()
+    host = _ContendedLock(lambda: _close_elsewhere(memory))
+    world = _world(memory, tmp_path, commands=commands, host=host)
+    install = _Install(memory, "E-1")
+
+    asyncio.run(world.run(install.op_id))
+
+    assert install.state() == OpState.VOID
+    assert commands.calls == []
     assert world.forwarder.forwarded == []
