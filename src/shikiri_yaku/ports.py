@@ -81,12 +81,14 @@ __all__ = [
     "HostObservation",
     "InboundLog",
     "InstallApprovalRenderer",
+    "InstallClaim",
     "InstallFacts",
     "InstallLog",
     "InstallOp",
     "InstallPreparer",
     "InstallProposalLog",
     "InstallReplyHandler",
+    "InstallRunLog",
     "InstallToolCheck",
     "LifecycleJournal",
     "LivenessJournal",
@@ -460,6 +462,32 @@ class InstallLog(Protocol):
     def expire_install(self, op_id: int, number: int, now: datetime) -> bool: ...
 
     def void_install(self, op_id: int, number: int, now: datetime) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class InstallClaim:
+    """An approved install op taken for its run, with the signal it answers and its suggestion."""
+
+    op: InstallOp
+    signal: Signal
+    suggestion: str
+
+
+class InstallRunLog(Protocol):
+    """The journal steps of an install run (design §6.3, §9): claimed, then one outcome.
+
+    `confirm` moves the op and its signal together; the other steps change only the op.
+    """
+
+    def claim(self, op_id: int, now: datetime) -> InstallClaim | None: ...
+
+    def acknowledge(self, op_id: int, ack: Ack, output_path: str, now: datetime) -> None: ...
+
+    def confirm(
+        self, op_id: int, ack: Ack, output_path: str, final_line: str, now: datetime
+    ) -> bool: ...
+
+    def fail(self, op_id: int, output_path: str, now: datetime) -> bool: ...
 
 
 class ActionLog(Protocol):

@@ -1146,6 +1146,62 @@ Acceptance criteria:
 * No test runs a real package manager: the gate stays offline.
 * The gate passes.
 
+Split (decided): D6 is implemented as D6a to D6d, one gate-green change each. D6 stays unchecked
+until D6d and every original acceptance criterion above pass. The claim, confirm and fail steps are
+journal methods that move the op and its signal together; the host lock and the scratch and output
+files are ports with file adapters; the executor is an app service that the approval tap starts in
+a task of its own, so the serial inbound loop never waits for a host command. Wiring and the
+composed install test come last. An install whose resolve is queued stays `issued` with its
+acknowledgement; settling it belongs to D7.
+
+#### D6a. Journal steps of a run
+
+Add `InstallRunLog` to ports, with `InstallClaim` (the approved op, its signal and the suggestion).
+Implement it in `journal/install_runs.py`: `claim` moves `approved → issued` and returns the stored
+op, `acknowledge` saves Shikiru's acknowledgement with the output path and leaves the op `issued`,
+`confirm` moves `issued → confirmed` and the signal `forwarded → resolved` in one transaction, and
+`fail` moves `issued → failed`. Every move is conditional.
+
+Acceptance criteria: in-memory SQLite tests show that a second claim, a claim of an intended op and a
+fail of an approved op change nothing; that a claim returns the payload stored at approval even when a
+replacement is offered afterwards; that confirm resolves the signal and keeps the command id; that a
+queued acknowledgement leaves the op `issued`; gate passes.
+
+#### D6b. Host lock and install files
+
+Add the `HostLock` port (`hold()` as an async context manager) with an adapter that takes an exclusive
+`flock` on `host.lock` in the parent of the instance directory and waits by polling with `Clock.sleep`,
+so a waiting executor stays cancellable. Add the `InstallFiles` port: `scratch_dir()` (created outside
+every repository, under the instance directory) and `save_output(op_id, text)` (a file in `output/`).
+Add two settings with defaults: the lock poll interval and the output tail line count.
+
+Acceptance criteria: two lock holders on one path never overlap (a real file lock, waited for with a
+short poll); a cancelled waiter releases nothing it does not hold; the output file is written under
+`output/` and the scratch directory exists; gate passes.
+
+#### D6c. Executor
+
+Add `InstallExecutor` in `app/install_executor.py`. `start(op_id)` runs `execute` in a task of its own
+(as the Router does) and `join()` waits for them. `execute` claims the op, runs `[shell, "-lc",
+shlex.join(argv)]` through `CommandRunner` under the host lock with the scratch `cwd`, `CI=1` and
+`NONINTERACTIVE=1`, saves the output, runs the D4 check, then resolves with the answer text or forwards
+the escalation with the output tail. Add the `InstallRunner` port (`start`) for the reply handler.
+
+Acceptance criteria: the fake-runner tests of D6 pass, including the cases of the original list; two
+executors started for one op run one command; the argument list run is the stored one; no test runs a
+real package manager; gate passes.
+
+#### D6d. Wiring and the composed install test
+
+The approval tap calls `InstallRunner.start` after `approve_install` returns True, and does nothing
+after it. Bootstrap builds the host lock, the files, the journal steps and the executor. The composed
+install test is updated deliberately: after the tap the fake runner runs the install and the check, the
+fake Shikiru acknowledges the resolve, and the op ends `confirmed`. The change is recorded in its
+docstring and in the report.
+
+Acceptance criteria: the composed approval path ends with one install command run and one resolve; the
+D5 criteria that still apply pass; gate passes.
+
 ### D7. Interrupted installs and measures (normal)
 
 Start-up reconcile for `install` ops: an op in `issued` is decided by its check, never repeated: check

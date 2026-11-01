@@ -230,6 +230,24 @@ class OpStore:
             (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
         )
 
+    def acknowledge_install(self, op_id: int, ack: Ack, output_path: str, now: datetime) -> None:
+        """Save the acknowledgement, its command id and the output of an issued install run."""
+        self._database.connection.execute(
+            """
+            UPDATE ops SET acknowledgement = ?, command_id = ?, output_path = ?, updated_at = ?
+            WHERE id = ? AND kind = ? AND state = ?
+            """,
+            (
+                ack.model_dump_json(),
+                str(ack.id),
+                output_path,
+                stamp(now),
+                op_id,
+                INSTALL_KIND,
+                OpState.ISSUED,
+            ),
+        )
+
     def confirm_command(self, project: str, command_id: str, now: datetime) -> bool:
         """Confirm the issued resolve that Shikiru's event names; an unknown id changes nothing."""
         confirmed = self._database.connection.execute(
