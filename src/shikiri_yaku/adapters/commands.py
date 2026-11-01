@@ -11,7 +11,7 @@ import contextlib
 import os
 import signal
 import tempfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.ports import CommandError, CommandResult
 
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
     from typing import BinaryIO
+
+_GROUP_POLL_S: Final = 0.02
 
 
 class ProcessCommandRunner:
@@ -47,7 +49,7 @@ class ProcessCommandRunner:
                 message = f"{argv[0]} could not be started: {error}"
                 raise CommandError(message) from error
             try:
-                await asyncio.wait_for(process.wait(), timeout_s)
+                await asyncio.wait_for(_wait_for_group(process), timeout_s)
             except TimeoutError as error:
                 await _kill_group(process)
                 message = f"{argv[0]} did not finish in {timeout_s:g} seconds and was killed"
@@ -67,6 +69,26 @@ async def _kill_group(process: asyncio.subprocess.Process) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
     await process.wait()
+    await _wait_for_group_exit(process.pid)
+
+
+async def _wait_for_group(process: asyncio.subprocess.Process) -> None:
+    await process.wait()
+    await _wait_for_group_exit(process.pid)
+
+
+async def _wait_for_group_exit(group_id: int) -> None:
+    while _group_exists(group_id):
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.Event().wait(), _GROUP_POLL_S)
+
+
+def _group_exists(group_id: int) -> bool:
+    try:
+        os.killpg(group_id, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def _read(output: BinaryIO) -> str:

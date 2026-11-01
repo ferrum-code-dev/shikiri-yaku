@@ -1171,7 +1171,9 @@ its op is marked `failed`. The forward is retried in this process every `forward
 stays `issued`. A restart finds such an op `issued` and settles it by its check (D7). (3) A command
 killed at its timeout keeps the output it printed (`CommandError.output`), which the output file and
 the forwarded tail use. The runner writes the output to files rather than pipes: after a kill, a pipe
-can keep unread output or block its reader.
+can keep unread output or block its reader. The runner also waits for the command's process group to
+exit, so a child that outlives its leader cannot outlive the timeout or the host lock; a harmless
+shell test covers this case.
 
 #### D6a. Journal steps of a run
 

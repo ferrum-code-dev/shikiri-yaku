@@ -18,6 +18,7 @@ from shikiri_yaku.ports import CommandError
 _TIMEOUT_S: Final = 10
 _START_WAIT_S: Final = 3
 _SHORT_TIMEOUT_S: Final = 2
+_GROUP_TIMEOUT_S: Final = 0.2
 _CHILD_PID_ATTEMPTS: Final = 100
 _CHILD_PID_WAIT_S: Final = 0.05
 
@@ -84,6 +85,14 @@ def test_output_printed_before_a_timeout_is_kept() -> None:
         _run(["/bin/sh", "-c", "echo diagnostic-before-timeout; exec sleep 60"], _SHORT_TIMEOUT_S)
 
     assert "diagnostic-before-timeout" in error.value.output
+
+
+def test_a_child_outliving_its_leader_is_killed_at_the_timeout() -> None:
+    with pytest.raises(CommandError, match="killed") as error:
+        _run(["/bin/sh", "-c", "sleep 60 & child=$!; printf '%s\\n' \"$child\""], _GROUP_TIMEOUT_S)
+
+    child = int(error.value.output.strip())
+    assert not _alive(child)
 
 
 def _alive(pid: int) -> bool:
