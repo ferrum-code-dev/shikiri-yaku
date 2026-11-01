@@ -468,6 +468,24 @@ class InstallLog(Protocol):
     def void_install(self, op_id: int, number: int, now: datetime) -> bool: ...
 
 
+class InstallReaskLog(Protocol):
+    """The journal steps of asking the PO again after a failed check (design §6.3).
+
+    The new op is intended before its approval is queued; the old op is voided only after that,
+    so a crash between the two leaves the old op issued for the next start to ask again.
+    """
+
+    def intend_install(
+        self,
+        identity: str,
+        signal: Signal,
+        payload: InstallOpPayload,
+        now: datetime,
+    ) -> InstallOp: ...
+
+    def void_issued(self, op_id: int, now: datetime) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class InstallClaim:
     """An approved install op taken for its run, with the signal it answers and its suggestion."""

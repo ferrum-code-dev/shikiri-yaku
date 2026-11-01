@@ -1237,6 +1237,25 @@ is a failed check, so the PO is asked again with a new approval and the old one 
 exited non-zero but whose check still finds the tool passes this rule and is answered. D7 must decide
 whether such a run goes to the PO first, since design §10 says only "an `install` by its check".
 
+Decided in D7: such a run is answered at restart, not sent to the PO first. Design §6.3 step 5 defines
+success as the check passing, and the install is not run again. An `issued` op with no acknowledgement
+is decided by its check: the tool is found, so the answer is sent once and its acknowledgement saved;
+the tool is missing, so the PO is asked again. A re-ask is a new op with identity
+`install:<signal id>:after:<old op id>` and the old op's stored payload, so the PO approves the command
+that was shown. The new approval is queued before the old op is voided: a crash between the two leaves
+the new approval queued and the old op issued, and the next start asks again without a second
+approval. A rejected answer at restart voids the op; the escalation stays forwarded, so the PO still
+has the question.
+
+Split, one commit each, gate green per commit (the whole of D7 is about 900 lines):
+* D7a. Ask again after a failed check: `InstallReasker` in `app/install_reask.py`, the re-ask identity
+  in the reply binding, the void note.
+* D7b. Start-up reconcile of approved and issued installs: the decision above, the in-flight check on
+  the executor, the bootstrap job.
+* D7c. Install counters: migration 16 (`ops.approved_at`, `ops.check_failed_at`), the marks set on
+  approval and on a failed check, the `stats` labels.
+* D7d. Crash-point and composed restart tests; the check-after break; D7 ticked.
+
 Acceptance criteria:
 * Restart with an op in `issued` and the tool present: resolves once, runs nothing. With the tool still missing: a new approval message, and the old one is void.
 * A crash between the claim and the run, and between the run and the resolve, are both covered by tests with the clock and fake runner.

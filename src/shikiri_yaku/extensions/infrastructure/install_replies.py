@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 DECLINED_NOTE: Final = "The Product Owner declined the install approval; no host command was run."
 EXPIRED_NOTE: Final = "This install approval expired; no host command was run."
 VOID_NOTE: Final = "This escalation is no longer open; the install approval is void."
+REPLACED_NOTE: Final = "A newer install approval replaced this one; this one is void."
 _INSTALL: Final = "i"
 _DECLINE: Final = "x"
 
@@ -86,7 +87,7 @@ class InstallApprovalReplies:
         elif state == INSTALL_EXPIRED:
             self._notice(origin, origin.key, INSTALL_EXPIRED, EXPIRED_NOTE)
         elif state == INSTALL_VOID:
-            self._notice(origin, origin.key, INSTALL_VOID, VOID_NOTE)
+            await self._void_notice(origin)
 
     async def _decide(
         self, operation: InstallOp, origin: ReplyOrigin, verb: Literal["i", "x"]
@@ -112,6 +113,11 @@ class InstallApprovalReplies:
     def _void(self, operation: InstallOp, origin: ReplyOrigin, now: datetime) -> None:
         if self._installs.void_install(operation.id, origin.number, now):
             self._notice(origin, origin.key, INSTALL_VOID, VOID_NOTE)
+
+    async def _void_notice(self, origin: ReplyOrigin) -> None:
+        # keep: an op void while its escalation is open was replaced by a newer approval
+        note = REPLACED_NOTE if await self._is_open(origin.signal) else VOID_NOTE
+        self._notice(origin, origin.key, INSTALL_VOID, note)
 
     async def _is_open(self, signal: Signal) -> bool:
         if signal.escalation_id is None:
@@ -147,7 +153,7 @@ def _bound(operation: InstallOp, item: Inbound, origin: ReplyOrigin, verb: str, 
         and _install_key(origin.key, op_id)
         and item.data == expected
         and expected in {button.data for button in origin.message.buttons}
-        and operation.identity == f"install:{origin.signal.id}"
+        and _install_identity(operation.identity, origin.signal.id)
         and operation.project == origin.signal.project
         and operation.task_id == origin.signal.task_id
         and operation.reason == origin.signal.reason
@@ -155,6 +161,12 @@ def _bound(operation: InstallOp, item: Inbound, origin: ReplyOrigin, verb: str, 
         and operation.payload.number == origin.number
         and origin.signal.escalation_id == operation.payload.escalation_id
     )
+
+
+def _install_identity(identity: str, signal_id: str) -> bool:
+    # keep: a re-asked op is named after the op it replaces; the exact signal id is the match
+    original = f"install:{signal_id}"
+    return identity == original or identity.startswith(f"{original}:after:")
 
 
 def _install_key(key: str | None, op_id: int) -> bool:

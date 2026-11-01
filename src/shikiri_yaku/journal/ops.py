@@ -169,6 +169,10 @@ class OpStore:
     def void_install(self, op_id: int, number: int, now: datetime) -> bool:
         return self._transition_install(op_id, number, OpState.VOID, now)
 
+    def void_issued(self, op_id: int, now: datetime) -> bool:
+        """Void an issued install once a new approval has been queued in its place."""
+        return self.transition(op_id, OpState.ISSUED, OpState.VOID, now)
+
     def decline_install(self, op_id: int, number: int, now: datetime) -> bool:
         with self._database.transaction():
             operation = self.install_op(op_id)
