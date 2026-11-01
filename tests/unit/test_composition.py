@@ -77,6 +77,8 @@ _CONFLICT: Final[dict[str, Any]] = json.loads(
     (TELEGRAM_FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
 )
 _E1_ID: Final = "api:escalation:E-1"
+_INSTALL_COMMAND: Final = "brew install ffmpeg"
+_FOUND_PATH: Final = "/opt/homebrew/bin/ffmpeg"
 _QUOTA_NOTICE: Final = "quota is used up"
 _RESET_IN: Final = timedelta(hours=1)
 # keep: the reset plus the default one-minute margin, so the wait is due at this moment
@@ -126,7 +128,9 @@ class _ShikiruSession:
 
     A submit is recorded and answered, unless `hangs_submit` keeps it from being answered, as a
     process that dies inside the call leaves it. A poll is answered with `events` at once, and with
-    `later` as well once `gate` is set, as an event that comes after the first ones does.
+    `later` as well once `gate` is set, as an event that comes after the first ones does. A resolve
+    is answered with `resolve_status`: `queued` for a reply, `done` for an install whose answer the
+    executor confirms.
     """
 
     def __init__(
@@ -138,6 +142,7 @@ class _ShikiruSession:
         events: Sequence[dict[str, Any]] = (),
         later: Sequence[dict[str, Any]] = (),
         gate: asyncio.Event | None = None,
+        resolve_status: str = "queued",
     ) -> None:
         self.resolved = resolved
         self.resolutions: list[dict[str, Any]] = []
@@ -149,6 +154,7 @@ class _ShikiruSession:
         self._events = list(events)
         self._later = list(later)
         self._gate = gate
+        self._resolve_status = resolve_status
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
         if name == "wait_for_events":
@@ -157,7 +163,7 @@ class _ShikiruSession:
         elif name == "resolve_escalation":
             self.resolutions.append(arguments)
             self.resolved.set()
-            payload = {"id": 12, "status": "queued", "result": None, "message": None}
+            payload = {"id": 12, "status": self._resolve_status, "result": None, "message": None}
         elif name == "submit_task":
             self.submits.append(arguments["request"])
             self.submitted.set()
@@ -184,10 +190,17 @@ class _ShikiruSession:
 
 
 class _InstallRunner:
-    """Answers only the fake Reasoner and read-only host probes used by the install path."""
+    """Answers the fake Reasoner and the read-only host probes, and records the one install.
+
+    The install command is recorded in `installs` and answered with success instead of running,
+    so no package manager runs. The check finds the tool only once that command has run, as a host
+    does after an install.
+    """
 
     def __init__(self) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.installs: list[str] = []
+        self.installed = False
 
     async def run(
         self,
@@ -213,10 +226,16 @@ class _InstallRunner:
                 },
             }
             return CommandResult(0, json.dumps(answer), "")
+        if command[-1] == _INSTALL_COMMAND:
+            self.installs.append(command[-1])
+            self.installed = True
+            return CommandResult(0, "", "")
         script = command[3]
         if "for tool in" in script:
             return CommandResult(0, "os=test\nmanager=brew\npath=/test/bin\n", "")
         if 'if location=$(command -v "$1")' in script:
+            if self.installed:
+                return CommandResult(0, f"found={_FOUND_PATH}\n", "")
             return CommandResult(0, "missing\n", "")
         message = f"unexpected command in install test: {command[0]}"
         raise AssertionError(message)
@@ -551,17 +570,25 @@ def _tap_install(
     update["callback_query"]["from"]["id"] = _OWNER
     update["callback_query"]["message"]["message_id"] = message_id
     update["callback_query"]["data"] = callback_data
+    session = _ShikiruSession(asyncio.Event(), resolve_status="done")
     _deliver_install(
         directory,
         runner,
         FakeBotApi([update], after_send=False),
-        _ShikiruSession(asyncio.Event()),
-        _until(lambda: _install_state(directory, op_id) == "approved"),
+        session,
+        _until(lambda: _install_state(directory, op_id) in {"confirmed", "failed"}),
     )
-    assert _install_state(directory, op_id) == "approved"
-    assert all(
-        command[0] not in {"brew", "apt", "dnf", "npm", "pip"} for command in runner.commands
-    )
+    assert _install_state(directory, op_id) == "confirmed"
+    assert runner.installs == [_INSTALL_COMMAND]
+    assert session.resolutions == [
+        {
+            "escalation_id": "E-1",
+            "resolution": {
+                "kind": "answer",
+                "text": f"Installed ffmpeg with brew (found at {_FOUND_PATH}). Please continue.",
+            },
+        }
+    ]
 
 
 def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path) -> None:
@@ -594,6 +621,12 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
 
 
 def test_host_tool_approval_survives_restart_open_and_reply(tmp_path: Path) -> None:
+    """An approval that comes after a restart runs the install and confirms it.
+
+    Changed by D6d: this test used to stop at `approved`, because nothing ran the op. The composed
+    executor now runs the one stored command, the check finds the tool, and the op ends `confirmed`
+    once Shikiru acknowledges the answer as done.
+    """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
     callback_data, op_id, created_at = _initial_install(directory, runner)

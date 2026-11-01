@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Final
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
+from shikiri_yaku.adapters.host_lock import FileHostLock
+from shikiri_yaku.adapters.install_files import InstanceInstallFiles
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
@@ -39,6 +41,7 @@ from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
+from shikiri_yaku.app.install_executor import InstallExecutor
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.notifier import Notifier
@@ -71,7 +74,7 @@ from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
 from shikiri_yaku.extensions.review.handler import NOTICE_KEY as REVIEW_NOTICE_KEY
-from shikiri_yaku.instance import JOURNAL_FILE_NAME
+from shikiri_yaku.instance import HOST_LOCK_FILE_NAME, JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -91,6 +94,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
@@ -118,6 +122,7 @@ if TYPE_CHECKING:
         InstallLog,
         InstallPreparer,
         InstallProposalLog,
+        InstallRunner,
         Outbox,
         ReasonerRung,
         Reporter,
@@ -253,11 +258,12 @@ def compose(
     infrastructure = settings.handlers.infrastructure
     install_shell = os.environ.get("SHELL", FALLBACK_SHELL)
     install_timeout_s = timedelta(minutes=infrastructure.command_timeout_min).total_seconds()
+    install_check = ToolCheck(commands, install_shell, install_timeout_s)
     install_proposals = SignalStore(journal)
     install_preparation = InstallPreparation(
         proposals=install_proposals,
         facts=HostFacts(commands, install_shell, install_timeout_s),
-        check=ToolCheck(commands, install_shell, install_timeout_s),
+        check=install_check,
     )
     extensions = registered_extensions(
         clients,
@@ -287,6 +293,22 @@ def compose(
         destinations,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
     )
+    host_lock = FileHostLock(
+        directory.parent / HOST_LOCK_FILE_NAME, clock, infrastructure.host_lock_poll_s
+    )
+    install_executor = InstallExecutor(
+        JournalInstallRuns(journal, SignalStore(journal), OpStore(journal)),
+        clients,
+        forwarder,
+        install_check,
+        commands,
+        host=host_lock,
+        files=InstanceInstallFiles(directory),
+        clock=clock,
+        shell=install_shell,
+        timeout_s=install_timeout_s,
+        tail_lines=infrastructure.install_output_tail_lines,
+    )
     assess = None if reasoning is None else reasoning.assessor.assess
     jobs += routing_jobs(
         settings,
@@ -314,6 +336,7 @@ def compose(
             goal=goal,
             destinations=destinations,
             ladder=None if reasoning is None else reasoning.ladder,
+            install_runner=install_executor,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -564,6 +587,7 @@ def inbound_job(
     goal: GoalCommand,
     destinations: Destinations,
     ladder: RungStates | None,
+    install_runner: InstallRunner,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -613,6 +637,7 @@ def inbound_job(
             outbox,
             clock,
             approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
+            runner=install_runner,
         ),
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)

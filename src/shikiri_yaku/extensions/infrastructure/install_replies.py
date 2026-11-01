@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         Forwarder,
         InstallLog,
         InstallOp,
+        InstallRunner,
         Outbox,
         ReplyOrigin,
         ShikiruClient,
@@ -51,6 +52,7 @@ class InstallApprovalReplies:
         clock: Clock,
         *,
         approval_expiry_h: int,
+        runner: InstallRunner,
     ) -> None:
         self._installs = installs
         self._clients = clients
@@ -58,6 +60,7 @@ class InstallApprovalReplies:
         self._outbox = outbox
         self._clock = clock
         self._expiry_h = approval_expiry_h
+        self._runner = runner
 
     async def handle(
         self,
@@ -97,7 +100,8 @@ class InstallApprovalReplies:
             return
 
         if verb == _INSTALL:
-            self._installs.approve_install(operation.id, origin.number, now)
+            if self._installs.approve_install(operation.id, origin.number, now):
+                self._runner.start(operation.id)
         elif self._installs.decline_install(operation.id, origin.number, now):
             await self._forward(origin)
 

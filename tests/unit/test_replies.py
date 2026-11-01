@@ -116,6 +116,14 @@ class Reporter:
         pytest.fail(line)
 
 
+class Runner:
+    def __init__(self) -> None:
+        self.started: list[int] = []
+
+    def start(self, op_id: int) -> None:
+        self.started.append(op_id)
+
+
 class Harness:
     def __init__(self) -> None:
         self.database = Database.open(":memory:")
@@ -137,6 +145,7 @@ class Harness:
         self.ops = OpStore(self.database)
         self.client = Client()
         self.clients = {"api": cast("ShikiruClient", self.client)}
+        self.runner = Runner()
         self.origin("1001/42", Purpose.QUESTION)
 
     def origin(
@@ -302,6 +311,7 @@ class Harness:
             self.outbox,
             Clock(clock_at),
             approval_expiry_h=InfrastructureSettings().approval_expiry_h,
+            runner=self.runner,
         )
         return replies, operation.id
 
@@ -330,6 +340,7 @@ def test_install_tap_approves_a_stored_op_once(h: Harness) -> None:
     operation = h.ops.get(op_id)
     assert operation is not None
     assert operation.state is OpState.APPROVED
+    assert h.runner.started == [op_id]
     assert h.outbox.pending() == []
 
 
@@ -382,6 +393,7 @@ def test_decline_is_durable_and_product_forward_is_replay_safe(h: Harness) -> No
     ]
     assert operation is not None
     assert operation.state is OpState.DECLINED
+    assert h.runner.started == []
     assert len(forwards) == 1
     assert forwards[0].purpose is Purpose.QUESTION
     assert forwards[0].body is not None

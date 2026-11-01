@@ -80,6 +80,6 @@ merged and `uv run poe check` passes.
     - [x] D5e. Composition, `/open` and end-to-end approval
       - [x] D5e1. Journaled install approval replay in `/open`
       - [x] D5e2. Production composition and end-to-end approval
-  - [ ] D6. Executor and resolution
+  - [x] D6. Executor and resolution
   - [ ] D7. Interrupted installs and measures
 - [ ] Phase E: Hardening
