@@ -123,6 +123,9 @@ class Runner:
     def start(self, op_id: int) -> None:
         self.started.append(op_id)
 
+    def running(self, op_id: int) -> bool:
+        return op_id in self.started
+
 
 class Harness:
     def __init__(self) -> None:

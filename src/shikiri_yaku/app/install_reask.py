@@ -13,12 +13,12 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.ports import INSTALL_INTENDED
 
 if TYPE_CHECKING:
+    from shikiri_yaku.domain.recipes import InstallOpPayload
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Clock,
         Destinations,
         InstallApprovalRenderer,
-        InstallOp,
         InstallReaskLog,
         Outbox,
     )
@@ -41,19 +41,19 @@ class InstallReasker:
         self._destinations = destinations
         self._clock = clock
 
-    def ask_again(self, old: InstallOp, signal: Signal) -> None:
-        """Make the PO's new approval of the same command, then void `old`."""
+    def ask_again(self, op_id: int, payload: InstallOpPayload, signal: Signal) -> None:
+        """Make the PO's new approval of the stored command of `op_id`, then void that op."""
         now = self._clock.now()
         new = self._installs.intend_install(
-            f"install:{signal.id}:after:{old.id}", signal, old.payload, now
+            f"install:{signal.id}:after:{op_id}", signal, payload, now
         )
         if new.state == INSTALL_INTENDED:
             self._outbox.queue(
-                old.payload.number,
+                payload.number,
                 Purpose.APPROVAL,
                 self._destinations.for_signal(signal.project, signal.kind),
                 self._renderer.render(new.id, new.payload),
                 key=f"install:{new.id}",
                 now=now,
             )
-        self._installs.void_issued(old.id, now)
+        self._installs.void_issued(op_id, now)

@@ -111,7 +111,7 @@ def test_ask_again_queues_the_stored_command_and_then_voids_the_old_op(memory: D
     world = _World(memory)
     old = world.issued()
 
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
 
     new = world.reasked(old)
     assert new.payload == old.payload
@@ -127,11 +127,11 @@ def test_ask_again_queues_the_stored_command_and_then_voids_the_old_op(memory: D
 def test_repeat_after_a_crash_queues_one_approval(memory: Database) -> None:
     world = _World(memory)
     old = world.issued()
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
     # keep: the crash came after the approval was queued and before the old op was voided
     assert world.ops.transition(old.id, OpState.VOID, OpState.ISSUED, NOW)
 
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
 
     assert len(world.messages.for_signal(world.number)) == 1
     assert memory.connection.execute("SELECT count(*) FROM ops").fetchone()[0] == 2
@@ -140,12 +140,12 @@ def test_repeat_after_a_crash_queues_one_approval(memory: Database) -> None:
 def test_repeat_does_not_queue_an_approval_the_po_has_already_answered(memory: Database) -> None:
     world = _World(memory)
     old = world.issued()
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
     new = world.reasked(old)
     assert world.ops.approve_install(new.id, world.number, NOW)
     assert world.ops.transition(old.id, OpState.VOID, OpState.ISSUED, NOW)
 
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
 
     assert len(world.messages.for_signal(world.number)) == 1
 
@@ -165,6 +165,9 @@ class _Starts:
     def start(self, op_id: int) -> None:
         self.started.append(op_id)
 
+    def running(self, op_id: int) -> bool:
+        return op_id in self.started
+
 
 def _approval_origin(world: _World, op_id: int) -> ReplyOrigin:
     buttons = (Button("Install", install_data(world.number, op_id)),)
@@ -181,7 +184,7 @@ def _approval_origin(world: _World, op_id: int) -> ReplyOrigin:
 def test_tap_on_the_replaced_approval_is_void_and_tap_on_the_new_one_runs(memory: Database) -> None:
     world = _World(memory)
     old = world.issued()
-    world.reasker.ask_again(old, SIGNAL)
+    world.reasker.ask_again(old.id, old.payload, SIGNAL)
     new = world.reasked(old)
     starts = _Starts()
     replies = InstallApprovalReplies(
