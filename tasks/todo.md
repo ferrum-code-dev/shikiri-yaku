@@ -87,3 +87,4 @@ merged and `uv run poe check` passes.
   - [x] E2. Drills as tests
   - [x] E3. Recording real Telegram replies
   - [x] E4. Install path hardening from the security review
+  - [ ] E5. Command line in Shikiru's style

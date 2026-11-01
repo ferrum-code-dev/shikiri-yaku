@@ -1392,6 +1392,44 @@ Acceptance criteria:
 * An approved op whose stored list was changed in the journal (an extra word, a different manager's recipe, a package with `;`) does not run and forwards with a reason; an unchanged op runs as before.
 * The gate passes.
 
+### E5. Command line in Shikiru's style (normal)
+
+The owner wants the same experience as `shikiru`: style, colours and structure. Reference (read, copy
+the ideas, never import Shikiru): `/Users/pavel/Projects/ferrum-code-dev/shikiru/src/shikiru/cli/app.py`
+(Typer app, `_configure_typer_help_palette`, global options, `_fail`) and `cli/render.py` (doctor lines,
+summary line, glyphs, colours). Run `shikiru --help`, `shikiru doctor` and `shikiru status` to see the result.
+
+1. A Typer app named `shikiri-yaku` with `no_args_is_help`, Shikiru's help palette and layout. Add `typer`
+   with the same pin as Shikiru. Typer and rich are imported only in `cli.py` (and a small `cli_render.py` if
+   it grows); the layering and the rule that `bootstrap` builds the callables the CLI is given do not change.
+2. Global options before the command, as `--project`, `--json` and `--version` are in Shikiru:
+   `--product <name>`, `--home <path>`, `--json`, `--version`. Each help text ends with "Default: …".
+   The product defaults to the only product directory under the home; none or several is a usage error
+   that lists what was found. `--home` is no longer repeated on each command.
+3. Flat verbs: `run`, `doctor`, `stats`, `install-service`. The channel repair moves under its channel:
+   `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`; `topics`
+   is removed. The old positional form (`run shop`) is a usage error, with no compatibility layer.
+4. Output like Shikiru: `doctor` prints one line per check as `✔ Name · detail` or `✘ Name · detail`, a blank
+   line, and the summary `✔ Doctor passed · N checks` or `✘ Doctor failed · F of N checks`; `stats` prints
+   titled sections as rich tables; errors are one `✘` line with the reason, as Shikiru's `_fail`. Colour only
+   on a terminal; piped output is plain text (no escape codes). Exit codes stay as they are.
+5. `--json` for `doctor` and `stats` prints one JSON object with fixed keys.
+6. `install-service` writes the unit with the new command form (`shikiri-yaku --product X --home H run`
+   with absolute paths); update README and every help text that names the old form.
+
+If it needs much more than 300 lines, split it (for example: app and global options; output of doctor
+and stats; the `telegram` group) and record the split in this section.
+
+Acceptance criteria (Typer's `CliRunner`, no terminal needed):
+* `--help` lists the verbs and the `telegram` group, and every global option's help ends with "Default: …".
+* Product resolution, table-driven: one product under the home, none, several, and `--product` given.
+* `run shop` (the old form) and `topics …` are usage errors.
+* `doctor` with a failing check prints the `✘` line and the failed summary and exits 1; with all checks passing it prints the passed summary and exits 0; piped output has no escape codes.
+* `--json` output of `doctor` and `stats` parses as JSON and has the documented keys.
+* The E1 behaviour (adopt and forget on a `creating` topic, refusal on other states, refusal while the instance lock is held) is kept under `telegram adopt|forget`, with its tests moved.
+* The service unit golden test holds the new command line, with the login-shell PATH as before.
+* `uv run poe check` passes, including all import contracts.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
