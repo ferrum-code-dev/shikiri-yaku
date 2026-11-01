@@ -61,7 +61,7 @@ merged and `uv run poe check` passes.
 - [x] C10. An engine that is up again closes its signal
 - [x] C11. A message in a topic is not a reply to the topic
 - [x] C12. Commands answer when they have nothing to show
-- [ ] Phase D: Install
+- [x] Phase D: Install
   - [x] D1. Reasoner spike (`tasks/reasoner-spike.md`)
   - [x] D2. Reasoner adapters and `assess_blocker`
   - [x] D3. Ladder and the safe tool list
@@ -83,3 +83,6 @@ merged and `uv run poe check` passes.
   - [x] D6. Executor and resolution
   - [x] D7. Interrupted installs and measures (component removal, lost-ack, durable rejection retry)
 - [ ] Phase E: Hardening
+  - [ ] E1. Recovery of an uncertain topic creation
+  - [ ] E2. Drills as tests
+  - [ ] E3. Recording real Telegram replies

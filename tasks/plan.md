@@ -1275,6 +1275,56 @@ Acceptance criteria:
 * The composed path passes, and fails when the check-after step is removed.
 * The gate passes.
 
+## Phase E: hardening
+
+Design §15 and the open items of the live run. All tasks are `normal`. The contract script
+(`scripts/contract_check.py`, A5b) already exists. The security review of the install path is done
+by the owner outside the task list.
+
+### E1. Recovery of an uncertain topic creation (normal)
+
+Today start-up refuses when a topic is in state `creating` (the process died between asking Telegram
+and saving the thread id), and the message says to inspect the forum by hand but gives no way to
+record what was found. The Bot API cannot list topics, so the PO decides. Add the CLI command
+`shikiri-yaku topics adopt <component|general> <thread-id>` (marks the topic open with that thread)
+and `topics forget <component|general>` (deletes the `creating` row, so start-up creates a new topic).
+Both refuse a topic that is not in state `creating`, take the instance lock, and print what they
+changed. The start-up refusal names both commands.
+
+Acceptance criteria:
+* Table-driven: adopt and forget on a `creating` topic, on an open topic, on a missing topic and with the instance lock held by a running Operator (refused).
+* After adopt, start-up does not create that topic again; after forget, it creates one.
+* The refusal message names both commands.
+* The gate passes.
+
+### E2. Drills as tests (normal)
+
+Go through the drill list of design §15 and write the mapping into `tasks/drills.md`: each drill, the
+test that covers it (file and name) or "missing". Then add composed tests (as in C7, with the fake
+Shikiru client, the fake channel and the test-time clock) for each one that is missing. Likely gaps:
+two answers to one question from two chats, an answer given in tmux (resolved elsewhere), a pull
+request closed unmerged, an Operator killed mid-send and mid-resolve, an engine the PO stopped staying
+stopped across an Operator restart. A drill that cannot run offline (a real host reboot, a real
+package manager) is listed as "human drill" with the exact steps.
+
+Acceptance criteria:
+* `tasks/drills.md` lists every drill of §15 with a test or a human drill; none is silently dropped.
+* Each new test fails under a deliberate break of the behavior it protects (state the break in the test report).
+* The gate passes.
+
+### E3. Recording real Telegram replies (normal)
+
+`scripts/record_telegram.py`, run by a human and never by the gate: sends a few harmless messages,
+edits and a topic call with the PO's own test bot, saves the raw replies and updates to
+`tests/fixtures/telegram/recorded/` with ids and tokens replaced by placeholders, and prints a diff
+against the documentation-shaped fixtures. The token is read from the token file by the script only.
+The script refuses to run when the output directory would hold a real token or user id.
+
+Acceptance criteria:
+* The redaction function is unit tested: a token, a user id and a chat id in a payload are replaced everywhere, including nested and in strings; a payload without them is unchanged.
+* The script's `--help` documents the token file and the chat; the gate does not import or run it.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
