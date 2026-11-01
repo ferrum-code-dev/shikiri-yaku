@@ -108,8 +108,11 @@ reverted afterwards (`git status` shows only the test file changed).
 
 These need a real host, a real package manager, a real agent CLI or a real reboot. Use a throwaway
 host. Use the Telegram test bot and the test chat. Keep `config.toml` and the token file in the
-instance directory `<home>/<product>` (default home `~/.shikiri-yaku`). Never paste the token or a
-chat id into a report. Commands below are the CLI as built (`shikiri-yaku --help`).
+instance directory `<home>/<product>` (default home `~/.shikiri-yaku`). `<product>` is the Operator
+instance name, `<component>` is a component name in its config, and `<component-path>` is that
+component's configured Shikiru project path. `/status` and engine notices name components. Never
+paste the token or a chat id into a report. Commands below are the CLI as built
+(`shikiri-yaku --help`).
 
 ### H1. Missing tool on a throwaway host (D1–D5)
 
@@ -151,44 +154,49 @@ Setup: as H1. Use an install that runs for more than 10 seconds (a large package
 
 ### H3. Host reboot: engines come back, a stopped engine stays stopped (D13, D14)
 
-Precondition: no automatic restart of any of these products in the hour before the reboot. The restart
-budget is one per project per hour, so a boot-time restart inside that hour is refused and forwarded.
+Precondition: no automatic restart of any component in these instances in the hour before the reboot.
+The restart budget is one per component per hour, so a boot-time restart inside that hour is refused
+and forwarded.
 
 1. For each product: `shikiri-yaku install-service <product>`. It prints `wrote <path>` and
    `start it with: <command>`. Run that command, so the Operator starts at each login.
-2. Stop one engine the way the PO does. Find its process with `pgrep -fl "project <path> engine"`.
-   It prints one line (the engine; the MCP link is `--project <path> mcp` and is not matched).
-   Stop if it prints more or none. Then `kill -TERM <pid>`. Wait 5 minutes, which is longer than
-   `stop_grace_min` (2) and the one-minute liveness interval. In Telegram, `/status` shows that product
-   as "Engine: down", and no restart message came for it.
+2. Stop one component engine the way the PO does. Find its process with
+   `pgrep -fl "project <component-path> engine"`. It prints one line (the engine; the MCP link is
+   `--project <component-path> mcp` and is not matched). Stop if it prints more or none. Then
+   `kill -TERM <pid>`. Wait 5 minutes, which is longer than `stop_grace_min` (2) and the one-minute
+   liveness interval. In Telegram, `/status` shows `<component>` with "Engine: down", and no restart
+   message came for that component.
 3. Reboot the host. Wait about five minutes after login.
-4. Expect each engine that was running before the reboot to come back: one message per product,
-   "The engine of <product> was restarted. Shikiru resumes its tasks.", and `/status` shows
-   "Engine: up" for it.
-5. Expect the engine stopped in step 2 to stay down: `/status` shows "Engine: down" for it, no
-   restart message for it, and `pgrep -fl "project <path> engine"` prints nothing for it.
+4. Expect each component engine that was running before the reboot to come back: one message per
+   restarted component, "The engine of <component> was restarted. Shikiru resumes its tasks.", and
+   `/status` shows that component with "Engine: up".
+5. Expect the component stopped in step 2 to stay down: `/status` shows `<component>` with
+   "Engine: down", no restart message names it, and `pgrep -fl "project <component-path> engine"`
+   prints nothing for it.
 
 ### H4. Real engine crash and restart (D9)
 
-Precondition: no automatic restart of this product in the hour before step 2. The restart budget is
-one per project per hour.
+Precondition: no automatic restart of `<component>` in the hour before step 2. The restart budget is
+one per component per hour.
 
-1. Terminal A: `shikiri-yaku run <product>`. In Telegram, `/status` shows `<product>` with
+1. Terminal A: `shikiri-yaku run <product>`. In Telegram, `/status` shows `<component>` with
    "Engine: up".
-2. Find the engine process with `pgrep -fl "project <path> engine"`. It prints one line; stop if it
-   prints more or none. Then `kill -9 <pid>` (a crash, so no stop event). Expect within about three
-   minutes one message, "The engine of <product> was restarted. Shikiru resumes its tasks.", and no
-   question. `/status` shows "Engine: up" again.
+2. Find the engine process with `pgrep -fl "project <component-path> engine"`. It prints one line;
+   stop if it prints more or none. Then `kill -9 <pid>` (a crash, so no stop event). Expect within
+   about three minutes one restart notice, "The engine of <component> was restarted. Shikiru resumes
+   its tasks.", and no question. `/status` shows `<component>` with "Engine: up" again.
 3. Within the same hour, find the new engine process with the same `pgrep` and `kill -9` it again.
-   Expect within about three minutes one question, and no restart message. Its text starts "The last
-   automatic restart was at <time>. Automatic restarts are limited to once per hour." and ends
-   "Please start it yourself with `shikiru start` in the <product> project." It may list "The failed
-   checks are: ..." between them. `/status` shows "Engine: down".
-4. Start the engine by hand: `shikiru --project <path> start`. Expect the question of step 3 to be
-   edited with the final line "Engine is up again" within about two minutes, and `/status` to show
-   "Engine: up". No restart message appears.
+   Expect within about three minutes one "For information" message for `<component>`, not a question
+   or restart notice. Its body starts "The engine of <component> is down." The "What I tried:" note
+   contains "The last automatic restart was at <time>. Automatic restarts are limited to once per
+   hour." and the body ends "Please start it yourself with `shikiru start` in the <component>
+   project." The note may list "The failed checks are: ..." between those sentences. `/status` shows
+   `<component>` with "Engine: down".
+4. Start the engine by hand: `shikiru --project <component-path> start`. Expect the information
+   message from step 3 to be edited with the final line "Engine is up again" within about two
+   minutes, and `/status` to show `<component>` with "Engine: up". No restart notice appears.
 5. Do not kill the engine again within the hour after the step 2 restart. After that hour, a crash
-   is restarted again, as in step 2.
+   of `<component>` is restarted again, as in step 2.
 
 ### H5. Two real projects (all drills, D1–D22 as applicable)
 
