@@ -151,24 +151,44 @@ Setup: as H1. Use an install that runs for more than 10 seconds (a large package
 
 ### H3. Host reboot: engines come back, a stopped engine stays stopped (D13, D14)
 
+Precondition: no automatic restart of any of these products in the hour before the reboot. The restart
+budget is one per project per hour, so a boot-time restart inside that hour is refused and forwarded.
+
 1. For each product: `shikiri-yaku install-service <product>`. It prints `wrote <path>` and
-   `start it with: <command>`. Run that command.
-2. Stop one engine the way the PO does: find its process with `pgrep -fl "shikiru --project"`, then
-   `kill -TERM <pid>`. Wait 5 minutes, which is longer than `stop_grace_min` (2) and the one-minute
-   liveness interval.
-3. Reboot the host. After login, `shikiri-yaku doctor <product>` for each product.
-4. Expect the engines that were running to be up. Expect the engine stopped in step 2 to stay down,
-   with no restart message. `shikiri-yaku stats <product>` shows the same.
+   `start it with: <command>`. Run that command, so the Operator starts at each login.
+2. Stop one engine the way the PO does. Find its process with `pgrep -fl "project <path> engine"`.
+   It prints one line (the engine; the MCP link is `--project <path> mcp` and is not matched).
+   Stop if it prints more or none. Then `kill -TERM <pid>`. Wait 5 minutes, which is longer than
+   `stop_grace_min` (2) and the one-minute liveness interval. In Telegram, `/status` shows that product
+   as "Engine: down", and no restart message came for it.
+3. Reboot the host. Wait about five minutes after login.
+4. Expect each engine that was running before the reboot to come back: one message per product,
+   "The engine of <product> was restarted. Shikiru resumes its tasks.", and `/status` shows
+   "Engine: up" for it.
+5. Expect the engine stopped in step 2 to stay down: `/status` shows "Engine: down" for it, no
+   restart message for it, and `pgrep -fl "project <path> engine"` prints nothing for it.
 
 ### H4. Real engine crash and restart (D9)
 
-1. Terminal A: `shikiri-yaku run <product>`.
-2. Find the engine process with `pgrep -fl "shikiru --project"`, then `kill -9 <pid>` (a crash, so
-   no stop event).
-3. Expect within about one minute one "engine down" message, the Operator starts the engine, and
-   the engine is up within 60 seconds. Expect no second message.
-4. Repeat step 2 twice within an hour. Expect the second restart to be refused with the failed
-   checks, as the restart budget says.
+Precondition: no automatic restart of this product in the hour before step 2. The restart budget is
+one per project per hour.
+
+1. Terminal A: `shikiri-yaku run <product>`. In Telegram, `/status` shows `<product>` with
+   "Engine: up".
+2. Find the engine process with `pgrep -fl "project <path> engine"`. It prints one line; stop if it
+   prints more or none. Then `kill -9 <pid>` (a crash, so no stop event). Expect within about three
+   minutes one message, "The engine of <product> was restarted. Shikiru resumes its tasks.", and no
+   question. `/status` shows "Engine: up" again.
+3. Within the same hour, find the new engine process with the same `pgrep` and `kill -9` it again.
+   Expect within about three minutes one question, and no restart message. Its text starts "The last
+   automatic restart was at <time>. Automatic restarts are limited to once per hour." and ends
+   "Please start it yourself with `shikiru start` in the <product> project." It may list "The failed
+   checks are: ..." between them. `/status` shows "Engine: down".
+4. Start the engine by hand: `shikiru --project <path> start`. Expect the question of step 3 to be
+   edited with the final line "Engine is up again" within about two minutes, and `/status` to show
+   "Engine: up". No restart message appears.
+5. Do not kill the engine again within the hour after the step 2 restart. After that hour, a crash
+   is restarted again, as in step 2.
 
 ### H5. Two real projects (all drills, D1–D22 as applicable)
 

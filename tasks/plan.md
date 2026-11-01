@@ -1297,7 +1297,7 @@ Acceptance criteria:
 * The refusal message names both commands.
 * The gate passes.
 
-### E2. Drills as tests (normal)
+### E2. Drills as tests (split into E2a, E2b and E2c, each normal)
 
 Go through the drill list of design §15 and write the mapping into `tasks/drills.md`: each drill, the
 test that covers it (file and name) or "missing". Then add composed tests (as in C7, with the fake
@@ -1307,9 +1307,61 @@ request closed unmerged, an Operator killed mid-send and mid-resolve, an engine 
 stopped across an Operator restart. A drill that cannot run offline (a real host reboot, a real
 package manager) is listed as "human drill" with the exact steps.
 
+Split (decided in the rework of commit `bfd1537`, which is 566 insertions and 8 deletions, about
+twice the guide): the work is split by unit, and each unit has its own acceptance. The commit
+`bfd1537` already holds all three units in one change; this split records them and does not rewrite
+that commit. The two test increments use the same composed harness in `tests/unit/test_composition.py`
+and do not move it: E2b defines the harness and its first four tests, E2c adds three tests and their
+stop constants. Measured in `bfd1537`: E2a 201 lines (`tasks/drills.md`, now 221 after this rework),
+E2b about 250 lines of the test file, E2c about 90 lines of the test file.
+
+### E2a. Drill mapping (`tasks/drills.md`, no code)
+
 Acceptance criteria:
+* Each of the 22 drills of design §15 (D1–D22) and each of the five measures (M1–M5) has one row.
+  A covered row names a test whose `def` exists in the repository (`grep -rn "def <name>"` finds it).
+  A drill with no offline test is a "missing" row that points to a composed test or to a human drill.
+* Each human drill (H1–H7) gives exact steps and the expected result, and each expected state is one
+  that the named command or Telegram message really shows (`/status` for engine state, `stats` only
+  for the figures it prints, `sqlite3` for journal rows).
+* No drill is dropped; M2 is marked partial with the gap named.
+
+### E2b. Composed drill tests A–D and the shared harness (normal)
+
+Tests in `tests/unit/test_composition.py`: two answers to one question from two chats (A), an answer
+given in tmux (B), a pull request closed unmerged (C), an Operator killed mid-send (D). The harness
+(the fakes `_ShikiruSession`, `_GatedBot`, `_HangingSendBot`, and the helpers `_tap`, `_sent`,
+`_play`) is defined here and stays in that file.
+
+Acceptance criteria:
+* Each of A–D exists under the name in `tasks/drills.md`, and drives the composed app through its
+  real ports and the fake channel, not a unit's internals.
+* Each fails under its deliberate break, which is named in the test report: A (`replies.py`
+  resolved-status check disabled), B (`event_source.py` resolved branch without its closing), C
+  (`event_source.py` review closing for `pr_closed` disabled), D (`outbox_sender.py` confirm disabled).
+  Each break is reverted and the test passes again.
+* No second harness: the fakes are not copied and the shared fakes in that file are unchanged.
+
+### E2c. Composed drill tests E–G (normal)
+
+Tests in `tests/unit/test_composition.py`: an Operator killed mid-resolve (E), an engine the PO stopped
+staying stopped across an Operator restart (F), a declined install (G), with the stop constants
+`_STOP_DOWN_ID`, `_STOP_AHEAD` and `_STOP_GAP` that F uses. It uses the harness from E2b and does not
+move it.
+
+Acceptance criteria:
+* Each of E–G exists under the name in `tasks/drills.md`, and runs through the composed app.
+* Each fails under its deliberate break, named in the test report: E (`reconciler.py` confirm
+  replaced with a failure), F (`liveness_source.py` respect-stop call disabled), G
+  (`install_replies.py` decline treated as install).
+* The three stop constants are defined once, with a `# keep:` reason, and are used by F only.
+
+### E2 acceptance (all three units)
+
 * `tasks/drills.md` lists every drill of §15 with a test or a human drill; none is silently dropped.
 * Each new test fails under a deliberate break of the behavior it protects (state the break in the test report).
+* Each unit changes only its own files: `tasks/drills.md` (E2a), `tests/unit/test_composition.py`
+  (E2b, E2c), `tasks/plan.md`, `tasks/todo.md`. `docs/design.md` is not edited.
 * The gate passes.
 
 ### E3. Recording real Telegram replies (normal)
