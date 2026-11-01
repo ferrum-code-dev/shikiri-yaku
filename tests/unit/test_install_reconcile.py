@@ -15,6 +15,7 @@ from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Resolved, Signal
 from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
+from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
@@ -27,6 +28,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.install_reconcile import JournalInstallReconcile
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
+from shikiri_yaku.journal.messages import Delivery
 from shikiri_yaku.journal.ops import OpState
 from shikiri_yaku.journal.signals import SignalState
 from shikiri_yaku.ports import (
@@ -49,7 +51,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
     from pathlib import Path
 
-    from shikiri_yaku.ports import Clock, ShikiruClient
+    from shikiri_yaku.ports import Clock, Reshower, ShikiruClient
 
 NOW: Final = datetime(2026, 10, 31, 12, tzinfo=UTC)
 STARTED: Final = datetime(2026, 10, 31, 9, tzinfo=UTC)
@@ -140,6 +142,9 @@ class _Shikiru:
     async def get_escalation(self, escalation_id: str) -> EscalationView | None:
         self.lookups.append(escalation_id)
         return self._view
+
+    async def get_task(self, task_id: str) -> None:
+        del task_id
 
     async def resolve_escalation(
         self, escalation_id: str, kind: str, text: str | None = None
@@ -253,8 +258,16 @@ class _Reshower:
     def __init__(self) -> None:
         self.shown: list[str] = []
 
-    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> bool:
-        del number, signal, note
+    async def reshow(
+        self,
+        number: int,
+        signal: Signal,
+        note: str,
+        *,
+        key: str,
+        even_if_closed: bool = False,
+    ) -> bool:
+        del number, signal, note, even_if_closed
         self.shown.append(key)
         return True
 
@@ -314,7 +327,14 @@ class _World:
             self.ops.acknowledge_install(operation.id, ack, None, NOW)
         return operation.id
 
-    def reconciler(self, clock: Clock | None = None, *, interval_s: float = 1) -> InstallReconciler:
+    def reconciler(
+        self,
+        clock: Clock | None = None,
+        *,
+        interval_s: float = 1,
+        clients: Mapping[str, ShikiruClient] | None = None,
+        reshower: Reshower | None = None,
+    ) -> InstallReconciler:
         clock = _Clock() if clock is None else clock
         reasker = InstallReasker(
             self.ops,
@@ -326,9 +346,9 @@ class _World:
         return InstallReconciler(
             JournalInstallReconcile(self.database, self.signals, self.ops),
             self.lifecycles,
-            {"api": cast("ShikiruClient", self.shikiru)},
+            {"api": cast("ShikiruClient", self.shikiru)} if clients is None else clients,
             self.runner,
-            reshower=self.reshower,
+            reshower=self.reshower if reshower is None else reshower,
             check=self.check,
             reasker=reasker,
             clock=clock,
@@ -396,6 +416,20 @@ def test_approved_recovery_voids_an_escalation_resolved_before_local_event_sync(
     assert world.shikiru.lookups == ["E-1"]
     assert world.state(op_id) == OpState.VOID
     assert world.signal_state() == SignalState.FORWARDED
+    assert world.runner.started == []
+
+
+@pytest.mark.parametrize(
+    "initial_state", [OpState.APPROVED, OpState.ISSUED], ids=["approved", "issued"]
+)
+def test_recovery_voids_ops_for_removed_components(world: _World, initial_state: str) -> None:
+    op_id = world.install(issued=initial_state == OpState.ISSUED)
+    world.signals.close_removed([], "component removed", RESTART)
+
+    asyncio.run(world.reconciler(clients={}).tick())
+
+    assert world.state(op_id) == OpState.VOID
+    assert world.signal_state() == SignalState.CLOSED
     assert world.runner.started == []
 
 
@@ -553,7 +587,54 @@ def test_an_answer_shikiru_refuses_voids_the_op_and_keeps_the_question(world: _W
 
     assert world.state(op_id) == OpState.VOID
     assert world.signal_state() == SignalState.FORWARDED
-    assert world.messages.for_signal(world.number) == []
+    assert world.reshower.shown == [f"install-rejected:{op_id}"]
+
+
+def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding(
+    world: _World,
+) -> None:
+    error = ShikiruRejectedError("resolution is not valid for this reason")
+    world.shikiru = _Shikiru(error=error)
+    op_id = world.install(issued=True)
+    operation = world.ops.install_op(op_id)
+    assert operation is not None
+    world.outbox.queue(
+        world.number,
+        Purpose.APPROVAL,
+        [OWNER],
+        InstallApprovalPresenter().render(op_id, operation.payload),
+        key=f"install:{op_id}",
+        now=NOW,
+    )
+    forwarder = ProductForwarder(
+        80,
+        {"api": cast("ShikiruClient", world.shikiru)},
+        world.outbox,
+        _Clock(),
+        FixedDestinations([OWNER]),
+        button_label_max_chars=32,
+    )
+
+    asyncio.run(world.reconciler(reshower=forwarder).tick())
+
+    [approval, question] = world.messages.for_signal(world.number)
+    assert world.state(op_id) == OpState.VOID
+    assert approval.purpose == Purpose.APPROVAL
+    assert question.purpose == Purpose.QUESTION
+    assert question.delivery == Delivery.PENDING
+    assert question.body is not None
+    assert str(error) in question.body.text
+
+    asyncio.run(
+        forwarder.reshow(
+            world.number,
+            SIGNAL,
+            f"Shikiru rejected the install answer: {error}",
+            key=f"install-rejected:{op_id}",
+            even_if_closed=True,
+        )
+    )
+    assert len(world.messages.for_signal(world.number)) == 2
 
 
 def test_a_link_down_during_the_answer_leaves_the_op_for_the_next_start(world: _World) -> None:
@@ -623,6 +704,32 @@ def test_a_different_command_event_preserves_the_external_resolution_at_restart(
     assert _final_line(memory, world.number) == "Resolved in Shikiru: answer"
 
 
+def test_an_event_without_its_lost_ack_is_voided_after_restart(
+    world: _World, memory: Database
+) -> None:
+    world.shikiru = _Shikiru(view=_view(EscalationStatus.RESOLVED, ResolutionKind.ANSWER))
+    op_id = world.install(issued=True)
+    events = JournalEvents(memory, CursorStore(memory, world.signals), world.ops)
+    events.record_batch(
+        "api",
+        [
+            Closing("api", escalation_id="E-1"),
+            Resolved("api", "E-1", ResolutionKind.ANSWER, command_id=str(DONE.id)),
+        ],
+        1,
+        None,
+        RESTART,
+    )
+
+    for _ in range(3):
+        world.reconcile()
+
+    assert world.state(op_id) == OpState.VOID
+    assert world.acknowledgement(op_id) is None
+    assert _final_line(memory, world.number) == "Resolved in Shikiru: answer"
+    assert world.shikiru.lookups == ["E-1"]
+
+
 def test_a_queued_answer_still_open_after_the_engine_came_back_is_shown_again(
     world: _World,
 ) -> None:
@@ -654,14 +761,29 @@ def test_a_queued_answer_is_not_lost_when_no_lifecycle_is_recorded(world: _World
     assert world.reshower.shown == []
 
 
-def test_an_issued_install_a_run_has_in_hand_is_left_alone(world: _World) -> None:
+def test_an_in_hand_install_waits_for_its_pre_ack_resolution_event(
+    world: _World, memory: Database
+) -> None:
+    world.shikiru = _Shikiru(view=_view(EscalationStatus.RESOLVED, ResolutionKind.ANSWER))
     op_id = world.install(issued=True)
     world.runner.in_hand.add(op_id)
+    events = JournalEvents(memory, CursorStore(memory, world.signals), world.ops)
+    events.record_batch(
+        "api",
+        [
+            Closing("api", escalation_id="E-1"),
+            Resolved("api", "E-1", ResolutionKind.ANSWER, command_id=str(DONE.id)),
+        ],
+        1,
+        None,
+        RESTART,
+    )
 
     world.reconcile()
 
     assert world.shikiru.answers == []
     assert world.state(op_id) == OpState.ISSUED
+    assert world.acknowledgement(op_id) is None
 
 
 def test_queued_answer_is_rechecked_after_engine_recovery_in_the_same_run(world: _World) -> None:

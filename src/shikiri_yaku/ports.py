@@ -1427,10 +1427,18 @@ class SubmitLog(Protocol):
 
 
 class Reshower(Protocol):
-    """Shows a signal's question again as a new message, once per key, while Shikiru has it open."""
+    """Queues a signal again under a stable key, if Shikiru still has it open by default."""
 
-    async def reshow(self, number: int, signal: Signal, note: str, *, key: str) -> bool:
-        """Return whether the question was queued; it is not when Shikiru no longer has it open."""
+    async def reshow(
+        self,
+        number: int,
+        signal: Signal,
+        note: str,
+        *,
+        key: str,
+        even_if_closed: bool = False,
+    ) -> bool:
+        """Return whether the keyed question or information message was queued."""
         ...
 
 

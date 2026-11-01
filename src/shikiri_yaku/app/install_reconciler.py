@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 
 class InstallReconciler:
-    """Runs once at start: starts approved installs and settles the issued ones by observation."""
+    """Repeatedly observes approved and issued installs to settle or resume recovery."""
 
     def __init__(
         self,
@@ -89,19 +89,30 @@ class InstallReconciler:
         pending = self._log.unsettled_op(op_id)
         if pending is None:
             return
-        if pending.op.state == INSTALL_APPROVED:
-            view = await self._clients[pending.op.project].get_escalation(
-                pending.op.payload.escalation_id
-            )
-            if view is None:
-                return
-            if view.escalation.status != EscalationStatus.OPEN:
+        client = self._clients.get(pending.op.project)
+        if client is None:
+            if pending.op.state == INSTALL_APPROVED:
                 self._log.void_approved(op_id, self._clock.now())
-                return
-            self._runner.start(op_id)
+            else:
+                self._log.void(op_id, self._clock.now())
             return
-        project = pending.op.project
-        view = await self._clients[project].get_escalation(pending.op.payload.escalation_id)
+        if pending.op.state == INSTALL_APPROVED:
+            await self._settle_approved(pending, client)
+            return
+
+        await self._settle_issued(pending, client)
+
+    async def _settle_approved(self, pending: PendingInstall, client: ShikiruClient) -> None:
+        view = await client.get_escalation(pending.op.payload.escalation_id)
+        if view is None:
+            return
+        if view.escalation.status != EscalationStatus.OPEN:
+            self._log.void_approved(pending.op.id, self._clock.now())
+            return
+        self._runner.start(pending.op.id)
+
+    async def _settle_issued(self, pending: PendingInstall, client: ShikiruClient) -> None:
+        view = await client.get_escalation(pending.op.payload.escalation_id)
         if view is None:
             return
         now = self._clock.now()
@@ -111,9 +122,12 @@ class InstallReconciler:
             await self._decide_by_check(pending, now)
         elif await self._is_lost(pending):
             await self._reshower.reshow(
-                pending.op.payload.number, pending.signal, AGAIN_NOTE, key=f"reshow:{op_id}"
+                pending.op.payload.number,
+                pending.signal,
+                AGAIN_NOTE,
+                key=f"reshow:{pending.op.id}",
             )
-            self._log.fail(op_id, now)
+            self._log.fail(pending.op.id, now)
 
     async def _is_lost(self, pending: PendingInstall) -> bool:
         ack = pending.ack
@@ -134,8 +148,7 @@ class InstallReconciler:
             self._log.void(pending.op.id, now)
             return
         if pending.ack is None:
-            if pending.resolved_command_id is None:
-                self._log.void(pending.op.id, now)
+            self._log.void(pending.op.id, now)
             return
         command_id = str(pending.ack.id)
         if pending.resolved_command_id == command_id:
@@ -156,8 +169,15 @@ class InstallReconciler:
             return
         try:
             ack = await send_answer(self._clients[operation.project], operation, found)
-        except ShikiruRejectedError:
-            # keep: the escalation stays forwarded, so the PO still has the question
-            self._log.void(operation.id, now)
+        except ShikiruRejectedError as error:
+            shown = await self._reshower.reshow(
+                operation.payload.number,
+                pending.signal,
+                f"Shikiru rejected the install answer: {error}",
+                key=f"install-rejected:{operation.id}",
+                even_if_closed=True,
+            )
+            if shown:
+                self._log.void(operation.id, now)
             return
         self._log.acknowledge(operation.id, ack, final_line(operation), now)
