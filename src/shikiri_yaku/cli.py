@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Protocol, cast
 
 import typer
+import typer.rich_utils as typer_rich_utils
 from typer.main import get_command
 
 from shikiri_yaku.instance import (
@@ -45,6 +46,14 @@ if TYPE_CHECKING:
 _PROGRAM = "shikiri-yaku"
 TOKEN_MODE: Final = 0o600
 _THREAD_ID_PATTERN: Final = r"[1-9][0-9]*"
+_DESCRIPTION: Final = "An autonomous Operator for product development with Shikiru."
+_BOLD: Final = "bold"
+_DIM: Final = "dim"
+_STEEL_BLUE: Final = "#83bddd"
+_PRIMARY_TEXT: Final = "#dce2e9"
+_SECONDARY_TEXT: Final = "#9aa5b5"
+_BORDER: Final = "#3d4654"
+_ALERT: Final = "#e3a0a0"
 
 
 class Lifecycle(Protocol):
@@ -121,13 +130,41 @@ def _show_version(*, value: bool) -> None:
         raise typer.Exit
 
 
+def _configure_help_palette() -> None:
+    """Colour the help as Shikiru's is; typer reads these settings each time it renders help."""
+    typer_rich_utils.STYLE_OPTION = f"{_BOLD} {_STEEL_BLUE}"
+    typer_rich_utils.STYLE_SWITCH = f"{_BOLD} {_STEEL_BLUE}"
+    typer_rich_utils.STYLE_NEGATIVE_OPTION = f"{_BOLD} {_ALERT}"
+    typer_rich_utils.STYLE_NEGATIVE_SWITCH = f"{_BOLD} {_ALERT}"
+    typer_rich_utils.STYLE_TYPES = _SECONDARY_TEXT
+    typer_rich_utils.STYLE_TYPES_SEPARATOR = f"{_DIM} {_SECONDARY_TEXT}"
+    typer_rich_utils.STYLE_USAGE = _STEEL_BLUE
+    typer_rich_utils.STYLE_USAGE_COMMAND = f"{_BOLD} {_PRIMARY_TEXT}"
+    typer_rich_utils.STYLE_HELPTEXT_FIRST_LINE = _PRIMARY_TEXT
+    typer_rich_utils.STYLE_HELPTEXT = f"{_DIM} {_SECONDARY_TEXT}"
+    typer_rich_utils.STYLE_OPTION_HELP = _PRIMARY_TEXT
+    typer_rich_utils.STYLE_OPTION_DEFAULT = f"{_DIM} {_SECONDARY_TEXT}"
+    typer_rich_utils.STYLE_OPTION_ENVVAR = f"{_DIM} {_SECONDARY_TEXT}"
+    typer_rich_utils.STYLE_REQUIRED_SHORT = _ALERT
+    typer_rich_utils.STYLE_REQUIRED_LONG = f"{_DIM} {_ALERT}"
+    typer_rich_utils.STYLE_OPTIONS_PANEL_BORDER = f"{_DIM} {_BORDER}"
+    typer_rich_utils.STYLE_COMMANDS_PANEL_BORDER = f"{_DIM} {_BORDER}"
+    typer_rich_utils.ARGUMENTS_PANEL_TITLE = f"[{_BOLD} not dim {_PRIMARY_TEXT}]Arguments[/]"
+    typer_rich_utils.OPTIONS_PANEL_TITLE = f"[{_BOLD} not dim {_PRIMARY_TEXT}]Options[/]"
+    typer_rich_utils.COMMANDS_PANEL_TITLE = f"[{_BOLD} not dim {_PRIMARY_TEXT}]Commands[/]"
+    typer_rich_utils.STYLE_COMMANDS_TABLE_FIRST_COLUMN = f"{_BOLD} {_STEEL_BLUE}"
+    typer_rich_utils.STYLE_ERRORS_PANEL_BORDER = _ALERT
+    typer_rich_utils.STYLE_ERRORS_SUGGESTION = f"{_DIM} {_SECONDARY_TEXT}"
+    typer_rich_utils.STYLE_ABORTED = _ALERT
+
+
 PRODUCT_OPTION = Annotated[
     str | None,
     typer.Option(
         "--product",
         metavar="NAME",
         callback=_product_option,
-        help="The product to work on. Default: the only product under --home",
+        help="The product to work on. [bold]Default:[/] the only product under --home",
     ),
 ]
 HOME_OPTION = Annotated[
@@ -135,7 +172,9 @@ HOME_OPTION = Annotated[
     typer.Option(
         "--home",
         metavar="PATH",
-        help="The directory that holds the product directories. Default: ~/.shikiri-yaku",
+        help=(
+            "The directory that holds the product directories. [bold]Default:[/] ~/.shikiri-yaku"
+        ),
     ),
 ]
 VERSION_OPTION = Annotated[
@@ -144,7 +183,7 @@ VERSION_OPTION = Annotated[
         "--version",
         callback=_show_version,
         is_eager=True,
-        help="Show the version and exit. Default: off",
+        help="Show the version and exit. [bold]Default:[/] off",
     ),
 ]
 COMPONENT_ARGUMENT = Annotated[
@@ -188,8 +227,15 @@ def build_app(
     forget_topic: ForgetTopic,
 ) -> typer.Typer:
     """Build the command line over the callables it is given; it builds no concrete object."""
-    app = typer.Typer(name=_PROGRAM, no_args_is_help=True, add_completion=False)
-    telegram = typer.Typer(no_args_is_help=True)
+    _configure_help_palette()
+    app = typer.Typer(
+        name=_PROGRAM,
+        help=_DESCRIPTION,
+        no_args_is_help=True,
+        add_completion=False,
+        rich_markup_mode="rich",
+    )
+    telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
     app.add_typer(
         telegram, name="telegram", help="Repair the Telegram topic of a component or general."
     )

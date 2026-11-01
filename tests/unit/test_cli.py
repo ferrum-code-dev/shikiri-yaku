@@ -52,6 +52,7 @@ _GROUP_ID: Final = -1009
 _BOT_ID: Final = 4242
 _USAGE_ERROR: Final = 2
 _DEFAULT_TAIL: Final = re.compile(r"Default: \S.*$")
+_MARKUP: Final = re.compile(r"\[/?[^\]]*\]")
 _GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--version"})
 
 type _Breakage = Callable[[Path], None]
@@ -788,9 +789,21 @@ def test_help_lists_the_verbs_and_the_telegram_group(capsys: pytest.CaptureFixtu
         assert word in listed
 
 
+def test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["--help"]) == 0
+
+    listed = capsys.readouterr().out
+    usage, options, commands = (listed.index(text) for text in ("Usage:", "Options", "Commands"))
+    assert usage < options < commands
+    assert "\x1b[" not in listed
+
+
 @pytest.mark.parametrize("flag", sorted(_GLOBAL_OPTIONS))
 def test_each_global_option_says_its_default(flag: str) -> None:
     command = get_command(cli.build_app(compose, stats_report, adopt_topic, forget_topic))
     option = next(param for param in command.params if flag in param.opts)
 
-    assert _DEFAULT_TAIL.search(str(getattr(option, "help", ""))) is not None
+    help_text = _MARKUP.sub("", str(getattr(option, "help", "")))
+    assert _DEFAULT_TAIL.search(help_text) is not None
