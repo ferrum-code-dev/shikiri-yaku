@@ -249,21 +249,24 @@ class OpStore:
         )
 
     def confirm_command(self, project: str, command_id: str, now: datetime) -> bool:
-        """Confirm the issued resolve that Shikiru's event names; an unknown id changes nothing."""
+        """Confirm the issued resolve or install that Shikiru's event names.
+
+        An unknown command id changes nothing.
+        """
         confirmed = self._database.connection.execute(
             """
             UPDATE ops SET state = ?, updated_at = ?
-            WHERE kind = 'resolve' AND project = ? AND command_id = ? AND state = ?
+            WHERE kind IN ('resolve', ?) AND project = ? AND command_id = ? AND state = ?
             """,
-            (OpState.CONFIRMED, stamp(now), project, command_id, OpState.ISSUED),
+            (OpState.CONFIRMED, stamp(now), INSTALL_KIND, project, command_id, OpState.ISSUED),
         ).rowcount
         return confirmed == 1
 
     def carries_command(self, project: str, command_id: str) -> bool:
-        """Say whether any resolve op, in any state, was acknowledged with this command id."""
+        """Say whether a resolve or install op, in any state, carries this command id."""
         row = self._database.connection.execute(
-            "SELECT 1 FROM ops WHERE kind = 'resolve' AND project = ? AND command_id = ?",
-            (project, command_id),
+            "SELECT 1 FROM ops WHERE kind IN ('resolve', ?) AND project = ? AND command_id = ?",
+            (INSTALL_KIND, project, command_id),
         ).fetchone()
         return row is not None
 

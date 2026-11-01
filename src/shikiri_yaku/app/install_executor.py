@@ -3,6 +3,7 @@
 The op is claimed before any host command runs, so a second run for the same op finds nothing to
 claim. The host lock covers the command only: the check reads the host and needs no turn. A run the
 check does not confirm is forwarded to the PO with the tail of its output, and its op ends `failed`.
+A passing check leaves its op issued until the `escalation_resolved` event confirms it.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.tool_check import ToolNameError
 from shikiri_yaku.ports import (
-    AckStatus,
     CommandError,
     ResolutionKind,
     ShikiruError,
@@ -160,12 +160,8 @@ class InstallExecutor:
             return
         except ShikiruError:
             return
-        now = self._clock.now()
-        if ack.status == AckStatus.DONE:
-            final = FINAL_LINE.format(tool=payload.tool, manager=payload.manager)
-            self._log.confirm(operation.id, ack, path, final, now)
-        else:
-            self._log.acknowledge(operation.id, ack, path, now)
+        final = FINAL_LINE.format(tool=payload.tool, manager=payload.manager)
+        self._log.acknowledge(operation.id, ack, path, final, self._clock.now())
 
     async def _fail(self, claim: InstallClaim, text: str, reason: str) -> None:
         await self._stop(claim, self._files.save_output(claim.op.id, text), text, reason)

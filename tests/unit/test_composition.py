@@ -130,7 +130,7 @@ class _ShikiruSession:
     process that dies inside the call leaves it. A poll is answered with `events` at once, and with
     `later` as well once `gate` is set, as an event that comes after the first ones does. A resolve
     is answered with `resolve_status`: `queued` for a reply, `done` for an install whose answer the
-    executor confirms.
+    executor acknowledges.
     """
 
     def __init__(
@@ -562,6 +562,26 @@ def _open_install(
     return buttons[0]["callback_data"], int(message_id)
 
 
+def _install_command(directory: Path, op_id: int) -> str | None:
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        operation = OpStore(database).get(op_id)
+    finally:
+        database.close()
+    return None if operation is None else operation.command_id
+
+
+async def _confirm_once_acknowledged(directory: Path, op_id: int, gate: asyncio.Event) -> None:
+    """Release Shikiru's `escalation_resolved` event after the answer is acknowledged, then wait.
+
+    Shikiru sends the event after it has accepted the answer, so the executor has stored the
+    command id before the event is read; the op is then confirmed by that event.
+    """
+    await _until(lambda: _install_command(directory, op_id) is not None)
+    gate.set()
+    await _until(lambda: _install_state(directory, op_id) in {"confirmed", "failed"})
+
+
 def _tap_install(
     directory: Path, runner: _InstallRunner, callback_data: str, message_id: int, op_id: int
 ) -> None:
@@ -570,13 +590,20 @@ def _tap_install(
     update["callback_query"]["from"]["id"] = _OWNER
     update["callback_query"]["message"]["message_id"] = message_id
     update["callback_query"]["data"] = callback_data
-    session = _ShikiruSession(asyncio.Event(), resolve_status="done")
+    gate = asyncio.Event()
+    # keep: the cursor starts at 0; a later id is read as a gap, resynced, and never settled
+    resolved = _recorded_event(
+        EventKinds.ESCALATION_RESOLVED,
+        1,
+        {"escalation_id": "E-1", "resolution": "answer", "command_id": 12},
+    )
+    session = _ShikiruSession(asyncio.Event(), resolve_status="done", later=[resolved], gate=gate)
     _deliver_install(
         directory,
         runner,
         FakeBotApi([update], after_send=False),
         session,
-        _until(lambda: _install_state(directory, op_id) in {"confirmed", "failed"}),
+        _confirm_once_acknowledged(directory, op_id, gate),
     )
     assert _install_state(directory, op_id) == "confirmed"
     assert runner.installs == [_INSTALL_COMMAND]
@@ -625,7 +652,7 @@ def test_host_tool_approval_survives_restart_open_and_reply(tmp_path: Path) -> N
 
     Changed by D6d: this test used to stop at `approved`, because nothing ran the op. The composed
     executor now runs the one stored command, the check finds the tool, and the op ends `confirmed`
-    once Shikiru acknowledges the answer as done.
+    once the `escalation_resolved` event names the answer's command.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()

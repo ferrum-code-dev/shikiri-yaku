@@ -250,7 +250,7 @@ def _world(
     )
 
 
-def test_a_passing_check_after_a_clean_exit_answers_and_confirms(
+def test_a_passing_check_after_a_clean_exit_answers_and_waits_for_its_event(
     memory: Database, tmp_path: Path
 ) -> None:
     shikiru = _Shikiru()
@@ -260,8 +260,8 @@ def test_a_passing_check_after_a_clean_exit_answers_and_confirms(
     asyncio.run(world.run(install.op_id))
 
     assert shikiru.calls == [("E-1", ResolutionKind.ANSWER, ANSWER_TEXT)]
-    assert install.state() == OpState.CONFIRMED
-    assert install.signal_state() == SignalState.RESOLVED
+    assert install.state() == OpState.ISSUED
+    assert install.signal_state() == SignalState.FORWARDED
     assert world.forwarder.forwarded == []
 
 
@@ -362,7 +362,7 @@ def test_two_executors_started_for_one_op_run_one_command(memory: Database, tmp_
     asyncio.run(both())
 
     assert len(commands.calls) == 1
-    assert install.state() == OpState.CONFIRMED
+    assert install.state() == OpState.ISSUED
 
 
 def test_two_ops_never_run_their_commands_at_once(memory: Database, tmp_path: Path) -> None:
@@ -375,8 +375,8 @@ def test_two_ops_never_run_their_commands_at_once(memory: Database, tmp_path: Pa
 
     assert len(commands.calls) == 2
     assert commands.peak == 1
-    assert first.state() == OpState.CONFIRMED
-    assert second.state() == OpState.CONFIRMED
+    assert first.state() == OpState.ISSUED
+    assert second.state() == OpState.ISSUED
 
 
 def test_a_rejected_answer_fails_the_op_and_forwards_shikiru_s_message(

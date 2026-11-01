@@ -162,6 +162,16 @@ class SignalStore:
             },
         ).rowcount
 
+    def set_final_line(self, number: int, final_line: str, now: datetime) -> None:
+        """Record the line the signal's copies end with, unless the signal has one already."""
+        self._database.connection.execute(
+            """
+            UPDATE signals SET final_line = COALESCE(final_line, ?), updated_at = ?
+            WHERE number = ?
+            """,
+            (final_line, stamp(now), number),
+        )
+
     def close_removed(self, configured: Collection[str], note: str, now: datetime) -> int:
         """Close open signals of projects not in `configured`, with the note; return the count."""
         closed = 0

@@ -489,18 +489,17 @@ class InstallFiles(Protocol):
 
 
 class InstallRunLog(Protocol):
-    """The journal steps of an install run (design §6.3, §9): claimed, then one outcome.
+    """The journal steps of an install run (design §6.3, §9, §10.1): claimed, then one outcome.
 
-    `confirm` moves the op and its signal together; the other steps change only the op.
+    An acknowledged op stays issued until the `escalation_resolved` event that names its command
+    confirms it, as it does for a reply's resolve. `final_line` is the line the signal ends with.
     """
 
     def claim(self, op_id: int, now: datetime) -> InstallClaim | None: ...
 
-    def acknowledge(self, op_id: int, ack: Ack, output_path: str, now: datetime) -> None: ...
-
-    def confirm(
+    def acknowledge(
         self, op_id: int, ack: Ack, output_path: str, final_line: str, now: datetime
-    ) -> bool: ...
+    ) -> None: ...
 
     def fail(self, op_id: int, output_path: str, now: datetime) -> bool: ...
 

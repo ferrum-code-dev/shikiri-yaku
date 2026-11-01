@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, Resolved, Signal
+from shikiri_yaku.journal.cursors import CursorStore
 from shikiri_yaku.journal.database import Database
+from shikiri_yaku.journal.events import JournalEvents
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.ops import OpState, OpStore
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore
@@ -20,6 +22,7 @@ NOW: Final = datetime(2026, 10, 30, tzinfo=UTC)
 LATER: Final = datetime(2026, 10, 30, 12, tzinfo=UTC)
 IDENTITY: Final = "install:api:escalation:E-1"
 OUTPUT: Final = "/instance/output/install-1.log"
+FINAL_LINE: Final = "Installed ffmpeg with brew."
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result=None, message=None)
 QUEUED: Final = Ack(id=8, status=AckStatus.QUEUED, result=None, message=None)
 
@@ -113,34 +116,44 @@ def test_a_claim_runs_the_payload_stored_at_approval(memory: Database) -> None:
     assert claim.op.payload == setup.payload
 
 
-def test_confirm_resolves_the_signal_with_the_command_id(memory: Database) -> None:
+@pytest.mark.parametrize("ack", [DONE, QUEUED])
+def test_an_acknowledged_run_stays_issued_until_its_event(memory: Database, ack: Ack) -> None:
     setup = _Setup(memory, approved=True)
     assert setup.runs.claim(setup.op_id, NOW) is not None
 
-    assert setup.runs.confirm(setup.op_id, DONE, OUTPUT, "Installed ffmpeg.", LATER)
-
-    stored = setup.ops.get(setup.op_id)
-    assert stored is not None
-    assert stored.state == OpState.CONFIRMED
-    assert stored.command_id == "7"
-    assert stored.output_path == OUTPUT
-    assert stored.acknowledgement == DONE
-    assert setup.signal_state() == SignalState.RESOLVED
-    assert not setup.runs.confirm(setup.op_id, DONE, OUTPUT, "again", LATER)
-
-
-def test_a_queued_acknowledgement_keeps_the_op_issued(memory: Database) -> None:
-    setup = _Setup(memory, approved=True)
-    assert setup.runs.claim(setup.op_id, NOW) is not None
-
-    setup.runs.acknowledge(setup.op_id, QUEUED, OUTPUT, LATER)
+    setup.runs.acknowledge(setup.op_id, ack, OUTPUT, FINAL_LINE, LATER)
 
     stored = setup.ops.get(setup.op_id)
     assert stored is not None
     assert stored.state == OpState.ISSUED
-    assert stored.command_id == "8"
-    assert stored.acknowledgement == QUEUED
+    assert stored.command_id == str(ack.id)
+    assert stored.output_path == OUTPUT
+    assert stored.acknowledgement == ack
     assert setup.signal_state() == SignalState.FORWARDED
+
+
+def test_the_event_that_names_the_command_confirms_the_op(memory: Database) -> None:
+    setup = _Setup(memory, approved=True)
+    assert setup.runs.claim(setup.op_id, NOW) is not None
+    setup.runs.acknowledge(setup.op_id, DONE, OUTPUT, FINAL_LINE, LATER)
+
+    _observe_resolved(memory, command_id="7", now=LATER)
+
+    stored = setup.ops.get(setup.op_id)
+    assert stored is not None
+    assert stored.state == OpState.CONFIRMED
+    assert setup.signal_state() == SignalState.CLOSED
+    assert _final_line(memory, setup.number) == FINAL_LINE
+
+
+def test_an_event_for_another_command_changes_nothing(memory: Database) -> None:
+    setup = _Setup(memory, approved=True)
+    assert setup.runs.claim(setup.op_id, NOW) is not None
+    setup.runs.acknowledge(setup.op_id, DONE, OUTPUT, FINAL_LINE, LATER)
+
+    _observe_resolved(memory, command_id="99", now=LATER)
+
+    assert setup.state() == OpState.ISSUED
 
 
 def test_fail_moves_only_an_issued_op_and_keeps_its_output(memory: Database) -> None:
@@ -156,6 +169,27 @@ def test_fail_moves_only_an_issued_op_and_keeps_its_output(memory: Database) -> 
     assert stored.state == OpState.FAILED
     assert stored.output_path == OUTPUT
     assert approved.signal_state() == SignalState.FORWARDED
+
+
+def _observe_resolved(database: Database, *, command_id: str, now: datetime) -> None:
+    """Feed the event journal the `escalation_resolved` event Shikiru sends for the command."""
+    events = JournalEvents(
+        database, CursorStore(database, SignalStore(database)), OpStore(database)
+    )
+    events.record_batch(
+        "api",
+        [Closing("api", escalation_id="E-1"), Resolved("api", "E-1", "answer", command_id)],
+        1,
+        None,
+        now,
+    )
+
+
+def _final_line(database: Database, number: int) -> str | None:
+    row = database.connection.execute(
+        "SELECT final_line FROM signals WHERE number = ?", (number,)
+    ).fetchone()
+    return None if row is None else row["final_line"]
 
 
 def _signal() -> Signal:

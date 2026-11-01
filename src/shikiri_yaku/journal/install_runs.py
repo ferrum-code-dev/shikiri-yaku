@@ -1,7 +1,7 @@
-"""The journal steps of an install run (design §6.3, §9): claimed, then acknowledged or settled.
+"""The journal steps of an install run (design §6.3, §9): claimed, then acknowledged or failed.
 
-Each step is one conditional change, so two executors that meet on one op change it once. The
-signal moves only together with a confirmed op, because the op is what says the tool is installed.
+Each step is one conditional change, so two executors that meet on one op change it once. The op
+is confirmed by the event that names its command, in the event journal (design §10.1), not here.
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.journal.ops import OpState
-from shikiri_yaku.journal.signals import SignalState
 from shikiri_yaku.ports import InstallClaim
 
 if TYPE_CHECKING:
@@ -41,27 +40,15 @@ class JournalInstallRuns:
                 return None
             return InstallClaim(operation, stored.to_signal(), stored.classification_note or "")
 
-    def acknowledge(self, op_id: int, ack: Ack, output_path: str, now: datetime) -> None:
-        self._ops.acknowledge_install(op_id, ack, output_path, now)
-
-    def confirm(
+    def acknowledge(
         self, op_id: int, ack: Ack, output_path: str, final_line: str, now: datetime
-    ) -> bool:
+    ) -> None:
         with self._database.transaction():
             operation = self._ops.install_op(op_id)
             if operation is None or operation.state != OpState.ISSUED:
-                return False
+                return
             self._ops.acknowledge_install(op_id, ack, output_path, now)
-            if not self._ops.transition(op_id, OpState.ISSUED, OpState.CONFIRMED, now):
-                return False
-            self._signals.transition(
-                operation.payload.number,
-                SignalState.FORWARDED,
-                SignalState.RESOLVED,
-                now,
-                final_line=final_line,
-            )
-            return True
+            self._signals.set_final_line(operation.payload.number, final_line, now)
 
     def fail(self, op_id: int, output_path: str, now: datetime) -> bool:
         return self._ops.transition(

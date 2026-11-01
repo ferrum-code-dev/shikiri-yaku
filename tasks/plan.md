@@ -1154,6 +1154,15 @@ a task of its own, so the serial inbound loop never waits for a host command. Wi
 composed install test come last. An install whose resolve is queued stays `issued` with its
 acknowledgement; settling it belongs to D7.
 
+Design check (decided): the design wins where this section differs. Design §10.1 confirms a resolve
+only when the `escalation_resolved` event carries its command id, and the signal table (line 162) says
+that event closes the open signal. So the `done` acknowledgement does not confirm the op. The executor
+acknowledges the answer, sets the signal's final line to "Installed `<tool>` with `<manager>`." and
+leaves the op `issued`; the event confirms the op and closes the signal (`closed`, not `resolved`).
+The "confirm" and "signal resolved" wording of D6 and D6a is superseded: `confirm` is the event path,
+not a run step. An event that arrives before the acknowledgement is not matched; D7 reconciles it, as
+on the reply path.
+
 #### D6a. Journal steps of a run
 
 Add `InstallRunLog` to ports, with `InstallClaim` (the approved op, its signal and the suggestion).
