@@ -7,6 +7,7 @@ The Shikiru link and the Bot API are fakes, so no process and no network take pa
 from __future__ import annotations
 
 import asyncio
+import copy
 import itertools
 import json
 from contextlib import asynccontextmanager
@@ -25,7 +26,7 @@ from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
 from shikiri_yaku.domain.callback import decline_data
 from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, Purpose
 from shikiri_yaku.domain.signal import Kind, Signal
-from shikiri_yaku.extensions.infrastructure.install_replies import DECLINED_NOTE
+from shikiri_yaku.extensions.infrastructure.install_replies import CANCELLED_NOTE, DECLINED_NOTE
 from shikiri_yaku.extensions.infrastructure.rules import (
     AGENT_ERROR,
     DECISION_REQUIRED,
@@ -84,6 +85,10 @@ _CONFLICT: Final[dict[str, Any]] = json.loads(
     (TELEGRAM_FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
 )
 _E1_ID: Final = "api:escalation:E-1"
+_FORWARDED_ESCALATION: Final = "E-2"
+_FORWARDED_REASON: Final = "iterations_exhausted"
+_FORWARDED_HEADLINE: Final = "The iterations ran out"
+_FORWARDED_ID: Final = "api:escalation:E-2"
 _INSTALL_COMMAND: Final = "brew install ffmpeg"
 _FOUND_PATH: Final = "/opt/homebrew/bin/ffmpeg"
 _QUOTA_NOTICE: Final = "quota is used up"
@@ -546,9 +551,13 @@ def _deliver_install(
         composition.close()
 
 
-def _initial_install(directory: Path, runner: _InstallRunner) -> tuple[str, int, datetime]:
+def _add_reasoner_ladder(directory: Path) -> None:
     with (directory / "config.toml").open("a", encoding="utf-8") as config:
         config.write('\n[reasoner]\nladder = ["claude:haiku"]\n')
+
+
+def _initial_install(directory: Path, runner: _InstallRunner) -> tuple[str, int, datetime]:
+    _add_reasoner_ladder(directory)
     bot = FakeBotApi()
     _deliver_install(
         directory,
@@ -1440,3 +1449,100 @@ def test_a_declined_install_runs_no_command_and_leaves_the_escalation_to_the_po(
     )
     state = _install_state(directory, op_id)
     assert (runner.installs, state, session.resolutions) == ([], INSTALL_DECLINED, [])
+
+
+def _two_escalations() -> dict[str, Any]:
+    """Return the recorded open escalation of T-1 and a second, forwarded one of T-1."""
+    listing = _recorded("list_escalations")
+    second = copy.deepcopy(listing["result"][0])
+    second["escalation"].update(
+        id=_FORWARDED_ESCALATION, reason=_FORWARDED_REASON, headline=_FORWARDED_HEADLINE
+    )
+    listing["result"].append(second)
+    return listing
+
+
+def _message_ids(directory: Path, purpose: Purpose) -> list[int]:
+    """Return the Telegram message ids of the sent copies the journal holds for the purpose."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        rows = database.connection.execute(
+            "SELECT platform_message_id FROM messages WHERE purpose = ? "
+            "AND platform_message_id IS NOT NULL",
+            (purpose,),
+        ).fetchall()
+    finally:
+        database.close()
+    return [int(row["platform_message_id"].partition("/")[2]) for row in rows]
+
+
+def test_a_cancelled_task_ends_its_question_and_its_unrun_install_and_a_tap_says_why(
+    tmp_path: Path,
+) -> None:
+    """Cancelling a task finishes its forwarded question and its pending install approval.
+
+    Neither keeps its buttons, the install runs no host command, and an Install tap after the
+    cancellation says why (design §6.3; plan E6).
+    """
+    directory = _instance(tmp_path)
+    _add_reasoner_ladder(directory)
+    runner = _InstallRunner()
+    bot = FakeBotApi()
+    session = _ShikiruSession(asyncio.Event(), answers={"list_escalations": _two_escalations()})
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        session,
+        _until(lambda: bool(_install_approvals(bot)) and bool(_sent(bot, _QUESTION_TEXT))),
+    )
+    [approval] = _install_approvals(bot)
+    [install, _decline] = [
+        button for row in approval["reply_markup"]["inline_keyboard"] for button in row
+    ]
+    op_id = int(install["callback_data"].split(":")[2])
+    [approval_id] = _message_ids(directory, Purpose.APPROVAL)
+    [question_id] = _message_ids(directory, Purpose.QUESTION)
+    assert _signal_state(directory, _FORWARDED_ID) == SignalState.FORWARDED
+    assert _install_state(directory, op_id) == "intended"
+
+    cancelled = _recorded_event(EventKinds.TASK_CANCELLED, 1, {})
+    closing_bot = _RestartBot([])
+    _deliver_install(
+        directory,
+        runner,
+        closing_bot,
+        _ShikiruSession(asyncio.Event(), events=[cancelled]),
+        _until(
+            lambda: (
+                {approval_id, question_id}
+                <= {payload["message_id"] for payload in _edits(closing_bot)}
+            )
+        ),
+    )
+    assert (
+        _signal_state(directory, _E1_ID),
+        _signal_state(directory, _FORWARDED_ID),
+        _install_state(directory, op_id),
+        runner.installs,
+    ) == (SignalState.CLOSED, SignalState.CLOSED, "failed", [])
+    assert {payload["message_id"]: payload["reply_markup"] for payload in _edits(closing_bot)} == {
+        approval_id: {"inline_keyboard": []},
+        question_id: {"inline_keyboard": []},
+    }
+
+    tap = _tap(_OWNER, approval_id, install["callback_data"], update_id=802)
+    tapped_bot = _RestartBot([tap])
+    session = _ShikiruSession(asyncio.Event())
+    _deliver_install(
+        directory,
+        runner,
+        tapped_bot,
+        session,
+        _until(lambda: bool(_sent(tapped_bot, CANCELLED_NOTE))),
+    )
+    assert (runner.installs, _install_state(directory, op_id), session.resolutions) == (
+        [],
+        "failed",
+        [],
+    )

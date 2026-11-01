@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 from shikiri_yaku.domain.loop_guard import Cause
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.journal.database import Inserted, parse_stamp, stamp
-from shikiri_yaku.ports import Ack, InstallOp
+from shikiri_yaku.ports import TASK_CANCELLED_REASON, Ack, InstallOp
 
 if TYPE_CHECKING:
     import sqlite3
@@ -198,6 +198,26 @@ class OpStore:
     def void_issued(self, op_id: int, now: datetime) -> bool:
         """Void an issued install once a new approval has been queued in its place."""
         return self.transition(op_id, OpState.ISSUED, OpState.VOID, now)
+
+    def void_task_installs(self, project: str, task_id: str, now: datetime) -> int:
+        """Fail the installs of a cancelled task that no host command has been issued for."""
+        return self._database.connection.execute(
+            """
+            UPDATE ops SET state = :failed, failure_reason = :reason, updated_at = :now
+            WHERE kind = :kind AND project = :project AND task_id = :task_id
+              AND state IN (:intended, :approved)
+            """,
+            {
+                "failed": OpState.FAILED,
+                "reason": TASK_CANCELLED_REASON,
+                "now": stamp(now),
+                "kind": INSTALL_KIND,
+                "project": project,
+                "task_id": task_id,
+                "intended": OpState.INTENDED,
+                "approved": OpState.APPROVED,
+            },
+        ).rowcount
 
     def decline_install(self, op_id: int, number: int, now: datetime) -> bool:
         with self._database.transaction():
@@ -406,6 +426,7 @@ def _install_op(row: sqlite3.Row) -> InstallOp:
         payload=payload,
         state=row["state"],
         created_at=created_at,
+        failure_reason=row["failure_reason"],
     )
 
 

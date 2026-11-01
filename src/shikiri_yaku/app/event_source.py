@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, PullRequest, Resolved, Signal
+from shikiri_yaku.domain.signal import (
+    Closing,
+    Kind,
+    Lifecycle,
+    PullRequest,
+    Resolved,
+    Signal,
+    TaskCancelled,
+)
 from shikiri_yaku.ports import (
     EscalationStatus,
     EscalationView,
@@ -24,8 +32,9 @@ NO_EVENTS = 0
 MERGED_LINE = "Merged"
 WITHDRAWN_LINE = "Withdrawn"
 CLOSED_UNMERGED_LINE = "Closed unmerged"
+CANCELLED_LINE = "Task cancelled"
 
-type Change = Signal | Closing | Resolved
+type Change = Signal | Closing | Resolved | TaskCancelled
 
 
 class _EscalationId(BaseModel):
@@ -58,7 +67,7 @@ class _OpenPulls:
         match event.kind:
             case EventKinds.PR_OPENED:
                 self._opened.append(event)
-            case EventKinds.TASK_DONE | EventKinds.PR_WITHDRAWN:
+            case EventKinds.TASK_DONE | EventKinds.PR_WITHDRAWN | EventKinds.TASK_CANCELLED:
                 self._close(event.task_id)
             case EventKinds.ESCALATION:
                 if _event_data(event, _EscalationData).reason == PR_CLOSED_REASON:
@@ -177,8 +186,19 @@ class EventSource:
                 return [self._review(event)]
             case EventKinds.PR_WITHDRAWN:
                 return [self._closed_review(event, WITHDRAWN_LINE)]
+            case EventKinds.TASK_CANCELLED:
+                return self._cancelled(event)
             case _:
                 return []
+
+    def _cancelled(self, event: ShikiruEvent) -> list[Change]:
+        # keep: without a task id the closing would match the open signals of every task
+        if event.task_id is None:
+            return []
+        return [
+            Closing(self._project, task_id=event.task_id, final_line=CANCELLED_LINE),
+            TaskCancelled(self._project, event.task_id),
+        ]
 
     async def _escalation(self, event: ShikiruEvent) -> list[Change]:
         data = _event_data(event, _EscalationData)

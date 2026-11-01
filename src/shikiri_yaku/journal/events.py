@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.signal import Closing, Kind, LifecycleState, Resolved, Signal
+from shikiri_yaku.domain.signal import (
+    Closing,
+    Kind,
+    LifecycleState,
+    Resolved,
+    Signal,
+    TaskCancelled,
+)
 from shikiri_yaku.journal.signals import NewSignal
 
 if TYPE_CHECKING:
@@ -31,14 +38,14 @@ class JournalEvents:
     def record_batch(
         self,
         project: str,
-        changes: Sequence[Signal | Closing | Resolved],
+        changes: Sequence[Signal | Closing | Resolved | TaskCancelled],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
         *,
         respected_stop_id: int | None = None,
     ) -> None:
-        stored = [_stored(change) for change in changes if not isinstance(change, Resolved)]
+        stored = [_stored(change) for change in changes if isinstance(change, Signal | Closing)]
         with self._database.transaction():
             self._cursors.record_batch(
                 project, stored, last_event_id, lifecycle, now, respected_stop_id=respected_stop_id
@@ -46,6 +53,8 @@ class JournalEvents:
             for change in changes:
                 if isinstance(change, Resolved):
                     self._settle_elsewhere(change, now)
+                elif isinstance(change, TaskCancelled):
+                    self._ops.void_task_installs(change.project, change.task_id, now)
 
     def _settle_elsewhere(self, change: Resolved, now: datetime) -> None:
         """Keep the final line on the signal unless an op of ours carries the event's command id.

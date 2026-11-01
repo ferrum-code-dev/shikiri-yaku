@@ -10,8 +10,10 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.ports import (
     INSTALL_DECLINED,
     INSTALL_EXPIRED,
+    INSTALL_FAILED,
     INSTALL_INTENDED,
     INSTALL_VOID,
+    TASK_CANCELLED_REASON,
     EscalationStatus,
     Message,
 )
@@ -37,6 +39,7 @@ DECLINED_NOTE: Final = "The Product Owner declined the install approval; no host
 EXPIRED_NOTE: Final = "This install approval expired; no host command was run."
 VOID_NOTE: Final = "This escalation is no longer open; the install approval is void."
 REPLACED_NOTE: Final = "A newer install approval replaced this one; this one is void."
+CANCELLED_NOTE: Final = "The task was cancelled; no host command was run."
 _INSTALL: Final = "i"
 _DECLINE: Final = "x"
 
@@ -75,19 +78,22 @@ class InstallApprovalReplies:
         if operation is None or not _bound(operation, item, origin, verb, op_id):
             return
         if operation.state != INSTALL_INTENDED:
-            await self._replay_effect(operation.state, origin, verb)
+            await self._replay_effect(operation, origin, verb)
             return
         await self._decide(operation, origin, verb)
 
     async def _replay_effect(
-        self, state: str, origin: ReplyOrigin, verb: Literal["i", "x"]
+        self, operation: InstallOp, origin: ReplyOrigin, verb: Literal["i", "x"]
     ) -> None:
+        state = operation.state
         if state == INSTALL_DECLINED and verb == _DECLINE:
             await self._forward(origin)
         elif state == INSTALL_EXPIRED:
             self._notice(origin, origin.key, INSTALL_EXPIRED, EXPIRED_NOTE)
         elif state == INSTALL_VOID:
             await self._void_notice(origin)
+        elif state == INSTALL_FAILED and operation.failure_reason == TASK_CANCELLED_REASON:
+            self._notice(origin, origin.key, INSTALL_FAILED, CANCELLED_NOTE)
 
     async def _decide(
         self, operation: InstallOp, origin: ReplyOrigin, verb: Literal["i", "x"]

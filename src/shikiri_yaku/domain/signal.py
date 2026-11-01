@@ -90,3 +90,11 @@ class Resolved:
     escalation_id: str
     resolution: str
     command_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCancelled:
+    """Shikiru's event log shows a task cancelled: its installs that have not run are voided."""
+
+    project: str
+    task_id: str

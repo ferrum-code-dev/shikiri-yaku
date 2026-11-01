@@ -336,3 +336,109 @@ def test_restart_and_repeated_first_sync_add_no_second_pr_review_signal(
     asyncio.run(restarted.poll())
     assert journal.last_event_id(PROJECT) == FAR_EVENT
     assert _states(database) == {"api:pr_review:1": SignalState.NEW}
+
+
+def _final_lines(database: Database) -> dict[str, str | None]:
+    rows = database.connection.execute("SELECT id, final_line FROM signals")
+    return {row["id"]: row["final_line"] for row in rows}
+
+
+def _op_states(database: Database) -> dict[str, tuple[str, str | None]]:
+    rows = database.connection.execute("SELECT identity, state, failure_reason FROM ops")
+    return {row["identity"]: (row["state"], row["failure_reason"]) for row in rows}
+
+
+def _open_work_of_two_tasks(database: Database, client: _FakeClient) -> EventSource:
+    """T1 has a new, a forwarded and a parked escalation, a pull request and three installs."""
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    client.views = {name: _view(name) for name in ("E1", "E2", "E3", "E4")}
+    client.events = [
+        _raised(1, "E1"),
+        _raised(2, "E2"),
+        _raised(3, "E3"),
+        _event(4, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
+        _event(5, "escalation", task_id="T2", escalation_id="E4", reason="decision_required"),
+    ]
+    asyncio.run(source.poll())
+    signals = SignalStore(database)
+    forwarded = signals.by_id("api:escalation:E2")
+    parked = signals.by_id("api:escalation:E3")
+    assert forwarded is not None
+    assert parked is not None
+    assert signals.transition(forwarded.number, SignalState.NEW, SignalState.FORWARDED, NOW)
+    assert signals.transition(parked.number, SignalState.NEW, SignalState.PARKED, NOW, wake_at=NOW)
+    ops = OpStore(database)
+    for identity, task_id, state in (
+        ("install:A", "T1", OpState.INTENDED),
+        ("install:B", "T1", OpState.APPROVED),
+        ("install:C", "T1", OpState.ISSUED),
+        ("install:D", "T2", OpState.INTENDED),
+    ):
+        ops.intend(
+            NewOp(identity, "install", PROJECT, task_id, "decision_required", "{}", state), NOW
+        )
+    return source
+
+
+def test_a_cancelled_task_closes_its_open_signals_and_fails_the_installs_it_has_not_run(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    source = _open_work_of_two_tasks(database, client)
+    client.events.append(_event(6, "task_cancelled", task_id="T1"))
+    asyncio.run(source.poll())
+    assert _states(database) == {
+        "api:escalation:E1": SignalState.CLOSED,
+        "api:escalation:E2": SignalState.CLOSED,
+        "api:escalation:E3": SignalState.CLOSED,
+        "api:pr_review:4": SignalState.CLOSED,
+        "api:escalation:E4": SignalState.NEW,
+    }
+    assert _final_lines(database) == {
+        "api:escalation:E1": "Task cancelled",
+        "api:escalation:E2": "Task cancelled",
+        "api:escalation:E3": "Task cancelled",
+        "api:pr_review:4": "Task cancelled",
+        "api:escalation:E4": None,
+    }
+    assert _op_states(database) == {
+        "install:A": (OpState.FAILED, "task cancelled"),
+        "install:B": (OpState.FAILED, "task cancelled"),
+        "install:C": (OpState.ISSUED, None),
+        "install:D": (OpState.INTENDED, None),
+    }
+
+
+def test_replaying_the_cancellation_changes_nothing(database: Database) -> None:
+    client = _FakeClient()
+    source = _open_work_of_two_tasks(database, client)
+    client.events.append(_event(6, "task_cancelled", task_id="T1"))
+    asyncio.run(source.poll())
+    before = (_states(database), _final_lines(database), _op_states(database))
+    assert before[2]["install:A"] == (OpState.FAILED, "task cancelled")
+    CursorStore(database, SignalStore(database)).record_batch(PROJECT, [], 5, None, NOW)
+    asyncio.run(source.poll())
+    assert (_states(database), _final_lines(database), _op_states(database)) == before
+
+
+def test_a_cancellation_without_a_task_closes_nothing(database: Database) -> None:
+    client = _FakeClient()
+    source = _open_work_of_two_tasks(database, client)
+    before = (_states(database), _final_lines(database), _op_states(database))
+    client.events.append(_event(6, "task_cancelled", task_id=None))
+    asyncio.run(source.poll())
+    assert (_states(database), _final_lines(database), _op_states(database)) == before
+
+
+def test_first_sync_opens_no_review_for_a_pull_request_of_a_task_cancelled_in_its_history(
+    database: Database,
+) -> None:
+    client = _FakeClient()
+    client.events = [
+        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=1),
+        _event(2, "task_cancelled", task_id="T1"),
+    ]
+    source, _ = _source(database, client)
+    asyncio.run(source.poll())
+    assert _states(database) == {}

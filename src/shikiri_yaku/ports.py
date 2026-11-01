@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         LifecycleState,
         Resolved,
         Signal,
+        TaskCancelled,
     )
 
 __all__ = [
@@ -43,10 +44,12 @@ __all__ = [
     "INSTALL_APPROVED",
     "INSTALL_DECLINED",
     "INSTALL_EXPIRED",
+    "INSTALL_FAILED",
     "INSTALL_INTENDED",
     "INSTALL_ISSUED",
     "INSTALL_VOID",
     "MESSAGE_TEXT_LIMIT",
+    "TASK_CANCELLED_REASON",
     "Ack",
     "AckStatus",
     "ActionLog",
@@ -157,9 +160,12 @@ __all__ = [
 INSTALL_APPROVED: Final = "approved"
 INSTALL_DECLINED: Final = "declined"
 INSTALL_EXPIRED: Final = "expired"
+INSTALL_FAILED: Final = "failed"
 INSTALL_INTENDED: Final = "intended"
 INSTALL_ISSUED: Final = "issued"
 INSTALL_VOID: Final = "void"
+# keep: the failure reason of an install that a cancelled task left unrun (design §6.3)
+TASK_CANCELLED_REASON: Final = "task cancelled"
 
 
 class _ShikiruPayload(BaseModel):
@@ -201,6 +207,7 @@ class EventKinds:
     ESCALATION: Final = "escalation"
     ESCALATION_RESOLVED: Final = "escalation_resolved"
     TASK_DONE: Final = "task_done"
+    TASK_CANCELLED: Final = "task_cancelled"
     PR_OPENED: Final = "pr_opened"
     PR_WITHDRAWN: Final = "pr_withdrawn"
     ENGINE_STARTED: Final = "engine_started"
@@ -367,7 +374,7 @@ class EventJournal(Protocol):
     def record_batch(
         self,
         project: str,
-        changes: Sequence[Signal | Closing | Resolved],
+        changes: Sequence[Signal | Closing | Resolved | TaskCancelled],
         last_event_id: int,
         lifecycle: Lifecycle | None,
         now: datetime,
@@ -450,6 +457,7 @@ class InstallOp:
     payload: InstallOpPayload
     state: str
     created_at: datetime
+    failure_reason: str | None = None
 
 
 class InstallLog(Protocol):

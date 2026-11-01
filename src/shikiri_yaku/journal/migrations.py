@@ -181,4 +181,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         "ALTER TABLE ops ADD COLUMN resolved_command_id TEXT",
     ),
     ("ALTER TABLE ops ADD COLUMN install_rejection TEXT",),
+    ("ALTER TABLE ops ADD COLUMN failure_reason TEXT",),
 )
