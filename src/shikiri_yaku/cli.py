@@ -1,6 +1,7 @@
+"""The command line: one Typer app whose global options come before the verb (design §3.1)."""
+
 from __future__ import annotations
 
-import argparse
 import asyncio
 import os
 import re
@@ -12,11 +13,15 @@ from dataclasses import dataclass
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Final, Protocol, cast
+
+import typer
+from typer.main import get_command
 
 from shikiri_yaku.instance import (
     InstanceLockedError,
     InstanceLockError,
+    home_dir,
     instance_dir,
     instance_lock,
 )
@@ -29,7 +34,7 @@ from shikiri_yaku.ports import (
     ShikiruError,
 )
 from shikiri_yaku.service import ServiceError, service_file, write_service_file
-from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings
+from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings, product_names
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
@@ -79,6 +84,158 @@ class _Check:
     status: str = "ok"
 
 
+@dataclass(frozen=True, slots=True)
+class _Global:
+    """The global options, as every verb reads them from the root context."""
+
+    product: str | None
+    home: Path | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Target:
+    """The instance a verb works on: its product, the home it was given under, and its directory."""
+
+    product: str
+    home: Path | None
+    directory: Path
+
+
+def _product_option(value: str | None) -> str | None:
+    if value is not None and re.fullmatch(NAME_PATTERN, value) is None:
+        message = f"invalid product name {value!r}: use letters, digits, '-' and '_'"
+        raise typer.BadParameter(message)
+    return value
+
+
+def _thread_id(value: str) -> str:
+    if re.fullmatch(_THREAD_ID_PATTERN, value) is None:
+        message = f"invalid thread id {value!r}: use a positive whole number"
+        raise typer.BadParameter(message)
+    return value
+
+
+def _show_version(*, value: bool) -> None:
+    if value:
+        sys.stdout.write(f"{_PROGRAM} {version(_PROGRAM)}\n")
+        raise typer.Exit
+
+
+PRODUCT_OPTION = Annotated[
+    str | None,
+    typer.Option(
+        "--product",
+        metavar="NAME",
+        callback=_product_option,
+        help="The product to work on. Default: the only product under --home",
+    ),
+]
+HOME_OPTION = Annotated[
+    Path | None,
+    typer.Option(
+        "--home",
+        metavar="PATH",
+        help="The directory that holds the product directories. Default: ~/.shikiri-yaku",
+    ),
+]
+VERSION_OPTION = Annotated[
+    bool,
+    typer.Option(
+        "--version",
+        callback=_show_version,
+        is_eager=True,
+        help="Show the version and exit. Default: off",
+    ),
+]
+COMPONENT_ARGUMENT = Annotated[
+    str,
+    typer.Argument(metavar="COMPONENT", help="A component's name, or general."),
+]
+THREAD_ID_ARGUMENT = Annotated[
+    str,
+    typer.Argument(
+        metavar="THREAD_ID",
+        callback=_thread_id,
+        help="The thread of the topic in the forum, a positive whole number.",
+    ),
+]
+
+
+def choose_product(given: str | None, found: Sequence[str], home: Path) -> str:
+    """Return the product a verb works on: the one given, else the only one that home holds."""
+    if given is not None:
+        return given
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        message = f"no product under {home}"
+    else:
+        message = f"several products under {home}: {', '.join(found)}"
+    raise typer.BadParameter(message, param_hint="'--product'")
+
+
+def _target(ctx: typer.Context) -> _Target:
+    options = cast("_Global", ctx.find_root().obj)
+    home = home_dir(options.home)
+    product = choose_product(options.product, product_names(home), home)
+    return _Target(product, options.home, instance_dir(product, options.home))
+
+
+def build_app(
+    compose: Compose,
+    report: Report,
+    adopt_topic: AdoptTopic,
+    forget_topic: ForgetTopic,
+) -> typer.Typer:
+    """Build the command line over the callables it is given; it builds no concrete object."""
+    app = typer.Typer(name=_PROGRAM, no_args_is_help=True, add_completion=False)
+    telegram = typer.Typer(no_args_is_help=True)
+    app.add_typer(
+        telegram, name="telegram", help="Repair the Telegram topic of a component or general."
+    )
+
+    @app.callback()
+    def global_options(
+        ctx: typer.Context,
+        product: PRODUCT_OPTION = None,
+        home: HOME_OPTION = None,
+        *,
+        _version: VERSION_OPTION = False,
+    ) -> None:
+        ctx.obj = _Global(product, home)
+
+    @app.command("run", help="Serve one product until SIGTERM.")
+    def run(ctx: typer.Context) -> None:
+        raise typer.Exit(_run(_target(ctx).directory, compose))
+
+    @app.command(help="Check one product's instance.")
+    def doctor(ctx: typer.Context) -> None:
+        raise typer.Exit(_doctor(_target(ctx).directory, compose))
+
+    @app.command("install-service", help="Write the service unit of one product.")
+    def install_service(ctx: typer.Context) -> None:
+        raise typer.Exit(_install_service(_target(ctx)))
+
+    @app.command(help="Print the figures of one product's journal.")
+    def stats(ctx: typer.Context) -> None:
+        raise typer.Exit(_stats(_target(ctx).directory, report))
+
+    @telegram.command("adopt", help="Mark an uncertain topic open with the thread that it has.")
+    def adopt(
+        ctx: typer.Context, component: COMPONENT_ARGUMENT, thread_id: THREAD_ID_ARGUMENT
+    ) -> None:
+        directory = _target(ctx).directory
+        change = partial(adopt_topic, directory, component, int(thread_id))
+        raise typer.Exit(_changed(directory, change))
+
+    @telegram.command("forget", help="Delete an uncertain topic's row, so start-up creates one.")
+    def forget(ctx: typer.Context, component: COMPONENT_ARGUMENT) -> None:
+        directory = _target(ctx).directory
+        raise typer.Exit(_changed(directory, partial(forget_topic, directory, component)))
+
+    return app
+
+
 def main(
     argv: Sequence[str] | None,
     compose: Compose,
@@ -86,53 +243,20 @@ def main(
     adopt_topic: AdoptTopic,
     forget_topic: ForgetTopic,
 ) -> int:
-    """Run one command. The caller supplies the composition and the changes; it builds nothing."""
-    parser = argparse.ArgumentParser(prog=_PROGRAM)
-    parser.add_argument("--version", action="version", version=f"%(prog)s {version(_PROGRAM)}")
-    commands = parser.add_subparsers(required=True)
-    run = commands.add_parser("run", help="serve one product until SIGTERM")
-    _add_product(run)
-    run.set_defaults(command=partial(_run, compose=compose))
-    doctor = commands.add_parser("doctor", help="check one product's instance")
-    _add_product(doctor)
-    doctor.set_defaults(command=partial(_doctor, compose=compose))
-    install = commands.add_parser("install-service", help="write the service unit of one product")
-    _add_product(install)
-    install.set_defaults(command=_install_service)
-    stats = commands.add_parser("stats", help="print the figures of one product's journal")
-    _add_product(stats)
-    stats.set_defaults(command=partial(_stats, report=report))
-    topics = commands.add_parser(
-        "topics", help="repair the Telegram topic of a component or general"
-    )
-    topic_commands = topics.add_subparsers(required=True)
-    adopt = topic_commands.add_parser("adopt", help="mark an uncertain topic open with its thread")
-    _add_product(adopt)
-    adopt.add_argument("component", help="a component's name, or general")
-    adopt.add_argument("thread_id", type=_thread_id, help="the thread of the topic in the forum")
-    adopt.set_defaults(command=partial(_adopt, adopt_topic=adopt_topic))
-    forget = topic_commands.add_parser("forget", help="delete an uncertain topic's row")
-    _add_product(forget)
-    forget.add_argument("component", help="a component's name, or general")
-    forget.set_defaults(command=partial(_forget, forget_topic=forget_topic))
-    arguments = parser.parse_args(argv)
-    return arguments.command(arguments)
+    """Run one command line and return its exit code; the caller supplies what it needs."""
+    command = get_command(build_app(compose, report, adopt_topic, forget_topic))
+    try:
+        command.main(args=None if argv is None else list(argv), prog_name=_PROGRAM)
+    except SystemExit as exit_:
+        return exit_.code if isinstance(exit_.code, int) else 0
+    return 0
 
 
-def _add_product(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("product", type=_product_name)
-    parser.add_argument("--home", type=Path, help="parent of the instance directory")
+async def _wait_for(event: asyncio.Event) -> None:
+    await event.wait()
 
 
-def _product_name(value: str) -> str:
-    if re.fullmatch(NAME_PATTERN, value) is None:
-        message = f"invalid product name {value!r}: use letters, digits, '-' and '_'"
-        raise argparse.ArgumentTypeError(message)
-    return value
-
-
-def _run(arguments: argparse.Namespace, compose: Compose) -> int:
-    directory = instance_dir(arguments.product, arguments.home)
+def _run(directory: Path, compose: Compose) -> int:
     try:
         settings = load_settings(directory)
         with instance_lock(directory):
@@ -155,10 +279,6 @@ def _run(arguments: argparse.Namespace, compose: Compose) -> int:
     return 0
 
 
-async def _wait_for(event: asyncio.Event) -> None:
-    await event.wait()
-
-
 async def _serve(jobs: Sequence[Job]) -> None:
     """Run the jobs until a stop signal; a job that fails ends the service with its error."""
     stop = asyncio.Event()
@@ -178,8 +298,7 @@ async def _serve(jobs: Sequence[Job]) -> None:
             raise outcome
 
 
-def _doctor(arguments: argparse.Namespace, compose: Compose) -> int:
-    directory = instance_dir(arguments.product, arguments.home)
+def _doctor(directory: Path, compose: Compose) -> int:
     try:
         settings = load_settings(directory)
     except SettingsError as error:
@@ -270,32 +389,14 @@ def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     return None
 
 
-def _stats(arguments: argparse.Namespace, report: Report) -> int:
+def _stats(directory: Path, report: Report) -> int:
     try:
-        text = report(instance_dir(arguments.product, arguments.home))
+        text = report(directory)
     except CompositionError as error:
         sys.stderr.write(f"{error}\n")
         return 1
     sys.stdout.write(text)
     return 0
-
-
-def _thread_id(value: str) -> int:
-    if re.fullmatch(_THREAD_ID_PATTERN, value) is None:
-        message = f"invalid thread id {value!r}: use a positive whole number"
-        raise argparse.ArgumentTypeError(message)
-    return int(value)
-
-
-def _adopt(arguments: argparse.Namespace, adopt_topic: AdoptTopic) -> int:
-    directory = instance_dir(arguments.product, arguments.home)
-    change = partial(adopt_topic, directory, arguments.component, arguments.thread_id)
-    return _changed(directory, change)
-
-
-def _forget(arguments: argparse.Namespace, forget_topic: ForgetTopic) -> int:
-    directory = instance_dir(arguments.product, arguments.home)
-    return _changed(directory, partial(forget_topic, directory, arguments.component))
 
 
 def _changed(directory: Path, change: Callable[[], str]) -> int:
@@ -310,12 +411,11 @@ def _changed(directory: Path, change: Callable[[], str]) -> int:
     return 0
 
 
-def _install_service(arguments: argparse.Namespace) -> int:
-    directory = instance_dir(arguments.product, arguments.home)
+def _install_service(target: _Target) -> int:
     login_path = os.environ.get("PATH", "")
     try:
-        load_settings(directory)
-        service = _service(arguments, login_path)
+        load_settings(target.directory)
+        service = _service(target, login_path)
         write_service_file(service)
     except (SettingsError, ServiceError) as error:
         sys.stderr.write(f"{error}\n")
@@ -324,11 +424,17 @@ def _install_service(arguments: argparse.Namespace) -> int:
     return 0
 
 
-def _service(arguments: argparse.Namespace, login_path: str) -> ServiceFile:
+def _service(target: _Target, login_path: str) -> ServiceFile:
     executable = shutil.which(_PROGRAM, path=login_path)
     if executable is None:
         message = f"{_PROGRAM} is not on PATH, so a service could not find it"
         raise ServiceError(message)
-    home_arguments = [] if arguments.home is None else ["--home", str(arguments.home.absolute())]
-    program = [str(Path(executable).absolute()), "run", arguments.product, *home_arguments]
-    return service_file(sys.platform, Path.home(), arguments.product, program, login_path)
+    home_arguments = [] if target.home is None else ["--home", str(target.home.absolute())]
+    program = [
+        str(Path(executable).absolute()),
+        "--product",
+        target.product,
+        *home_arguments,
+        "run",
+    ]
+    return service_file(sys.platform, Path.home(), target.product, program, login_path)

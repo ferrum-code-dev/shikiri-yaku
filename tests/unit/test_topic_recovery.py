@@ -37,8 +37,8 @@ type Row = tuple[str, int]
 _CREATING: Final = (TOPIC_CREATING, UNASSIGNED_THREAD)
 _OPEN: Final = (TOPIC_OPEN, OPEN_THREAD)
 _ADOPTED: Final = (TOPIC_OPEN, ADOPTED_THREAD)
-_ADOPT_COMMAND: Final = ["topics", "adopt", PRODUCT, COMPONENT, str(ADOPTED_THREAD)]
-_FORGET_COMMAND: Final = ["topics", "forget", PRODUCT, COMPONENT]
+_ADOPT_COMMAND: Final = ["telegram", "adopt", COMPONENT, str(ADOPTED_THREAD)]
+_FORGET_COMMAND: Final = ["telegram", "forget", COMPONENT]
 
 
 class _Forum:
@@ -157,8 +157,8 @@ def test_start_up_refusal_names_both_recovery_commands() -> None:
             asyncio.run(_reconciler(topics, forum).run())
 
         message = str(refusal.value)
-        assert f"topics adopt {PRODUCT} {COMPONENT}" in message
-        assert f"topics forget {PRODUCT} {COMPONENT}" in message
+        assert f"--product {PRODUCT} telegram adopt {COMPONENT}" in message
+        assert f"--product {PRODUCT} telegram forget {COMPONENT}" in message
         assert forum.created == []
     finally:
         database.close()
@@ -203,6 +203,6 @@ def test_topic_commands_change_the_journal_only_when_no_operator_is_running(
     directory = _journal(tmp_path, _CREATING)
 
     with instance_lock(directory) if running else nullcontext():
-        assert main([*command, "--home", str(tmp_path)]) == exit_code
+        assert main(["--product", PRODUCT, "--home", str(tmp_path), *command]) == exit_code
 
     assert _journal_row(directory) == after

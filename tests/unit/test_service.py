@@ -15,7 +15,7 @@ import pytest
 from shikiri_yaku.service import ServiceError, service_file
 
 _HOME: Final = Path("/users/op")
-_PROGRAM: Final = ["/opt/tools/shikiri-yaku", "run", "shop", "--home", "/srv/op"]
+_PROGRAM: Final = ["/opt/tools/shikiri-yaku", "--product", "shop", "--home", "/srv/op", "run"]
 _LOGIN_PATH: Final = "/opt/tools:/usr/bin:/bin"
 
 
@@ -44,7 +44,7 @@ def test_the_systemd_user_unit_runs_the_command_with_the_login_path() -> None:
         "[Unit]",
         "Description=shikiri-yaku for shop",
         "[Service]",
-        'ExecStart=:"/opt/tools/shikiri-yaku" "run" "shop" "--home" "/srv/op"',
+        'ExecStart=:"/opt/tools/shikiri-yaku" "--product" "shop" "--home" "/srv/op" "run"',
         'Environment="PATH=/opt/tools:/usr/bin:/bin"',
         "Restart=on-failure",
         "[Install]",
@@ -64,7 +64,9 @@ def test_the_systemd_user_unit_runs_the_command_with_the_login_path() -> None:
 def test_the_systemd_executable_is_quoted_so_that_it_reads_back_whole(
     executable: str, quoted: str
 ) -> None:
-    service = service_file("linux", _HOME, "shop", [executable, "run", "shop"], _LOGIN_PATH)
+    service = service_file(
+        "linux", _HOME, "shop", [executable, "--product", "shop", "run"], _LOGIN_PATH
+    )
 
     assert f"ExecStart=:{quoted} " in service.content.decode("utf-8")
 
@@ -77,12 +79,11 @@ def test_the_systemd_executable_is_quoted_so_that_it_reads_back_whole(
     ],
 )
 def test_the_systemd_exec_start_keeps_a_dollar_sign_literal(argument: str, quoted: str) -> None:
-    service = service_file(
-        "linux", _HOME, "shop", ["/opt/shikiri-yaku", "run", "shop", argument], _LOGIN_PATH
-    )
+    program = ["/opt/shikiri-yaku", "--product", "shop", "--home", argument, "run"]
+    service = service_file("linux", _HOME, "shop", program, _LOGIN_PATH)
 
     lines = _unit_lines(service.content)
-    assert f'ExecStart=:"/opt/shikiri-yaku" "run" "shop" {quoted}' in lines
+    assert f'ExecStart=:"/opt/shikiri-yaku" "--product" "shop" "--home" {quoted} "run"' in lines
 
 
 def test_the_systemd_environment_path_is_not_dollar_escaped() -> None:

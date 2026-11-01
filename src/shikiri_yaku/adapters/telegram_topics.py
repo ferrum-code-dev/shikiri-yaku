@@ -180,6 +180,7 @@ def _uncertain_creation(product: str, component: str | None) -> str:
     name = GENERAL_TOPIC if component is None else component
     return (
         f"Telegram topic creation for {name!r} has an uncertain result; inspect the forum. "
-        f"If the topic exists, run `shikiri-yaku topics adopt {product} {name} <thread-id>`; "
-        f"if it does not, run `shikiri-yaku topics forget {product} {name}`."
+        f"If the topic exists, run `shikiri-yaku --product {product} telegram adopt {name} "
+        f"<thread-id>`; if it does not, run "
+        f"`shikiri-yaku --product {product} telegram forget {name}`."
     )

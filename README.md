@@ -28,14 +28,34 @@ Product Owner in a chat (Telegram first), where one tap applies the answer in Sh
 Design stage, no code yet. The design is in [docs/design.md](docs/design.md). The effort estimate
 and the plan to build it with Shikiru itself are in [docs/plan.md](docs/plan.md).
 
+## Command line
+
+Global options come before the command. `--product` names the product. When `--home` (default
+`~/.shikiri-yaku`) holds exactly one product directory, `--product` may be left out; with none or
+several, the command refuses and names what it found.
+
+```
+shikiri-yaku [--product NAME] [--home PATH] [--version] COMMAND
+```
+
+- `run` serves one product until SIGTERM.
+- `doctor` checks one product's instance.
+- `stats` prints the figures of one product's journal.
+- `install-service` writes the launchd or systemd unit that runs `run` at login.
+- `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`
+  repair an uncertain Telegram topic, as described below.
+
+The older forms, with the product after the verb (`run shop`) or `topics …`, are usage errors.
+
 ## Telegram topics
 
 With a group that has forum topics, the Operator creates one topic per component and a General
 topic at start-up, but only when its own journal has no open topic for that component. It never
 looks at the forum, because the Telegram Bot API cannot list a forum's topics. Telegram accepts
 duplicate topic names, so a fresh `--home`, a deleted journal or
-`shikiri-yaku telegram forget <component|general>` makes the next start create a second topic with
-the same name. A topic created by hand is never adopted automatically. To reuse one, run
-`shikiri-yaku telegram adopt <component|general> <thread-id>` before the first start; the
-thread id is the number at the end of the topic's link. If a start-up is interrupted while a topic
-is being created, the next start refuses and names `topics adopt` and `topics forget`.
+`shikiri-yaku --product <product> telegram forget <component|general>` makes the next start create
+a second topic with the same name. A topic created by hand is never adopted automatically. To reuse
+one, run `shikiri-yaku --product <product> telegram adopt <component|general> <thread-id>` before the
+first start; the thread id is the number at the end of the topic's link. If a start-up is
+interrupted while a topic is being created, the next start refuses and names `telegram adopt` and
+`telegram forget`.

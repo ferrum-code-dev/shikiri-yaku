@@ -193,7 +193,7 @@ def test_stats_without_a_journal_fails_and_creates_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(bootstrap, "compose", _forbidden)
-    assert bootstrap.main(["stats", _PRODUCT, "--home", str(tmp_path)]) == 1
+    assert bootstrap.main(["--product", _PRODUCT, "--home", str(tmp_path), "stats"]) == 1
     assert not (tmp_path / _PRODUCT).exists()
 
 
@@ -205,6 +205,6 @@ def test_stats_prints_the_four_sections_of_a_journal_without_composing_the_servi
     directory.mkdir()
     with closing(Database.open(directory / JOURNAL_FILE_NAME)) as database:
         _signal(database, "A", created=0, final=60, state=SignalState.RESOLVED, queued=(10,))
-    assert bootstrap.main(["stats", _PRODUCT, "--home", str(tmp_path)]) == 0
+    assert bootstrap.main(["--product", _PRODUCT, "--home", str(tmp_path), "stats"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert [line[:3] for line in lines if line[:1].isdigit()] == ["1. ", "2. ", "3. ", "4. "]

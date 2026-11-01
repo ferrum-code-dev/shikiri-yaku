@@ -29,10 +29,14 @@ class InstanceLockedError(InstanceLockError):
     """Another process holds the instance lock, so this instance is already running."""
 
 
+def home_dir(home: Path | None = None) -> Path:
+    """Return the directory that holds the product directories: home, or ~/.shikiri-yaku."""
+    return Path.home() / HOME_DIRECTORY_NAME if home is None else home
+
+
 def instance_dir(product: str, home: Path | None = None) -> Path:
     """Return <home>/<product>, where home defaults to ~/.shikiri-yaku."""
-    root = Path.home() / HOME_DIRECTORY_NAME if home is None else home
-    return root / product
+    return home_dir(home) / product
 
 
 @contextmanager

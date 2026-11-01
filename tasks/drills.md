@@ -67,7 +67,7 @@ are in [Human drills](#human-drills) and the gate never runs them.
 
 ## Measures
 
-Always on; all of them are read from journal timestamps and rows by `shikiri-yaku stats <product>`
+Always on; all of them are read from journal timestamps and rows by `shikiri-yaku --product <product> stats`
 (`src/shikiri_yaku/app/stats.py`). Figures are computed over the instance's own journal only.
 
 | # | Measure (§15) | Source | Tested by | Status |
@@ -119,12 +119,12 @@ paste the token or a chat id into a report. Commands below are the CLI as built
 Setup: a tool that is not installed on the host (name it `<tool>`), and a Shikiru engine with its
 fake agent that asks for it.
 
-1. `shikiri-yaku doctor <product>`. Expect every check to pass.
-2. In terminal A: `shikiri-yaku run <product>`. Leave it running.
+1. `shikiri-yaku --product <product> doctor`. Expect every check to pass.
+2. In terminal A: `shikiri-yaku --product <product> run`. Leave it running.
 3. Start the fake agent's task that needs `<tool>`. Expect a message headed "S<n> · Install approval"
    with the buttons **Install** and **Decline**.
 4. Tap **Install**. Expect the tool to be found by the check, and the task to continue in Shikiru.
-   Then run `shikiri-yaku stats <product>`: the install outcomes show `approved: 1`.
+   Then run `shikiri-yaku --product <product> stats`: the install outcomes show `approved: 1`.
 5. Start a second task that asks for a second missing tool. Tap **Decline**. Expect a question to the
    PO with a note that it was declined, and `<tool2>` still missing on the host. `stats` shows
    `declined: 1`.
@@ -138,10 +138,10 @@ fake agent that asks for it.
 
 Setup: as H1. Use an install that runs for more than 10 seconds (a large package).
 
-1. Terminal A: `shikiri-yaku run <product>`.
+1. Terminal A: `shikiri-yaku --product <product> run`.
 2. Mid-install: tap **Install**. While the install runs, in terminal B:
-   `kill -9 $(pgrep -f "shikiri-yaku run <product>")`.
-3. In terminal A: `shikiri-yaku run <product>`. Expect the install not to run twice: the ops table
+   `kill -9 $(pgrep -f "shikiri-yaku --product <product>.* run")`.
+3. In terminal A: `shikiri-yaku --product <product> run`. Expect the install not to run twice: the ops table
    (`sqlite3 -readonly ... "SELECT kind, state FROM ops;"`) shows one install op that ends in one of
    its final states, and the PO sees at most one new question.
 4. Mid-resolve: answer a question. Within one second after the answer, `kill -9` the Operator as in
@@ -158,7 +158,7 @@ Precondition: no automatic restart of any component in these instances in the ho
 The restart budget is one per component per hour, so a boot-time restart inside that hour is refused
 and forwarded.
 
-1. For each product: `shikiri-yaku install-service <product>`. It prints `wrote <path>` and
+1. For each product: `shikiri-yaku --product <product> install-service`. It prints `wrote <path>` and
    `start it with: <command>`. Run that command, so the Operator starts at each login.
 2. Stop one component engine the way the PO does. Find its process with
    `pgrep -fl "project <component-path> engine"`. It prints one line (the engine; the MCP link is
@@ -179,7 +179,7 @@ and forwarded.
 Precondition: no automatic restart of `<component>` in the hour before step 2. The restart budget is
 one per component per hour.
 
-1. Terminal A: `shikiri-yaku run <product>`. In Telegram, `/status` shows `<component>` with
+1. Terminal A: `shikiri-yaku --product <product> run`. In Telegram, `/status` shows `<component>` with
    "Engine: up".
 2. Find the engine process with `pgrep -fl "project <component-path> engine"`. It prints one line;
    stop if it prints more or none. Then `kill -9 <pid>` (a crash, so no stop event). Expect within
@@ -201,15 +201,18 @@ one per component per hour.
 ### H5. Two real projects (all drills, D1–D22 as applicable)
 
 1. Prepare two small projects, `<product-a>` and `<product-b>`, each with its own instance directory.
-2. `shikiri-yaku doctor <product-a>` and `shikiri-yaku doctor <product-b>`. Expect both to pass.
-3. Terminal A: `shikiri-yaku run <product-a>`. Terminal B: `shikiri-yaku run <product-b>`.
+2. `shikiri-yaku --product <product-a> doctor` and `shikiri-yaku --product <product-b> doctor`.
+   Expect both to pass.
+3. Terminal A: `shikiri-yaku --product <product-a> run`. Terminal B:
+   `shikiri-yaku --product <product-b> run`.
 4. Run H1 steps 3 and 4 in each project. Expect each question in its own chat, and no answer in one
    project to appear in the other.
-5. `shikiri-yaku stats <product-a>` and `shikiri-yaku stats <product-b>`. Each prints its own figures.
+5. `shikiri-yaku --product <product-a> stats` and `shikiri-yaku --product <product-b> stats`. Each
+   prints its own figures.
 
 ### H6. Real agent quota (D7, D8)
 
-1. `shikiri-yaku run <product>`.
+1. `shikiri-yaku --product <product> run`.
 2. Drive a task until the real agent's quota window is at 100 percent (`/status` in Telegram shows
    the block).
 3. Expect one message with the wait and the reset time. Expect no retry before the reset.

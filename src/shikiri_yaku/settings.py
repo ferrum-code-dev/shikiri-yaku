@@ -6,6 +6,7 @@ that nothing reads is an error, so a misspelled key cannot silently keep its def
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections.abc import Sized
 from pathlib import Path
@@ -256,6 +257,20 @@ class Settings(_FrozenModel):
                 message = "'components[{index}].name' repeats the component name '{name}'"
                 raise PydanticCustomError(_RULE, message, {"index": index, "name": name})
         return self
+
+
+def product_names(home: Path) -> list[str]:
+    """Return the products under home: the directories with a config.toml, by name."""
+    try:
+        entries = sorted(home.iterdir())
+    except OSError:
+        return []
+    return [
+        entry.name
+        for entry in entries
+        if re.fullmatch(NAME_PATTERN, entry.name) is not None
+        and (entry / CONFIG_FILE_NAME).is_file()
+    ]
 
 
 def load_settings(instance_dir: Path) -> Settings:

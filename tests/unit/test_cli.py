@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import re
 import signal
 import sys
 import threading
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Final, override
 import httpx
 import pytest
 from mcp.types import CallToolResult
+from typer.main import get_command
 
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
@@ -48,6 +50,9 @@ _HTTP_OK: Final = 200
 _UNAUTHORIZED: Final = 401
 _GROUP_ID: Final = -1009
 _BOT_ID: Final = 4242
+_USAGE_ERROR: Final = 2
+_DEFAULT_TAIL: Final = re.compile(r"Default: \S.*$")
+_GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--version"})
 
 type _Breakage = Callable[[Path], None]
 
@@ -275,10 +280,16 @@ def _run_doctor(
     link: Callable[[], Any] = _answering_link,
     bot: BotFactory = _accepting_bot,
     commands: CommandRunner | None = None,
+    product: str | None = _PRODUCT,
 ) -> int:
     composed = partial(compose, link=lambda _executable, _project: link, bot=bot, commands=commands)
+    product_option = [] if product is None else ["--product", product]
     return cli.main(
-        ["doctor", _PRODUCT, "--home", str(home)], composed, stats_report, adopt_topic, forget_topic
+        [*product_option, "--home", str(home), "doctor"],
+        composed,
+        stats_report,
+        adopt_topic,
+        forget_topic,
     )
 
 
@@ -461,7 +472,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
 
     assert (
         cli.main(
-            ["doctor", _PRODUCT, "--home", str(tmp_path)],
+            ["--product", _PRODUCT, "--home", str(tmp_path), "doctor"],
             composed,
             stats_report,
             adopt_topic,
@@ -485,14 +496,14 @@ def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
 
 def test_run_is_refused_while_another_holder_has_the_instance_lock(tmp_path: Path) -> None:
     with instance_lock(_instance(tmp_path)):
-        assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
+        assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
 
 
 def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> None:
     _instance(tmp_path)
     _lock_becomes_directory(tmp_path)
 
-    assert main(["run", _PRODUCT, "--home", str(tmp_path)]) == 1
+    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
 
 
 def _exit_when_serving(argv: list[str], serving: Event) -> None:
@@ -528,7 +539,8 @@ def test_run_stops_with_exit_code_zero_on_sigterm_and_releases_the_lock(tmp_path
     context = multiprocessing.get_context("spawn")
     serving = context.Event()
     process = context.Process(
-        target=_exit_when_serving, args=(["run", _PRODUCT, "--home", str(tmp_path)], serving)
+        target=_exit_when_serving,
+        args=(["--product", _PRODUCT, "--home", str(tmp_path), "run"], serving),
     )
     process.start()
     try:
@@ -608,7 +620,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(
 
     assert (
         cli.main(
-            ["run", _PRODUCT, "--home", str(tmp_path)],
+            ["--product", _PRODUCT, "--home", str(tmp_path), "run"],
             composed,
             stats_report,
             adopt_topic,
@@ -644,9 +656,16 @@ def test_install_service_writes_the_unit_of_the_run_command_under_home(
     instances = tmp_path / "instances"
     _instance(instances)
 
-    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 0
+    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 0
 
-    program = [str(user_environment.executable), "run", _PRODUCT, "--home", str(instances)]
+    program = [
+        str(user_environment.executable),
+        "--product",
+        _PRODUCT,
+        "--home",
+        str(instances),
+        "run",
+    ]
     expected = service_file(
         sys.platform,
         user_environment.home,
@@ -671,9 +690,9 @@ def test_install_service_writes_an_absolute_executable_for_a_relative_path_entry
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "local-bin")
 
-    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 0
+    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 0
 
-    program = [str(executable), "run", _PRODUCT, "--home", str(instances)]
+    program = [str(executable), "--product", _PRODUCT, "--home", str(instances), "run"]
     expected = service_file(sys.platform, user_environment.home, _PRODUCT, program, "local-bin")
     assert expected.path.read_bytes() == expected.content
 
@@ -681,7 +700,7 @@ def test_install_service_writes_an_absolute_executable_for_a_relative_path_entry
 def test_install_service_refuses_an_instance_that_cannot_run(
     tmp_path: Path, user_environment: _UserEnvironment
 ) -> None:
-    assert main(["install-service", _PRODUCT, "--home", str(tmp_path)]) == 1
+    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "install-service"]) == 1
     assert list(user_environment.home.iterdir()) == []
 
 
@@ -694,7 +713,7 @@ def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
     _instance(instances)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
 
-    assert main(["install-service", _PRODUCT, "--home", str(instances)]) == 1
+    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 1
     assert list(user_environment.home.iterdir()) == []
 
 
@@ -702,7 +721,76 @@ def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
 def test_a_product_name_that_is_not_a_plain_name_is_refused_before_anything_is_written(
     tmp_path: Path, user_environment: _UserEnvironment, name: str
 ) -> None:
-    with pytest.raises(SystemExit):
-        main(["install-service", name, "--home", str(tmp_path)])
+    assert main(["--product", name, "--home", str(tmp_path), "install-service"]) == _USAGE_ERROR
 
     assert list(user_environment.home.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("given", "found", "chosen"),
+    [
+        ("web", [], "web"),
+        ("web", ["shop", "api"], "web"),
+        (None, ["shop"], "shop"),
+    ],
+)
+def test_the_product_is_the_one_given_or_the_only_one_under_home(
+    tmp_path: Path, given: str | None, found: list[str], chosen: str
+) -> None:
+    assert cli.choose_product(given, found, tmp_path) == chosen
+
+
+def test_no_product_under_home_is_a_usage_error(tmp_path: Path) -> None:
+    assert _run_doctor(tmp_path, product=None) == _USAGE_ERROR
+
+
+def test_several_products_under_home_are_a_usage_error_that_lists_them(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "config.toml").write_text("", encoding="utf-8")
+
+    assert _run_doctor(tmp_path, product=None) == _USAGE_ERROR
+    error = capsys.readouterr().err
+    assert _PRODUCT in error
+    assert "web" in error
+
+
+def test_the_only_product_under_home_is_used_without_the_product_option(tmp_path: Path) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, product=None) == 0
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["run", _PRODUCT],
+        ["doctor", _PRODUCT],
+        ["install-service", _PRODUCT],
+        ["stats", _PRODUCT],
+        ["topics", "adopt", _PRODUCT, "api", "7"],
+        ["topics", "forget", _PRODUCT, "api"],
+    ],
+)
+def test_the_positional_product_and_the_topics_group_are_usage_errors(
+    tmp_path: Path, argv: list[str]
+) -> None:
+    assert main(["--home", str(tmp_path), *argv]) == _USAGE_ERROR
+
+
+def test_help_lists_the_verbs_and_the_telegram_group(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--help"]) == 0
+
+    listed = capsys.readouterr().out
+    for word in ("run", "doctor", "install-service", "stats", "telegram"):
+        assert word in listed
+
+
+@pytest.mark.parametrize("flag", sorted(_GLOBAL_OPTIONS))
+def test_each_global_option_says_its_default(flag: str) -> None:
+    command = get_command(cli.build_app(compose, stats_report, adopt_topic, forget_topic))
+    option = next(param for param in command.params if flag in param.opts)
+
+    assert _DEFAULT_TAIL.search(str(getattr(option, "help", ""))) is not None

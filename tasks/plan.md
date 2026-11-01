@@ -1417,8 +1417,19 @@ summary line, glyphs, colours). Run `shikiru --help`, `shikiru doctor` and `shik
 6. `install-service` writes the unit with the new command form (`shikiri-yaku --product X --home H run`
    with absolute paths); update README and every help text that names the old form.
 
-If it needs much more than 300 lines, split it (for example: app and global options; output of doctor
-and stats; the `telegram` group) and record the split in this section.
+Split into commits, each keeping the gate green (the task is larger than one 300-line change):
+* E5a: the Typer app, global options, product resolution, flat verbs, the `telegram` group, the
+  `install-service` command form, the migrated tests, README and drills.
+* E5b: Shikiru's help palette and help layout.
+* E5c: doctor lines with `✔`/`✘` and the summary, `✘` error lines, colour on a terminal only, in
+  `cli_render.py`.
+* E5d: `stats` as titled rich tables.
+* E5e: `--json` for `doctor` and `stats`, with the documented keys.
+
+Design conflict, reported and not resolved in the design: `docs/design.md` §3.1 still writes the
+product as a positional argument (`shikiri-yaku run <product>`). Items 2 and 3 above put
+`--product` before the verb instead. The code follows this section; the design is not edited here,
+so it needs a decision on which form the design should state.
 
 Acceptance criteria (Typer's `CliRunner`, no terminal needed):
 * `--help` lists the verbs and the `telegram` group, and every global option's help ends with "Default: …".
