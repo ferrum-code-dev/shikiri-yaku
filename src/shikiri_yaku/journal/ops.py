@@ -57,6 +57,7 @@ class StoredOp:
     payload: str | None
     state: OpState
     command_id: str | None
+    resolved_command_id: str | None
     output_path: str | None
     acknowledgement: Ack | None
     updated_at: datetime
@@ -73,6 +74,7 @@ def _op(row: sqlite3.Row) -> StoredOp:
         payload=row["payload"],
         state=OpState(row["state"]),
         command_id=row["command_id"],
+        resolved_command_id=row["resolved_command_id"],
         output_path=row["output_path"],
         acknowledgement=None
         if row["acknowledgement"] is None

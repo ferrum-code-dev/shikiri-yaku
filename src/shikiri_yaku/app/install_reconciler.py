@@ -1,9 +1,9 @@
-"""Settles the installs a restart found unsettled (design §6.3 step 7, §10), once per start.
+"""Settles unsettled installs by observation (design §6.3 step 7, §10).
 
-An approved op no run claimed is run. An issued op is decided by its escalation, then by its check,
-and is never repeated: a tool found is answered, a tool still missing is asked again, and an answer
-the lost link did not deliver is shown to the PO again. An op a run of this process has in hand is
-left alone, and each op is read again before its decision, so an earlier list cannot act twice.
+An approved op is checked against Shikiru before it runs. An issued op is decided by its escalation,
+then by its check; the host install is never repeated. A tool found is answered, and a missing tool
+is asked again. An answer the lost link did not deliver is shown to the PO again. Each pass observes
+unsettled ops again, while an op a run of this process has in hand is left alone.
 """
 
 from __future__ import annotations
@@ -58,6 +58,7 @@ class InstallReconciler:
         reasker: InstallReasker,
         clock: Clock,
         lost_command_min: int,
+        interval_s: float,
     ) -> None:
         self._log = log
         self._lifecycles = lifecycles
@@ -68,8 +69,14 @@ class InstallReconciler:
         self._reasker = reasker
         self._clock = clock
         self._lost_after = timedelta(minutes=lost_command_min)
+        self._interval_s = interval_s
 
     async def run(self) -> None:
+        while True:
+            await self.tick()
+            await self._clock.sleep(self._interval_s)
+
+    async def tick(self) -> None:
         for pending in self._log.unsettled():
             op_id = pending.op.id
             if self._runner.running(op_id):
@@ -83,6 +90,14 @@ class InstallReconciler:
         if pending is None:
             return
         if pending.op.state == INSTALL_APPROVED:
+            view = await self._clients[pending.op.project].get_escalation(
+                pending.op.payload.escalation_id
+            )
+            if view is None:
+                return
+            if view.escalation.status != EscalationStatus.OPEN:
+                self._log.void_approved(op_id, self._clock.now())
+                return
             self._runner.start(op_id)
             return
         project = pending.op.project
@@ -115,10 +130,17 @@ class InstallReconciler:
         )
 
     def _closed(self, pending: PendingInstall, view: EscalationView, now: datetime) -> None:
-        # keep: an answer that closed the escalation confirms the op; another close voids it
-        if view.escalation.resolution == ResolutionKind.ANSWER:
+        if view.escalation.resolution != ResolutionKind.ANSWER:
+            self._log.void(pending.op.id, now)
+            return
+        if pending.ack is None:
+            if pending.resolved_command_id is None:
+                self._log.void(pending.op.id, now)
+            return
+        command_id = str(pending.ack.id)
+        if pending.resolved_command_id == command_id:
             self._log.confirm(pending.op.id, final_line(pending.op), now)
-        else:
+        elif pending.resolved_command_id is not None:
             self._log.void(pending.op.id, now)
 
     async def _decide_by_check(self, pending: PendingInstall, now: datetime) -> None:

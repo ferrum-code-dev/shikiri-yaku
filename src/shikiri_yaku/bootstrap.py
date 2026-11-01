@@ -589,19 +589,6 @@ def after_settled(settled: asyncio.Event, job: Job) -> Job:
     return run
 
 
-def held(job: Job) -> Job:
-    """Return the job, which then waits for the service to stop once `job` has made its pass.
-
-    The service ends when any of its jobs returns, so a job that runs once must not return.
-    """
-
-    async def run() -> None:
-        await job()
-        await asyncio.Event().wait()
-
-    return run
-
-
 def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channel) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(outbox, channel, clock, interval_s=settings.operator.outbox_interval_s)
@@ -760,7 +747,7 @@ def install_reconcile_job(
     outbox: Outbox,
     destinations: Destinations,
 ) -> Job:
-    """Return the once-only install recovery job (design §6.3, §10)."""
+    """Return the recurring install recovery job (design §6.3, §10)."""
     signals = SignalStore(journal)
     reasker = InstallReasker(
         OpStore(journal), InstallApprovalPresenter(), outbox, destinations, clock
@@ -775,8 +762,9 @@ def install_reconcile_job(
         reasker=reasker,
         clock=clock,
         lost_command_min=settings.operator.lost_command_min,
+        interval_s=settings.operator.liveness_interval_s,
     )
-    return held(reconciler.run)
+    return reconciler.run
 
 
 def start_reconciler(

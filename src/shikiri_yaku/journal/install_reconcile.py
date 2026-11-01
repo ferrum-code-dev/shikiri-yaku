@@ -58,6 +58,9 @@ class JournalInstallReconcile:
             self._signals.set_final_line(operation.payload.number, final_line, now, replace=True)
             return True
 
+    def void_approved(self, op_id: int, now: datetime) -> bool:
+        return self._ops.transition(op_id, OpState.APPROVED, OpState.VOID, now)
+
     def void(self, op_id: int, now: datetime) -> bool:
         return self._ops.void_issued(op_id, now)
 
@@ -76,4 +79,10 @@ class JournalInstallReconcile:
         stored = self._signals.get(operation.payload.number)
         if stored is None:
             return None
-        return PendingInstall(operation, stored.to_signal(), op.acknowledgement, op.updated_at)
+        return PendingInstall(
+            operation,
+            stored.to_signal(),
+            op.acknowledgement,
+            op.updated_at,
+            op.resolved_command_id,
+        )

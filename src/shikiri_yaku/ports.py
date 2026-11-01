@@ -540,6 +540,7 @@ class PendingInstall:
     signal: Signal
     ack: Ack | None
     since: datetime
+    resolved_command_id: str | None
 
 
 class InstallReconcileLog(Protocol):
@@ -555,6 +556,8 @@ class InstallReconcileLog(Protocol):
     def acknowledge(self, op_id: int, ack: Ack, final_line: str, now: datetime) -> None: ...
 
     def confirm(self, op_id: int, final_line: str, now: datetime) -> bool: ...
+
+    def void_approved(self, op_id: int, now: datetime) -> bool: ...
 
     def void(self, op_id: int, now: datetime) -> bool: ...
 

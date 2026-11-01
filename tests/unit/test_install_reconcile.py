@@ -13,10 +13,12 @@ from shikiri_yaku.app.install_reconciler import InstallReconciler
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.domain.signal import Kind, Lifecycle, LifecycleState, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Resolved, Signal
 from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
 from shikiri_yaku.journal import (
+    CursorStore,
     Database,
+    JournalEvents,
     JournalOutbox,
     MessageStore,
     NewSignal,
@@ -44,10 +46,10 @@ from tests.support.destinations import FixedDestinations
 from tests.support.notices import FailingReporter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Generator, Mapping, Sequence
+    from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
     from pathlib import Path
 
-    from shikiri_yaku.ports import ShikiruClient
+    from shikiri_yaku.ports import Clock, ShikiruClient
 
 NOW: Final = datetime(2026, 10, 31, 12, tzinfo=UTC)
 STARTED: Final = datetime(2026, 10, 31, 9, tzinfo=UTC)
@@ -102,6 +104,23 @@ class _Clock:
         del seconds
 
 
+class _LoopClock:
+    def __init__(self, on_sleep: Callable[[], None]) -> None:
+        self._now = NOW
+        self._on_sleep = on_sleep
+
+    def now(self) -> datetime:
+        return self._now
+
+    async def sleep(self, seconds: float) -> None:
+        self._now += timedelta(seconds=seconds)
+        self._on_sleep()
+
+
+class _StopRunError(Exception):
+    pass
+
+
 class _Shikiru:
     """One escalation as Shikiru reports it; an answer is refused with `error` when one is given."""
 
@@ -114,11 +133,12 @@ class _Shikiru:
     ) -> None:
         self._view = _view(EscalationStatus.OPEN) if view is None else view
         self._error = error
-        self._engine_up = engine_up
+        self.engine_up = engine_up
         self.answers: list[tuple[str, str, str | None]] = []
+        self.lookups: list[str] = []
 
     async def get_escalation(self, escalation_id: str) -> EscalationView | None:
-        del escalation_id
+        self.lookups.append(escalation_id)
         return self._view
 
     async def resolve_escalation(
@@ -130,7 +150,7 @@ class _Shikiru:
         return DONE
 
     async def status(self) -> EngineStatus:
-        return EngineStatus(engine_up=self._engine_up, quotas={})
+        return EngineStatus(engine_up=self.engine_up, quotas={})
 
 
 class _Check:
@@ -139,9 +159,11 @@ class _Check:
     def __init__(self, found: str | None = FOUND, *, error: CommandError | None = None) -> None:
         self.found = found
         self.error = error
+        self.calls = 0
 
     async def find(self, tool: str) -> str | None:
         del tool
+        self.calls += 1
         if self.error is not None:
             raise self.error
         return self.found
@@ -292,8 +314,8 @@ class _World:
             self.ops.acknowledge_install(operation.id, ack, None, NOW)
         return operation.id
 
-    def reconcile(self) -> None:
-        clock = _Clock()
+    def reconciler(self, clock: Clock | None = None, *, interval_s: float = 1) -> InstallReconciler:
+        clock = _Clock() if clock is None else clock
         reasker = InstallReasker(
             self.ops,
             InstallApprovalPresenter(),
@@ -301,7 +323,7 @@ class _World:
             FixedDestinations([OWNER]),
             clock,
         )
-        reconciler = InstallReconciler(
+        return InstallReconciler(
             JournalInstallReconcile(self.database, self.signals, self.ops),
             self.lifecycles,
             {"api": cast("ShikiruClient", self.shikiru)},
@@ -311,8 +333,11 @@ class _World:
             reasker=reasker,
             clock=clock,
             lost_command_min=LOST_MIN,
+            interval_s=interval_s,
         )
-        asyncio.run(reconciler.run())
+
+    def reconcile(self) -> None:
+        asyncio.run(self.reconciler().tick())
 
     def state(self, op_id: int) -> str:
         stored = self.ops.get(op_id)
@@ -357,6 +382,20 @@ def test_an_approved_install_a_run_has_in_hand_is_not_started_again(world: _Worl
 
     world.reconcile()
 
+    assert world.runner.started == []
+
+
+def test_approved_recovery_voids_an_escalation_resolved_before_local_event_sync(
+    world: _World,
+) -> None:
+    world.shikiru = _Shikiru(view=_view(EscalationStatus.RESOLVED, ResolutionKind.CANCEL))
+    op_id = world.install(issued=False)
+
+    world.reconcile()
+
+    assert world.shikiru.lookups == ["E-1"]
+    assert world.state(op_id) == OpState.VOID
+    assert world.signal_state() == SignalState.FORWARDED
     assert world.runner.started == []
 
 
@@ -542,14 +581,14 @@ def test_a_failing_check_leaves_the_op_for_the_next_start(world: _World) -> None
 @pytest.mark.parametrize(
     ("ack", "resolution", "expected"),
     [
-        (None, ResolutionKind.ANSWER, OpState.CONFIRMED),
-        (DONE, ResolutionKind.ANSWER, OpState.CONFIRMED),
+        (None, ResolutionKind.ANSWER, OpState.VOID),
+        (DONE, ResolutionKind.ANSWER, OpState.ISSUED),
         (None, ResolutionKind.CANCEL, OpState.VOID),
         (DONE, ResolutionKind.CANCEL, OpState.VOID),
     ],
-    ids=["answered-unacked", "answered-acked", "cancelled-unacked", "cancelled-acked"],
+    ids=["unattributed-answer", "answer-without-event", "cancelled-unacked", "cancelled-acked"],
 )
-def test_an_issued_install_whose_escalation_closed_is_settled_by_its_resolution(
+def test_an_issued_install_closed_without_matching_event_is_not_confirmed(
     world: _World, ack: Ack | None, resolution: str, expected: str
 ) -> None:
     world.shikiru = _Shikiru(view=_view(EscalationStatus.RESOLVED, resolution))
@@ -559,6 +598,29 @@ def test_an_issued_install_whose_escalation_closed_is_settled_by_its_resolution(
 
     assert world.state(op_id) == expected
     assert world.shikiru.answers == []
+
+
+def test_a_different_command_event_preserves_the_external_resolution_at_restart(
+    world: _World, memory: Database
+) -> None:
+    world.shikiru = _Shikiru(view=_view(EscalationStatus.RESOLVED, ResolutionKind.ANSWER))
+    op_id = world.install(issued=True, ack=DONE)
+    events = JournalEvents(memory, CursorStore(memory, world.signals), world.ops)
+    events.record_batch(
+        "api",
+        [
+            Closing("api", escalation_id="E-1"),
+            Resolved("api", "E-1", ResolutionKind.ANSWER, command_id="99"),
+        ],
+        1,
+        None,
+        RESTART,
+    )
+
+    world.reconcile()
+
+    assert world.state(op_id) == OpState.VOID
+    assert _final_line(memory, world.number) == "Resolved in Shikiru: answer"
 
 
 def test_a_queued_answer_still_open_after_the_engine_came_back_is_shown_again(
@@ -600,6 +662,59 @@ def test_an_issued_install_a_run_has_in_hand_is_left_alone(world: _World) -> Non
 
     assert world.shikiru.answers == []
     assert world.state(op_id) == OpState.ISSUED
+
+
+def test_queued_answer_is_rechecked_after_engine_recovery_in_the_same_run(world: _World) -> None:
+    world.shikiru = _Shikiru(engine_up=False)
+    op_id = world.install(issued=True, ack=QUEUED)
+
+    def engine_returns() -> None:
+        world.shikiru.engine_up = True
+        if world.reshower.shown:
+            raise _StopRunError
+
+    reconciler = world.reconciler(_LoopClock(engine_returns), interval_s=120)
+    with pytest.raises(_StopRunError):
+        asyncio.run(reconciler.run())
+
+    assert world.state(op_id) == OpState.FAILED
+    assert world.reshower.shown == [f"reshow:{op_id}"]
+
+
+def test_an_approval_arriving_after_startup_is_observed_by_the_next_pass(world: _World) -> None:
+    new_ops: list[int] = []
+
+    def approval_arrives() -> None:
+        if not new_ops:
+            new_ops.append(world.install(issued=False))
+        elif world.runner.started:
+            raise _StopRunError
+
+    reconciler = world.reconciler(_LoopClock(approval_arrives))
+    with pytest.raises(_StopRunError):
+        asyncio.run(reconciler.run())
+
+    assert world.runner.started == new_ops
+    assert world.state(new_ops[0]) == OpState.APPROVED
+    assert world.shikiru.lookups == ["E-1"]
+
+
+def test_a_transient_check_failure_is_retried_during_the_same_run(world: _World) -> None:
+    op_id = world.install(issued=True)
+    world.check.error = CommandError("temporary failure")
+
+    def check_recovers() -> None:
+        world.check.error = None
+        if world.shikiru.answers:
+            raise _StopRunError
+
+    reconciler = world.reconciler(_LoopClock(check_recovers))
+    with pytest.raises(_StopRunError):
+        asyncio.run(reconciler.run())
+
+    assert world.check.calls == 2
+    assert world.state(op_id) == OpState.ISSUED
+    assert len(world.shikiru.answers) == 1
 
 
 def _final_line(database: Database, number: int) -> str | None:

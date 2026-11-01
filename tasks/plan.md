@@ -1247,6 +1247,11 @@ the new approval queued and the old op issued, and the next start asks again wit
 approval. A rejected answer at restart voids the op; the escalation stays forwarded, so the PO still
 has the question.
 
+Verification follow-up: the recurring reconcile pass checks Shikiru before starting an approved
+op, so an event still awaiting local synchronization cannot authorize a stale install. Closed
+answer resolutions confirm only with the matching acknowledgement command id; differing ids keep
+the Shikiru resolution attribution. Transient lookup and check failures are retried on the next pass.
+
 Split, one commit each, gate green per commit (the whole of D7 is about 900 lines):
 * D7a. Ask again after a failed check: `InstallReasker` in `app/install_reask.py`, the re-ask identity
   in the reply binding, the void note.
