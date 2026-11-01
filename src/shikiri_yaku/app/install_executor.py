@@ -3,8 +3,10 @@
 The op is claimed under the host lock, before its command runs, so a second run for the same op
 finds nothing to claim, and an approval whose escalation was resolved elsewhere is void. The lock
 covers the claim and the command only: the check reads the host and needs no turn. A run the check
-does not confirm is forwarded to the PO with the tail of its output, and its op ends `failed`.
-A passing check leaves its op issued until the `escalation_resolved` event confirms it.
+does not confirm is forwarded to the PO with the tail of its output. The forward is retried in this
+process while the op stays issued, and only then does the op end `failed`; an op a restart finds
+issued is settled by its check (design §10). A passing check leaves its op issued until the
+`escalation_resolved` event confirms it.
 """
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ class InstallExecutor:
         shell: str,
         timeout_s: float,
         tail_lines: int,
+        forward_retry_s: float,
     ) -> None:
         self._log = log
         self._clients = clients
@@ -81,6 +84,7 @@ class InstallExecutor:
         self._shell = shell
         self._timeout_s = timeout_s
         self._tail_lines = tail_lines
+        self._retry_s = forward_retry_s
         self._tasks: set[asyncio.Task[None]] = set()
 
     def start(self, op_id: int) -> None:
@@ -163,10 +167,26 @@ class InstallExecutor:
         await self._stop(claim, self._files.save_output(claim.op.id, text), text, reason)
 
     async def _stop(self, claim: InstallClaim, path: str, text: str, reason: str) -> None:
-        if not self._log.fail(claim.op.id, path, self._clock.now()):
-            return
         note = f"{reason}. Output tail:\n{_tail(text, self._tail_lines)}"
-        await self._forwarder.forward(claim.op.payload.number, claim.signal, note, claim.suggestion)
+        await self._forward_until_queued(claim, note)
+        self._log.fail(claim.op.id, path, self._clock.now())
+
+    async def _forward_until_queued(self, claim: InstallClaim, note: str) -> None:
+        # keep: the op stays issued until the PO has the failure, so a restart can find it
+        while True:
+            try:
+                await self._forwarder.forward(
+                    claim.op.payload.number, claim.signal, note, claim.suggestion
+                )
+            except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
+                _LOG.warning(
+                    "forwarding an install failure failed, trying again in %g s: %s",
+                    self._retry_s,
+                    error,
+                )
+                await self._clock.sleep(self._retry_s)
+            else:
+                return
 
     def _finished(self, task: asyncio.Task[None]) -> None:
         self._tasks.discard(task)

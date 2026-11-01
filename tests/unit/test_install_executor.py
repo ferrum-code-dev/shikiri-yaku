@@ -41,6 +41,9 @@ TIMEOUT_S: Final = 900.0
 TAIL_LINES: Final = 2
 POLL_S: Final = 1
 PAUSE_S: Final = 1
+RETRY_S: Final = 60.0
+FOREVER: Final = 1_000_000
+INTERRUPT_S: Final = 0.2
 FOUND: Final = "/opt/homebrew/bin/ffmpeg"
 ANSWER_TEXT: Final = (
     "Installed ffmpeg with brew (found at /opt/homebrew/bin/ffmpeg). Please continue."
@@ -111,10 +114,23 @@ class _Check:
 
 
 class _Forwarder:
-    def __init__(self) -> None:
+    """Records its forwards; its first `failures` calls raise, as a down channel does."""
+
+    def __init__(
+        self, *, failures: int = 0, while_forwarding: Callable[[], None] | None = None
+    ) -> None:
+        self._failures = failures
+        self._while_forwarding = while_forwarding
+        self.attempts = 0
         self.forwarded: list[tuple[int, Signal, str, str]] = []
 
     async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+        self.attempts += 1
+        if self._while_forwarding is not None:
+            self._while_forwarding()
+        if self.attempts <= self._failures:
+            message = "the channel is down"
+            raise OSError(message)
         self.forwarded.append((number, signal, note, suggestion))
 
 
@@ -159,8 +175,9 @@ class _World:
         check: _Check,
         shikiru: _Shikiru,
         host: HostLock | None = None,
+        forwarder: _Forwarder | None = None,
     ) -> None:
-        self.forwarder = _Forwarder()
+        self.forwarder = _Forwarder() if forwarder is None else forwarder
         clock = NapClock()
         runs = JournalInstallRuns(database, SignalStore(database), OpStore(database))
         self.executor = InstallExecutor(
@@ -175,6 +192,7 @@ class _World:
             shell=SHELL,
             timeout_s=TIMEOUT_S,
             tail_lines=TAIL_LINES,
+            forward_retry_s=RETRY_S,
         )
 
     async def run(self, *op_ids: int) -> None:
@@ -255,6 +273,7 @@ def _world(
     check: _Check | None = None,
     shikiru: _Shikiru | None = None,
     host: HostLock | None = None,
+    forwarder: _Forwarder | None = None,
 ) -> _World:
     return _World(
         database,
@@ -263,6 +282,7 @@ def _world(
         check=_Check(FOUND) if check is None else check,
         shikiru=_Shikiru() if shikiru is None else shikiru,
         host=host,
+        forwarder=forwarder,
     )
 
 
@@ -458,6 +478,37 @@ def test_an_escalation_closed_before_the_run_voids_the_approval(
     assert install.state() == OpState.VOID
     assert commands.calls == []
     assert world.forwarder.forwarded == []
+
+
+def test_a_failed_forward_is_tried_again_while_the_op_stays_issued(
+    memory: Database, tmp_path: Path
+) -> None:
+    install = _Install(memory, "E-1")
+    seen: list[str] = []
+    forwarder = _Forwarder(failures=2, while_forwarding=lambda: seen.append(install.state()))
+    world = _world(memory, tmp_path, commands=_Commands(returncode=1), forwarder=forwarder)
+
+    asyncio.run(world.run(install.op_id))
+
+    assert seen == [OpState.ISSUED] * 3
+    assert install.state() == OpState.FAILED
+    [(number, _, note, _)] = forwarder.forwarded
+    assert number == install.number
+    assert "exited with status 1" in note
+
+
+def test_a_run_ended_while_its_failure_is_forwarded_leaves_the_op_issued(
+    memory: Database, tmp_path: Path
+) -> None:
+    install = _Install(memory, "E-1")
+    forwarder = _Forwarder(failures=FOREVER)
+    world = _world(memory, tmp_path, commands=_Commands(returncode=1), forwarder=forwarder)
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(asyncio.wait_for(world.run(install.op_id), INTERRUPT_S))
+
+    assert install.state() == OpState.ISSUED
+    assert forwarder.forwarded == []
 
 
 def test_an_escalation_closed_while_the_run_waits_for_the_host_lock_voids_the_approval(

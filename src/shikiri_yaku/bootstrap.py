@@ -308,6 +308,7 @@ def compose(
         shell=install_shell,
         timeout_s=install_timeout_s,
         tail_lines=infrastructure.install_output_tail_lines,
+        forward_retry_s=settings.operator.forward_retry_s,
     )
     assess = None if reasoning is None else reasoning.assessor.assess
     jobs += routing_jobs(

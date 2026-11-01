@@ -1163,6 +1163,16 @@ The "confirm" and "signal resolved" wording of D6 and D6a is superseded: `confir
 not a run step. An event that arrives before the acknowledgement is not matched; D7 reconciles it, as
 on the reply path.
 
+Rework after review (decided): (1) The claim runs under the host lock, with the command. A claim voids
+an approved op whose signal is no longer forwarded (design §6.3: an approval for an escalation resolved
+elsewhere is void), so an op whose escalation closed before the claim, or while its run waited for the
+lock, runs nothing. The check and the answer stay outside the lock. (2) A failure is forwarded before
+its op is marked `failed`. The forward is retried in this process every `forward_retry_s` while the op
+stays `issued`. A restart finds such an op `issued` and settles it by its check (D7). (3) A command
+killed at its timeout keeps the output it printed (`CommandError.output`), which the output file and
+the forwarded tail use. The runner writes the output to files rather than pipes: after a kill, a pipe
+can keep unread output or block its reader.
+
 #### D6a. Journal steps of a run
 
 Add `InstallRunLog` to ports, with `InstallClaim` (the approved op, its signal and the suggestion).
