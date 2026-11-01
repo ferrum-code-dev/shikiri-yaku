@@ -55,9 +55,16 @@ from shikiri_yaku.app.start_reconciler import StartReconciler
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
+from shikiri_yaku.app.tool_check import ToolCheck
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
+from shikiri_yaku.extensions.infrastructure.install import (
+    InstallAction,
+    InstallApprovalPresenter,
+)
+from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
+from shikiri_yaku.extensions.infrastructure.preparation import InstallPreparation
 from shikiri_yaku.extensions.notice.extension import notice_extension
 from shikiri_yaku.extensions.notice.handler import HEALTH_KEY as HEALTH_NOTICE_KEY
 from shikiri_yaku.extensions.product.extension import product_extension
@@ -108,6 +115,9 @@ if TYPE_CHECKING:
         Destinations,
         Forwarder,
         Guard,
+        InstallLog,
+        InstallPreparer,
+        InstallProposalLog,
         Outbox,
         ReasonerRung,
         Reporter,
@@ -241,6 +251,14 @@ def compose(
     waits = JournalWaits(journal, OpStore(journal))
     notifier = Notifier(outbox, destinations, clock)
     infrastructure = settings.handlers.infrastructure
+    install_shell = os.environ.get("SHELL", FALLBACK_SHELL)
+    install_timeout_s = timedelta(minutes=infrastructure.command_timeout_min).total_seconds()
+    install_proposals = SignalStore(journal)
+    install_preparation = InstallPreparation(
+        proposals=install_proposals,
+        facts=HostFacts(commands, install_shell, install_timeout_s),
+        check=ToolCheck(commands, install_shell, install_timeout_s),
+    )
     extensions = registered_extensions(
         clients,
         guard,
@@ -249,6 +267,9 @@ def compose(
         waits=waits,
         starts=JournalStarts(journal, OpStore(journal), SignalStore(journal)),
         notifier=notifier,
+        install_preparation=install_preparation,
+        proposals=install_proposals,
+        installs=OpStore(journal),
         quota_wait_max=timedelta(hours=infrastructure.quota_wait_max_h),
         quota_wait_margin=timedelta(minutes=infrastructure.quota_wait_margin_min),
         restart_confirm=timedelta(seconds=infrastructure.restart_confirm_s),
@@ -288,6 +309,7 @@ def compose(
             clock,
             clients=clients,
             reshower=forwarder,
+            forwarder=forwarder,
             bot_api=bot_api,
             goal=goal,
             destinations=destinations,
@@ -375,6 +397,9 @@ def registered_extensions(
     waits: WaitLog,
     starts: StartLog,
     notifier: Notifier,
+    install_preparation: InstallPreparer,
+    proposals: InstallProposalLog,
+    installs: InstallLog,
     quota_wait_max: timedelta,
     quota_wait_margin: timedelta,
     restart_confirm: timedelta,
@@ -385,6 +410,15 @@ def registered_extensions(
     destinations: Destinations,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
+    install = InstallAction(
+        preparation=install_preparation,
+        proposals=proposals,
+        numbers=numbers,
+        installs=installs,
+        outbox=outbox,
+        clock=clock,
+        destinations=destinations,
+    )
     infrastructure = infrastructure_extension(
         clients,
         guard,
@@ -393,6 +427,7 @@ def registered_extensions(
         waits=waits,
         starts=starts,
         notifier=notifier,
+        install=install,
         quota_wait_max=quota_wait_max,
         quota_wait_margin=quota_wait_margin,
         restart_confirm=restart_confirm,
@@ -524,6 +559,7 @@ def inbound_job(
     *,
     clients: Mapping[str, ShikiruClient],
     reshower: Reshower,
+    forwarder: Forwarder,
     bot_api: BotApi,
     goal: GoalCommand,
     destinations: Destinations,
@@ -550,6 +586,8 @@ def inbound_job(
         clock,
         destinations=destinations,
         channel=TELEGRAM_CHANNEL,
+        install_approval=InstallApprovalPresenter(),
+        approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
     )
     commands = Commands(
         outbox,
@@ -568,6 +606,14 @@ def inbound_job(
         channel=TELEGRAM_CHANNEL,
         commands=commands,
         goal=goal,
+        install_replies=InstallApprovalReplies(
+            OpStore(journal),
+            clients,
+            forwarder,
+            outbox,
+            clock,
+            approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
+        ),
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(

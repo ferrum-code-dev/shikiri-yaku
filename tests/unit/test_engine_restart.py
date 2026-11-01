@@ -36,6 +36,7 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
     StartAttempt,
 )
+from tests.support.install import UnusedInstallAction
 from tests.support.notices import journal_notifier, journal_outbox
 
 if TYPE_CHECKING:
@@ -141,6 +142,7 @@ class World:
             waits=JournalWaits(database, ops),
             starts=self.starts,
             notifier=notifier,
+            install=UnusedInstallAction(),
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
             restart_confirm=CONFIRM_WITHIN,

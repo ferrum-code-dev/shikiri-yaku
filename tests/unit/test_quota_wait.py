@@ -24,6 +24,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.ports import Ack, AckStatus, EngineStatus, QuotaWindow
+from tests.support.install import UnusedInstallAction
 from tests.support.notices import journal_notifier, journal_outbox
 
 if TYPE_CHECKING:
@@ -89,6 +90,7 @@ class Shop:
             waits=JournalWaits(self.database, ops),
             starts=JournalStarts(self.database, ops, SignalStore(self.database)),
             notifier=journal_notifier(self.outbox, self.clock),
+            install=UnusedInstallAction(),
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
             restart_confirm=timedelta(seconds=60),

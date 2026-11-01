@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import timedelta
 
+    from shikiri_yaku.domain.extension import Action
     from shikiri_yaku.ports import (
         Clock,
         Guard,
@@ -40,6 +41,7 @@ def infrastructure_extension(
     waits: WaitLog,
     starts: StartLog,
     notifier: Notifier,
+    install: Action,
     quota_wait_max: timedelta,
     quota_wait_margin: timedelta,
     restart_confirm: timedelta,
@@ -66,7 +68,7 @@ def infrastructure_extension(
         poll=restart_poll,
     )
     engine_error = EngineErrorAction(clients, restart, retry, starts)
-    actions = (retry, wait, restart, engine_error)
+    actions = (retry, wait, restart, engine_error, install)
     return Extension(
         INFRASTRUCTURE,
         (INFRASTRUCTURE_RULE, HOST_TOOL_RULE),

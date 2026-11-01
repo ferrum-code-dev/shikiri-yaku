@@ -37,7 +37,13 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.submits import JournalSubmits
-from shikiri_yaku.ports import AttemptState, EventKinds, ResolutionKind, SubmitStatus
+from shikiri_yaku.ports import (
+    AttemptState,
+    CommandResult,
+    EventKinds,
+    ResolutionKind,
+    SubmitStatus,
+)
 from shikiri_yaku.settings import load_settings
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIRST_MESSAGE_ID, FakeBotApi
@@ -175,6 +181,45 @@ class _ShikiruSession:
 
     def restore_engine(self) -> None:
         self._answers["status"] = {"engine_up": True, "quotas": {}}
+
+
+class _InstallRunner:
+    """Answers only the fake Reasoner and read-only host probes used by the install path."""
+
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        del timeout_s, cwd, env
+        command = tuple(argv)
+        self.commands.append(command)
+        if command[0] == "claude":
+            answer = {
+                "is_error": False,
+                "structured_output": {
+                    "verdict": "host_tool",
+                    "tool": "ffmpeg",
+                    "manager": "brew",
+                    "package": "ffmpeg",
+                    "why": "The build needs ffmpeg.",
+                    "suggestion": "Install ffmpeg on this host.",
+                },
+            }
+            return CommandResult(0, json.dumps(answer), "")
+        script = command[3]
+        if "for tool in" in script:
+            return CommandResult(0, "os=test\nmanager=brew\npath=/test/bin\n", "")
+        if 'if location=$(command -v "$1")' in script:
+            return CommandResult(0, "missing\n", "")
+        message = f"unexpected command in install test: {command[0]}"
+        raise AssertionError(message)
 
 
 def _shikiru_link(
@@ -344,6 +389,14 @@ class _StagedBot(FakeBotApi):
         return await super().call(method, payload)
 
 
+class _RestartBot(FakeBotApi):
+    """Keeps fake Telegram message ids continuous when a composed service restarts."""
+
+    def __init__(self, updates: list[dict[str, Any]]) -> None:
+        super().__init__(updates, after_send=False)
+        self._message_ids = itertools.count(FIRST_MESSAGE_ID + 1)
+
+
 def _in_topic(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
     """Return the messages the bot sent into the topic that carry `text`."""
     return [
@@ -353,6 +406,162 @@ def _in_topic(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
         and payload.get("message_thread_id") == _TOPIC
         and text in str(payload.get("text", ""))
     ]
+
+
+def _install_approvals(bot: FakeBotApi) -> list[dict[str, Any]]:
+    return [
+        payload
+        for method, payload in bot.calls
+        if method == "sendMessage" and "Install approval" in str(payload.get("text", ""))
+    ]
+
+
+def _install_state(directory: Path, op_id: int) -> str | None:
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        operation = OpStore(database).install_op(op_id)
+    finally:
+        database.close()
+    return None if operation is None else operation.state
+
+
+def _deliver_install(
+    directory: Path,
+    runner: _InstallRunner,
+    bot: FakeBotApi,
+    session: _ShikiruSession,
+    scenario: Awaitable[None],
+) -> None:
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        commands=runner,
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+    try:
+        asyncio.run(_deliver(composition.jobs, scenario))
+    finally:
+        composition.close()
+
+
+def _initial_install(directory: Path, runner: _InstallRunner) -> tuple[str, int, datetime]:
+    with (directory / "config.toml").open("a", encoding="utf-8") as config:
+        config.write('\n[reasoner]\nladder = ["claude:haiku"]\n')
+    bot = FakeBotApi()
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: bool(_install_approvals(bot))),
+    )
+
+    [approval] = _install_approvals(bot)
+    buttons = [button for row in approval["reply_markup"]["inline_keyboard"] for button in row]
+    assert "Tool: ffmpeg" in approval["text"]
+    assert "Command: brew install ffmpeg" in approval["text"]
+    assert [button["text"] for button in buttons] == ["Install", "Decline"]
+    callback_data = buttons[0]["callback_data"]
+    _, number, op_id_text = callback_data.split(":")
+    op_id = int(op_id_text)
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        signals = SignalStore(database)
+        classified = signals.by_id(_E1_ID)
+        proposal = signals.install_proposal(_E1_ID)
+        operation = OpStore(database).install_op(op_id)
+    finally:
+        database.close()
+    assert classified is not None
+    assert (classified.category, classified.classified_by, classified.verdict) == (
+        "infrastructure",
+        "reasoner",
+        "host_tool",
+    )
+    assert proposal is not None
+    assert (proposal.tool, proposal.manager, proposal.package, proposal.why) == (
+        "ffmpeg",
+        "brew",
+        "ffmpeg",
+        "The build needs ffmpeg.",
+    )
+    assert operation is not None
+    assert (number, operation.state, operation.payload.argv) == (
+        str(operation.payload.number),
+        "intended",
+        ("brew", "install", "ffmpeg"),
+    )
+    assert all(
+        command[0] not in {"brew", "apt", "dnf", "npm", "pip"} for command in runner.commands
+    )
+    return callback_data, op_id, operation.created_at
+
+
+def _open_install(
+    directory: Path,
+    runner: _InstallRunner,
+    callback_data: str,
+    op_id: int,
+    created_at: datetime,
+) -> tuple[str, int]:
+    update = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text())["result"][0]
+    update["update_id"] = 800
+    update["message"]["text"] = "/open"
+    bot = _RestartBot([update])
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: bool(_install_approvals(bot))),
+    )
+
+    [approval] = _install_approvals(bot)
+    buttons = [button for row in approval["reply_markup"]["inline_keyboard"] for button in row]
+    assert buttons[0]["callback_data"] == callback_data
+    assert _install_state(directory, op_id) == "intended"
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        operation = OpStore(database).install_op(op_id)
+    finally:
+        database.close()
+    assert operation is not None
+    assert operation.created_at == created_at
+    assert operation.payload.argv == ("brew", "install", "ffmpeg")
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            "SELECT platform_message_id FROM messages WHERE notice_key = ?",
+            (f"install:{op_id}:open:800",),
+        ).fetchone()
+    finally:
+        database.close()
+    assert row is not None
+    _, _, message_id = row["platform_message_id"].partition("/")
+    return buttons[0]["callback_data"], int(message_id)
+
+
+def _tap_install(
+    directory: Path, runner: _InstallRunner, callback_data: str, message_id: int, op_id: int
+) -> None:
+    update = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text())["result"][2]
+    update["update_id"] = 801
+    update["callback_query"]["from"]["id"] = _OWNER
+    update["callback_query"]["message"]["message_id"] = message_id
+    update["callback_query"]["data"] = callback_data
+    _deliver_install(
+        directory,
+        runner,
+        FakeBotApi([update], after_send=False),
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: _install_state(directory, op_id) == "approved"),
+    )
+    assert _install_state(directory, op_id) == "approved"
+    assert all(
+        command[0] not in {"brew", "apt", "dnf", "npm", "pip"} for command in runner.commands
+    )
 
 
 def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path) -> None:
@@ -382,6 +591,14 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
     finally:
         database.close()
     assert references == ["1001/42"]
+
+
+def test_host_tool_approval_survives_restart_open_and_reply(tmp_path: Path) -> None:
+    directory = _instance(tmp_path)
+    runner = _InstallRunner()
+    callback_data, op_id, created_at = _initial_install(directory, runner)
+    copy_data, message_id = _open_install(directory, runner, callback_data, op_id, created_at)
+    _tap_install(directory, runner, copy_data, message_id, op_id)
 
 
 def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> None:

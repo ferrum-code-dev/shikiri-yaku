@@ -67,7 +67,7 @@ merged and `uv run poe check` passes.
   - [x] D3. Ladder and the safe tool list
   - [x] D3b. Wiring, host facts, health and doctor
   - [x] D4. Names, recipes and the existence check
-  - [ ] D5. Install approval
+  - [x] D5. Install approval
     - [x] D5b. Proposal persistence and host managers
     - [x] D5c. Install action and approval message
       - [x] D5c1. Install op payload, journal port and callbacks
@@ -77,9 +77,9 @@ merged and `uv run poe check` passes.
       - [x] D5d1. Conditional install decisions
       - [x] D5d2. Callback routing and origin binding
       - [x] D5d3. Install decision effects
-    - [ ] D5e. Composition, `/open` and end-to-end approval
+    - [x] D5e. Composition, `/open` and end-to-end approval
       - [x] D5e1. Journaled install approval replay in `/open`
-      - [ ] D5e2. Production composition and end-to-end approval
+      - [x] D5e2. Production composition and end-to-end approval
   - [ ] D6. Executor and resolution
   - [ ] D7. Interrupted installs and measures
 - [ ] Phase E: Hardening

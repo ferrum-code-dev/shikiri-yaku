@@ -28,6 +28,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.ports import Ack, AckStatus
+from tests.support.install import UnusedInstallAction
 from tests.support.notices import journal_notifier, journal_outbox
 
 if TYPE_CHECKING:
@@ -145,6 +146,7 @@ def infrastructure(
         waits=waits,
         starts=JournalStarts(memory, OpStore(memory), SignalStore(memory)),
         notifier=notifier,
+        install=UnusedInstallAction(),
         quota_wait_max=timedelta(hours=24),
         quota_wait_margin=timedelta(minutes=1),
         restart_confirm=timedelta(seconds=60),

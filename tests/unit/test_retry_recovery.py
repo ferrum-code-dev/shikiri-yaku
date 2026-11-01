@@ -41,6 +41,7 @@ from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.ports import Ack, EngineStatus
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
+from tests.support.install import UnusedInstallAction
 from tests.support.notices import journal_notifier, journal_outbox
 from tests.unit.test_replies import Client
 
@@ -165,6 +166,7 @@ class World:
             waits=waits,
             starts=JournalStarts(self.database, self.ops, self.signals),
             notifier=notifier,
+            install=UnusedInstallAction(),
             quota_wait_max=timedelta(hours=24),
             quota_wait_margin=timedelta(minutes=1),
             restart_confirm=timedelta(seconds=60),
