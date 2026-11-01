@@ -1441,6 +1441,26 @@ Acceptance criteria (Typer's `CliRunner`, no terminal needed):
 * The service unit golden test holds the new command line, with the login-shell PATH as before.
 * `uv run poe check` passes, including all import contracts.
 
+### E6. A cancelled task closes its open signals (normal)
+
+Found in drill H1: Shikiru emits `task_cancelled`, and the Operator ignores it. After `cancel_task` the
+task's open question or Install approval stays on the PO's screen with live buttons; a tap on Install
+would run the install and then fail to resolve an escalation that no longer exists.
+
+When a `task_cancelled` event arrives for a task, every open signal of that task (forwarded, parked or
+new) is closed with the final line "Task cancelled", through the same journaled path as the other
+closings, so every copy loses its buttons. An install op of that task that is `intended` or `approved`
+and not yet claimed becomes `declined`-like void (state `failed` with the reason `task cancelled`);
+an install already `issued` is left to its run. A tap that arrives afterwards says the task was
+cancelled and does nothing.
+
+Acceptance criteria:
+* Composed test: a forwarded question and a pending Install approval for one task; `task_cancelled` closes both, edits both messages to the final line without buttons, and voids the install op; a later Install tap runs nothing and says why.
+* An `issued` install op is not voided and still settles.
+* A signal of another task is untouched; the same event replayed changes nothing.
+* The test fails when the new handling is removed.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
