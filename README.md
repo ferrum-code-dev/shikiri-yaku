@@ -34,7 +34,7 @@ With a group that has forum topics, the Operator creates one topic per component
 topic at start-up, but only when its own journal has no open topic for that component. It never
 looks at the forum, because the Telegram Bot API cannot list a forum's topics. Telegram accepts
 duplicate topic names, so a fresh `--home`, a deleted journal or
-`shikiri-yaku topics forget <component|general>` makes the next start create a second topic with
+`shikiri-yaku topics forget <product> <component|general>` makes the next start create a second topic with
 the same name. A topic created by hand is never adopted automatically. To reuse one, run
 `shikiri-yaku topics adopt <product> <component|general> <thread-id>` before the first start; the
 thread id is the number at the end of the topic's link. If a start-up is interrupted while a topic
