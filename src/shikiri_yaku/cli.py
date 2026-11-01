@@ -19,6 +19,7 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from typer.main import get_command
 
+from shikiri_yaku.cli_render import CheckResult, print_doctor, print_failure
 from shikiri_yaku.instance import (
     InstanceLockedError,
     InstanceLockError,
@@ -320,7 +321,7 @@ def _run(directory: Path, compose: Compose) -> int:
         ChannelError,
         ChannelStartupError,
     ) as error:
-        sys.stderr.write(f"{error}\n")
+        print_failure(str(error))
         return 1
     return 0
 
@@ -360,12 +361,16 @@ def _doctor(directory: Path, compose: Compose) -> int:
 
 
 def _report(checks: Sequence[_Check]) -> int:
-    for check in checks:
-        if check.problem is None:
-            sys.stdout.write(f"{check.name}: {check.status}\n")
-        else:
-            sys.stdout.write(f"{check.name}: FAILED: {check.problem}\n")
-    return 1 if any(check.problem is not None for check in checks) else 0
+    results = [
+        CheckResult(
+            check.name,
+            check.status if check.problem is None else check.problem,
+            passed=check.problem is None,
+        )
+        for check in checks
+    ]
+    print_doctor(results)
+    return 0 if all(result.passed for result in results) else 1
 
 
 def _components_problem(settings: Settings) -> str | None:
@@ -439,7 +444,7 @@ def _stats(directory: Path, report: Report) -> int:
     try:
         text = report(directory)
     except CompositionError as error:
-        sys.stderr.write(f"{error}\n")
+        print_failure(str(error))
         return 1
     sys.stdout.write(text)
     return 0
@@ -451,7 +456,7 @@ def _changed(directory: Path, change: Callable[[], str]) -> int:
         with instance_lock(directory):
             message = change()
     except (InstanceLockError, CompositionError, ChannelRepairError) as error:
-        sys.stderr.write(f"{error}\n")
+        print_failure(str(error))
         return 1
     sys.stdout.write(f"{message}\n")
     return 0
@@ -464,7 +469,7 @@ def _install_service(target: _Target) -> int:
         service = _service(target, login_path)
         write_service_file(service)
     except (SettingsError, ServiceError) as error:
-        sys.stderr.write(f"{error}\n")
+        print_failure(str(error))
         return 1
     sys.stdout.write(f"wrote {service.path}\nstart it with: {service.start}\n")
     return 0

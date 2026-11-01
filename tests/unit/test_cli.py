@@ -54,6 +54,9 @@ _USAGE_ERROR: Final = 2
 _DEFAULT_TAIL: Final = re.compile(r"Default: \S.*$")
 _MARKUP: Final = re.compile(r"\[/?[^\]]*\]")
 _GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--version"})
+_PASSED_MARK: Final = "✔ "
+_FAILED_MARK: Final = "✘ "
+_SEPARATOR: Final = " · "
 
 type _Breakage = Callable[[Path], None]
 
@@ -96,8 +99,17 @@ def _group_instance(home: Path) -> Path:
     return directory
 
 
+def _doctor_lines(output: str) -> tuple[list[str], str]:
+    """Split doctor's output into its check lines and its summary, which a blank line separates."""
+    *checks, blank, summary = output.splitlines()
+    assert blank == ""
+    return checks, summary
+
+
 def _failed(output: str) -> set[str]:
-    return {line.partition(": FAILED")[0] for line in output.splitlines() if ": FAILED" in line}
+    checks, _summary = _doctor_lines(output)
+    failed = [line.removeprefix(_FAILED_MARK) for line in checks if line.startswith(_FAILED_MARK)]
+    return {line.partition(_SEPARATOR)[0].lower() for line in failed}
 
 
 def _remove_config(home: Path) -> None:
@@ -298,7 +310,12 @@ def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFi
     _instance(tmp_path)
 
     assert _run_doctor(tmp_path) == 0
-    assert _failed(capsys.readouterr().out) == set()
+    output = capsys.readouterr().out
+    checks, summary = _doctor_lines(output)
+    assert _failed(output) == set()
+    assert all(line.startswith(_PASSED_MARK) and _SEPARATOR in line for line in checks)
+    assert summary == f"✔ Doctor passed · {len(checks)} checks"
+    assert "\x1b[" not in output
 
 
 @pytest.mark.parametrize(
@@ -365,7 +382,10 @@ def test_doctor_names_each_failed_check_and_exits_non_zero(
     breakage(tmp_path)
 
     assert _run_doctor(tmp_path) == 1
-    assert _failed(capsys.readouterr().out) == failed
+    output = capsys.readouterr().out
+    checks, summary = _doctor_lines(output)
+    assert _failed(output) == failed
+    assert summary == f"✘ Doctor failed · {len(failed)} of {len(checks)} checks"
 
 
 def test_doctor_names_a_component_whose_mcp_link_does_not_come_up(
@@ -492,12 +512,18 @@ def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
 
     output = capsys.readouterr().out
     assert _failed(output) == set()
-    assert "instance lock: running" in output
+    assert f"{_PASSED_MARK}Instance lock{_SEPARATOR}running" in output
 
 
-def test_run_is_refused_while_another_holder_has_the_instance_lock(tmp_path: Path) -> None:
+def test_run_is_refused_while_another_holder_has_the_instance_lock(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with instance_lock(_instance(tmp_path)):
         assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
+
+    error_lines = capsys.readouterr().err.splitlines()
+    assert len(error_lines) == 1
+    assert error_lines[0].startswith(_FAILED_MARK)
 
 
 def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> None:
