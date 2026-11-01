@@ -1229,6 +1229,12 @@ approval. An `approved` op never claimed is run. `stats` reports installs approv
 failed (the counters design §15 lists), replacing the "unavailable until Phase D" labels. A composed
 test runs the whole path: raise, verdict, approval, tap, install, check, resolve.
 
+Failure forwards (decided in the D6 rework): an `issued` op whose failure was never queued, because the
+process stopped during the forward retry, is decided by its check like any issued op. The usual result
+is a failed check, so the PO is asked again with a new approval and the old one is void. A run that
+exited non-zero but whose check still finds the tool passes this rule and is answered. D7 must decide
+whether such a run goes to the PO first, since design §10 says only "an `install` by its check".
+
 Acceptance criteria:
 * Restart with an op in `issued` and the tool present: resolves once, runs nothing. With the tool still missing: a new approval message, and the old one is void.
 * A crash between the claim and the run, and between the run and the resolve, are both covered by tests with the clock and fake runner.
