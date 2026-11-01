@@ -42,6 +42,8 @@ from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
 from shikiri_yaku.app.install_executor import InstallExecutor
+from shikiri_yaku.app.install_reask import InstallReasker
+from shikiri_yaku.app.install_reconciler import InstallReconciler
 from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.notifier import Notifier
@@ -94,6 +96,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.install_reconcile import JournalInstallReconcile
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.reconcile import JournalReconcile
@@ -123,6 +126,7 @@ if TYPE_CHECKING:
         InstallPreparer,
         InstallProposalLog,
         InstallRunner,
+        InstallToolCheck,
         Outbox,
         ReasonerRung,
         Reporter,
@@ -343,6 +347,22 @@ def compose(
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs.append(copy_edit_job(settings, journal, channel, clock))
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
+    jobs.append(
+        after_settled(
+            starts_reconciler.settled,
+            install_reconcile_job(
+                settings,
+                journal,
+                clock,
+                clients=clients,
+                reshower=forwarder,
+                runner=install_executor,
+                check=install_check,
+                outbox=outbox,
+                destinations=destinations,
+            ),
+        )
+    )
 
     def recover() -> None:
         # keep: operator health signals belong to no component; a restart must not close them
@@ -569,6 +589,19 @@ def after_settled(settled: asyncio.Event, job: Job) -> Job:
     return run
 
 
+def held(job: Job) -> Job:
+    """Return the job, which then waits for the service to stop once `job` has made its pass.
+
+    The service ends when any of its jobs returns, so a job that runs once must not return.
+    """
+
+    async def run() -> None:
+        await job()
+        await asyncio.Event().wait()
+
+    return run
+
+
 def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channel) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(outbox, channel, clock, interval_s=settings.operator.outbox_interval_s)
@@ -713,6 +746,37 @@ def reconcile_job(
         interval_s=operator.liveness_interval_s,
     )
     return reconciler.run
+
+
+def install_reconcile_job(
+    settings: Settings,
+    journal: Database,
+    clock: Clock,
+    *,
+    clients: Mapping[str, ShikiruClient],
+    reshower: Reshower,
+    runner: InstallRunner,
+    check: InstallToolCheck,
+    outbox: Outbox,
+    destinations: Destinations,
+) -> Job:
+    """Return the once-only install recovery job (design §6.3, §10)."""
+    signals = SignalStore(journal)
+    reasker = InstallReasker(
+        OpStore(journal), InstallApprovalPresenter(), outbox, destinations, clock
+    )
+    reconciler = InstallReconciler(
+        JournalInstallReconcile(journal, signals, OpStore(journal)),
+        JournalSources(CursorStore(journal, signals), signals),
+        clients,
+        runner,
+        reshower=reshower,
+        check=check,
+        reasker=reasker,
+        clock=clock,
+        lost_command_min=settings.operator.lost_command_min,
+    )
+    return held(reconciler.run)
 
 
 def start_reconciler(

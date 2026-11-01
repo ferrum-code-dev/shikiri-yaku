@@ -55,6 +55,9 @@ class JournalEvents:
         """
         if change.command_id is not None:
             self._ops.confirm_command(change.project, change.command_id, now)
+            self._ops.observe_install_resolution(
+                change.project, change.escalation_id, change.command_id
+            )
             if self._ops.carries_command(change.project, change.command_id):
                 return
         self._database.connection.execute(

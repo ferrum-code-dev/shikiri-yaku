@@ -22,6 +22,8 @@ Migration 12 stores Telegram topic threads on outbox rows and records the reconc
 Migration 13 keeps the pull request of a review signal: its link and its commit count (design §4).
 Migration 14 keeps a Reasoner call's usage and duration for a signal's verdict, as JSON (design §8).
 Migration 15 keeps the typed host-tool proposal from the classification, as JSON (design §5).
+Migration 16 records install outcomes and a resolution event that arrived before its acknowledgement
+(design §6.3, §10, §15).
 """
 
 from __future__ import annotations
@@ -171,4 +173,9 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE signals ADD COLUMN verdict_call TEXT",),
     ("ALTER TABLE signals ADD COLUMN install_proposal TEXT",),
+    (
+        "ALTER TABLE ops ADD COLUMN approved_at TEXT",
+        "ALTER TABLE ops ADD COLUMN check_failed_at TEXT",
+        "ALTER TABLE ops ADD COLUMN resolved_command_id TEXT",
+    ),
 )

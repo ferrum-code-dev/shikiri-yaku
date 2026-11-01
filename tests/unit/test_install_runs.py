@@ -155,6 +155,23 @@ def test_the_event_that_names_the_command_confirms_the_op(memory: Database) -> N
     assert _final_line(memory, setup.number) == FINAL_LINE
 
 
+def test_an_event_seen_before_its_ack_confirms_the_install_when_the_ack_arrives(
+    memory: Database,
+) -> None:
+    setup = _Setup(memory, approved=True)
+    assert setup.runs.claim(setup.op_id, NOW) is not None
+
+    _observe_resolved(memory, command_id=str(DONE.id), now=LATER)
+    assert setup.state() == OpState.ISSUED
+
+    setup.runs.acknowledge(setup.op_id, DONE, OUTPUT, FINAL_LINE, LATER)
+
+    stored = setup.ops.get(setup.op_id)
+    assert stored is not None
+    assert stored.state == OpState.CONFIRMED
+    assert _final_line(memory, setup.number) == FINAL_LINE
+
+
 def test_an_event_for_another_command_changes_nothing(memory: Database) -> None:
     setup = _Setup(memory, approved=True)
     assert setup.runs.claim(setup.op_id, NOW) is not None
@@ -178,6 +195,19 @@ def test_fail_moves_only_an_issued_op_and_keeps_its_output(memory: Database) -> 
     assert stored.state == OpState.FAILED
     assert stored.output_path == OUTPUT
     assert approved.signal_state() == SignalState.FORWARDED
+
+
+def test_a_failed_check_is_recorded_once_for_an_issued_install(memory: Database) -> None:
+    setup = _Setup(memory, approved=True)
+    assert setup.runs.claim(setup.op_id, NOW) is not None
+
+    setup.runs.check_failed(setup.op_id, LATER)
+    setup.runs.check_failed(setup.op_id, NOW)
+
+    row = memory.connection.execute(
+        "SELECT check_failed_at FROM ops WHERE id = ?", (setup.op_id,)
+    ).fetchone()
+    assert row["check_failed_at"] == LATER.isoformat()
 
 
 def _observe_resolved(database: Database, *, command_id: str, now: datetime) -> None:

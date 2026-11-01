@@ -40,9 +40,11 @@ if TYPE_CHECKING:
 __all__ = [
     "BLOCK_SEPARATOR",
     "CALLBACK_DATA_LIMIT",
+    "INSTALL_APPROVED",
     "INSTALL_DECLINED",
     "INSTALL_EXPIRED",
     "INSTALL_INTENDED",
+    "INSTALL_ISSUED",
     "INSTALL_VOID",
     "MESSAGE_TEXT_LIMIT",
     "Ack",
@@ -90,6 +92,8 @@ __all__ = [
     "InstallOp",
     "InstallPreparer",
     "InstallProposalLog",
+    "InstallReaskLog",
+    "InstallReconcileLog",
     "InstallReplyHandler",
     "InstallRunLog",
     "InstallRunner",
@@ -100,6 +104,7 @@ __all__ = [
     "Notifier",
     "Outbox",
     "Pending",
+    "PendingInstall",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -148,9 +153,11 @@ __all__ = [
     "text_room",
 ]
 
+INSTALL_APPROVED: Final = "approved"
 INSTALL_DECLINED: Final = "declined"
 INSTALL_EXPIRED: Final = "expired"
 INSTALL_INTENDED: Final = "intended"
+INSTALL_ISSUED: Final = "issued"
 INSTALL_VOID: Final = "void"
 
 
@@ -517,20 +524,55 @@ class InstallRunLog(Protocol):
     def claim(self, op_id: int, now: datetime) -> InstallClaim | None: ...
 
     def acknowledge(
-        self, op_id: int, ack: Ack, output_path: str, final_line: str, now: datetime
+        self, op_id: int, ack: Ack, output_path: str | None, final_line: str, now: datetime
     ) -> None: ...
 
     def fail(self, op_id: int, output_path: str, now: datetime) -> bool: ...
+
+    def check_failed(self, op_id: int, now: datetime) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PendingInstall:
+    """An install op a run has not settled: `approved`, or `issued` with its acknowledgement."""
+
+    op: InstallOp
+    signal: Signal
+    ack: Ack | None
+    since: datetime
+
+
+class InstallReconcileLog(Protocol):
+    """The journal steps of settling an install a restart found unsettled (design §10).
+
+    `unsettled_op` reads one op again, so a decision never acts on an earlier snapshot.
+    """
+
+    def unsettled(self) -> list[PendingInstall]: ...
+
+    def unsettled_op(self, op_id: int) -> PendingInstall | None: ...
+
+    def acknowledge(self, op_id: int, ack: Ack, final_line: str, now: datetime) -> None: ...
+
+    def confirm(self, op_id: int, final_line: str, now: datetime) -> bool: ...
+
+    def void(self, op_id: int, now: datetime) -> bool: ...
+
+    def fail(self, op_id: int, now: datetime) -> bool: ...
+
+    def check_failed(self, op_id: int, now: datetime) -> None: ...
 
 
 class InstallRunner(Protocol):
     """Starts the run of an approved install op; the run goes on in a task of its own.
 
     The reply that approves the op returns at once, so the serial inbound loop never waits for a
-    host command.
+    host command. `running` says whether a run of the op has been started and not yet settled.
     """
 
     def start(self, op_id: int) -> None: ...
+
+    def running(self, op_id: int) -> bool: ...
 
 
 class ActionLog(Protocol):
@@ -1431,8 +1473,8 @@ class CompletedEscalation:
 class StatsLog(Protocol):
     """What `stats` reads of the journal (design §15).
 
-    Counts are per category, reason, verdict or current op state; a None category or verdict is an
-    absent one. The states are not outcomes.
+    Counts are per category, reason, verdict, current op state or recorded install outcome; a None
+    category or verdict is an absent one. The states are not outcomes.
     """
 
     def completed_escalations(self) -> list[CompletedEscalation]: ...
@@ -1440,3 +1482,4 @@ class StatsLog(Protocol):
     def escalation_reasons(self) -> Mapping[str, int]: ...
     def escalation_verdicts(self) -> Mapping[str | None, int]: ...
     def install_states(self) -> Mapping[str, int]: ...
+    def install_outcomes(self) -> Mapping[str, int]: ...

@@ -162,14 +162,17 @@ class SignalStore:
             },
         ).rowcount
 
-    def set_final_line(self, number: int, final_line: str, now: datetime) -> None:
-        """Record the line the signal's copies end with, unless the signal has one already."""
+    def set_final_line(
+        self, number: int, final_line: str, now: datetime, *, replace: bool = False
+    ) -> None:
+        """Record the line its copies end with, replacing a matched early event note."""
         self._database.connection.execute(
             """
-            UPDATE signals SET final_line = COALESCE(final_line, ?), updated_at = ?
+            UPDATE signals SET final_line = CASE WHEN ? THEN ? ELSE COALESCE(final_line, ?) END,
+                updated_at = ?
             WHERE number = ?
             """,
-            (final_line, stamp(now), number),
+            (replace, final_line, final_line, stamp(now), number),
         )
 
     def close_removed(self, configured: Collection[str], note: str, now: datetime) -> int:

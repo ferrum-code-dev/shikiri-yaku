@@ -15,6 +15,7 @@ import asyncio
 import logging
 import shlex
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
@@ -30,12 +31,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.ports import (
+        Ack,
         Clock,
         CommandRunner,
         Forwarder,
         HostLock,
         InstallClaim,
         InstallFiles,
+        InstallOp,
         InstallRunLog,
         InstallToolCheck,
         ShikiruClient,
@@ -52,6 +55,18 @@ FINAL_LINE: Final = "Installed {tool} with {manager}."
 class _Run:
     text: str
     failure: str | None
+
+
+async def send_answer(client: ShikiruClient, operation: InstallOp, found: str) -> Ack:
+    """Answer the escalation: the installed tool lets the task continue (design §6.3, step 6)."""
+    payload = operation.payload
+    text = ANSWER.format(tool=payload.tool, manager=payload.manager, path=found)
+    return await client.resolve_escalation(payload.escalation_id, ResolutionKind.ANSWER, text)
+
+
+def final_line(operation: InstallOp) -> str:
+    """Return the line the signal ends with once the install is answered."""
+    return FINAL_LINE.format(tool=operation.payload.tool, manager=operation.payload.manager)
 
 
 class InstallExecutor:
@@ -86,12 +101,23 @@ class InstallExecutor:
         self._tail_lines = tail_lines
         self._retry_s = forward_retry_s
         self._tasks: set[asyncio.Task[None]] = set()
+        self._running: set[int] = set()
 
     def start(self, op_id: int) -> None:
-        """Run the op in a task of its own; the call returns before the command starts."""
+        """Run the op in a task of its own; the call returns before the command starts.
+
+        A run of the op that is under way is not started again.
+        """
+        if op_id in self._running:
+            return
+        self._running.add(op_id)
         task = asyncio.ensure_future(self.execute(op_id))
         self._tasks.add(task)
-        task.add_done_callback(self._finished)
+        task.add_done_callback(partial(self._finished, op_id))
+
+    def running(self, op_id: int) -> bool:
+        """Whether a run of the op has been started and has not yet settled."""
+        return op_id in self._running
 
     async def join(self) -> None:
         """Wait until every run started so far has ended."""
@@ -131,37 +157,36 @@ class InstallExecutor:
         return _Run(text, None)
 
     async def _settle(self, claim: InstallClaim, run: _Run) -> None:
-        if run.failure is not None:
-            await self._fail(claim, run.text, run.failure)
-            return
         tool = claim.op.payload.tool
         try:
             found = await self._check.find(tool)
         except (CommandError, ToolNameError) as error:
+            self._log.check_failed(claim.op.id, self._clock.now())
             message = f"the check after the run did not run to its end: {error}"
+            if run.failure is not None:
+                message = f"{run.failure}; {message}"
             await self._fail(claim, run.text, message)
             return
         if found is None:
-            await self._fail(claim, run.text, f"the check after the run did not find {tool}")
+            self._log.check_failed(claim.op.id, self._clock.now())
+            message = f"the check after the run did not find {tool}"
+            if run.failure is not None:
+                message = f"{run.failure}; {message}"
+            await self._fail(claim, run.text, message)
             return
         await self._answer(claim, run.text, found)
 
     async def _answer(self, claim: InstallClaim, text: str, found: str) -> None:
         operation = claim.op
-        payload = operation.payload
         path = self._files.save_output(operation.id, text)
-        answer = ANSWER.format(tool=payload.tool, manager=payload.manager, path=found)
         try:
-            ack = await self._clients[operation.project].resolve_escalation(
-                payload.escalation_id, ResolutionKind.ANSWER, answer
-            )
+            ack = await send_answer(self._clients[operation.project], operation, found)
         except ShikiruRejectedError as error:
             await self._stop(claim, path, text, f"Shikiru rejected the answer: {error}")
             return
         except ShikiruError:
             return
-        final = FINAL_LINE.format(tool=payload.tool, manager=payload.manager)
-        self._log.acknowledge(operation.id, ack, path, final, self._clock.now())
+        self._log.acknowledge(operation.id, ack, path, final_line(operation), self._clock.now())
 
     async def _fail(self, claim: InstallClaim, text: str, reason: str) -> None:
         await self._stop(claim, self._files.save_output(claim.op.id, text), text, reason)
@@ -188,7 +213,8 @@ class InstallExecutor:
             else:
                 return
 
-    def _finished(self, task: asyncio.Task[None]) -> None:
+    def _finished(self, op_id: int, task: asyncio.Task[None]) -> None:
+        self._running.discard(op_id)
         self._tasks.discard(task)
         if task.cancelled():
             return

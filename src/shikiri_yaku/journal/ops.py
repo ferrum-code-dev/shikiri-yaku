@@ -161,7 +161,29 @@ class OpStore:
         return stored
 
     def approve_install(self, op_id: int, number: int, now: datetime) -> bool:
-        return self._transition_install(op_id, number, OpState.APPROVED, now)
+        with self._database.transaction():
+            operation = self.install_op(op_id)
+            if (
+                operation is None
+                or operation.payload.number != number
+                or operation.state != OpState.INTENDED
+            ):
+                return False
+            changed = self._database.connection.execute(
+                """
+                UPDATE ops SET state = ?, approved_at = COALESCE(approved_at, ?), updated_at = ?
+                WHERE id = ? AND kind = ? AND state = ?
+                """,
+                (
+                    OpState.APPROVED,
+                    stamp(now),
+                    stamp(now),
+                    op_id,
+                    INSTALL_KIND,
+                    OpState.INTENDED,
+                ),
+            ).rowcount
+            return changed == 1
 
     def expire_install(self, op_id: int, number: int, now: datetime) -> bool:
         return self._transition_install(op_id, number, OpState.EXPIRED, now)
@@ -234,14 +256,20 @@ class OpStore:
             (ack.model_dump_json(), str(ack.id), stamp(now), op_id, OpState.ISSUED),
         )
 
-    def acknowledge_install(self, op_id: int, ack: Ack, output_path: str, now: datetime) -> None:
-        """Save the acknowledgement, its command id and the output of an issued install run."""
-        self._database.connection.execute(
+    def acknowledge_install(
+        self, op_id: int, ack: Ack, output_path: str | None, now: datetime
+    ) -> bool:
+        """Save the acknowledgement, confirming it if its event arrived first."""
+        matched = self._database.connection.execute(
             """
-            UPDATE ops SET acknowledgement = ?, command_id = ?, output_path = ?, updated_at = ?
+            UPDATE ops SET state = CASE WHEN resolved_command_id = ? THEN ? ELSE state END,
+                acknowledgement = ?, command_id = ?,
+                output_path = COALESCE(?, output_path), updated_at = ?
             WHERE id = ? AND kind = ? AND state = ?
             """,
             (
+                str(ack.id),
+                OpState.CONFIRMED,
                 ack.model_dump_json(),
                 str(ack.id),
                 output_path,
@@ -250,6 +278,46 @@ class OpStore:
                 INSTALL_KIND,
                 OpState.ISSUED,
             ),
+        ).rowcount
+        return matched == 1 and self.install_resolution_seen(op_id, str(ack.id))
+
+    def observe_install_resolution(
+        self, project: str, escalation_id: str, command_id: str | None
+    ) -> None:
+        """Keep an event id while its issued install is still waiting for the acknowledgement."""
+        if command_id is None:
+            return
+        rows = self._database.connection.execute(
+            "SELECT id, payload FROM ops WHERE kind = ? AND project = ? AND state = ?",
+            (INSTALL_KIND, project, OpState.ISSUED),
+        ).fetchall()
+        for row in rows:
+            payload = InstallOpPayload.model_validate_json(row["payload"])
+            if payload.escalation_id != escalation_id:
+                continue
+            self._database.connection.execute(
+                """
+                UPDATE ops SET resolved_command_id = COALESCE(resolved_command_id, ?)
+                WHERE id = ? AND state = ?
+                """,
+                (command_id, row["id"], OpState.ISSUED),
+            )
+
+    def install_resolution_seen(self, op_id: int, command_id: str) -> bool:
+        row = self._database.connection.execute(
+            "SELECT resolved_command_id FROM ops WHERE id = ? AND kind = ?",
+            (op_id, INSTALL_KIND),
+        ).fetchone()
+        return row is not None and row["resolved_command_id"] == command_id
+
+    def mark_install_check_failed(self, op_id: int, now: datetime) -> None:
+        """Record the first check that did not find its tool, without counting later retries."""
+        self._database.connection.execute(
+            """
+            UPDATE ops SET check_failed_at = COALESCE(check_failed_at, ?)
+            WHERE id = ? AND kind = ? AND state = ?
+            """,
+            (stamp(now), op_id, INSTALL_KIND, OpState.ISSUED),
         )
 
     def confirm_command(self, project: str, command_id: str, now: datetime) -> bool:

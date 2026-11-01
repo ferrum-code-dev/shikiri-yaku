@@ -16,6 +16,7 @@ from shikiri_yaku.ports import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from shikiri_yaku.ports import (
         Clock,
@@ -28,6 +29,25 @@ if TYPE_CHECKING:
 
 AGAIN_NOTE: Final = "Your answer did not reach Shikiru, so please answer again."
 RETRY_AGAIN_NOTE: Final = "The automatic retry did not reach Shikiru, so the decision is yours."
+
+
+async def is_lost(
+    lifecycles: LifecycleJournal,
+    client: ShikiruClient,
+    project: str,
+    *,
+    since: datetime,
+    now: datetime,
+    lost_after: timedelta,
+) -> bool:
+    """Whether a queued command is lost: the engine is up, and it waited `lost_after` for it."""
+    state = lifecycles.state(project)
+    lifecycle = None if state is None else state.lifecycle
+    if lifecycle is None or lifecycle.kind != EventKinds.ENGINE_STARTED:
+        return False
+    if not (await client.status()).engine_up:
+        return False
+    return now >= max(lifecycle.at, since) + lost_after
 
 
 class ResolveReconciler:
@@ -99,10 +119,11 @@ class ResolveReconciler:
 
     async def _is_lost(self, op: Unsettled) -> bool:
         project = op.payload.project
-        state = self._lifecycles.state(project)
-        lifecycle = None if state is None else state.lifecycle
-        if lifecycle is None or lifecycle.kind != EventKinds.ENGINE_STARTED:
-            return False
-        if not (await self._clients[project].status()).engine_up:
-            return False
-        return self._clock.now() >= max(lifecycle.at, op.since) + self._lost_after
+        return await is_lost(
+            self._lifecycles,
+            self._clients[project],
+            project,
+            since=op.since,
+            now=self._clock.now(),
+            lost_after=self._lost_after,
+        )

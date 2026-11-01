@@ -46,16 +46,21 @@ class JournalInstallRuns:
             return InstallClaim(operation, stored.to_signal(), stored.classification_note or "")
 
     def acknowledge(
-        self, op_id: int, ack: Ack, output_path: str, final_line: str, now: datetime
+        self, op_id: int, ack: Ack, output_path: str | None, final_line: str, now: datetime
     ) -> None:
         with self._database.transaction():
             operation = self._ops.install_op(op_id)
             if operation is None or operation.state != OpState.ISSUED:
                 return
-            self._ops.acknowledge_install(op_id, ack, output_path, now)
-            self._signals.set_final_line(operation.payload.number, final_line, now)
+            event_arrived = self._ops.acknowledge_install(op_id, ack, output_path, now)
+            self._signals.set_final_line(
+                operation.payload.number, final_line, now, replace=event_arrived
+            )
 
     def fail(self, op_id: int, output_path: str, now: datetime) -> bool:
         return self._ops.transition(
             op_id, OpState.ISSUED, OpState.FAILED, now, output_path=output_path
         )
+
+    def check_failed(self, op_id: int, now: datetime) -> None:
+        self._ops.mark_install_check_failed(op_id, now)

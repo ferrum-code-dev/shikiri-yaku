@@ -73,5 +73,9 @@ def test_install_decisions_are_conditional_signal_bound_and_final(memory: Databa
         stored = store.get(operation.id)
         assert stored is not None
         assert stored.state is expected
+        row = memory.connection.execute(
+            "SELECT approved_at FROM ops WHERE id = ?", (operation.id,)
+        ).fetchone()
+        assert (row["approved_at"] is not None) is (expected is OpState.APPROVED)
         pending_ids = {pending.id for pending in store.non_final()}
         assert (operation.id in pending_ids) is (expected is OpState.APPROVED)

@@ -324,24 +324,40 @@ def test_a_clean_exit_with_a_failing_check_forwards_and_fails(
     assert install.signal_state() == SignalState.FORWARDED
 
 
-def test_a_non_zero_exit_forwards_the_output_tail_and_fails(
+def test_a_non_zero_exit_with_a_passing_check_answers_the_escalation(
     memory: Database, tmp_path: Path
 ) -> None:
     commands = _Commands(returncode=1, stdout="a\nb\nc\n", stderr="boom\n")
     check = _Check(FOUND)
-    world = _world(memory, tmp_path, commands=commands, check=check)
+    shikiru = _Shikiru()
+    world = _world(memory, tmp_path, commands=commands, check=check, shikiru=shikiru)
+    install = _Install(memory, "E-1")
+
+    asyncio.run(world.run(install.op_id))
+
+    assert install.state() == OpState.ISSUED
+    assert check.asked == ["ffmpeg"]
+    assert shikiru.calls == [("E-1", ResolutionKind.ANSWER, ANSWER_TEXT)]
+    assert world.forwarder.forwarded == []
+    stored = install.ops.get(install.op_id)
+    assert stored is not None
+    assert stored.output_path is not None
+    assert Path(stored.output_path).read_text(encoding="utf-8") == "a\nb\nc\nboom\n"
+
+
+def test_a_non_zero_exit_with_a_missing_tool_forwards_the_output_tail_and_fails(
+    memory: Database, tmp_path: Path
+) -> None:
+    commands = _Commands(returncode=1, stdout="a\nb\nc\n", stderr="boom\n")
+    world = _world(memory, tmp_path, commands=commands, check=_Check(None))
     install = _Install(memory, "E-1")
 
     asyncio.run(world.run(install.op_id))
 
     assert install.state() == OpState.FAILED
-    assert check.asked == []
     [(_, _, note, _)] = world.forwarder.forwarded
+    assert "exited with status 1" in note
     assert note.endswith("c\nboom")
-    stored = install.ops.get(install.op_id)
-    assert stored is not None
-    assert stored.output_path is not None
-    assert Path(stored.output_path).read_text(encoding="utf-8") == "a\nb\nc\nboom\n"
 
 
 def test_a_timeout_forwards_the_error_and_the_output_printed_before_it(
@@ -349,14 +365,14 @@ def test_a_timeout_forwards_the_error_and_the_output_printed_before_it(
 ) -> None:
     error = CommandError("timed out after 900 s", output="step one\nstep two started")
     commands = _Commands(error=error)
-    check = _Check(FOUND)
+    check = _Check(None)
     world = _world(memory, tmp_path, commands=commands, check=check)
     install = _Install(memory, "E-1")
 
     asyncio.run(world.run(install.op_id))
 
     assert install.state() == OpState.FAILED
-    assert check.asked == []
+    assert check.asked == ["ffmpeg"]
     [(_, _, note, _)] = world.forwarder.forwarded
     assert "timed out after 900 s" in note
     assert "step two started" in note
@@ -408,6 +424,24 @@ def test_two_executors_started_for_one_op_run_one_command(memory: Database, tmp_
 
     assert len(commands.calls) == 1
     assert install.state() == OpState.ISSUED
+
+
+def test_running_holds_from_the_start_until_the_run_settles(
+    memory: Database, tmp_path: Path
+) -> None:
+    world = _world(memory, tmp_path, commands=_Commands(pause=NapClock()))
+    install = _Install(memory, "E-1")
+    seen: list[bool] = []
+
+    async def watch() -> None:
+        world.executor.start(install.op_id)
+        seen.append(world.executor.running(install.op_id))
+        await world.executor.join()
+        seen.append(world.executor.running(install.op_id))
+
+    asyncio.run(watch())
+
+    assert seen == [True, False]
 
 
 def test_two_ops_never_run_their_commands_at_once(memory: Database, tmp_path: Path) -> None:
@@ -486,7 +520,13 @@ def test_a_failed_forward_is_tried_again_while_the_op_stays_issued(
     install = _Install(memory, "E-1")
     seen: list[str] = []
     forwarder = _Forwarder(failures=2, while_forwarding=lambda: seen.append(install.state()))
-    world = _world(memory, tmp_path, commands=_Commands(returncode=1), forwarder=forwarder)
+    world = _world(
+        memory,
+        tmp_path,
+        commands=_Commands(returncode=1),
+        check=_Check(None),
+        forwarder=forwarder,
+    )
 
     asyncio.run(world.run(install.op_id))
 
@@ -502,7 +542,13 @@ def test_a_run_ended_while_its_failure_is_forwarded_leaves_the_op_issued(
 ) -> None:
     install = _Install(memory, "E-1")
     forwarder = _Forwarder(failures=FOREVER)
-    world = _world(memory, tmp_path, commands=_Commands(returncode=1), forwarder=forwarder)
+    world = _world(
+        memory,
+        tmp_path,
+        commands=_Commands(returncode=1),
+        check=_Check(None),
+        forwarder=forwarder,
+    )
 
     with pytest.raises(TimeoutError):
         asyncio.run(asyncio.wait_for(world.run(install.op_id), INTERRUPT_S))
