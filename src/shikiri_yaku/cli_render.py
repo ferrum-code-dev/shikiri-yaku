@@ -91,7 +91,7 @@ def print_failure(message: str) -> None:
     """Print a failed command's reason on one line, to standard error."""
     line = Text()
     line.append(FAILED_GLYPH, style=f"{BOLD} {FAILED_COLOR}")
-    line.append(f" {message}", style=PRIMARY_TEXT_COLOR)
+    line.append(f" {_one_line(message)}", style=PRIMARY_TEXT_COLOR)
     _console(stderr=True).print(line)
 
 
@@ -192,7 +192,7 @@ def _check_line(check: CheckResult) -> Text:
     line = _outcome(passed=check.passed)
     line.append(f" {_title(check.name)}", style=f"{BOLD} {PRIMARY_TEXT_COLOR}")
     line.append(SEPARATOR, style=SECONDARY_TEXT_COLOR)
-    line.append(check.detail, style=PRIMARY_TEXT_COLOR)
+    line.append(_one_line(check.detail), style=PRIMARY_TEXT_COLOR)
     return line
 
 
@@ -224,3 +224,9 @@ def _outcome(*, passed: bool) -> Text:
 
 def _title(name: str) -> str:
     return name[:1].upper() + name[1:]
+
+
+# keep: settings joins its problems with newlines; each error and check must stay on one line
+def _one_line(text: str) -> str:
+    lines = (line.strip() for line in text.splitlines())
+    return "; ".join(line for line in lines if line)

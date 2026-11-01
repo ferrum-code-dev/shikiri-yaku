@@ -148,6 +148,13 @@ def _config_not_utf8(home: Path) -> None:
     (_directory(home) / "config.toml").write_bytes(b"\xff" * 10)
 
 
+def _bare_product(home: Path) -> None:
+    """A config with neither components nor channels: settings reports both on separate lines."""
+    directory = _directory(home)
+    directory.mkdir(parents=True)
+    (directory / "config.toml").write_text(f'product = "{_PRODUCT}"\n', encoding="utf-8")
+
+
 def _token_becomes_directory(home: Path) -> None:
     token = _directory(home) / "secrets" / "telegram.token"
     token.unlink()
@@ -545,6 +552,35 @@ def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
     assert f"{_PASSED_MARK}Instance lock{_SEPARATOR}running" in output
 
 
+def test_doctor_puts_a_config_with_several_problems_on_one_check_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _bare_product(tmp_path)
+
+    assert _run_doctor(tmp_path) == 1
+
+    output = capsys.readouterr().out
+    checks, summary = _doctor_lines(output)
+    assert _failed(output) == {"config"}
+    assert len(checks) == 1
+    assert "components" in checks[0]
+    assert "channels" in checks[0]
+    assert summary == "✘ Doctor failed · 1 of 1 checks"
+
+
+def test_doctor_json_keeps_every_problem_of_a_config_in_its_detail(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _bare_product(tmp_path)
+
+    assert _run_doctor(tmp_path, json_output=True) == 1
+
+    (check,) = json.loads(capsys.readouterr().out)["checks"]
+    assert check["name"] == "config"
+    assert "components" in check["detail"]
+    assert "channels" in check["detail"]
+
+
 def test_run_is_refused_while_another_holder_has_the_instance_lock(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -554,6 +590,22 @@ def test_run_is_refused_while_another_holder_has_the_instance_lock(
     error_lines = capsys.readouterr().err.splitlines()
     assert len(error_lines) == 1
     assert error_lines[0].startswith(_FAILED_MARK)
+
+
+def test_run_refuses_a_config_with_several_problems_on_one_error_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _bare_product(tmp_path)
+
+    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_lines = captured.err.splitlines()
+    assert len(error_lines) == 1
+    assert error_lines[0].startswith(_FAILED_MARK)
+    assert "components" in error_lines[0]
+    assert "channels" in error_lines[0]
 
 
 def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> None:
