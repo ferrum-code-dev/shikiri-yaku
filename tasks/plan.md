@@ -1426,10 +1426,10 @@ Split into commits, each keeping the gate green (the task is larger than one 300
 * E5d: `stats` as titled rich tables.
 * E5e: `--json` for `doctor` and `stats`, with the documented keys.
 
-Design conflict, reported and not resolved in the design: `docs/design.md` §3.1 still writes the
-product as a positional argument (`shikiri-yaku run <product>`). Items 2 and 3 above put
-`--product` before the verb instead. The code follows this section; the design is not edited here,
-so it needs a decision on which form the design should state.
+Design conflict, decided by the PO: `docs/design.md` §3.1 wrote the product as a positional argument
+(`shikiri-yaku run <product>`), while items 2 and 3 above put `--product` before the verb. The PO
+approved the `--product` form for E5, which supersedes §3.1 for this task, and reports having
+amended §3.1 on `main`. This branch does not edit `docs/design.md`.
 
 Acceptance criteria (Typer's `CliRunner`, no terminal needed):
 * `--help` lists the verbs and the `telegram` group, and every global option's help ends with "Default: …".
