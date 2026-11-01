@@ -85,5 +85,5 @@ merged and `uv run poe check` passes.
 - [ ] Phase E: Hardening
   - [x] E1. Recovery of an uncertain topic creation
   - [x] E2. Drills as tests
-  - [ ] E3. Recording real Telegram replies
+  - [x] E3. Recording real Telegram replies
   - [x] E4. Install path hardening from the security review
