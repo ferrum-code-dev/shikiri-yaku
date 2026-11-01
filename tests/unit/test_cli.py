@@ -23,7 +23,7 @@ from typer.main import get_command
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
-from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, main, stats_report
+from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, main, stats_measures
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
@@ -300,7 +300,7 @@ def _run_doctor(
     return cli.main(
         [*product_option, "--home", str(home), "doctor"],
         composed,
-        stats_report,
+        stats_measures,
         adopt_topic,
         forget_topic,
     )
@@ -495,7 +495,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
         cli.main(
             ["--product", _PRODUCT, "--home", str(tmp_path), "doctor"],
             composed,
-            stats_report,
+            stats_measures,
             adopt_topic,
             forget_topic,
         )
@@ -545,7 +545,7 @@ def _exit_when_serving(argv: list[str], serving: Event) -> None:
         )
         return replace(composition, jobs=[_announced(job, serving) for job in composition.jobs])
 
-    sys.exit(cli.main(argv, composed, stats_report, adopt_topic, forget_topic))
+    sys.exit(cli.main(argv, composed, stats_measures, adopt_topic, forget_topic))
 
 
 def _announced(job: cli.Job, serving: Event) -> cli.Job:
@@ -649,7 +649,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(
         cli.main(
             ["--product", _PRODUCT, "--home", str(tmp_path), "run"],
             composed,
-            stats_report,
+            stats_measures,
             adopt_topic,
             forget_topic,
         )
@@ -828,7 +828,7 @@ def test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped(
 
 @pytest.mark.parametrize("flag", sorted(_GLOBAL_OPTIONS))
 def test_each_global_option_says_its_default(flag: str) -> None:
-    command = get_command(cli.build_app(compose, stats_report, adopt_topic, forget_topic))
+    command = get_command(cli.build_app(compose, stats_measures, adopt_topic, forget_topic))
     option = next(param for param in command.params if flag in param.opts)
 
     help_text = _MARKUP.sub("", str(getattr(option, "help", "")))

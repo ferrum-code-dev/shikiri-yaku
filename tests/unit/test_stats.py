@@ -206,5 +206,8 @@ def test_stats_prints_the_four_sections_of_a_journal_without_composing_the_servi
     with closing(Database.open(directory / JOURNAL_FILE_NAME)) as database:
         _signal(database, "A", created=0, final=60, state=SignalState.RESOLVED, queued=(10,))
     assert bootstrap.main(["--product", _PRODUCT, "--home", str(tmp_path), "stats"]) == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert [line[:3] for line in lines if line[:1].isdigit()] == ["1. ", "2. ", "3. ", "4. "]
+    output = capsys.readouterr().out
+    titles = ["1. PO wait time", "2. Handled without the PO", "3. Escalation mix", "4. Installs"]
+    positions = [output.index(title) for title in titles]
+    assert positions == sorted(positions)
+    assert "\x1b[" not in output

@@ -19,7 +19,7 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from typer.main import get_command
 
-from shikiri_yaku.cli_render import CheckResult, print_doctor, print_failure
+from shikiri_yaku.cli_render import CheckResult, print_doctor, print_failure, print_stats
 from shikiri_yaku.instance import (
     InstanceLockedError,
     InstanceLockError,
@@ -41,6 +41,7 @@ from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings, pr
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
+    from shikiri_yaku.app.stats import Measures
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
 
@@ -80,7 +81,7 @@ class Lifecycle(Protocol):
 
 type Job = Callable[[], Coroutine[Any, Any, None]]
 type Compose = Callable[[Settings, Path], Lifecycle]
-type Report = Callable[[Path], str]
+type ReadMeasures = Callable[[Path], Measures]
 type AdoptTopic = Callable[[Path, str, int], str]
 type ForgetTopic = Callable[[Path, str], str]
 
@@ -223,7 +224,7 @@ def _target(ctx: typer.Context) -> _Target:
 
 def build_app(
     compose: Compose,
-    report: Report,
+    read_measures: ReadMeasures,
     adopt_topic: AdoptTopic,
     forget_topic: ForgetTopic,
 ) -> typer.Typer:
@@ -265,7 +266,7 @@ def build_app(
 
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
-        raise typer.Exit(_stats(_target(ctx).directory, report))
+        raise typer.Exit(_stats(_target(ctx).directory, read_measures))
 
     @telegram.command("adopt", help="Mark an uncertain topic open with the thread that it has.")
     def adopt(
@@ -286,12 +287,12 @@ def build_app(
 def main(
     argv: Sequence[str] | None,
     compose: Compose,
-    report: Report,
+    read_measures: ReadMeasures,
     adopt_topic: AdoptTopic,
     forget_topic: ForgetTopic,
 ) -> int:
     """Run one command line and return its exit code; the caller supplies what it needs."""
-    command = get_command(build_app(compose, report, adopt_topic, forget_topic))
+    command = get_command(build_app(compose, read_measures, adopt_topic, forget_topic))
     try:
         command.main(args=None if argv is None else list(argv), prog_name=_PROGRAM)
     except SystemExit as exit_:
@@ -440,13 +441,13 @@ def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     return None
 
 
-def _stats(directory: Path, report: Report) -> int:
+def _stats(directory: Path, read_measures: ReadMeasures) -> int:
     try:
-        text = report(directory)
+        measures = read_measures(directory)
     except CompositionError as error:
         print_failure(str(error))
         return 1
-    sys.stdout.write(text)
+    print_stats(measures)
     return 0
 
 

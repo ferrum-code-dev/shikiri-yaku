@@ -1,4 +1,4 @@
-"""The figures of `stats` (design §15): what the journal supports, with its limits printed."""
+"""The figures of `stats` (design §15): what the journal supports, before any output is chosen."""
 
 from __future__ import annotations
 
@@ -53,9 +53,6 @@ class Stats:
             install_outcomes=dict(self._log.install_outcomes()),
         )
 
-    def report(self) -> str:
-        return _render(self.measure()) + "\n"
-
 
 def _waiting(item: CompletedEscalation) -> timedelta:
     if item.first_queued_at is None:
@@ -66,45 +63,3 @@ def _waiting(item: CompletedEscalation) -> timedelta:
 
 def _labelled(counts: Mapping[str | None, int]) -> dict[str, int]:
     return {ABSENT if key is None else key: count for key, count in counts.items()}
-
-
-def _render(measures: Measures) -> str:
-    return "\n".join(
-        [
-            "1. PO wait time: journal-observed proxies, not Shikiru's exact times",
-            f"   completed escalations (resolved or closed): {measures.completed}",
-            f"   with an outbound question or approval: {measures.queued}",
-            (
-                f"   lifetime proxy: {_seconds(measures.lifetime)}; "
-                f"queued waiting proxy: {_seconds(measures.waiting)}"
-            ),
-            f"   share waiting for the PO: {_share(measures.share)}",
-            "   created is not always the original escalation time, closed is not always",
-            "   resolved, and queued does not prove the PO received it",
-            "2. Handled without the PO: resolved, no question or approval ever recorded",
-            f"   by category: {_counts(measures.handled_without_po)}",
-            "   closed signals are not counted; action attribution is unavailable",
-            "3. Escalation mix",
-            f"   by reason: {_counts(measures.reasons)}",
-            f"   by Reasoner verdict: {_counts(measures.verdicts)}",
-            "4. Installs: journaled outcomes",
-            f"   approved: {measures.install_outcomes['approved']}",
-            f"   declined: {measures.install_outcomes['declined']}",
-            f"   checks failed: {measures.install_outcomes['checks failed']}",
-            "   current state (supplemental):",
-            f"   by state: {_counts(measures.installs)}",
-            "Misroutes are a manual review (design §15) and are not printed",
-        ]
-    )
-
-
-def _seconds(duration: timedelta) -> str:
-    return f"{round(duration.total_seconds())} s"
-
-
-def _share(share: float | None) -> str:
-    return "unavailable" if share is None else f"{share:.1%}"
-
-
-def _counts(counts: Mapping[str, int]) -> str:
-    return ", ".join(f"{key} {count}" for key, count in counts.items()) or "none"

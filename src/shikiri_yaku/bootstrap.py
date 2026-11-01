@@ -61,7 +61,7 @@ from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.app.start_reconciler import StartReconciler
-from shikiri_yaku.app.stats import Stats
+from shikiri_yaku.app.stats import Measures, Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.app.tool_check import ToolCheck
@@ -796,14 +796,14 @@ def start_reconciler(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
-    return cli.main(argv, compose, stats_report, adopt_topic, forget_topic)
+    return cli.main(argv, compose, stats_measures, adopt_topic, forget_topic)
 
 
-def stats_report(directory: Path) -> str:
+def stats_measures(directory: Path) -> Measures:
     """Return the figures of one instance's journal, which must exist; nothing else is composed."""
     journal = _existing_journal(directory)
     try:
-        return Stats(JournalStats(journal)).report()
+        return Stats(JournalStats(journal)).measure()
     finally:
         journal.close()
 
