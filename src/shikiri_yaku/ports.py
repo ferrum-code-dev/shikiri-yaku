@@ -92,6 +92,7 @@ __all__ = [
     "InstallProposalLog",
     "InstallReplyHandler",
     "InstallRunLog",
+    "InstallRunner",
     "InstallToolCheck",
     "LifecycleJournal",
     "LivenessJournal",
@@ -502,6 +503,16 @@ class InstallRunLog(Protocol):
     ) -> bool: ...
 
     def fail(self, op_id: int, output_path: str, now: datetime) -> bool: ...
+
+
+class InstallRunner(Protocol):
+    """Starts the run of an approved install op; the run goes on in a task of its own.
+
+    The reply that approves the op returns at once, so the serial inbound loop never waits for a
+    host command.
+    """
+
+    def start(self, op_id: int) -> None: ...
 
 
 class ActionLog(Protocol):
