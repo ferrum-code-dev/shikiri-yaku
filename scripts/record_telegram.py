@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, ValidationError
 
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
-from shikiri_yaku.adapters.telegram_redact import Secrets, leaks, redact
+from shikiri_yaku.adapters.telegram_redact import (
+    RecordingLeakError,
+    Secrets,
+    holds_secret,
+    redact_recording,
+)
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import ChannelError
 
@@ -162,14 +167,12 @@ def _read_token(path: Path) -> str:
     return token
 
 
-def _recorded_texts() -> list[str]:
-    return [path.read_text(encoding="utf-8") for path in RECORDED.glob("*.json")]
-
-
-def _refuse_if_held(secrets: Secrets, texts: list[str]) -> None:
-    if any(leaks(text, secrets) for text in texts):
-        message = "a reply or a file in the output directory would hold the token or an id"
-        raise RecordingError(message)
+def _recorded_values() -> list[object]:
+    try:
+        return [json.loads(path.read_text(encoding="utf-8")) for path in RECORDED.glob("*.json")]
+    except json.JSONDecodeError:
+        message = "a file in the output directory is not a recorded reply"
+        raise RecordingError(message) from None
 
 
 def _dump(value: object) -> str:
@@ -203,11 +206,12 @@ async def _main(arguments: argparse.Namespace) -> int:
     token = _read_token(arguments.token_file)
     bot_id = int(token.partition(":")[0])
     secrets = Secrets(token, frozenset({arguments.chat, arguments.group, bot_id}))
-    _refuse_if_held(secrets, _recorded_texts())
+    if any(holds_secret(value, secrets) for value in _recorded_values()):
+        message = "a file in the output directory would hold the token or an id"
+        raise RecordingError(message)
     api = HttpBotApi(arguments.token_file, TIMEOUT_S)
     replies = await _record(api, arguments.chat, arguments.group)
-    redacted = {name: redact(reply, secrets) for name, reply in replies.items()}
-    _refuse_if_held(secrets, [_dump(value) for value in redacted.values()])
+    redacted = redact_recording(replies, secrets)
     _save(redacted)
     _report(redacted)
     return 0
@@ -250,6 +254,11 @@ def main() -> int:
         return 1
     except ValidationError:
         sys.stderr.write("FAILED: a reply did not have the shape this script reads\n")
+        return 1
+    except RecordingLeakError:
+        sys.stderr.write(
+            "FAILED: a reply would still hold the token or an id; nothing was written\n"
+        )
         return 1
 
 
