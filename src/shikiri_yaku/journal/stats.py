@@ -89,5 +89,21 @@ class JournalStats:
         )
         return {row["key"]: row["n"] for row in rows}
 
+    def install_outcomes(self) -> Mapping[str, int]:
+        row = self._database.connection.execute(
+            """
+            SELECT COUNT(approved_at) AS approved,
+                COALESCE(SUM(CASE WHEN state = 'declined' THEN 1 ELSE 0 END), 0) AS declined,
+                COUNT(check_failed_at) AS checks_failed
+            FROM ops WHERE kind = :install
+            """,
+            _PARAMETERS,
+        ).fetchone()
+        return {
+            "approved": row["approved"],
+            "declined": row["declined"],
+            "checks failed": row["checks_failed"],
+        }
+
     def _rows(self, sql: str) -> list[sqlite3.Row]:
         return self._database.connection.execute(sql, _PARAMETERS).fetchall()

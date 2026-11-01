@@ -27,6 +27,7 @@ class Measures:
     reasons: Mapping[str, int]
     verdicts: Mapping[str, int]
     installs: Mapping[str, int]
+    install_outcomes: Mapping[str, int]
 
 
 class Stats:
@@ -49,6 +50,7 @@ class Stats:
             reasons=dict(self._log.escalation_reasons()),
             verdicts=_labelled(self._log.escalation_verdicts()),
             installs=dict(self._log.install_states()),
+            install_outcomes=dict(self._log.install_outcomes()),
         )
 
     def report(self) -> str:
@@ -85,9 +87,12 @@ def _render(measures: Measures) -> str:
             "3. Escalation mix",
             f"   by reason: {_counts(measures.reasons)}",
             f"   by Reasoner verdict: {_counts(measures.verdicts)}",
-            "4. Installs: current state only, supplemental",
+            "4. Installs: journaled outcomes",
+            f"   approved: {measures.install_outcomes['approved']}",
+            f"   declined: {measures.install_outcomes['declined']}",
+            f"   checks failed: {measures.install_outcomes['checks failed']}",
+            "   current state (supplemental):",
             f"   by state: {_counts(measures.installs)}",
-            "   approved, declined and checks-failed outcomes are unavailable until Phase D",
             "Misroutes are a manual review (design §15) and are not printed",
         ]
     )

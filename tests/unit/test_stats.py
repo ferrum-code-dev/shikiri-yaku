@@ -157,10 +157,32 @@ def test_installs_are_counted_by_current_state_and_other_kinds_are_left_out(
     assert _measure(seeded).installs == {"intended": 1, "issued": 1}
 
 
+def test_install_outcomes_count_recorded_approvals_declines_and_failed_checks(
+    seeded: Database,
+) -> None:
+    seeded.connection.execute(
+        "UPDATE ops SET approved_at = ? WHERE identity = ?", (_at(1).isoformat(), "install-2")
+    )
+    seeded.connection.execute(
+        "UPDATE ops SET state = 'declined' WHERE identity = ?", ("install-1",)
+    )
+    seeded.connection.execute(
+        "UPDATE ops SET check_failed_at = ? WHERE identity = ?",
+        (_at(2).isoformat(), "install-2"),
+    )
+
+    assert _measure(seeded).install_outcomes == {
+        "approved": 1,
+        "declined": 1,
+        "checks failed": 1,
+    }
+
+
 def test_no_completed_escalation_leaves_the_share_unavailable() -> None:
     with closing(Database.open(":memory:")) as database:
         measured = _measure(database)
     assert (measured.completed, measured.share) == (0, None)
+    assert measured.install_outcomes == {"approved": 0, "declined": 0, "checks failed": 0}
 
 
 def _forbidden(*_arguments: object) -> None:
