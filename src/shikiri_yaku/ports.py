@@ -541,6 +541,7 @@ class PendingInstall:
     ack: Ack | None
     since: datetime
     resolved_command_id: str | None
+    rejection: str | None
 
 
 class InstallReconcileLog(Protocol):
@@ -554,6 +555,8 @@ class InstallReconcileLog(Protocol):
     def unsettled_op(self, op_id: int) -> PendingInstall | None: ...
 
     def acknowledge(self, op_id: int, ack: Ack, final_line: str, now: datetime) -> None: ...
+
+    def record_rejection(self, op_id: int, reason: str, now: datetime) -> bool: ...
 
     def confirm(self, op_id: int, final_line: str, now: datetime) -> bool: ...
 

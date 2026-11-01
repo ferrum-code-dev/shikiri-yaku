@@ -132,15 +132,21 @@ class _Shikiru:
         view: EscalationView | None = None,
         error: Exception | None = None,
         engine_up: bool = True,
+        lookup_error_at: int | None = None,
+        lookup_error: Exception | None = None,
     ) -> None:
         self._view = _view(EscalationStatus.OPEN) if view is None else view
         self._error = error
+        self._lookup_error_at = lookup_error_at
+        self._lookup_error = lookup_error
         self.engine_up = engine_up
         self.answers: list[tuple[str, str, str | None]] = []
         self.lookups: list[str] = []
 
     async def get_escalation(self, escalation_id: str) -> EscalationView | None:
         self.lookups.append(escalation_id)
+        if len(self.lookups) == self._lookup_error_at and self._lookup_error is not None:
+            raise self._lookup_error
         return self._view
 
     async def get_task(self, task_id: str) -> None:
@@ -156,6 +162,9 @@ class _Shikiru:
 
     async def status(self) -> EngineStatus:
         return EngineStatus(engine_up=self.engine_up, quotas={})
+
+    def close(self, resolution: str) -> None:
+        self._view = _view(EscalationStatus.RESOLVED, resolution)
 
 
 class _Check:
@@ -373,6 +382,19 @@ class _World:
         stored = self.signals.get(self.number)
         assert stored is not None
         return stored.state
+
+
+def _queue_approval(world: _World, op_id: int) -> None:
+    operation = world.ops.install_op(op_id)
+    assert operation is not None
+    world.outbox.queue(
+        world.number,
+        Purpose.APPROVAL,
+        [OWNER],
+        InstallApprovalPresenter().render(op_id, operation.payload),
+        key=f"install:{op_id}",
+        now=NOW,
+    )
 
 
 @pytest.fixture
@@ -596,16 +618,7 @@ def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding
     error = ShikiruRejectedError("resolution is not valid for this reason")
     world.shikiru = _Shikiru(error=error)
     op_id = world.install(issued=True)
-    operation = world.ops.install_op(op_id)
-    assert operation is not None
-    world.outbox.queue(
-        world.number,
-        Purpose.APPROVAL,
-        [OWNER],
-        InstallApprovalPresenter().render(op_id, operation.payload),
-        key=f"install:{op_id}",
-        now=NOW,
-    )
+    _queue_approval(world, op_id)
     forwarder = ProductForwarder(
         80,
         {"api": cast("ShikiruClient", world.shikiru)},
@@ -635,6 +648,49 @@ def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding
         )
     )
     assert len(world.messages.for_signal(world.number)) == 2
+
+
+def test_rejection_is_durable_when_reshow_lookup_fails_then_escalation_closes(
+    world: _World,
+) -> None:
+    error = ShikiruRejectedError("already resolved by the PO")
+    world.shikiru = _Shikiru(
+        error=error,
+        lookup_error_at=2,
+        lookup_error=ShikiruLinkDownError("reshow lookup failed"),
+    )
+    op_id = world.install(issued=True)
+    _queue_approval(world, op_id)
+    forwarder = ProductForwarder(
+        80,
+        {"api": cast("ShikiruClient", world.shikiru)},
+        world.outbox,
+        _Clock(),
+        FixedDestinations([OWNER]),
+        button_label_max_chars=32,
+    )
+
+    asyncio.run(world.reconciler(reshower=forwarder).tick())
+
+    pending = world.ops.get(op_id)
+    assert pending is not None
+    assert pending.state == OpState.ISSUED
+    assert pending.install_rejection == str(error)
+    assert [message.purpose for message in world.messages.for_signal(world.number)] == [
+        Purpose.APPROVAL
+    ]
+
+    world.shikiru.close(ResolutionKind.ANSWER)
+    asyncio.run(world.reconciler(reshower=forwarder).tick())
+
+    [approval, notice] = world.messages.for_signal(world.number)
+    assert world.state(op_id) == OpState.VOID
+    assert approval.purpose == Purpose.APPROVAL
+    assert notice.purpose == Purpose.NOTICE
+    assert notice.delivery == Delivery.PENDING
+    assert notice.body is not None
+    assert str(error) in notice.body.text
+    assert len(world.shikiru.lookups) == 3
 
 
 def test_a_link_down_during_the_answer_leaves_the_op_for_the_next_start(world: _World) -> None:

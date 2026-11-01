@@ -58,6 +58,7 @@ class StoredOp:
     state: OpState
     command_id: str | None
     resolved_command_id: str | None
+    install_rejection: str | None
     output_path: str | None
     acknowledgement: Ack | None
     updated_at: datetime
@@ -75,6 +76,7 @@ def _op(row: sqlite3.Row) -> StoredOp:
         state=OpState(row["state"]),
         command_id=row["command_id"],
         resolved_command_id=row["resolved_command_id"],
+        install_rejection=row["install_rejection"],
         output_path=row["output_path"],
         acknowledgement=None
         if row["acknowledgement"] is None
@@ -311,6 +313,17 @@ class OpStore:
             (op_id, INSTALL_KIND),
         ).fetchone()
         return row is not None and row["resolved_command_id"] == command_id
+
+    def record_install_rejection(self, op_id: int, reason: str, now: datetime) -> bool:
+        """Keep a rejected recovery answer before its PO notification is prepared."""
+        updated = self._database.connection.execute(
+            """
+            UPDATE ops SET install_rejection = COALESCE(install_rejection, ?), updated_at = ?
+            WHERE id = ? AND kind = ? AND state = ?
+            """,
+            (reason, stamp(now), op_id, INSTALL_KIND, OpState.ISSUED),
+        ).rowcount
+        return updated == 1
 
     def mark_install_check_failed(self, op_id: int, now: datetime) -> None:
         """Record the first check that did not find its tool, without counting later retries."""

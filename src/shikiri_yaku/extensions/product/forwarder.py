@@ -142,13 +142,19 @@ class ProductForwarder:
     async def _view(self, signal: Signal) -> EscalationView | None:
         if signal.escalation_id is None:
             return None
-        return await self._clients[signal.project].get_escalation(signal.escalation_id)
+        client = self._clients.get(signal.project)
+        if client is None:
+            return None
+        return await client.get_escalation(signal.escalation_id)
 
     async def _title(self, signal: Signal) -> str:
         if signal.task_id is None:
             return ""
+        client = self._clients.get(signal.project)
+        if client is None:
+            return ""
         try:
-            detail = await self._clients[signal.project].get_task(signal.task_id)
+            detail = await client.get_task(signal.task_id)
         except ShikiruError:
             return ""
         return "" if detail is None else fit(detail.task.title, self._title_max_chars)

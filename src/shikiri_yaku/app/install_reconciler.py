@@ -89,6 +89,9 @@ class InstallReconciler:
         pending = self._log.unsettled_op(op_id)
         if pending is None:
             return
+        if pending.rejection is not None:
+            await self._deliver_rejection(pending, pending.rejection)
+            return
         client = self._clients.get(pending.op.project)
         if client is None:
             if pending.op.state == INSTALL_APPROVED:
@@ -170,14 +173,19 @@ class InstallReconciler:
         try:
             ack = await send_answer(self._clients[operation.project], operation, found)
         except ShikiruRejectedError as error:
-            shown = await self._reshower.reshow(
-                operation.payload.number,
-                pending.signal,
-                f"Shikiru rejected the install answer: {error}",
-                key=f"install-rejected:{operation.id}",
-                even_if_closed=True,
-            )
-            if shown:
-                self._log.void(operation.id, now)
+            reason = str(error)
+            if self._log.record_rejection(operation.id, reason, now):
+                await self._deliver_rejection(pending, reason)
             return
         self._log.acknowledge(operation.id, ack, final_line(operation), now)
+
+    async def _deliver_rejection(self, pending: PendingInstall, reason: str) -> None:
+        shown = await self._reshower.reshow(
+            pending.op.payload.number,
+            pending.signal,
+            f"Shikiru rejected the install answer: {reason}",
+            key=f"install-rejected:{pending.op.id}",
+            even_if_closed=True,
+        )
+        if shown:
+            self._log.void(pending.op.id, self._clock.now())

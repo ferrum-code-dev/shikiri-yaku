@@ -24,6 +24,8 @@ Migration 14 keeps a Reasoner call's usage and duration for a signal's verdict, 
 Migration 15 keeps the typed host-tool proposal from the classification, as JSON (design §5).
 Migration 16 records install outcomes and a resolution event that arrived before its acknowledgement
 (design §6.3, §10, §15).
+Migration 17 records a rejected recovery answer before retryable PO notification work begins
+(design §10.1).
 """
 
 from __future__ import annotations
@@ -178,4 +180,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         "ALTER TABLE ops ADD COLUMN check_failed_at TEXT",
         "ALTER TABLE ops ADD COLUMN resolved_command_id TEXT",
     ),
+    ("ALTER TABLE ops ADD COLUMN install_rejection TEXT",),
 )

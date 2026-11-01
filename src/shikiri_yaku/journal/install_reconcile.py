@@ -58,6 +58,9 @@ class JournalInstallReconcile:
             self._signals.set_final_line(operation.payload.number, final_line, now, replace=True)
             return True
 
+    def record_rejection(self, op_id: int, reason: str, now: datetime) -> bool:
+        return self._ops.record_install_rejection(op_id, reason, now)
+
     def void_approved(self, op_id: int, now: datetime) -> bool:
         return self._ops.transition(op_id, OpState.APPROVED, OpState.VOID, now)
 
@@ -85,4 +88,5 @@ class JournalInstallReconcile:
             op.acknowledgement,
             op.updated_at,
             op.resolved_command_id,
+            op.install_rejection,
         )
