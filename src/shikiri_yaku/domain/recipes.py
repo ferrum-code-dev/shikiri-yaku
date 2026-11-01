@@ -100,6 +100,21 @@ def is_tool_name(name: str) -> bool:
     return _is_valid(_PLAIN, name)
 
 
+def is_recipe_argv(manager: str, package: str, argv: tuple[str, ...]) -> bool:
+    """Return whether `argv` is exactly the recipe of `manager` for `package`, and nothing more.
+
+    The Executor runs a stored list only when this holds, so it never runs a list it did not check.
+    """
+    recipe = RECIPES.get(manager)
+    if recipe is None or not _package_fits(recipe, package):
+        return False
+    return argv == (*recipe.words, package)
+
+
+def _package_fits(recipe: Recipe, package: str) -> bool:
+    return _is_valid(_SCOPED if recipe.scoped else _PLAIN, package)
+
+
 def _is_valid(adapter: TypeAdapter[str], value: str) -> bool:
     try:
         adapter.validate_python(value)
@@ -120,7 +135,7 @@ def validate_install(
     recipe = RECIPES.get(manager)
     if recipe is None:
         return Refusal(RefusalReason.MANAGER_NOT_ALLOWED)
-    if not _is_valid(_SCOPED if recipe.scoped else _PLAIN, package):
+    if not _package_fits(recipe, package):
         return Refusal(RefusalReason.BAD_PACKAGE)
     if manager not in host_managers:
         return Refusal(RefusalReason.MANAGER_MISSING)

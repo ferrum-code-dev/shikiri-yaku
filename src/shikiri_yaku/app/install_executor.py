@@ -1,12 +1,13 @@
 """Runs an approved install op (design §6.3, steps 4 to 6): the stored command, then the check.
 
 The op is claimed under the host lock, before its command runs, so a second run for the same op
-finds nothing to claim, and an approval whose escalation was resolved elsewhere is void. The lock
-covers the claim and the command only: the check reads the host and needs no turn. A run the check
-does not confirm is forwarded to the PO with the tail of its output. The forward is retried in this
-process while the op stays issued, and only then does the op end `failed`; an op a restart finds
-issued is settled by its check (design §10). A passing check leaves its op issued until the
-`escalation_resolved` event confirms it.
+finds nothing to claim, and an approval whose escalation was resolved elsewhere is void. Before the
+command runs, the stored list must be exactly its manager's recipe for its package; a list that is
+not fails the op without a run or a check. The lock covers the claim and the command only: the check
+reads the host and needs no turn. A run the check does not confirm is forwarded to the PO with the
+tail of its output. The forward is retried in this process while the op stays issued, and only then
+does the op end `failed`; an op a restart finds issued is settled by its check (design §10). A
+passing check leaves its op issued until the `escalation_resolved` event confirms it.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.tool_check import ToolNameError
+from shikiri_yaku.domain.recipes import is_recipe_argv
 from shikiri_yaku.ports import (
     CommandError,
     ResolutionKind,
@@ -49,6 +51,7 @@ _LOG = logging.getLogger(__name__)
 NONINTERACTIVE_ENV: Final = MappingProxyType({"CI": "1", "NONINTERACTIVE": "1"})
 ANSWER: Final = "Installed {tool} with {manager} (found at {path}). Please continue."
 FINAL_LINE: Final = "Installed {tool} with {manager}."
+REFUSED: Final = "the stored command is not the recipe of its manager for its package; nothing ran"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +139,16 @@ class InstallExecutor:
             claim = self._log.claim(op_id, self._clock.now())
             if claim is None:
                 return
-            run = await self._run(claim.op.payload.argv)
+            payload = claim.op.payload
+            # keep: a refused list is failed as it stands; the check must not answer for it
+            run = (
+                await self._run(payload.argv)
+                if is_recipe_argv(payload.manager, payload.package, payload.argv)
+                else None
+            )
+        if run is None:
+            await self._refuse(claim)
+            return
         await self._settle(claim, run)
 
     async def _run(self, argv: tuple[str, ...]) -> _Run:
@@ -195,6 +207,11 @@ class InstallExecutor:
         note = f"{reason}. Output tail:\n{_tail(text, self._tail_lines)}"
         await self._forward_until_queued(claim, note)
         self._log.fail(claim.op.id, path, self._clock.now())
+
+    async def _refuse(self, claim: InstallClaim) -> None:
+        # keep: as for a failed run, the op stays issued until the PO has the reason
+        await self._forward_until_queued(claim, REFUSED)
+        self._log.fail(claim.op.id, None, self._clock.now())
 
     async def _forward_until_queued(self, claim: InstallClaim, note: str) -> None:
         # keep: the op stays issued until the PO has the failure, so a restart can find it

@@ -57,7 +57,7 @@ class JournalInstallRuns:
                 operation.payload.number, final_line, now, replace=event_arrived
             )
 
-    def fail(self, op_id: int, output_path: str, now: datetime) -> bool:
+    def fail(self, op_id: int, output_path: str | None, now: datetime) -> bool:
         return self._ops.transition(
             op_id, OpState.ISSUED, OpState.FAILED, now, output_path=output_path
         )

@@ -520,6 +520,7 @@ class InstallRunLog(Protocol):
     A claim returns None, and voids an approved op, when its escalation is no longer forwarded.
     An acknowledged op stays issued until the `escalation_resolved` event that names its command
     confirms it, as it does for a reply's resolve. `final_line` is the line the signal ends with.
+    `fail` takes no output path when nothing ran, as for a stored list that is refused.
     """
 
     def claim(self, op_id: int, now: datetime) -> InstallClaim | None: ...
@@ -528,7 +529,7 @@ class InstallRunLog(Protocol):
         self, op_id: int, ack: Ack, output_path: str | None, final_line: str, now: datetime
     ) -> None: ...
 
-    def fail(self, op_id: int, output_path: str, now: datetime) -> bool: ...
+    def fail(self, op_id: int, output_path: str | None, now: datetime) -> bool: ...
 
     def check_failed(self, op_id: int, now: datetime) -> None: ...
 

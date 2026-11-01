@@ -14,6 +14,7 @@ from shikiri_yaku.domain.recipes import (
     InstallPlan,
     Refusal,
     RefusalReason,
+    is_recipe_argv,
     is_tool_name,
     validate_install,
 )
@@ -134,3 +135,38 @@ def test_no_recipe_word_is_a_shell_string(manager: str) -> None:
 
     assert all(BARE_WORD.fullmatch(word) for word in words)
     assert shlex.split(" ".join(words)) == list(words)
+
+
+@pytest.mark.parametrize(
+    ("manager", "package"),
+    [
+        ("brew", "ffmpeg"),
+        ("uv", "ruff"),
+        ("npm", "@scope/pkg"),
+        ("pipx", "httpie"),
+        ("cargo", "ripgrep"),
+    ],
+)
+def test_a_stored_list_that_is_its_recipe_for_its_package_is_accepted(
+    manager: str, package: str
+) -> None:
+    assert is_recipe_argv(manager, package, (*RECIPES[manager].words, package))
+
+
+@pytest.mark.parametrize(
+    ("manager", "package", "argv"),
+    [
+        ("brew", "ffmpeg", ("brew", "install", "ffmpeg", "--force")),
+        ("brew", "ffmpeg", ("brew", "install")),
+        ("brew", "ffmpeg", ("uv", "tool", "install", "ffmpeg")),
+        ("brew", "ffmpeg", ("brew", "install", "ffmpeg;echo")),
+        ("brew", "ffmpeg;echo", ("brew", "install", "ffmpeg;echo")),
+        ("npm", "user/repo", ("npm", "install", "-g", "user/repo")),
+        ("apt", "ffmpeg", ("apt", "install", "ffmpeg")),
+        ("brew", "ffmpeg", ()),
+    ],
+)
+def test_a_stored_list_that_is_not_exactly_its_recipe_is_refused(
+    manager: str, package: str, argv: tuple[str, ...]
+) -> None:
+    assert not is_recipe_argv(manager, package, argv)

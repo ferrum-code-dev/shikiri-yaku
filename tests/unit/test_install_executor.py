@@ -10,7 +10,7 @@ import pytest
 
 from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import SCRATCH_DIR_NAME, InstanceInstallFiles
-from shikiri_yaku.app.install_executor import InstallExecutor
+from shikiri_yaku.app.install_executor import REFUSED, InstallExecutor
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.signal import Closing, Kind, Signal
 from shikiri_yaku.journal.database import Database
@@ -406,6 +406,48 @@ def test_a_replacement_offered_after_approval_is_not_run(memory: Database, tmp_p
 
     [(argv, _, _, _)] = commands.calls
     assert argv == [SHELL, "-lc", "brew install ffmpeg"]
+
+
+TAMPERED_PLANS: Final = [
+    pytest.param({"argv": ("brew", "install", "ffmpeg", "--force")}, id="extra-word"),
+    pytest.param({"argv": ("uv", "tool", "install", "ffmpeg")}, id="another-managers-recipe"),
+    pytest.param({"argv": ("brew", "install", "ffmpeg;echo")}, id="semicolon-in-the-list"),
+    pytest.param(
+        {"package": "ffmpeg;echo", "argv": ("brew", "install", "ffmpeg;echo")},
+        id="semicolon-in-the-package",
+    ),
+]
+
+
+@pytest.mark.parametrize("changes", TAMPERED_PLANS)
+def test_a_stored_list_changed_after_approval_is_not_run_and_fails_with_a_reason(
+    memory: Database, tmp_path: Path, changes: dict[str, object]
+) -> None:
+    commands = _Commands()
+    check = _Check(FOUND)
+    world = _world(memory, tmp_path, commands=commands, check=check)
+    install = _Install(memory, "E-1")
+    _store_payload(memory, install.op_id, install.payload.model_copy(update=changes))
+
+    asyncio.run(world.run(install.op_id))
+
+    assert commands.calls == []
+    assert check.asked == []
+    assert install.state() == OpState.FAILED
+    assert install.signal_state() == SignalState.FORWARDED
+    [(number, _, note, _)] = world.forwarder.forwarded
+    assert number == install.number
+    assert note == REFUSED
+    stored = install.ops.get(install.op_id)
+    assert stored is not None
+    assert stored.output_path is None
+
+
+def _store_payload(database: Database, op_id: int, payload: InstallOpPayload) -> None:
+    """Rewrite the stored plan the way someone with access to the journal could."""
+    database.connection.execute(
+        "UPDATE ops SET payload = ? WHERE id = ?", (payload.model_dump_json(), op_id)
+    )
 
 
 def test_two_executors_started_for_one_op_run_one_command(memory: Database, tmp_path: Path) -> None:
