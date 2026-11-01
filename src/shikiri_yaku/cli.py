@@ -19,7 +19,15 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from typer.main import get_command
 
-from shikiri_yaku.cli_render import CheckResult, print_doctor, print_failure, print_stats
+from shikiri_yaku.cli_render import (
+    CheckResult,
+    doctor_document,
+    print_doctor,
+    print_failure,
+    print_json,
+    print_stats,
+    stats_document,
+)
 from shikiri_yaku.instance import (
     InstanceLockedError,
     InstanceLockError,
@@ -101,6 +109,7 @@ class _Global:
 
     product: str | None
     home: Path | None
+    json_output: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +197,13 @@ VERSION_OPTION = Annotated[
         help="Show the version and exit. [bold]Default:[/] off",
     ),
 ]
+JSON_OPTION = Annotated[
+    bool,
+    typer.Option(
+        "--json",
+        help=("Print doctor's and stats' output as one JSON object. [bold]Default:[/] off"),
+    ),
+]
 COMPONENT_ARGUMENT = Annotated[
     str,
     typer.Argument(metavar="COMPONENT", help="A component's name, or general."),
@@ -216,10 +232,14 @@ def choose_product(given: str | None, found: Sequence[str], home: Path) -> str:
 
 
 def _target(ctx: typer.Context) -> _Target:
-    options = cast("_Global", ctx.find_root().obj)
+    options = _options(ctx)
     home = home_dir(options.home)
     product = choose_product(options.product, product_names(home), home)
     return _Target(product, options.home, instance_dir(product, options.home))
+
+
+def _options(ctx: typer.Context) -> _Global:
+    return cast("_Global", ctx.find_root().obj)
 
 
 def build_app(
@@ -249,8 +269,9 @@ def build_app(
         home: HOME_OPTION = None,
         *,
         _version: VERSION_OPTION = False,
+        json_output: JSON_OPTION = False,
     ) -> None:
-        ctx.obj = _Global(product, home)
+        ctx.obj = _Global(product, home, json_output)
 
     @app.command("run", help="Serve one product until SIGTERM.")
     def run(ctx: typer.Context) -> None:
@@ -258,7 +279,9 @@ def build_app(
 
     @app.command(help="Check one product's instance.")
     def doctor(ctx: typer.Context) -> None:
-        raise typer.Exit(_doctor(_target(ctx).directory, compose))
+        raise typer.Exit(
+            _doctor(_target(ctx).directory, compose, as_json=_options(ctx).json_output)
+        )
 
     @app.command("install-service", help="Write the service unit of one product.")
     def install_service(ctx: typer.Context) -> None:
@@ -266,7 +289,9 @@ def build_app(
 
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
-        raise typer.Exit(_stats(_target(ctx).directory, read_measures))
+        raise typer.Exit(
+            _stats(_target(ctx).directory, read_measures, as_json=_options(ctx).json_output)
+        )
 
     @telegram.command("adopt", help="Mark an uncertain topic open with the thread that it has.")
     def adopt(
@@ -346,22 +371,23 @@ async def _serve(jobs: Sequence[Job]) -> None:
             raise outcome
 
 
-def _doctor(directory: Path, compose: Compose) -> int:
+def _doctor(directory: Path, compose: Compose, *, as_json: bool) -> int:
     try:
         settings = load_settings(directory)
     except SettingsError as error:
-        return _report([_Check("config", str(error))])
+        return _report([_Check("config", str(error))], as_json=as_json)
     return _report(
         [
             _Check("components", _components_problem(settings)),
             _Check("token file", _token_problem(settings.telegram.token_file)),
             _lock_check(directory),
             *_composed_checks(settings, directory, compose),
-        ]
+        ],
+        as_json=as_json,
     )
 
 
-def _report(checks: Sequence[_Check]) -> int:
+def _report(checks: Sequence[_Check], *, as_json: bool) -> int:
     results = [
         CheckResult(
             check.name,
@@ -370,7 +396,10 @@ def _report(checks: Sequence[_Check]) -> int:
         )
         for check in checks
     ]
-    print_doctor(results)
+    if as_json:
+        print_json(doctor_document(results))
+    else:
+        print_doctor(results)
     return 0 if all(result.passed for result in results) else 1
 
 
@@ -441,13 +470,16 @@ def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     return None
 
 
-def _stats(directory: Path, read_measures: ReadMeasures) -> int:
+def _stats(directory: Path, read_measures: ReadMeasures, *, as_json: bool) -> int:
     try:
         measures = read_measures(directory)
     except CompositionError as error:
         print_failure(str(error))
         return 1
-    print_stats(measures)
+    if as_json:
+        print_json(stats_document(measures))
+    else:
+        print_stats(measures)
     return 0
 
 

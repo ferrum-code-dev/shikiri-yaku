@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
@@ -211,3 +212,46 @@ def test_stats_prints_the_four_sections_of_a_journal_without_composing_the_servi
     positions = [output.index(title) for title in titles]
     assert positions == sorted(positions)
     assert "\x1b[" not in output
+
+
+_STATS_KEYS: Final = {
+    "completed",
+    "queued",
+    "lifetime_seconds",
+    "waiting_seconds",
+    "share",
+    "handled_without_po",
+    "reasons",
+    "verdicts",
+    "installs",
+    "install_outcomes",
+}
+
+
+def test_stats_json_is_one_object_with_the_documented_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(bootstrap, "compose", _forbidden)
+    directory = tmp_path / _PRODUCT
+    directory.mkdir()
+    with closing(Database.open(directory / JOURNAL_FILE_NAME)) as database:
+        _signal(database, "A", created=0, final=60, state=SignalState.RESOLVED, queued=(10,))
+    assert bootstrap.main(["--json", "--product", _PRODUCT, "--home", str(tmp_path), "stats"]) == 0
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert set(document) == _STATS_KEYS
+    assert (document["completed"], document["queued"]) == (1, 1)
+    assert document["lifetime_seconds"] == timedelta(minutes=60).total_seconds()
+    assert document["waiting_seconds"] == timedelta(minutes=50).total_seconds()
+    assert "\x1b[" not in output
+
+
+def test_stats_json_without_a_journal_prints_nothing_to_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(bootstrap, "compose", _forbidden)
+    assert bootstrap.main(["--json", "--product", _PRODUCT, "--home", str(tmp_path), "stats"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("✘ ")
+    assert len(captured.err.splitlines()) == 1

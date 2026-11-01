@@ -53,7 +53,7 @@ _BOT_ID: Final = 4242
 _USAGE_ERROR: Final = 2
 _DEFAULT_TAIL: Final = re.compile(r"Default: \S.*$")
 _MARKUP: Final = re.compile(r"\[/?[^\]]*\]")
-_GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--version"})
+_GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--json", "--version"})
 _PASSED_MARK: Final = "✔ "
 _FAILED_MARK: Final = "✘ "
 _SEPARATOR: Final = " · "
@@ -294,11 +294,14 @@ def _run_doctor(
     bot: BotFactory = _accepting_bot,
     commands: CommandRunner | None = None,
     product: str | None = _PRODUCT,
+    *,
+    json_output: bool = False,
 ) -> int:
     composed = partial(compose, link=lambda _executable, _project: link, bot=bot, commands=commands)
     product_option = [] if product is None else ["--product", product]
+    json_option = ["--json"] if json_output else []
     return cli.main(
-        [*product_option, "--home", str(home), "doctor"],
+        [*product_option, *json_option, "--home", str(home), "doctor"],
         composed,
         stats_measures,
         adopt_topic,
@@ -316,6 +319,33 @@ def test_doctor_passes_a_valid_instance(tmp_path: Path, capsys: pytest.CaptureFi
     assert all(line.startswith(_PASSED_MARK) and _SEPARATOR in line for line in checks)
     assert summary == f"✔ Doctor passed · {len(checks)} checks"
     assert "\x1b[" not in output
+
+
+def test_doctor_json_is_one_object_with_the_documented_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, json_output=True) == 0
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert set(document) == {"passed", "failed", "total", "checks"}
+    assert (document["passed"], document["failed"]) == (True, 0)
+    assert document["total"] == len(document["checks"])
+    assert all(set(check) == {"name", "passed", "detail"} for check in document["checks"])
+    assert "\x1b[" not in output
+
+
+def test_doctor_json_names_the_failed_check_and_exits_non_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+    _remove_component(tmp_path)
+
+    assert _run_doctor(tmp_path, json_output=True) == 1
+    document = json.loads(capsys.readouterr().out)
+    assert (document["passed"], document["failed"]) == (False, 1)
+    assert [check["name"] for check in document["checks"] if not check["passed"]] == ["components"]
 
 
 @pytest.mark.parametrize(

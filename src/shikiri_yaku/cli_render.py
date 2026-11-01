@@ -1,4 +1,4 @@
-"""The human output of the command line: doctor, stats and one line per failure.
+"""The output of the command line: doctor, stats and one line per failure, as text or as JSON.
 
 Rich writes colour only to a terminal, so piped output is plain text. Soft wrapping keeps each
 line whole, so a long detail is never split across lines of a pipe (design §3.1).
@@ -6,6 +6,8 @@ line whole, so a long detail is never split across lines of a pipe (design §3.1
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -49,6 +51,40 @@ def print_doctor(checks: Sequence[CheckResult]) -> None:
         console.print(_check_line(check))
     console.print()
     console.print(_summary(checks))
+
+
+def print_json(document: Mapping[str, object]) -> None:
+    """Print one JSON object on one line, to standard output."""
+    sys.stdout.write(f"{json.dumps(document)}\n")
+
+
+def doctor_document(checks: Sequence[CheckResult]) -> dict[str, object]:
+    """Build the doctor report as JSON: the overall result, the counts and each check."""
+    failed = _failures(checks)
+    return {
+        "passed": failed == 0,
+        "failed": failed,
+        "total": len(checks),
+        "checks": [
+            {"name": check.name, "passed": check.passed, "detail": check.detail} for check in checks
+        ],
+    }
+
+
+def stats_document(measures: Measures) -> dict[str, object]:
+    """Build the stats figures as JSON: durations in seconds, share null when unavailable."""
+    return {
+        "completed": measures.completed,
+        "queued": measures.queued,
+        "lifetime_seconds": measures.lifetime.total_seconds(),
+        "waiting_seconds": measures.waiting.total_seconds(),
+        "share": measures.share,
+        "handled_without_po": dict(measures.handled_without_po),
+        "reasons": dict(measures.reasons),
+        "verdicts": dict(measures.verdicts),
+        "installs": dict(measures.installs),
+        "install_outcomes": dict(measures.install_outcomes),
+    }
 
 
 def print_failure(message: str) -> None:
@@ -160,8 +196,12 @@ def _check_line(check: CheckResult) -> Text:
     return line
 
 
+def _failures(checks: Sequence[CheckResult]) -> int:
+    return sum(not check.passed for check in checks)
+
+
 def _summary(checks: Sequence[CheckResult]) -> Text:
-    failed = sum(not check.passed for check in checks)
+    failed = _failures(checks)
     if failed == 0:
         line = _outcome(passed=True)
         line.append(" Doctor passed", style=f"{BOLD} {PASSED_COLOR}")

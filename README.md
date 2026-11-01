@@ -35,7 +35,7 @@ Global options come before the command. `--product` names the product. When `--h
 several, the command refuses and names what it found.
 
 ```
-shikiri-yaku [--product NAME] [--home PATH] [--version] COMMAND
+shikiri-yaku [--product NAME] [--home PATH] [--json] [--version] COMMAND
 ```
 
 - `run` serves one product until SIGTERM.
@@ -44,8 +44,20 @@ shikiri-yaku [--product NAME] [--home PATH] [--version] COMMAND
 - `install-service` writes the launchd or systemd unit that runs `run` at login.
 - `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`
   repair an uncertain Telegram topic, as described below.
+- `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text.
+  The other commands ignore it. Exit codes are the same. `doctor` reports its failed checks inside
+  the object. When `stats` cannot run, it prints one `✘` line on standard error and nothing on
+  standard output.
 
 The older forms, with the product after the verb (`run shop`) or `topics …`, are usage errors.
+
+`doctor --json` has the keys `passed` (true when every check passed), `failed` (the number of
+failed checks), `total` and `checks`. Each entry of `checks` has `name`, `passed` and `detail`.
+
+`stats --json` has the keys `completed`, `queued`, `lifetime_seconds`, `waiting_seconds`,
+`share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and `install_outcomes`. The two
+durations are in seconds, and `share` is the waiting fraction from 0 to 1, or `null` when it is
+unavailable. The last five keys each map a label to its count.
 
 ## Telegram topics
 

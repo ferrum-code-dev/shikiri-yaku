@@ -87,9 +87,9 @@ merged and `uv run poe check` passes.
   - [x] E2. Drills as tests
   - [x] E3. Recording real Telegram replies
   - [x] E4. Install path hardening from the security review
-  - [ ] E5. Command line in Shikiru's style
+  - [x] E5. Command line in Shikiru's style
     - [x] E5a. Typer app, global options, product resolution, flat verbs, telegram group
     - [x] E5b. Help palette and help layout
     - [x] E5c. Doctor lines and summary, error lines, colour on a terminal only
     - [x] E5d. Stats as titled rich tables
-    - [ ] E5e. --json for doctor and stats
+    - [x] E5e. --json for doctor and stats
