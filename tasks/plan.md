@@ -1252,14 +1252,17 @@ Split, one commit each, gate green per commit (the whole of D7 is about 900 line
   in the reply binding, the void note.
 * D7b. Start-up reconcile of approved and issued installs: the decision above, the in-flight check on
   the executor, the bootstrap job.
-* D7c. Install counters: migration 16 (`ops.approved_at`, `ops.check_failed_at`), the marks set on
-  approval and on a failed check, the `stats` labels.
-* D7d. Crash-point and composed restart tests; the check-after break; D7 ticked.
+* D7c. Install counters: migration 16 (`ops.approved_at`, `ops.check_failed_at`, and the
+  pre-ack `ops.resolved_command_id`), the marks set on approval and on a failed check, the `stats`
+  labels.
+* D7d. Crash-point tests, including an `escalation_resolved` event before its acknowledgement and a
+  nonzero run whose restart check passes; composed path; check-after regression; D7 ticked.
 
 Acceptance criteria:
 * Restart with an op in `issued` and the tool present: resolves once, runs nothing. With the tool still missing: a new approval message, and the old one is void.
 * A crash between the claim and the run, and between the run and the resolve, are both covered by tests with the clock and fake runner.
 * `stats` shows the three install counters from a seeded journal.
+* A resolved event that arrives before its acknowledgement confirms the install when the matching acknowledgement arrives; a nonzero run interrupted during its failure forward is decided by the passing check at restart.
 * The composed path passes, and fails when the check-after step is removed.
 * The gate passes.
 
