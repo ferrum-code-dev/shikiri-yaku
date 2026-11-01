@@ -1,7 +1,8 @@
 """Settles unsettled installs by observation (design §6.3 step 7, §10).
 
 An approved op is checked against Shikiru before it runs. An issued op is decided by its escalation,
-then by its check; the host install is never repeated. A tool found is answered, and a missing tool
+then by its stored list, then by its check; the host install is never repeated. A refused list is
+failed with its reason and never checked or answered. A tool found is answered, and a missing tool
 is asked again. An answer the lost link did not deliver is shown to the PO again. Each pass observes
 unsettled ops again, while an op a run of this process has in hand is left alone.
 """
@@ -12,7 +13,7 @@ import contextlib
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.app.install_executor import final_line, send_answer
+from shikiri_yaku.app.install_executor import REFUSED, final_line, is_refused, send_answer
 from shikiri_yaku.app.reconciler import AGAIN_NOTE, is_lost
 from shikiri_yaku.app.tool_check import ToolNameError
 from shikiri_yaku.ports import (
@@ -121,6 +122,8 @@ class InstallReconciler:
         now = self._clock.now()
         if view.escalation.status != EscalationStatus.OPEN:
             self._closed(pending, view, now)
+        elif is_refused(pending.op.payload):
+            await self._refuse(pending, now)
         elif pending.ack is None:
             await self._decide_by_check(pending, now)
         elif await self._is_lost(pending):
@@ -178,6 +181,17 @@ class InstallReconciler:
                 await self._deliver_rejection(pending, reason)
             return
         self._log.acknowledge(operation.id, ack, final_line(operation), now)
+
+    async def _refuse(self, pending: PendingInstall, now: datetime) -> None:
+        # keep: the op fails only once the reason is queued, so a restart shows it again
+        shown = await self._reshower.reshow(
+            pending.op.payload.number,
+            pending.signal,
+            REFUSED,
+            key=f"install-refused:{pending.op.id}",
+        )
+        if shown:
+            self._log.fail(pending.op.id, now)
 
     async def _deliver_rejection(self, pending: PendingInstall, reason: str) -> None:
         shown = await self._reshower.reshow(

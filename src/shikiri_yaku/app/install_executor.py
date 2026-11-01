@@ -6,8 +6,9 @@ command runs, the stored list must be exactly its manager's recipe for its packa
 not fails the op without a run or a check. The lock covers the claim and the command only: the check
 reads the host and needs no turn. A run the check does not confirm is forwarded to the PO with the
 tail of its output. The forward is retried in this process while the op stays issued, and only then
-does the op end `failed`; an op a restart finds issued is settled by its check (design §10). A
-passing check leaves its op issued until the `escalation_resolved` event confirms it.
+does the op end `failed`; an op a restart finds issued is settled by its check (design §10), except
+a refused list, which is never checked: its reason is queued and the op fails. A passing check
+leaves its op issued until the `escalation_resolved` event confirms it.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from shikiri_yaku.domain.recipes import InstallOpPayload
     from shikiri_yaku.ports import (
         Ack,
         Clock,
@@ -70,6 +72,14 @@ async def send_answer(client: ShikiruClient, operation: InstallOp, found: str) -
 def final_line(operation: InstallOp) -> str:
     """Return the line the signal ends with once the install is answered."""
     return FINAL_LINE.format(tool=operation.payload.tool, manager=operation.payload.manager)
+
+
+def is_refused(payload: InstallOpPayload) -> bool:
+    """Whether the stored list is not exactly its manager's recipe for its package.
+
+    A restart recomputes this from the stored payload, so a refusal needs no marker of its own.
+    """
+    return not is_recipe_argv(payload.manager, payload.package, payload.argv)
 
 
 class InstallExecutor:
@@ -141,11 +151,7 @@ class InstallExecutor:
                 return
             payload = claim.op.payload
             # keep: a refused list is failed as it stands; the check must not answer for it
-            run = (
-                await self._run(payload.argv)
-                if is_recipe_argv(payload.manager, payload.package, payload.argv)
-                else None
-            )
+            run = None if is_refused(payload) else await self._run(payload.argv)
         if run is None:
             await self._refuse(claim)
             return

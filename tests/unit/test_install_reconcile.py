@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.app.install_executor import ANSWER, FINAL_LINE, InstallExecutor
+from shikiri_yaku.app.install_executor import ANSWER, FINAL_LINE, REFUSED, InstallExecutor
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.app.install_reconciler import InstallReconciler
 from shikiri_yaku.domain.outbound import Purpose
@@ -80,6 +80,7 @@ PAYLOAD = InstallOpPayload(
     why="not on the host PATH",
     argv=("brew", "install", "ffmpeg"),
 )
+TAMPERED_ARGV: Final = ("brew", "install", "ffmpeg", "--force")
 
 
 def _view(status: str, resolution: str | None = None) -> EscalationView:
@@ -205,6 +206,7 @@ class _Host:
 class _Commands:
     def __init__(self, returncode: int = 1) -> None:
         self._returncode = returncode
+        self.calls: list[tuple[str, ...]] = []
 
     async def run(
         self,
@@ -214,7 +216,8 @@ class _Commands:
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
     ) -> CommandResult:
-        del argv, timeout_s, cwd, env
+        self.calls.append(tuple(argv))
+        del timeout_s, cwd, env
         return CommandResult(self._returncode, "partial install", "manager exited late")
 
 
@@ -368,6 +371,15 @@ class _World:
     def reconcile(self) -> None:
         asyncio.run(self.reconciler().tick())
 
+    def tamper_argv(self, op_id: int, argv: tuple[str, ...]) -> None:
+        """Rewrite the stored list the way someone with access to the journal could."""
+        operation = self.ops.install_op(op_id)
+        assert operation is not None
+        payload = operation.payload.model_copy(update={"argv": argv})
+        self.database.connection.execute(
+            "UPDATE ops SET payload = ? WHERE id = ?", (payload.model_dump_json(), op_id)
+        )
+
     def state(self, op_id: int) -> str:
         stored = self.ops.get(op_id)
         assert stored is not None
@@ -395,6 +407,41 @@ def _queue_approval(world: _World, op_id: int) -> None:
         key=f"install:{op_id}",
         now=NOW,
     )
+
+
+def _product_forwarder(world: _World) -> ProductForwarder:
+    return ProductForwarder(
+        80,
+        {"api": cast("ShikiruClient", world.shikiru)},
+        world.outbox,
+        _Clock(),
+        FixedDestinations([OWNER]),
+        button_label_max_chars=32,
+    )
+
+
+def _interrupted_refusal(world: _World, tmp_path: Path, commands: _Commands) -> int:
+    """An approved op whose stored list was changed, stopped while its refusal is forwarded."""
+    op_id = world.install(issued=False)
+    world.tamper_argv(op_id, TAMPERED_ARGV)
+    executor = InstallExecutor(
+        JournalInstallRuns(world.database, world.signals, world.ops),
+        {"api": cast("ShikiruClient", world.shikiru)},
+        _InterruptedForwarder(),
+        _Check(),
+        commands,
+        host=_Host(),
+        files=_Files(tmp_path),
+        clock=_Clock(),
+        shell=SHELL,
+        timeout_s=60,
+        tail_lines=5,
+        forward_retry_s=1,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(executor.execute(op_id))
+    assert world.state(op_id) == OpState.ISSUED
+    return op_id
 
 
 @pytest.fixture
@@ -599,6 +646,53 @@ def test_an_issued_install_whose_tool_is_missing_is_asked_again(world: _World) -
     assert new.payload == PAYLOAD.model_copy(update={"number": world.number})
     [stored] = world.messages.for_signal(world.number)
     assert stored.purpose == Purpose.APPROVAL
+
+
+@pytest.mark.parametrize("found", [FOUND, None], ids=["tool-found", "tool-missing"])
+def test_a_refusal_interrupted_during_forward_fails_at_restart_without_answer_or_reask(
+    world: _World, tmp_path: Path, found: str | None
+) -> None:
+    commands = _Commands()
+    op_id = _interrupted_refusal(world, tmp_path, commands)
+    check = _Check(found)
+    world.check = check
+
+    asyncio.run(world.reconciler(reshower=_product_forwarder(world)).tick())
+
+    assert world.state(op_id) == OpState.FAILED
+    assert commands.calls == []
+    assert check.calls == 0
+    assert world.shikiru.answers == []
+    assert world.ops.get_install(f"install:{SIGNAL.id}:after:{op_id}") is None
+    [question] = world.messages.for_signal(world.number)
+    assert question.purpose == Purpose.QUESTION
+    assert question.body is not None
+    assert REFUSED in question.body.text
+
+
+def test_a_refusal_the_link_cannot_deliver_stays_issued_until_a_later_pass(
+    world: _World, tmp_path: Path
+) -> None:
+    world.shikiru = _Shikiru(
+        lookup_error_at=2, lookup_error=ShikiruLinkDownError("reshow lookup failed")
+    )
+    commands = _Commands()
+    op_id = _interrupted_refusal(world, tmp_path, commands)
+    forwarder = _product_forwarder(world)
+
+    asyncio.run(world.reconciler(reshower=forwarder).tick())
+
+    assert world.state(op_id) == OpState.ISSUED
+    assert world.messages.for_signal(world.number) == []
+
+    asyncio.run(world.reconciler(reshower=forwarder).tick())
+
+    assert world.state(op_id) == OpState.FAILED
+    assert commands.calls == []
+    assert world.shikiru.answers == []
+    [question] = world.messages.for_signal(world.number)
+    assert question.body is not None
+    assert REFUSED in question.body.text
 
 
 def test_an_answer_shikiru_refuses_voids_the_op_and_keeps_the_question(world: _World) -> None:
