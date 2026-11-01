@@ -12,19 +12,25 @@ import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
-from shikiri_yaku.app.event_source import MERGED_LINE
+from shikiri_yaku.app.event_source import CLOSED_UNMERGED_LINE, MERGED_LINE, PR_CLOSED_REASON
 from shikiri_yaku.app.health_source import RECOVERED_LINE
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
-from shikiri_yaku.domain.outbound import ENGINE_UP_LINE
+from shikiri_yaku.domain.callback import decline_data
+from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, Purpose
 from shikiri_yaku.domain.signal import Kind, Signal
-from shikiri_yaku.extensions.infrastructure.rules import AGENT_ERROR, QUOTA_EXHAUSTED
+from shikiri_yaku.extensions.infrastructure.install_replies import DECLINED_NOTE
+from shikiri_yaku.extensions.infrastructure.rules import (
+    AGENT_ERROR,
+    DECISION_REQUIRED,
+    QUOTA_EXHAUSTED,
+)
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     Database,
@@ -38,6 +44,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import (
+    INSTALL_DECLINED,
     AttemptState,
     CommandResult,
     EventKinds,
@@ -90,6 +97,17 @@ _ENGINE_DOWN_ID: Final = "api:engine_down:40"
 _LAST_EVENT: Final = 40
 # keep: a liveness check runs once its interval has passed, which a test moves the clock past for
 _LIVENESS_GAP: Final = timedelta(minutes=2)
+_SECOND_OWNER: Final = 1002
+_QUESTION_TEXT: Final = "Which behavior should remain?"
+_ANSWER_TAP: Final = "a:1:1"
+_RESOLVED_IN_SHIKIRU: Final = "Resolved in Shikiru: answer"
+_ALREADY_RESOLVED: Final = "Already resolved"
+_RESOLVED_DATA: Final[dict[str, Any]] = {"escalation_id": "E-1", "resolution": "answer"}
+_STOP_DOWN_ID: Final = "api:engine_down:1"
+# keep: a stop is stamped a second after the test starts, so the run that reads it began before it
+_STOP_AHEAD: Final = timedelta(seconds=1)
+# keep: past the grace of a stop, and a later run starts after the stop it must respect
+_STOP_GAP: Final = timedelta(minutes=3)
 # keep: a refused restart asks doctor for the failed checks, and this fake is the only command
 _DOCTOR_ONLY_SHIKIRU: Final = """#!/bin/sh
 case "$*" in
@@ -123,6 +141,22 @@ def _recorded_event(kind: str, event_id: int, data: dict[str, Any]) -> dict[str,
     return {**event, "id": event_id, "kind": kind, "message": kind, "data": data}
 
 
+def _question_event(event_id: int) -> dict[str, Any]:
+    """Return the escalation event that asks the PO a question, as Shikiru raises it."""
+    return _recorded_event(
+        EventKinds.ESCALATION, event_id, {"escalation_id": "E-1", "reason": DECISION_REQUIRED}
+    )
+
+
+def _resolved_escalation() -> dict[str, Any]:
+    """Return the recorded escalation as Shikiru has it once the answer resolved it."""
+    view = _recorded("get_escalation")
+    view["result"]["escalation"].update(
+        status="resolved", resolution="answer", resolved_at="2026-10-28T08:10:00Z"
+    )
+    return view
+
+
 class _ShikiruSession:
     """Answers the tools of one healthy project from the recorded fixtures, or from `answers`.
 
@@ -130,7 +164,8 @@ class _ShikiruSession:
     process that dies inside the call leaves it. A poll is answered with `events` at once, and with
     `later` as well once `gate` is set, as an event that comes after the first ones does. A resolve
     is answered with `resolve_status`: `queued` for a reply, `done` for an install whose answer the
-    executor acknowledges.
+    executor acknowledges. After a resolve the escalation reads as resolved, as Shikiru has it, and
+    with `hangs_resolve` the call never returns, as a process killed inside it leaves it.
     """
 
     def __init__(
@@ -138,6 +173,7 @@ class _ShikiruSession:
         resolved: asyncio.Event,
         *,
         hangs_submit: bool = False,
+        hangs_resolve: bool = False,
         answers: Mapping[str, dict[str, Any]] | None = None,
         events: Sequence[dict[str, Any]] = (),
         later: Sequence[dict[str, Any]] = (),
@@ -148,7 +184,9 @@ class _ShikiruSession:
         self.resolutions: list[dict[str, Any]] = []
         self.submits: list[str] = []
         self.submitted = asyncio.Event()
+        self.tools: list[str] = []
         self.hangs_submit = hangs_submit
+        self.hangs_resolve = hangs_resolve
         self._answers: dict[str, dict[str, Any]] = {"status": {"engine_up": True, "quotas": {}}}
         self._answers.update(answers or {})
         self._events = list(events)
@@ -157,12 +195,16 @@ class _ShikiruSession:
         self._resolve_status = resolve_status
 
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
+        self.tools.append(name)
         if name == "wait_for_events":
             events = await self._poll(arguments["since_id"], arguments["timeout_s"])
             payload: dict[str, Any] = {"result": events}
         elif name == "resolve_escalation":
             self.resolutions.append(arguments)
+            self._answers["get_escalation"] = _resolved_escalation()
             self.resolved.set()
+            if self.hangs_resolve:
+                await asyncio.Event().wait()
             payload = {"id": 12, "status": self._resolve_status, "result": None, "message": None}
         elif name == "submit_task":
             self.submits.append(arguments["request"])
@@ -255,15 +297,16 @@ def _shikiru_link(
     return link
 
 
-def _instance(home: Path, group_id: int | None = None) -> Path:
+def _instance(home: Path, group_id: int | None = None, owners: tuple[int, ...] = (_OWNER,)) -> Path:
     component = home / "api"
     component.mkdir()
     directory = home / _PRODUCT
     directory.mkdir()
     group = "" if group_id is None else f"group_id = {group_id}\n"
+    listed = ", ".join(map(str, owners))
     (directory / "config.toml").write_text(
         f'product = "{_PRODUCT}"\n\n[[components]]\nname = "api"\npath = "{component}"\n\n'
-        f"[channels.telegram]\nowners = [{_OWNER}]\n{group}\n"
+        f"[channels.telegram]\nowners = [{listed}]\n{group}\n"
         "[operator]\ndispatch_interval_s = 1\noutbox_interval_s = 1\n\n"
         "[handlers.infrastructure]\nrestart_poll_s = 1\n",
         encoding="utf-8",
@@ -414,6 +457,44 @@ class _RestartBot(FakeBotApi):
     def __init__(self, updates: list[dict[str, Any]]) -> None:
         super().__init__(updates, after_send=False)
         self._message_ids = itertools.count(FIRST_MESSAGE_ID + 1)
+
+
+class _GatedBot(FakeBotApi):
+    """A fake Bot API that gives each update once its own gate is set, in the order given.
+
+    A sent message is reported in the chat it went to, as Telegram reports it, so each owner's
+    question keeps its own reference for the taps that answer it.
+    """
+
+    def __init__(self, gated: list[tuple[dict[str, Any], asyncio.Event]]) -> None:
+        super().__init__(after_send=False)
+        self._gated = gated
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == "getUpdates":
+            self._updates = [update for update, gate in self._gated if gate.is_set()]
+            self._gated = [(update, gate) for update, gate in self._gated if not gate.is_set()]
+        reply = await super().call(method, payload)
+        if method == "sendMessage":
+            sent = cast("dict[str, Any]", reply)
+            sent["result"]["chat"]["id"] = int(str(payload["chat_id"]))
+        return reply
+
+
+class _HangingSendBot(FakeBotApi):
+    """A fake Bot API whose first message with `marker` is never answered, as a crash leaves it."""
+
+    def __init__(self, marker: str) -> None:
+        super().__init__()
+        self._marker = marker
+        self.hung = asyncio.Event()
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == "sendMessage" and self._marker in str(payload.get("text", "")):
+            self.calls.append((method, dict(payload)))
+            self.hung.set()
+            await asyncio.Event().wait()
+        return await super().call(method, payload)
 
 
 def _in_topic(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
@@ -1083,3 +1164,279 @@ def test_an_engine_down_forwarded_for_want_of_a_restart_closes_once_the_engine_i
     [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
     final = (str(edit["text"]).endswith(ENGINE_UP_LINE), edit["reply_markup"])
     assert final == (True, {"inline_keyboard": []})
+
+
+def _tap(owner: int, message_id: int, data: str, update_id: int) -> dict[str, Any]:
+    """Return the owner's tap of the button `data` on the message `message_id`, as an update."""
+    recorded = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
+    update = recorded["result"][2]
+    update["update_id"] = update_id
+    tapped = update["callback_query"]
+    tapped["from"]["id"] = owner
+    tapped["message"]["message_id"] = message_id
+    tapped["message"]["chat"]["id"] = owner
+    tapped["data"] = data
+    return update
+
+
+def _sent(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
+    """Return the messages the bot sent, in any chat, whose text contains `text`."""
+    return [
+        payload
+        for method, payload in bot.calls
+        if method == "sendMessage" and text in str(payload.get("text", ""))
+    ]
+
+
+def _edits(bot: FakeBotApi) -> list[dict[str, Any]]:
+    return [payload for method, payload in bot.calls if method == "editMessageText"]
+
+
+def _cursor(directory: Path) -> tuple[int, int | None] | None:
+    """Return the event cursor as (last event id, respected stop id), read on its own connection."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            "SELECT last_event_id, respected_stop_id FROM cursors"
+        ).fetchone()
+    finally:
+        database.close()
+    return None if row is None else (row["last_event_id"], row["respected_stop_id"])
+
+
+def _question_refs(directory: Path) -> list[str | None]:
+    """Return the platform reference of each question the journal holds, None while unsent."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        rows = database.connection.execute(
+            "SELECT platform_message_id FROM messages WHERE purpose = ?", (Purpose.QUESTION,)
+        ).fetchall()
+    finally:
+        database.close()
+    return [row["platform_message_id"] for row in rows]
+
+
+def _resolve_states(directory: Path) -> list[str]:
+    """Return the state of each resolve op the journal holds."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        rows = database.connection.execute(
+            "SELECT state FROM ops WHERE kind = 'resolve'"
+        ).fetchall()
+    finally:
+        database.close()
+    return [row["state"] for row in rows]
+
+
+def _play(
+    directory: Path,
+    session: _ShikiruSession,
+    bot: FakeBotApi,
+    scenario: Awaitable[None],
+    *,
+    clock: NapClock | None = None,
+) -> None:
+    """Start one composed Operator as a restart does, run it until `scenario` ends, then stop it."""
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock() if clock is None else clock,
+    )
+    try:
+        composition.recover()
+        asyncio.run(_deliver(composition.jobs, scenario))
+    finally:
+        composition.close()
+
+
+def test_two_answers_to_one_question_from_two_chats_resolve_once(tmp_path: Path) -> None:
+    """A second owner's answer to a question already answered is told so and sends nothing.
+
+    The question goes to both owners. The second tap comes once the first answer is confirmed,
+    so the journal holds the resolution it must report (design §15 drill 6).
+    """
+    directory = _instance(tmp_path, owners=(_OWNER, _SECOND_OWNER))
+    first_chat, second_chat = asyncio.Event(), asyncio.Event()
+    bot = _GatedBot(
+        [
+            (_tap(_OWNER, FIRST_MESSAGE_ID, _ANSWER_TAP, update_id=801), first_chat),
+            (_tap(_SECOND_OWNER, FIRST_MESSAGE_ID + 1, _ANSWER_TAP, update_id=802), second_chat),
+        ]
+    )
+    released = asyncio.Event()
+    session = _ShikiruSession(
+        asyncio.Event(),
+        events=[_question_event(41)],
+        later=[
+            _recorded_event(
+                EventKinds.ESCALATION_RESOLVED, 42, {**_RESOLVED_DATA, "command_id": 12}
+            )
+        ],
+        gate=released,
+    )
+
+    async def two_chats() -> None:
+        await _until(lambda: len(_sent(bot, _QUESTION_TEXT)) == 2)
+        first_chat.set()
+        await _until(session.resolved.is_set)
+        released.set()
+        await _until(lambda: _resolve_states(directory) == ["confirmed"])
+        second_chat.set()
+        await _until(lambda: bool(_sent(bot, _ALREADY_RESOLVED)))
+
+    _play(directory, session, bot, two_chats())
+    assert len(session.resolutions) == 1
+    assert [payload["chat_id"] for payload in _sent(bot, _ALREADY_RESOLVED)] == [str(_SECOND_OWNER)]
+
+
+def test_an_answer_given_in_tmux_closes_the_question_in_telegram(tmp_path: Path) -> None:
+    """An escalation answered outside Telegram closes its question there, once the PO has seen it.
+
+    The resolving event comes after the question is sent (design §15 drill 6, "an answer in tmux").
+    """
+    directory = _instance(tmp_path)
+    bot = _MarkingBot(_QUESTION_TEXT)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        events=[_question_event(41)],
+        later=[_recorded_event(EventKinds.ESCALATION_RESOLVED, 42, _RESOLVED_DATA)],
+        gate=bot.marked,
+    )
+    _play(directory, session, bot, _until(lambda: _edited(bot, _RESOLVED_IN_SHIKIRU)))
+    [edit] = _edits(bot)
+    assert (edit["message_id"], edit["reply_markup"]) == (FIRST_MESSAGE_ID, {"inline_keyboard": []})
+    assert _signal_state(directory, _E1_ID) is SignalState.CLOSED
+
+
+def test_a_pull_request_closed_unmerged_closes_its_review_message(tmp_path: Path) -> None:
+    """A pull request closed without a merge ends its review message as closed unmerged.
+
+    The review is sent first; Shikiru then raises the escalation for the closed pull request
+    (design §15 drill 5).
+    """
+    directory = _instance(tmp_path)
+    bot = _MarkingBot(_REVIEW_MARKER)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"list_escalations": {"result": []}},
+        events=[_recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": 2})],
+        later=[
+            _recorded_event(
+                EventKinds.ESCALATION, 42, {"escalation_id": "E-1", "reason": PR_CLOSED_REASON}
+            )
+        ],
+        gate=bot.marked,
+    )
+    _play(directory, session, bot, _until(lambda: _edited(bot, CLOSED_UNMERGED_LINE)))
+    [edit] = _edits(bot)
+    final = (edit["message_id"], edit["reply_markup"], CLOSED_UNMERGED_LINE in str(edit["text"]))
+    assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
+
+
+def test_a_question_killed_mid_send_is_sent_once_more_and_then_confirmed(tmp_path: Path) -> None:
+    """A question the Channel took but the Operator never confirmed is sent again after a restart.
+
+    The copy carries the same signal number, so the PO can recognize the duplicate; the journal
+    then holds the message as sent (design §7, §15 drill 4).
+    """
+    directory = _instance(tmp_path)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        events=[_question_event(41)],
+    )
+    killed = _HangingSendBot(_QUESTION_TEXT)
+    _play(directory, session, killed, _until(killed.hung.is_set))
+    survivor = FakeBotApi()
+    _play(directory, session, survivor, _until(lambda: _question_refs(directory) == ["1001/42"]))
+    counts = (len(_sent(killed, _QUESTION_TEXT)), len(_sent(survivor, _QUESTION_TEXT)))
+    assert counts == (1, 1)
+
+
+def test_an_operator_killed_mid_resolve_confirms_the_answer_shikiru_recorded(
+    tmp_path: Path,
+) -> None:
+    """A resolve cut short by a crash is confirmed on restart from the escalation's own state.
+
+    The answer is not sent again, and the PO is not asked the question once more
+    (design §15 drill 4).
+    """
+    directory = _instance(tmp_path)
+    tap = _tap(_OWNER, FIRST_MESSAGE_ID, _ANSWER_TAP, update_id=801)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        hangs_resolve=True,
+        events=[_question_event(41)],
+    )
+    _play(directory, session, FakeBotApi([tap]), _until(session.resolved.is_set))
+    restarted = FakeBotApi()
+    _play(
+        directory, session, restarted, _until(lambda: _resolve_states(directory) == ["confirmed"])
+    )
+    assert (len(session.resolutions), _sent(restarted, _QUESTION_TEXT)) == (1, [])
+
+
+def test_an_engine_the_po_stopped_stays_stopped_across_an_operator_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean stop is respected once its grace has passed, so a restart does not reopen it.
+
+    The restart starts after the stop, so the stop would read as a host shutdown unless the first
+    run respected it (design §15 drill 4).
+    """
+    # keep: a wrong verdict would start the engine, and no command it runs may be found on this PATH
+    monkeypatch.setenv("PATH", str(tmp_path))
+    directory = _instance(tmp_path)
+    clock = NapClock()
+    stop = _recorded_event(EventKinds.ENGINE_STOPPED, 1, {})
+    stop["ts"] = (clock.now() + _STOP_AHEAD).isoformat()
+    released = asyncio.Event()
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"status": {"engine_up": False, "quotas": {}}},
+        later=[stop],
+        gate=released,
+    )
+
+    async def po_stops_the_engine() -> None:
+        await _until(lambda: _cursor(directory) is not None)
+        released.set()
+        await _until(lambda: _cursor(directory) == (1, None))
+        clock.advance(_STOP_GAP)
+        await _until(lambda: _cursor(directory) == (1, 1))
+
+    _play(directory, session, FakeBotApi(), po_stops_the_engine(), clock=clock)
+
+    restarted = FakeBotApi()
+    checks = session.tools.count("status")
+
+    async def restart_checks_the_engine() -> None:
+        await _until(lambda: session.tools.count("status") > checks)
+        clock.advance(_LIVENESS_GAP)
+        await _until(lambda: session.tools.count("status") > checks + 1)
+
+    _play(directory, session, restarted, restart_checks_the_engine(), clock=clock)
+    opened = _signal_state(directory, _STOP_DOWN_ID)
+    assert (opened, _sent(restarted, _ENGINE_DOWN_TEXT)) == (None, [])
+
+
+def test_a_declined_install_runs_no_command_and_leaves_the_escalation_to_the_po(
+    tmp_path: Path,
+) -> None:
+    """Declining an install approval runs no host command and forwards the escalation with a note.
+
+    Design §15 drill 1 ("the same with Decline") and principle 4: nothing runs without approval.
+    """
+    directory = _instance(tmp_path)
+    runner = _InstallRunner()
+    callback_data, op_id, _created_at = _initial_install(directory, runner)
+    _, number, _ = callback_data.split(":")
+    decline = _tap(_OWNER, FIRST_MESSAGE_ID, decline_data(int(number), op_id), update_id=801)
+    bot = _RestartBot([decline])
+    session = _ShikiruSession(asyncio.Event())
+    _deliver_install(
+        directory, runner, bot, session, _until(lambda: bool(_sent(bot, DECLINED_NOTE)))
+    )
+    state = _install_state(directory, op_id)
+    assert (runner.installs, state, session.resolutions) == ([], INSTALL_DECLINED, [])
