@@ -116,8 +116,10 @@ class _Fallback:
         self.suggestions: list[str] = []
         self._informs = informs
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
-        del number
+    async def forward(
+        self, number: int, signal: Signal, note: str, suggestion: str, *, standing: bool
+    ) -> bool:
+        del number, standing
         self.forwarded.append((signal.id, note))
         self.suggestions.append(suggestion)
         return self._informs

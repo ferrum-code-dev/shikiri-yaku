@@ -67,6 +67,7 @@ class ReviewHandler:
             review_message(number, signal, pull, title, product=self._product, in_topic=in_topic),
             key=f"{NOTICE_KEY}:{number}",
             now=self._clock.now(),
+            standing=True,
         )
         return Notified(SENT)
 

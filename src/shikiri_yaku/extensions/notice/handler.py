@@ -104,6 +104,7 @@ class NoticeHandler:
             ),
             key=f"{HEALTH_KEY}:{number}",
             now=self._clock.now(),
+            standing=True,
         )
         return Notified(SENT)
 

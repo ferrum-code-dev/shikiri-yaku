@@ -16,7 +16,14 @@ class Resolved:
 
 @dataclass(frozen=True, slots=True)
 class Forward:
+    """The signal goes to the PO; `standing` says its message is about something that stays true.
+
+    A standing message keeps Stop reminders (design §6.1). The handler decides, not the kind of the
+    signal, so a new notice is informational unless its handler says otherwise.
+    """
+
     note: str
+    standing: bool = False
 
 
 @dataclass(frozen=True, slots=True)

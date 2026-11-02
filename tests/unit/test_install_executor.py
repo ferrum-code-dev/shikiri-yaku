@@ -124,7 +124,10 @@ class _Forwarder:
         self.attempts = 0
         self.forwarded: list[tuple[int, Signal, str, str]] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
+    async def forward(
+        self, number: int, signal: Signal, note: str, suggestion: str, *, standing: bool
+    ) -> bool:
+        del standing
         self.attempts += 1
         if self._while_forwarding is not None:
             self._while_forwarding()

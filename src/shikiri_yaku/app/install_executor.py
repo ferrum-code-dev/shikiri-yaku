@@ -224,7 +224,7 @@ class InstallExecutor:
         while True:
             try:
                 await self._forwarder.forward(
-                    claim.op.payload.number, claim.signal, note, claim.suggestion
+                    claim.op.payload.number, claim.signal, note, claim.suggestion, standing=False
                 )
             except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
                 _LOG.warning(

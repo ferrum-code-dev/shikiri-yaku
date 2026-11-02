@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC
 from typing import TYPE_CHECKING
 
@@ -21,11 +22,15 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import RecordedResolution
 
 _BODY = TypeAdapter(Message)
-# keep: a copy with buttons is edited to its final state, as a question is; one without is not
+# keep: a copy with buttons is edited to its final state, as a question is
+# keep: a copy without buttons is edited only when its key has a prefix the caller names, because
+# keep: a copy sent before the upgrade has no button and still needs its recovery edit (design §6.5)
 _SHOWS_BUTTONS = """
     direction = :out AND delivery = :sent
     AND refusal IS NULL AND body IS NOT NULL
-    AND json_array_length(json_extract(body, '$.buttons')) > 0
+    AND (json_array_length(json_extract(body, '$.buttons')) > 0 OR EXISTS (
+        SELECT 1 FROM json_each(:endings) AS ending
+        WHERE substr(messages.notice_key, 1, length(ending.value)) = ending.value))
 """
 
 
@@ -37,12 +42,23 @@ class JournalFinalEdits:
     copy reads "Reminders stopped" once its signal is silenced, and again when the signal ends.
     """
 
-    def __init__(self, database: Database, replies: JournalReplies) -> None:
+    def __init__(
+        self,
+        database: Database,
+        replies: JournalReplies,
+        *,
+        ending_prefixes: tuple[str, ...] = (),
+    ) -> None:
         self._database = database
         self._replies = replies
+        self._endings = ending_prefixes
 
     def _arguments(self) -> dict[str, str]:
-        return {"out": Direction.OUT, "sent": Delivery.SENT}
+        return {
+            "out": Direction.OUT,
+            "sent": Delivery.SENT,
+            "endings": json.dumps(self._endings),
+        }
 
     def unsettled(self) -> list[tuple[int, str]]:
         # keep: a copy shown as "Reminders stopped" is unsettled again until its signal ends

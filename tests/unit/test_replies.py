@@ -13,7 +13,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
-from shikiri_yaku.bootstrap import STANDING_KINDS, goal_command
+from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.callback import decline_data, install_data
 from shikiri_yaku.domain.classification import InstallProposal, Verdict
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -160,6 +160,7 @@ class Harness:
         *,
         key: str | None = None,
         at: datetime = NOW,
+        standing: bool = False,
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.number,
@@ -169,6 +170,7 @@ class Harness:
             body=Message("question", tuple(Button("Choice", value) for value in data)),
             notice_key=key,
             now=at,
+            standing=standing,
         )
         self.messages.confirm_delivery(row.row_id, ref)
 
@@ -177,7 +179,6 @@ class Harness:
             self.database,
             self.signals,
             OpStore(self.database),
-            standing_kinds=STANDING_KINDS,
         )
 
     def commands(self, at: datetime) -> Commands:
@@ -190,7 +191,6 @@ class Harness:
             Clock(at),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-            standing_kinds=STANDING_KINDS,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -308,7 +308,6 @@ class Harness:
             Clock(clock_at),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-            standing_kinds=STANDING_KINDS,
         )
         replies = InstallApprovalReplies(
             self.ops,

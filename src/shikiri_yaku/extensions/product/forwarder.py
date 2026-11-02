@@ -11,7 +11,7 @@ from shikiri_yaku.ports import EscalationStatus, ShikiruError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.domain.signal import Kind, Signal
+    from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Clock,
         Destinations,
@@ -26,7 +26,7 @@ class ProductForwarder:
     """The Router's Forwarder: queues the message of a forwarded signal for each destination.
 
     A signal with an escalation is shown as its structured view. A signal without one, or whose
-    escalation Shikiru no longer returns, is shown as information; a standing kind keeps its Stop
+    escalation Shikiru no longer returns, is shown as information; a standing message keeps its Stop
     reminders button, and any other information closes its signal. The task's title is optional:
     when Shikiru cannot give it, the header names the task alone. A failure to read the view or to
     queue propagates, so the Router retries the forward later.
@@ -41,17 +41,23 @@ class ProductForwarder:
         destinations: Destinations,
         *,
         button_label_max_chars: int,
-        standing_kinds: frozenset[Kind],
     ) -> None:
         self._title_max_chars = title_max_chars
         self._button_label_max_chars = button_label_max_chars
-        self._standing_kinds = standing_kinds
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
         self._destinations = destinations
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
+    async def forward(
+        self,
+        number: int,
+        signal: Signal,
+        note: str,
+        suggestion: str,
+        *,
+        standing: bool,
+    ) -> bool:
         """Queue the forward's message; True when it only informs, so the signal closes."""
         view = await self._view(signal)
         title = await self._title(signal)
@@ -63,8 +69,9 @@ class ProductForwarder:
             note=note,
             suggestion=suggestion,
             key=f"forward:{number}",
+            standing=standing,
         )
-        return view is None and signal.kind not in self._standing_kinds
+        return view is None and not standing
 
     async def reshow(
         self,
@@ -88,7 +95,16 @@ class ProductForwarder:
         visible_view = view
         if view is not None and view.escalation.status != EscalationStatus.OPEN:
             visible_view = None
-        self._show(number, signal, visible_view, title=title, note=note, suggestion="", key=key)
+        self._show(
+            number,
+            signal,
+            visible_view,
+            title=title,
+            note=note,
+            suggestion="",
+            key=key,
+            standing=False,
+        )
         return True
 
     def _show(
@@ -101,17 +117,36 @@ class ProductForwarder:
         note: str,
         suggestion: str,
         key: str,
+        standing: bool,
     ) -> None:
         now = self._clock.now()
         # keep: a handler may run twice for one signal, and the key makes the second queue nothing
         for destination in self._destinations.for_signal(signal.project, signal.kind):
             in_topic = self._destinations.component_of(destination.thread) == signal.project
             purpose, message = self._render(
-                number, signal, view, title, in_topic=in_topic, note=note, suggestion=suggestion
+                number,
+                signal,
+                view,
+                title,
+                in_topic=in_topic,
+                note=note,
+                suggestion=suggestion,
+                standing=standing,
             )
             # keep: only an open question has a slot; an information copy never replaces a question
             slot = QUESTION_SLOT if purpose == Purpose.QUESTION else None
-            self._outbox.queue(number, purpose, [destination], message, key=key, now=now, slot=slot)
+            # keep: a question is reminded by its own rule, so only a notice can stand
+            stands = standing and purpose == Purpose.NOTICE
+            self._outbox.queue(
+                number,
+                purpose,
+                [destination],
+                message,
+                key=key,
+                now=now,
+                slot=slot,
+                standing=stands,
+            )
 
     def _render(
         self,
@@ -123,6 +158,7 @@ class ProductForwarder:
         in_topic: bool,
         note: str,
         suggestion: str,
+        standing: bool,
     ) -> tuple[Purpose, Message]:
         if view is None:
             information = information_message(
@@ -132,7 +168,7 @@ class ProductForwarder:
                 in_topic=in_topic,
                 note=note,
                 suggestion=suggestion,
-                standing=signal.kind in self._standing_kinds,
+                standing=standing,
             )
             return Purpose.NOTICE, information
         question = escalation_message(

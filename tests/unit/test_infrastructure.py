@@ -75,8 +75,10 @@ class FakeFallback:
     def __init__(self) -> None:
         self.forwarded: list[str] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
-        del number, signal, suggestion
+    async def forward(
+        self, number: int, signal: Signal, note: str, suggestion: str, *, standing: bool
+    ) -> bool:
+        del number, signal, suggestion, standing
         self.forwarded.append(note)
         return False
 

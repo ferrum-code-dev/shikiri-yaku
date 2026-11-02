@@ -10,7 +10,7 @@ from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.status import Status
-from shikiri_yaku.bootstrap import STANDING_KINDS, goal_command
+from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
@@ -100,7 +100,6 @@ class Harness:
             _Clock(),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-            standing_kinds=STANDING_KINDS,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -122,9 +121,7 @@ class Harness:
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
         return Replies(
-            JournalReplies(
-                self.database, self.signals, OpStore(self.database), standing_kinds=STANDING_KINDS
-            ),
+            JournalReplies(self.database, self.signals, OpStore(self.database)),
             self.outbox,
             _Clock(),
             self.clients,

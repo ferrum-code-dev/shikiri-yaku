@@ -20,7 +20,6 @@ from shikiri_yaku.app.event_source import (
     WITHDRAWN_LINE,
     EventSource,
 )
-from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.extensions.review.message import review_message
@@ -141,15 +140,14 @@ def _review_on_screen(database: Database) -> int:
             body=body,
             notice_key=f"review:{number}",
             now=NOW,
+            standing=True,
         )
         messages.confirm_delivery(row.row_id, ref)
     return number
 
 
 def _replies(database: Database) -> JournalReplies:
-    return JournalReplies(
-        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
-    )
+    return JournalReplies(database, SignalStore(database), OpStore(database))
 
 
 def _close(database: Database, event: ShikiruEvent) -> None:
@@ -181,7 +179,6 @@ def test_each_way_a_pull_request_closes_edits_every_copy_without_buttons(
         SignalStore(database),
         MessageStore(database, _Reporter()),
         OpStore(database),
-        standing_kinds=STANDING_KINDS,
     )
     assert [awaiting.number for awaiting in schedule.awaiting_answer()] == [number]
 

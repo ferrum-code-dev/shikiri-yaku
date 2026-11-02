@@ -67,7 +67,7 @@ from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.app.tool_check import ToolCheck
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
-from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.infrastructure.install import (
     InstallAction,
@@ -76,6 +76,7 @@ from shikiri_yaku.extensions.infrastructure.install import (
 from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
 from shikiri_yaku.extensions.infrastructure.preparation import InstallPreparation
 from shikiri_yaku.extensions.notice.extension import notice_extension
+from shikiri_yaku.extensions.notice.handler import HEALTH_KEY
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
@@ -147,10 +148,8 @@ if TYPE_CHECKING:
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
-# keep: a standing message keeps Stop reminders; it is set by kind, since one key serves both kinds
-STANDING_KINDS: Final = frozenset(
-    {Kind.ENGINE_DOWN, Kind.ENGINE_FAULT, Kind.HEALTH, Kind.PR_REVIEW}
-)
+# keep: a copy without buttons that the signal ends, sent before the upgrade, still gets its edit
+ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_KEY}:",)
 REASONER_SCRATCH_DIR: Final = "reasoner-scratch"
 FALLBACK_SHELL: Final = "/bin/sh"
 RUNG_CLASSES: Final[Mapping[str, Callable[..., ReasonerRung]]] = {
@@ -302,7 +301,6 @@ def compose(
         clock,
         destinations,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
-        standing_kinds=STANDING_KINDS,
     )
     host_lock = FileHostLock(
         directory.parent / HOST_LOCK_FILE_NAME, clock, infrastructure.host_lock_poll_s
@@ -651,7 +649,7 @@ def inbound_job(
         name_max_chars=operator.command_name_max_chars,
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal), standing_kinds=STANDING_KINDS),
+        JournalReplies(journal, signals, OpStore(journal)),
         outbox,
         clock,
         clients,
@@ -684,9 +682,7 @@ def goal_command(
 ) -> GoalCommand:
     """Return the /goal command, which journals its submits and replies."""
     submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
-    replies = JournalReplies(
-        journal, SignalStore(journal), OpStore(journal), standing_kinds=STANDING_KINDS
-    )
+    replies = JournalReplies(journal, SignalStore(journal), OpStore(journal))
     return GoalCommand(
         submitter,
         replies,
@@ -711,9 +707,9 @@ def secret_cleanup_job(
 def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
     signals = SignalStore(journal)
-    replies = JournalReplies(journal, signals, OpStore(journal), standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(journal, signals, OpStore(journal))
     editor = CopyEditor(
-        JournalFinalEdits(journal, replies),
+        JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
         channel,
         clock,
         interval_s=settings.operator.inbound_interval_s,
@@ -867,11 +863,10 @@ def _existing_journal(directory: Path) -> Database:
 
 
 def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
-    """Build the reminder schedule, which reminds standing kinds until the PO stops them (§6.4)."""
+    """Build the reminder schedule, which reminds standing messages until the PO stops them."""
     return JournalSchedule(
         journal,
         SignalStore(journal),
         MessageStore(journal, reporter),
         OpStore(journal),
-        standing_kinds=STANDING_KINDS,
     )

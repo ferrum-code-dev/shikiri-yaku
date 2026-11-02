@@ -15,7 +15,7 @@ import pytest
 
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.scheduler import Scheduler
-from shikiri_yaku.bootstrap import STANDING_KINDS, schedule_log
+from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, REMINDERS_STOPPED_LINE, Purpose
 from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.extensions.product.message import information_message
@@ -114,15 +114,14 @@ def _engine_down_on_screen(database: Database) -> int:
         body=body,
         notice_key=f"forward:{number}",
         now=NOW,
+        standing=True,
     )
     messages.confirm_delivery(row.row_id, REF)
     return number
 
 
 def _replies(database: Database) -> JournalReplies:
-    return JournalReplies(
-        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
-    )
+    return JournalReplies(database, SignalStore(database), OpStore(database))
 
 
 def _remind(database: Database, clock: _Clock) -> list[str]:

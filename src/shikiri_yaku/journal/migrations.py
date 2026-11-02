@@ -204,4 +204,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         """,
     ),
     ("ALTER TABLE messages ADD COLUMN final_line TEXT",),
+    ("ALTER TABLE messages ADD COLUMN standing INTEGER NOT NULL DEFAULT 0",),
 )

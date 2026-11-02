@@ -8,7 +8,7 @@ import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.scheduler import Scheduler
-from shikiri_yaku.bootstrap import STANDING_KINDS, schedule_log
+from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.journal import (
@@ -105,6 +105,8 @@ class _World:
         chat: str = CHAT,
         purpose: Purpose = Purpose.QUESTION,
         key: str | None = None,
+        *,
+        standing: bool = False,
     ) -> None:
         sent = self.messages.record_outbound(
             signal_number=number,
@@ -114,6 +116,7 @@ class _World:
             body=Message("asked"),
             notice_key=key,
             now=START,
+            standing=standing,
         )
         self.messages.confirm_delivery(sent.row_id, f"m{sent.row_id}")
 
@@ -218,7 +221,7 @@ def test_unstopped_review_is_reminded_until_stopped_or_closed(
     final_state: SignalState,
 ) -> None:
     number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
-    world.ask(number, purpose=Purpose.NOTICE, key="review:api:T-1")
+    world.ask(number, purpose=Purpose.NOTICE, key="review:api:T-1", standing=True)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
     world.clock.moment = START + timedelta(hours=FIRST_H + 1)
@@ -233,12 +236,11 @@ def test_unstopped_review_is_reminded_until_stopped_or_closed(
 
 def test_a_stopped_review_is_not_reminded_and_stays_forwarded(world: _World) -> None:
     number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
-    world.ask(number, purpose=Purpose.NOTICE, key=f"review:{number}")
+    world.ask(number, purpose=Purpose.NOTICE, key=f"review:{number}", standing=True)
     JournalReplies(
         world.database,
         world.signals,
         OpStore(world.database),
-        standing_kinds=STANDING_KINDS,
     ).stop_notice(number, START)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
@@ -250,18 +252,19 @@ def test_a_stopped_review_is_not_reminded_and_stays_forwarded(world: _World) -> 
 
 
 @pytest.mark.parametrize(
-    ("kind", "reminded"),
+    ("kind", "standing", "reminded"),
     [
-        (Kind.ENGINE_DOWN, True),
-        (Kind.ENGINE_FAULT, True),
-        (Kind.HEALTH, True),
-        (Kind.PR_REVIEW, True),
-        (Kind.TASK_DONE, False),
+        (Kind.ENGINE_DOWN, True, True),
+        (Kind.ENGINE_DOWN, False, False),
+        (Kind.TASK_DONE, True, True),
+        (Kind.TASK_DONE, False, False),
     ],
 )
-def test_only_a_standing_notice_is_reminded(world: _World, kind: Kind, *, reminded: bool) -> None:
+def test_only_a_standing_notice_is_reminded(
+    world: _World, kind: Kind, *, standing: bool, reminded: bool
+) -> None:
     number = world.signal("n1", SignalState.FORWARDED, kind=kind)
-    world.ask(number, purpose=Purpose.NOTICE, key=f"forward:{number}")
+    world.ask(number, purpose=Purpose.NOTICE, key=f"forward:{number}", standing=standing)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
     assert [chat for chat, _ in _queued(world)] == ([CHAT] if reminded else [])

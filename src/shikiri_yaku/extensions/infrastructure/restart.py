@@ -62,11 +62,11 @@ class RestartAction:
         existing = self._starts.existing(signal)
         if existing is not None:
             if existing.state == AttemptState.FAILED:
-                return Forward(await self._give_up(signal.project, EARLIER_FAILED))
+                return Forward(await self._give_up(signal.project, EARLIER_FAILED), standing=True)
             return await self._confirm(signal)
         decision = self._guard.restart(signal.project)
         if isinstance(decision, Refused):
-            return Forward(await self._give_up(signal.project, decision.note))
+            return Forward(await self._give_up(signal.project, decision.note), standing=True)
         self._starts.issue(signal, self._clock.now())
         await self._start(signal)
         return await self._confirm(signal)
@@ -89,7 +89,7 @@ class RestartAction:
             now = self._clock.now()
             if now >= deadline:
                 self._starts.fail(signal, now)
-                return Forward(await self._give_up(signal.project, NOT_UP))
+                return Forward(await self._give_up(signal.project, NOT_UP), standing=True)
             await self._clock.sleep(min(self._poll, deadline - now).total_seconds())
         self._starts.confirm(signal, self._clock.now())
         self._notifier.tell(signal, _notice(signal.project), key=f"restart:{signal.id}")

@@ -1562,9 +1562,12 @@ commits, and E10 is ticked only when both pass the gate.
   composed engine-down test, and the docs. The help text, README and drills file hold no
   "Acknowledge" text, so there is nothing in them to change.
 
-Deviation, recorded here: which kind stands is set by composition (`STANDING_KINDS` in bootstrap),
-as the reminder kinds were before, not by the notice key. The forward key `forward:<n>` is shared by
-standing and information messages, so a key cannot say which one a message is.
+Standing is decided by the handler, not by the signal's kind (item 3). `Forward(note, standing=True)`
+marks a forward that stays true (the restart give-ups); the health and review handlers queue their
+notice with `standing=True`. The flag is stored per copy in `messages.standing` (migration 23,
+default 0), and the scheduler and the Stop reminders tap read that column. A new notice is
+informational unless its handler says otherwise. A copy sent before migration 23 is not standing, so
+it is not reminded after the upgrade; the PO has to decide whether that is acceptable.
 
 ### E11. A group may have other members (normal)
 

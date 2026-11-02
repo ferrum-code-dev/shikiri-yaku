@@ -124,18 +124,24 @@ def test_stop_reminders_on_information_closes_without_shikiru(h: Harness) -> Non
 
 
 @pytest.mark.parametrize(
-    ("kind", "silenced"),
-    [("pr_review", True), ("task_done", False)],
+    ("standing", "silenced"),
+    [(True, True), (False, False)],
     ids=["standing notice silences and stays open", "information closes"],
 )
 def test_stop_reminders_silences_a_standing_notice_and_closes_information(
-    h: Harness, kind: str, *, silenced: bool
+    h: Harness, *, standing: bool, silenced: bool
 ) -> None:
     h.number = h.signals.insert_if_absent(
-        NewSignal(f"api:{kind}:T-1", "api", kind, "x", "x", "T-1"), NOW
+        NewSignal("api:task_done:T-1", "api", "task_done", "x", "x", "T-1"), NOW
     ).row_id
     h.signals.transition(h.number, SignalState.NEW, SignalState.FORWARDED, NOW)
-    h.origin("1001/45", Purpose.NOTICE, (f"k:{h.number}",), key=f"notice:{h.number}")
+    h.origin(
+        "1001/45",
+        Purpose.NOTICE,
+        (f"k:{h.number}",),
+        key=f"notice:{h.number}",
+        standing=standing,
+    )
     h.handle(ref="1001/45", data=f"k:{h.number}")
     h.handle(ref="1001/45", data=f"k:{h.number}")
     stored = h.signals.get(h.number)

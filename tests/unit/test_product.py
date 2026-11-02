@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, TelegramDestinations
-from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
@@ -148,8 +147,9 @@ class _Outbox:
         key: str,
         now: datetime,
         slot: str | None = None,
+        standing: bool = False,
     ) -> None:
-        del number, now, slot
+        del number, now, slot, standing
         self.queued.append((purpose, tuple(destinations), message, key))
 
     def command_reply_queued(self, key: str) -> bool:
@@ -194,7 +194,6 @@ def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarde
         _Clock(),
         FixedDestinations(destinations),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-        standing_kinds=STANDING_KINDS,
     )
 
 
@@ -528,7 +527,7 @@ def test_callback_data_fits_the_platform_limit() -> None:
 def test_forwarder_queues_one_message_per_destination_keyed_by_the_signal() -> None:
     outbox = _Outbox()
     forwarder = _forwarder(_Client(view=_fixture_view()), outbox, "1001", "1002")
-    asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, SUGGESTION))
+    asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, SUGGESTION, standing=False))
     assert [
         (purpose, destinations[0].chat, key) for purpose, destinations, _, key in outbox.queued
     ] == [(Purpose.QUESTION, "1001", "forward:41"), (Purpose.QUESTION, "1002", "forward:41")]
@@ -616,9 +615,8 @@ def test_decision_header_names_the_project_only_outside_its_topic(
         _Clock(),
         destinations,
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-        standing_kinds=STANDING_KINDS,
     )
-    asyncio.run(forwarder.forward(NUMBER, signal, NOTE, ""))
+    asyncio.run(forwarder.forward(NUMBER, signal, NOTE, "", standing=False))
     [(_, _, message, _)] = outbox.queued
     assert message.heading == header
 
@@ -626,7 +624,9 @@ def test_decision_header_names_the_project_only_outside_its_topic(
 def test_escalation_that_shikiru_no_longer_returns_is_shown_as_information_that_informs() -> None:
     outbox = _Outbox()
     informs = asyncio.run(
-        _forwarder(_Client(view=None), outbox, "1001").forward(NUMBER, ESCALATION, NOTE, "")
+        _forwarder(_Client(view=None), outbox, "1001").forward(
+            NUMBER, ESCALATION, NOTE, "", standing=False
+        )
     )
     purpose, _, message, _ = outbox.queued[0]
     assert purpose is Purpose.NOTICE
@@ -635,20 +635,23 @@ def test_escalation_that_shikiru_no_longer_returns_is_shown_as_information_that_
 
 
 @pytest.mark.parametrize(
-    ("kind", "buttons", "informs"),
+    ("kind", "standing", "buttons", "informs"),
     [
-        (Kind.ENGINE_DOWN, (Button(STOP_REMINDERS_LABEL, "k:41"),), False),
-        (Kind.ENGINE_FAULT, (Button(STOP_REMINDERS_LABEL, "k:41"),), False),
-        (Kind.TASK_DONE, (), True),
+        (Kind.ENGINE_DOWN, True, (Button(STOP_REMINDERS_LABEL, "k:41"),), False),
+        (Kind.TASK_DONE, True, (Button(STOP_REMINDERS_LABEL, "k:41"),), False),
+        (Kind.ENGINE_DOWN, False, (), True),
+        (Kind.TASK_DONE, False, (), True),
     ],
 )
-def test_information_without_escalation_has_stop_reminders_only_for_a_standing_kind(
-    kind: Kind, buttons: tuple[Button, ...], *, informs: bool
+def test_information_without_escalation_has_stop_reminders_only_when_it_stands(
+    kind: Kind, *, standing: bool, buttons: tuple[Button, ...], informs: bool
 ) -> None:
     client = _Client(error=ShikiruLinkDownError("link down"))
     outbox = _Outbox()
     signal = Signal("api", kind, "7", "x", "The text.")
-    closes = asyncio.run(_forwarder(client, outbox, "1001").forward(NUMBER, signal, NOTE, ""))
+    closes = asyncio.run(
+        _forwarder(client, outbox, "1001").forward(NUMBER, signal, NOTE, "", standing=standing)
+    )
     assert client.asked == []
     assert closes is informs
     assert outbox.queued[0][2].buttons == buttons
@@ -658,7 +661,9 @@ def test_link_down_while_reading_the_escalation_propagates_for_a_retry() -> None
     client = _Client(error=ShikiruLinkDownError("link down"))
     outbox = _Outbox()
     with pytest.raises(ShikiruLinkDownError):
-        asyncio.run(_forwarder(client, outbox, "1001").forward(NUMBER, ESCALATION, NOTE, ""))
+        asyncio.run(
+            _forwarder(client, outbox, "1001").forward(NUMBER, ESCALATION, NOTE, "", standing=False)
+        )
     assert outbox.queued == []
 
 

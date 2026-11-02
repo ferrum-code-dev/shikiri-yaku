@@ -133,7 +133,7 @@ class InstallApprovalReplies:
 
     async def _forward(self, origin: ReplyOrigin) -> None:
         await self._forwarder.forward(
-            origin.number, origin.signal, DECLINED_NOTE, origin.suggestion
+            origin.number, origin.signal, DECLINED_NOTE, origin.suggestion, standing=False
         )
 
     def _notice(self, origin: ReplyOrigin, approval_key: str | None, state: str, note: str) -> None:

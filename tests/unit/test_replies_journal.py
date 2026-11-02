@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import ValidationError
 
-from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.signal import Kind
@@ -79,24 +78,36 @@ def test_choices_share_numbers_including_unknown_resolution_gaps() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "state"),
-    [(Kind.PR_REVIEW, SignalState.FORWARDED), (Kind.TASK_DONE, SignalState.CLOSED)],
-    ids=["a standing kind stays open", "information closes"],
+    ("standing", "state"),
+    [(True, SignalState.FORWARDED), (False, SignalState.CLOSED)],
+    ids=["a standing notice stays open", "information closes"],
 )
-def test_stop_reminders_silences_a_standing_kind_and_closes_information(
-    kind: Kind, state: SignalState, memory: Database
+def test_stop_reminders_silences_a_standing_notice_and_closes_information(
+    *, standing: bool, state: SignalState, memory: Database
 ) -> None:
     signals = SignalStore(memory)
     number = signals.insert_if_absent(
-        NewSignal(f"api:{kind}:1", "api", kind, "x", "x", "T-1"), NOW
+        NewSignal(f"api:{Kind.TASK_DONE}:1", "api", Kind.TASK_DONE, "x", "x", "T-1"), NOW
     ).row_id
     signals.classify(
         number, category="product", classified_by="rule", verdict=None, handler="p", now=NOW
     )
     signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
     signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
+    messages = MessageStore(memory, _Reporter())
+    stored = messages.record_outbound(
+        signal_number=number,
+        channel="telegram",
+        chat="1001",
+        purpose=Purpose.NOTICE,
+        body=Message("x", (Button(STOP_REMINDERS_LABEL, f"k:{number}"),)),
+        notice_key=f"forward:{number}",
+        now=NOW,
+        standing=standing,
+    )
+    messages.confirm_delivery(stored.row_id, "1001/42")
 
-    replies = JournalReplies(memory, signals, OpStore(memory), standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(memory, signals, OpStore(memory))
     replies.stop_notice(number, NOW)
 
     stored = signals.get(number)
@@ -136,7 +147,7 @@ def test_a_tap_on_information_closes_it_and_edits_every_copy_once(memory: Databa
             now=NOW,
         )
         messages.confirm_delivery(stored.row_id, reference)
-    replies = JournalReplies(memory, signals, OpStore(memory), standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(memory, signals, OpStore(memory))
     final = JournalFinalEdits(memory, replies)
 
     replies.stop_notice(number, NOW)
@@ -182,7 +193,7 @@ def test_origin_binds_only_delivered_outbound_copy_to_channel_and_purpose(purpos
         notice_key=None,
         now=NOW,
     )
-    replies = JournalReplies(database, signals, OpStore(database), standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(database, signals, OpStore(database))
     assert replies.origin("telegram", "1001/42") is None
     messages.confirm_delivery(stored.row_id, "1001/42")
     origin = replies.origin("telegram", "1001/42")
@@ -204,15 +215,13 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
 ) -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops, standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(database, SignalStore(database), ops)
     op_id = replies.intend_resolve(700, PAYLOAD, NOW)
     assert op_id is not None
     changed = PAYLOAD.model_copy(update={"text": "a different answer"})
     assert replies.intend_resolve(700, changed, NOW) == op_id
     assert replies.claim_resolve(op_id, NOW) == PAYLOAD
-    restarted = JournalReplies(
-        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
-    )
+    restarted = JournalReplies(database, SignalStore(database), OpStore(database))
     assert restarted.claim_resolve(op_id, NOW) is None
     ack = Ack(id=12, status=status, result=None, message=None)
     restarted.acknowledge_resolve(op_id, ack, NOW)
@@ -227,9 +236,7 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
 @pytest.mark.parametrize("kind", ["accept", "cancel"])
 def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) -> None:
     database = Database.open(":memory:")
-    replies = JournalReplies(
-        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
-    )
+    replies = JournalReplies(database, SignalStore(database), OpStore(database))
     payload = PAYLOAD.model_copy(update={"kind": kind, "text": None})
     op_id = replies.intend_resolve(700, payload, NOW)
     assert op_id is not None
@@ -237,9 +244,7 @@ def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) ->
     assert not replies.approve_resolve(op_id, payload.number + 1, NOW)
     assert replies.claim_resolve(op_id, NOW) is None
     assert replies.approve_resolve(op_id, payload.number, NOW)
-    restarted = JournalReplies(
-        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
-    )
+    restarted = JournalReplies(database, SignalStore(database), OpStore(database))
     assert restarted.claim_resolve(op_id, NOW) == payload
     assert restarted.claim_resolve(op_id, NOW) is None
     database.close()
@@ -261,7 +266,7 @@ def test_only_a_resolve_shikiru_confirmed_is_the_recorded_resolution(
 ) -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops, standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(database, SignalStore(database), ops)
     op_id = replies.intend_resolve(700, PAYLOAD, NOW)
     assert op_id is not None
     assert ops.transition(op_id, OpState.INTENDED, state, LATER)
@@ -273,7 +278,7 @@ def test_only_a_resolve_shikiru_confirmed_is_the_recorded_resolution(
 def test_recorded_resolution_is_never_another_signals() -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops, standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(database, SignalStore(database), ops)
     other = replies.intend_resolve(700, PAYLOAD.model_copy(update={"number": 2}), NOW)
     assert other is not None
     assert ops.transition(other, OpState.INTENDED, OpState.CONFIRMED, LATER)
@@ -284,7 +289,7 @@ def test_recorded_resolution_is_never_another_signals() -> None:
 def test_an_unconfirmed_attempt_never_displaces_the_confirmed_winner() -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops, standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(database, SignalStore(database), ops)
     winner = replies.intend_resolve(700, PAYLOAD, NOW)
     loser = replies.intend_resolve(701, PAYLOAD.model_copy(update={"label": "Change"}), NOW)
     assert winner is not None

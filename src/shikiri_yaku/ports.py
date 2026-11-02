@@ -703,10 +703,19 @@ class Forwarder(Protocol):
     `number` is the signal's journal number, its reference `S<number>`. `note` says what was tried
     and why it stopped. `suggestion` is the note of the classification, the Reasoner's suggestion
     or its failure, which is model-written and shown as such. The result is True when the message
-    only informs, so the signal closes with it and does not wait for an answer.
+    only informs, so the signal closes with it and does not wait for an answer. `standing` says the
+    message is about something that stays true, so its copy keeps Stop reminders (design §6.1).
     """
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool: ...
+    async def forward(
+        self,
+        number: int,
+        signal: Signal,
+        note: str,
+        suggestion: str,
+        *,
+        standing: bool,
+    ) -> bool: ...
 
 
 class WakeTarget(Protocol):
@@ -877,11 +886,13 @@ class Outbox(Protocol):
         key: str,
         now: datetime,
         slot: str | None = None,
+        standing: bool = False,
     ) -> None:
         """Record the message once per key and destination; a key seen before records nothing.
 
         A message with a slot replaces the older copies of the same slot, chat and thread once the
-        platform has accepted it (design §7).
+        platform has accepted it (design §7). A standing message keeps Stop reminders until the PO
+        stops them (design §6.1); the handler that queues it says so, not the kind of its signal.
         """
         ...
 

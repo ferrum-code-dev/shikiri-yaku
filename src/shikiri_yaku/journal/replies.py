@@ -21,7 +21,6 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from shikiri_yaku.domain.signal import Kind
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.signals import SignalStore
     from shikiri_yaku.ports import Ack
@@ -34,24 +33,16 @@ _BODY = TypeAdapter(Message)
 
 
 class JournalReplies:
-    """A Stop reminders tap on a standing signal silences it, and keeps the signal open.
+    """A Stop reminders tap on a standing notice silences its signal, and keeps the signal open.
 
     The silence is an op named `ack:<number>`, which the Scheduler reads (design §6.4). A tap on a
-    notice of any other kind closes its signal, as a button sent before the upgrade always did.
+    signal with no standing notice closes it, as a button sent before the upgrade always did.
     """
 
-    def __init__(
-        self,
-        database: Database,
-        signals: SignalStore,
-        ops: OpStore,
-        *,
-        standing_kinds: frozenset[Kind],
-    ) -> None:
+    def __init__(self, database: Database, signals: SignalStore, ops: OpStore) -> None:
         self._database = database
         self._signals = signals
         self._ops = ops
-        self._standing_kinds = standing_kinds
 
     def silenced(self, number: int) -> bool:
         """Whether the PO tapped Stop reminders on the signal, which the Scheduler also reads."""
@@ -179,7 +170,7 @@ class JournalReplies:
         # keep: a tap that arrives after the signal ended changes nothing, not even its op
         if stored is None or stored.state in {SignalState.RESOLVED, SignalState.CLOSED}:
             return
-        if stored.kind in self._standing_kinds:
+        if self._stands(number):
             op = NewOp(
                 f"{SILENCE}:{number}",
                 SILENCE,
@@ -197,3 +188,13 @@ class JournalReplies:
             now,
             final_line=ACKNOWLEDGED_LINE,
         )
+
+    def _stands(self, number: int) -> bool:
+        row = self._database.connection.execute(
+            """
+            SELECT 1 FROM messages WHERE signal_number = ? AND direction = ? AND delivery = ?
+                AND standing = 1 LIMIT 1
+            """,
+            (number, Direction.OUT, Delivery.SENT),
+        ).fetchone()
+        return row is not None

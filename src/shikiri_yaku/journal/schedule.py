@@ -14,7 +14,6 @@ from shikiri_yaku.journal.signals import SignalState
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from shikiri_yaku.domain.signal import Kind
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.messages import MessageStore
     from shikiri_yaku.journal.ops import OpStore
@@ -37,14 +36,11 @@ class JournalSchedule:
         signals: SignalStore,
         messages: MessageStore,
         ops: OpStore,
-        *,
-        standing_kinds: frozenset[Kind],
     ) -> None:
         self._database = database
         self._signals = signals
         self._messages = messages
         self._ops = ops
-        self._standing_kinds = standing_kinds
 
     def due_parked(self, now: datetime) -> list[Parked]:
         return [_parked(stored) for stored in self._signals.parked_due(now)]
@@ -55,13 +51,12 @@ class JournalSchedule:
     def awaiting_answer(self) -> list[Awaiting]:
         rows = self._database.connection.execute(
             """
-            SELECT s.number, s.project, s.task_id, s.kind, m.purpose,
+            SELECT s.number, s.project, s.task_id, m.purpose,
                    m.channel, m.chat, m.thread, m.created_at
             FROM signals s JOIN messages m ON m.signal_number = s.number
             WHERE s.state = :forwarded AND m.direction = :out AND m.delivery = :sent
                 AND (m.purpose IN (:question, :approval)
-                     OR (m.purpose = :notice
-                         AND (m.notice_key IS NULL OR m.notice_key NOT LIKE :reminders)))
+                     OR (m.purpose = :notice AND m.standing = 1))
                 AND NOT EXISTS (SELECT 1 FROM ops WHERE identity = :silenced || s.number)
             ORDER BY s.number, m.id
             """,
@@ -72,14 +67,11 @@ class JournalSchedule:
                 "question": Purpose.QUESTION,
                 "approval": Purpose.APPROVAL,
                 "notice": Purpose.NOTICE,
-                "reminders": f"{REMIND}:%",
                 "silenced": f"{SILENCE}:",
             },
         )
         grouped: dict[int, Awaiting] = {}
         for row in rows:
-            if row["purpose"] == Purpose.NOTICE and row["kind"] not in self._standing_kinds:
-                continue
             asked_at = parse_stamp(row["created_at"])
             if asked_at is None:
                 continue

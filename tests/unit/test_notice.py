@@ -12,18 +12,19 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.health_source import LINK_SCOPE, RECOVERED_LINE
 from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.router import Router
-from shikiri_yaku.bootstrap import STANDING_KINDS
-from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL
+from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Informed, Notified, Resolved
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.extensions.notice.extension import notice_extension
-from shikiri_yaku.extensions.notice.handler import SENT, WAITING, NoticeHandler
+from shikiri_yaku.extensions.notice.handler import HEALTH_KEY, SENT, WAITING, NoticeHandler
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.journal import (
     Database,
@@ -36,7 +37,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import Button, ShikiruLinkDownError, ShikiruTask, TaskStatus
+from shikiri_yaku.ports import Button, Message, ShikiruLinkDownError, ShikiruTask, TaskStatus
 from tests.support.destinations import FixedDestinations
 from tests.support.notices import WHERE, journal_notifier, journal_outbox
 
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import Channel, Message, ShikiruClient
+    from shikiri_yaku.ports import Channel, ShikiruClient
 
 PROJECT: Final = "api"
 NOW: Final = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
@@ -86,8 +87,10 @@ class _Fallback:
     def __init__(self) -> None:
         self.forwarded: list[tuple[str, str]] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
-        del number, suggestion
+    async def forward(
+        self, number: int, signal: Signal, note: str, suggestion: str, *, standing: bool
+    ) -> bool:
+        del number, suggestion, standing
         self.forwarded.append((signal.id, note))
         return False
 
@@ -249,7 +252,7 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
         Closing(PROJECT, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE), NOW
     )
     channel = _Channel()
-    replies = JournalReplies(memory, signals, OpStore(memory), standing_kinds=STANDING_KINDS)
+    replies = JournalReplies(memory, signals, OpStore(memory))
     editor = CopyEditor(
         JournalFinalEdits(memory, replies),
         cast("Channel", channel),
@@ -263,6 +266,55 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
     assert ref == "ref-1"
     assert message.text == f"{HEALTH_TEXT}\n\n{RECOVERED_LINE}"
     assert message.buttons == ()
+
+
+def test_a_health_copy_sent_before_the_upgrade_is_edited_to_recovered_and_never_reminded(
+    memory: Database,
+) -> None:
+    signals = SignalStore(memory)
+    number = signals.insert_if_absent(
+        NewSignal(
+            f"{PROJECT}:health:{LINK_SCOPE}:2026-10-29T09:00Z",
+            PROJECT,
+            "health",
+            LINK_SCOPE,
+            HEALTH_TEXT,
+        ),
+        NOW,
+    ).row_id
+    signals.transition(number, SignalState.NEW, SignalState.HANDLING, NOW)
+    signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
+    # keep: the copy an Operator had before the upgrade: no button, and no standing flag
+    outbox = journal_outbox(memory)
+    outbox.queue(
+        number,
+        Purpose.NOTICE,
+        [WHERE],
+        Message(HEALTH_TEXT),
+        key=f"{HEALTH_KEY}:{number}",
+        now=NOW,
+    )
+    [pending] = outbox.pending()
+    outbox.confirm(pending.message_id, "ref-1")
+    assert schedule_log(memory, StderrReporter()).awaiting_answer() == []
+
+    signals.close(
+        Closing(PROJECT, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE), NOW
+    )
+    replies = JournalReplies(memory, signals, OpStore(memory))
+    channel = _Channel()
+    editor = CopyEditor(
+        JournalFinalEdits(memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        cast("Channel", channel),
+        _Clock(),
+        interval_s=1,
+    )
+
+    asyncio.run(editor.tick())
+
+    [(ref, message)] = channel.edits
+    assert ref == "ref-1"
+    assert message.text == f"{HEALTH_TEXT}\n\n{RECOVERED_LINE}"
 
 
 async def _route(router: Router, number: int, signal: Signal) -> None:

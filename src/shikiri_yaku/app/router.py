@@ -111,9 +111,11 @@ class Router:
         match outcome:
             case Resolved(note):
                 self._log.resolve(number, note, self._clock.now())
-            case Forward(note):
+            case Forward(note, standing):
                 try:
-                    informs = await self._fallback.forward(number, signal, note, suggestion)
+                    informs = await self._fallback.forward(
+                        number, signal, note, suggestion, standing=standing
+                    )
                 except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
                     await self._retry_later(number, error)
                     return

@@ -90,11 +90,12 @@ class MessageStore:
         notice_key: str | None,
         now: datetime,
         slot: str | None = None,
+        standing: bool = False,
     ) -> Inserted:
         """Journal a message and its body before it is sent; a key queued for that chat is known.
 
         A body that carries a secret is refused here: its form is kept, its text is not, and the PO
-        gets the notice of the refusal.
+        gets the notice of the refusal. A standing copy keeps its reminders until the PO stops them.
         """
         form = secret_form(body.texts())
         with self._database.transaction():
@@ -109,6 +110,7 @@ class MessageStore:
                 body=None if form is not None else _BODY.dump_json(body).decode(),
                 refusal=form,
                 slot=slot,
+                standing=standing,
             )
             if form is not None and inserted.is_new:
                 self._notify(
@@ -135,6 +137,7 @@ class MessageStore:
         body: str | None,
         refusal: str | None,
         slot: str | None = None,
+        standing: bool = False,
     ) -> Inserted:
         """Insert an outbound row, or find the row that has its notice key for that chat."""
         connection = self._database.connection
@@ -143,9 +146,9 @@ class MessageStore:
             """
             INSERT INTO messages (
                 signal_number, direction, channel, chat, thread, purpose, notice_key,
-                delivery, body, refusal, created_at, slot
+                delivery, body, refusal, created_at, slot, standing
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (notice_key, channel, chat, COALESCE(thread, -1)) DO NOTHING
             """,
             (
@@ -161,6 +164,7 @@ class MessageStore:
                 refusal,
                 stamp(now),
                 slot,
+                standing,
             ),
         )
         if created.rowcount == 1:
