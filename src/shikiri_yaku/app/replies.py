@@ -221,6 +221,7 @@ class Replies:
                 confirm_message(origin.number, payload.kind, item.data or ""),
                 Purpose.APPROVAL,
                 key=confirm_key(op_id),
+                slot=confirm_key(op_id),
             )
         else:
             await self._issue(op_id, origin)
@@ -301,7 +302,15 @@ class Replies:
                 key=f"details:{item.update_id}:{offset}",
             )
 
-    def _queue(self, origin: ReplyOrigin, message: Message, purpose: Purpose, *, key: str) -> None:
+    def _queue(
+        self,
+        origin: ReplyOrigin,
+        message: Message,
+        purpose: Purpose,
+        *,
+        key: str,
+        slot: str | None = None,
+    ) -> None:
         self._outbox.queue(
             origin.number,
             purpose,
@@ -309,4 +318,5 @@ class Replies:
             message,
             key=key,
             now=self._clock.now(),
+            slot=slot,
         )

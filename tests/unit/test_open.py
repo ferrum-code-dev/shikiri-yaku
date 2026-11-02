@@ -9,7 +9,7 @@ from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.journal import JournalFinalEdits
+from shikiri_yaku.journal import JournalFinalEdits, JournalReplacements
 from shikiri_yaku.journal.signals import NewSignal, SignalState
 from shikiri_yaku.ports import EscalationStatus, ShikiruClient, ShikiruLinkDownError
 from tests.support.destinations import FixedDestinations
@@ -134,6 +134,14 @@ def test_a_later_open_shows_the_open_items_again(h: Harness) -> None:
     _deliver(h)
     _open(h, update=701)
     assert [stored.purpose for stored in h.messages.unconfirmed()] == [Purpose.QUESTION]
+
+
+def test_a_question_shown_again_by_open_replaces_the_copy_it_repeats(h: Harness) -> None:
+    _open(h, update=700)
+    [first] = _deliver(h)
+    _open(h, update=701)
+    _deliver(h)
+    assert JournalReplacements(h.database, h.messages).superseded() == [first]
 
 
 def test_two_confirm_copies_of_one_approval_issue_one_resolve(h: Harness) -> None:

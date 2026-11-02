@@ -26,6 +26,8 @@ Migration 16 records install outcomes and a resolution event that arrived before
 (design §6.3, §10, §15).
 Migration 17 records a rejected recovery answer before retryable PO notification work begins
 (design §10.1).
+Migration 18 keeps the slot of an outbound message, so a newer copy in the same slot replaces it
+(design §7).
 """
 
 from __future__ import annotations
@@ -182,4 +184,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE ops ADD COLUMN install_rejection TEXT",),
     ("ALTER TABLE ops ADD COLUMN failure_reason TEXT",),
+    ("ALTER TABLE messages ADD COLUMN slot TEXT",),
 )

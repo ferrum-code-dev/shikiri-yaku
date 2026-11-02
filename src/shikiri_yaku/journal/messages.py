@@ -89,6 +89,7 @@ class MessageStore:
         body: Message,
         notice_key: str | None,
         now: datetime,
+        slot: str | None = None,
     ) -> Inserted:
         """Journal a message and its body before it is sent; a key queued for that chat is known.
 
@@ -107,6 +108,7 @@ class MessageStore:
                 now=now,
                 body=None if form is not None else _BODY.dump_json(body).decode(),
                 refusal=form,
+                slot=slot,
             )
             if form is not None and inserted.is_new:
                 self._notify(
@@ -132,6 +134,7 @@ class MessageStore:
         now: datetime,
         body: str | None,
         refusal: str | None,
+        slot: str | None = None,
     ) -> Inserted:
         """Insert an outbound row, or find the row that has its notice key for that chat."""
         connection = self._database.connection
@@ -140,9 +143,9 @@ class MessageStore:
             """
             INSERT INTO messages (
                 signal_number, direction, channel, chat, thread, purpose, notice_key,
-                delivery, body, refusal, created_at
+                delivery, body, refusal, created_at, slot
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (notice_key, channel, chat, COALESCE(thread, -1)) DO NOTHING
             """,
             (
@@ -157,6 +160,7 @@ class MessageStore:
                 body,
                 refusal,
                 stamp(now),
+                slot,
             ),
         )
         if created.rowcount == 1:

@@ -14,6 +14,7 @@ from shikiri_yaku.journal.messages import (
 )
 from shikiri_yaku.journal.ops import JournalActions, NewOp, OpState, OpStore, StoredOp
 from shikiri_yaku.journal.outbox import JournalOutbox
+from shikiri_yaku.journal.replacements import JournalReplacements
 from shikiri_yaku.journal.retries import JournalRetries
 from shikiri_yaku.journal.routing import JournalRouting
 from shikiri_yaku.journal.schedule import JournalSchedule
@@ -34,6 +35,7 @@ __all__ = [
     "JournalFinalEdits",
     "JournalInbound",
     "JournalOutbox",
+    "JournalReplacements",
     "JournalRetries",
     "JournalRouting",
     "JournalSchedule",

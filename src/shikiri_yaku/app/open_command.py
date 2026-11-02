@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import INSTALL_SLOT, Purpose
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.ports import (
     INSTALL_INTENDED,
@@ -123,6 +123,7 @@ class OpenCommand:
                     approval.number, approval.kind, answer_data(approval.number, option)
                 ),
                 key=confirm_key(approval.op_id, update_id),
+                slot=confirm_key(approval.op_id),
             )
             queued += 1
         return queued
@@ -148,6 +149,7 @@ class OpenCommand:
                 Purpose.APPROVAL,
                 self._install_approval.render(operation.id, payload),
                 key=f"install:{operation.id}:open:{update_id}",
+                slot=INSTALL_SLOT,
             )
             queued += 1
         return queued
@@ -190,6 +192,7 @@ class OpenCommand:
         message: Message,
         *,
         key: str,
+        slot: str,
     ) -> None:
         self._outbox.queue(
             number,
@@ -198,6 +201,7 @@ class OpenCommand:
             message,
             key=key,
             now=self._clock.now(),
+            slot=slot,
         )
 
 

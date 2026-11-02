@@ -27,6 +27,7 @@ from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
     Database,
+    Delivery,
     JournalFinalEdits,
     JournalOutbox,
     JournalSources,
@@ -502,6 +503,16 @@ def test_unknown_origin_wrong_signal_and_invalid_buttons_do_not_resolve(
     h.origin("1001/44", Purpose.QUESTION, ("a:2:1", "a:1"))
     h.handle(ref=ref, data=data)
     assert h.client.calls == []
+
+
+def test_a_tap_on_a_copy_already_deleted_changes_nothing_and_says_nothing(h: Harness) -> None:
+    h.origin("1001/43", Purpose.QUESTION, ("a:1:1",))
+    h.database.connection.execute(
+        "UPDATE messages SET delivery = ? WHERE platform_message_id = ?",
+        (Delivery.DELETED, "1001/43"),
+    )
+    h.handle(ref="1001/43", data="a:1:1")
+    assert (h.client.calls, h.outbox.pending()) == ([], [])
 
 
 @pytest.mark.parametrize("data", ["a:1:1", "a:1:3", "a:1:4"])

@@ -76,8 +76,9 @@ class _Outbox:
         *,
         key: str,
         now: datetime,
+        slot: str | None = None,
     ) -> None:
-        del now
+        del now, slot
         self.queued.append((number, purpose, destinations, message, key))
 
 

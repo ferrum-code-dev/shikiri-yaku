@@ -19,12 +19,13 @@ import pytest
 from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
+from shikiri_yaku.adapters.telegram import BAD_REQUEST
 from shikiri_yaku.app.event_source import CLOSED_UNMERGED_LINE, MERGED_LINE, PR_CLOSED_REASON
 from shikiri_yaku.app.health_source import RECOVERED_LINE
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
 from shikiri_yaku.domain.callback import decline_data
-from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, Purpose
+from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, REPLACED_LINE, Purpose
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.install_replies import CANCELLED_NOTE, DECLINED_NOTE
 from shikiri_yaku.extensions.infrastructure.rules import (
@@ -35,6 +36,7 @@ from shikiri_yaku.extensions.infrastructure.rules import (
 from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     Database,
+    Delivery,
     JournalActions,
     JournalInbound,
     JournalStarts,
@@ -43,9 +45,11 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
+from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import (
     INSTALL_DECLINED,
+    INSTALL_VOID,
     AttemptState,
     CommandResult,
     EventKinds,
@@ -72,6 +76,8 @@ _PROMPT_ID: Final = FIRST_MESSAGE_ID + 1
 _HELP_LINE: Final = "/help · this list"
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
+# keep: polls a replayed restart gets through, enough for every job to run its tick at least once
+_POLLS: Final = 5
 _ASKED: Final = "I may have submitted this already"
 _RESTARTED: Final = "The engine of api was restarted."
 _FAILED_HANDLER: Final = "handler failed"
@@ -502,6 +508,40 @@ class _HangingSendBot(FakeBotApi):
         return await super().call(method, payload)
 
 
+class _DeletionBot(_RestartBot):
+    """Keeps the restart's ids and records, for each deletion, the journal's delivery of the copy.
+
+    With `refuse`, every deletion is answered as the platform answers a copy it will not delete,
+    such as one older than 48 hours.
+    """
+
+    def __init__(
+        self, directory: Path, updates: list[dict[str, Any]], *, refuse: bool = False
+    ) -> None:
+        super().__init__(updates)
+        self._directory = directory
+        self._refuse = refuse
+        self.states: list[str | None] = []
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method != "deleteMessage":
+            return await super().call(method, payload)
+        self.states.append(_delivery_of(self._directory, int(str(payload["message_id"]))))
+        reply = await super().call(method, payload)
+        if self._refuse:
+            return {"ok": False, "error_code": BAD_REQUEST, "description": "can't be deleted"}
+        return reply
+
+
+def _deleted(bot: FakeBotApi) -> list[int]:
+    """Return the message ids the bot was asked to delete, in order."""
+    return [
+        int(str(payload["message_id"]))
+        for method, payload in bot.calls
+        if method == "deleteMessage"
+    ]
+
+
 def _in_topic(bot: FakeBotApi, text: str) -> list[dict[str, Any]]:
     """Return the messages the bot sent into the topic that carry `text`."""
     return [
@@ -528,6 +568,34 @@ def _install_state(directory: Path, op_id: int) -> str | None:
     finally:
         database.close()
     return None if operation is None else operation.state
+
+
+def _claim_interrupted(directory: Path, op_id: int) -> None:
+    """Approve the install and claim it, as an Operator killed right after the claim leaves it."""
+    now = SystemClock().now()
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        ops = OpStore(database)
+        operation = ops.install_op(op_id)
+        assert operation is not None
+        assert ops.approve_install(op_id, operation.payload.number, now)
+        claimed = JournalInstallRuns(database, SignalStore(database), ops).claim(op_id, now)
+    finally:
+        database.close()
+    assert claimed is not None
+
+
+def _delivery_of(directory: Path, message_id: int) -> str | None:
+    """Return the journal's delivery of the copy with the Telegram message id, read on its own."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            "SELECT delivery FROM messages WHERE platform_message_id LIKE ?",
+            (f"%/{message_id}",),
+        ).fetchone()
+    finally:
+        database.close()
+    return None if row is None else str(row["delivery"])
 
 
 def _deliver_install(
@@ -624,7 +692,7 @@ def _open_install(
         runner,
         bot,
         _ShikiruSession(asyncio.Event()),
-        _until(lambda: bool(_install_approvals(bot))),
+        _until(lambda: bool(_install_approvals(bot)) and FIRST_MESSAGE_ID in _deleted(bot)),
     )
 
     [approval] = _install_approvals(bot)
@@ -649,6 +717,8 @@ def _open_install(
         database.close()
     assert row is not None
     _, _, message_id = row["platform_message_id"].partition("/")
+    # keep: /open re-shows the approval as a newer copy of its slot, so the copy it replaces is gone
+    assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [int(message_id)]
     return buttons[0]["callback_data"], int(message_id)
 
 
@@ -1476,6 +1546,13 @@ def _message_ids(directory: Path, purpose: Purpose) -> list[int]:
     return [int(row["platform_message_id"].partition("/")[2]) for row in rows]
 
 
+def _live_copies(directory: Path, purpose: Purpose, deleted: Sequence[int]) -> list[int]:
+    """Return the Telegram ids of the sent copies of the purpose that no deletion has removed."""
+    return [
+        message_id for message_id in _message_ids(directory, purpose) if message_id not in deleted
+    ]
+
+
 def test_a_cancelled_task_ends_its_question_and_its_unrun_install_and_a_tap_says_why(
     tmp_path: Path,
 ) -> None:
@@ -1546,3 +1623,73 @@ def test_a_cancelled_task_ends_its_question_and_its_unrun_install_and_a_tap_says
         "failed",
         [],
     )
+
+
+def test_an_install_interrupted_after_its_claim_is_asked_again_and_its_old_approval_is_replaced(
+    tmp_path: Path,
+) -> None:
+    """A restart that finds the tool still missing asks again once and deletes the old approval.
+
+    The old copy's deletion is journaled before the platform is asked, and the new approval is the
+    one copy left. A replay of the same restart deletes and sends nothing more (design §6.3, §7).
+    """
+    directory = _instance(tmp_path)
+    runner = _InstallRunner()
+    _, op_id, _ = _initial_install(directory, runner)
+    _claim_interrupted(directory, op_id)
+    bot = _DeletionBot(directory, [])
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: _delivery_of(directory, FIRST_MESSAGE_ID) == Delivery.DELETED),
+    )
+
+    [approval] = _install_approvals(bot)
+    assert "Command: brew install ffmpeg" in approval["text"]
+    assert _install_state(directory, op_id) == INSTALL_VOID
+    assert (runner.installs, _deleted(bot), bot.states) == (
+        [],
+        [FIRST_MESSAGE_ID],
+        [Delivery.DELETE_ATTEMPTED],
+    )
+    assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [FIRST_MESSAGE_ID + 1]
+
+    replay = _DeletionBot(directory, [])
+    _deliver_install(
+        directory,
+        runner,
+        replay,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: sum(method == "getUpdates" for method, _ in replay.calls) >= _POLLS),
+    )
+    changes = {"sendMessage", "editMessageText", "deleteMessage"}
+    assert [method for method, _ in replay.calls if method in changes] == []
+
+
+def test_a_deletion_the_platform_refuses_leaves_the_old_copy_marked_replaced(
+    tmp_path: Path,
+) -> None:
+    """A copy the platform will not delete, such as one older than 48 hours, is edited to say so.
+
+    The edit is its final line and leaves no buttons, so the old approval cannot be tapped
+    (design §7).
+    """
+    directory = _instance(tmp_path)
+    runner = _InstallRunner()
+    _, op_id, _ = _initial_install(directory, runner)
+    _claim_interrupted(directory, op_id)
+    bot = _DeletionBot(directory, [], refuse=True)
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: _edited(bot, REPLACED_LINE)),
+    )
+
+    [edit] = [payload for payload in _edits(bot) if payload["message_id"] == FIRST_MESSAGE_ID]
+    assert REPLACED_LINE in edit["text"]
+    assert edit["reply_markup"] == {"inline_keyboard": []}
+    assert _deleted(bot) == [FIRST_MESSAGE_ID]

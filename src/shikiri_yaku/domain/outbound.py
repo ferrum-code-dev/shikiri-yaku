@@ -33,6 +33,12 @@ def refusal_notice(number: int | None) -> str:
 # keep: the last line of a message whose signal ended, so the PO sees why its buttons went
 ACKNOWLEDGED_LINE: Final = "Acknowledged"
 ENGINE_UP_LINE: Final = "Engine is up again"
+# keep: the last line of a copy that a newer copy replaced, when the platform will not delete it
+REPLACED_LINE: Final = "Replaced by a newer message"
+# keep: a slot names the one live copy of a kind of message for a signal (design §7)
+# keep: a newer copy in the same slot, chat and thread replaces the older one once accepted
+QUESTION_SLOT: Final = "question"
+INSTALL_SLOT: Final = "install"
 TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
 _CUT_MARK: Final = "…"
 

@@ -89,7 +89,7 @@ merged and `uv run poe check` passes.
   - [x] E4. Install path hardening from the security review
   - [x] E5. Command line in Shikiru's style
   - [x] E6. A cancelled task closes its open signals
-  - [ ] E7. A replaced message disappears
+  - [x] E7. A replaced message disappears
   - [ ] E8. Reconcile an answer by Shikiru's real resolution text
   - [ ] E9. Every signal of a component goes to its topic
   - [ ] E10. The Acknowledge button says what it does

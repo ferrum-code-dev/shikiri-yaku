@@ -6,7 +6,7 @@ import shlex
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.callback import decline_data, install_data
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import INSTALL_SLOT, Purpose
 from shikiri_yaku.domain.outcome import Forward, Notified
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.extensions.infrastructure.rules import DECISION_REQUIRED
@@ -96,6 +96,7 @@ class InstallAction:
             message,
             key=f"{OP_IDENTITY}{operation.id}",
             now=self._clock.now(),
+            slot=INSTALL_SLOT,
         )
         return Notified("queued the install approval for the Product Owner")
 

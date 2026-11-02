@@ -83,7 +83,7 @@ class JournalFinalEdits:
                 {**self._arguments(), "number": number},
             ).fetchall()
             for row in rows:
-                final = _final(_BODY.validate_json(row["body"]), line)
+                final = final_copy(_BODY.validate_json(row["body"]), line)
                 connection.execute(
                     "UPDATE messages SET final_body = ? WHERE id = ?",
                     (_BODY.dump_json(final).decode(), row["id"]),
@@ -122,7 +122,7 @@ class JournalFinalEdits:
         )
 
 
-def _final(original: Message, line: str) -> Message:
+def final_copy(original: Message, line: str) -> Message:
     """Return a sent copy's final state: its heading, as much text as fits, then the line."""
     room = text_room(original.heading)
     shown = fit(line, room)

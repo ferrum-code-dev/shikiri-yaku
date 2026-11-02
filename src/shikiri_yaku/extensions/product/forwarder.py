@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import Purpose, fit
+from shikiri_yaku.domain.outbound import QUESTION_SLOT, Purpose, fit
 from shikiri_yaku.extensions.product.message import escalation_message, information_message
 from shikiri_yaku.ports import EscalationStatus, ShikiruError
 
@@ -104,7 +104,9 @@ class ProductForwarder:
             purpose, message = self._render(
                 number, signal, view, title, in_topic=in_topic, note=note, suggestion=suggestion
             )
-            self._outbox.queue(number, purpose, [destination], message, key=key, now=now)
+            # keep: only an open question has a slot; an information copy never replaces a question
+            slot = QUESTION_SLOT if purpose == Purpose.QUESTION else None
+            self._outbox.queue(number, purpose, [destination], message, key=key, now=now, slot=slot)
 
     def _render(
         self,

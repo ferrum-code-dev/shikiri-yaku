@@ -38,6 +38,7 @@ from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.assessor import Assessor
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
+from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.goal import GoalCommand
@@ -90,6 +91,7 @@ from shikiri_yaku.journal import (
     JournalFinalEdits,
     JournalInbound,
     JournalOutbox,
+    JournalReplacements,
     JournalRetries,
     JournalRouting,
     JournalSchedule,
@@ -350,7 +352,7 @@ def compose(
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
-    jobs.append(copy_edit_job(settings, journal, channel, clock))
+    jobs += copy_jobs(settings, journal, reporter, channel, clock)
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
     jobs.append(
         after_settled(
@@ -715,6 +717,30 @@ def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock
         interval_s=settings.operator.inbound_interval_s,
     )
     return editor.run
+
+
+def copy_jobs(
+    settings: Settings, journal: Database, reporter: Reporter, channel: Channel, clock: Clock
+) -> list[Job]:
+    """Return the jobs that finish the copies of resolved questions and delete the replaced ones."""
+    messages = MessageStore(journal, reporter)
+    return [
+        copy_edit_job(settings, journal, channel, clock),
+        replacement_job(settings, journal, messages, channel, clock),
+    ]
+
+
+def replacement_job(
+    settings: Settings, journal: Database, messages: MessageStore, channel: Channel, clock: Clock
+) -> Job:
+    """Return the job that deletes the copies a newer copy of the same slot has replaced (§7)."""
+    replacer = CopyReplacer(
+        JournalReplacements(journal, messages),
+        channel,
+        clock,
+        interval_s=settings.operator.inbound_interval_s,
+    )
+    return replacer.run
 
 
 def reconcile_job(

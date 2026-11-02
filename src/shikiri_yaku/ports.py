@@ -115,6 +115,7 @@ __all__ = [
     "ReasonerRung",
     "ReconcileLog",
     "RecordedResolution",
+    "Replacements",
     "ReplyLog",
     "ReplyOrigin",
     "Reporter",
@@ -865,8 +866,13 @@ class Outbox(Protocol):
         *,
         key: str,
         now: datetime,
+        slot: str | None = None,
     ) -> None:
-        """Record the message once per key and destination; a key seen before records nothing."""
+        """Record the message once per key and destination; a key seen before records nothing.
+
+        A message with a slot replaces the older copies of the same slot, chat and thread once the
+        platform has accepted it (design §7).
+        """
         ...
 
     def command_reply_queued(self, key: str) -> bool:
@@ -961,6 +967,25 @@ class SecretLog(Protocol):
     def defer_deletion(self, update_id: int) -> None: ...
 
     def confirm_deletion(self, update_id: int) -> None: ...
+
+
+class Replacements(Protocol):
+    """Sent copies that a newer copy of the same slot has replaced, and their deletion (design §7).
+
+    `superseded` lists them, oldest first. Each deletion is journaled before the platform is asked.
+    A deletion the platform refuses for good keeps the copy as its final state, with the line that
+    says it was replaced and no buttons; one that fails for a transient reason is tried again.
+    """
+
+    def superseded(self) -> list[str]: ...
+
+    def begin_deletion(self, message_ref: str) -> None: ...
+
+    def keep_replaced(self, message_ref: str, line: str, reason: str) -> None: ...
+
+    def undo_deletion(self, message_ref: str) -> None: ...
+
+    def confirm_deletion(self, message_ref: str) -> None: ...
 
 
 class Reporter(Protocol):

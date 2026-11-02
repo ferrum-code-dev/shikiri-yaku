@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import INSTALL_SLOT, Purpose
 from shikiri_yaku.ports import INSTALL_INTENDED
 
 if TYPE_CHECKING:
@@ -55,5 +55,6 @@ class InstallReasker:
                 self._renderer.render(new.id, new.payload),
                 key=f"install:{new.id}",
                 now=now,
+                slot=INSTALL_SLOT,
             )
         self._installs.void_issued(op_id, now)
