@@ -1524,6 +1524,31 @@ Acceptance criteria:
 * Without a group (private chats) nothing changes.
 * The gate passes.
 
+### E10. The Acknowledge button says what it does (normal)
+
+Found in drills H1 and H4: the button "Acknowledge" is generic, the owner could not tell what a tap
+would do, and it sits on messages that need no tap at all. Design §6.1 and §6.5 are changed (committed).
+
+1. A message that only informs (finished work, a restart that worked, and any other notice that closes
+   itself) has no button and its signal closes when the message is sent (state `closed`), so it never
+   gets a reminder.
+2. A message about something that stays true until it is fixed (an engine that could not be restarted,
+   the Operator's own health, a pull request waiting) keeps one button, now labelled **Stop reminders**
+   (callback data unchanged). A tap removes the reminders, edits the message to end with the line
+   "Reminders stopped" (buttons removed, the other lines kept), and leaves the signal open until it
+   closes by itself, which still edits the message to its final line ("Engine is up again", "Recovered",
+   the pull request outcome).
+3. Which kind a notice is stays a property of the notice's key or its handler, not a switch on a category
+   name in the core; a new notice defaults to informational.
+4. Update the help text, README and the drills file where they say Acknowledge.
+
+Acceptance criteria:
+* Table-driven over notice kinds (finished work, restart worked, engine down not restarted, Operator health, pull request ready): the button label is "Stop reminders" or absent as specified, and informational signals are `closed` when sent.
+* A composed test: an engine-down message with Stop reminders; a tap ends reminders and edits the message to "Reminders stopped"; when the engine is up the message is edited to "Engine is up again"; no reminder is sent in between (test-time clock past the reminder time).
+* An informational notice gets no reminder after the reminder time.
+* No test or source text still uses the word "Acknowledge" for the button.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
