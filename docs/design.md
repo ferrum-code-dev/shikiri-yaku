@@ -102,6 +102,7 @@ path = "~/src/shop-web"
 [channels.telegram]
 token_file = "secrets/telegram.token"   # mode 0600; never in the journal, chat or a repository
 owners = [123456789]                    # allow-listed user ids
+# allow_other_members = false             # true: other group members may read; only owners can act
 
 [reasoner]                      # optional: without it every decision_required goes to the PO
 ladder = ["claude:<model>:<effort>", "codex:<model>:<effort>"]   # tried in order
@@ -496,7 +497,7 @@ Each item below is an extension, a handler, an action, a Reasoner job, an adapte
 | Suggested-answer buttons | Product handler | A Reasoner suggestion such as "add it to `pyproject.toml`" becomes a button | The same suggestion is typed repeatedly |
 | Digest and acceptance note | Notice handler | One message a day; a note on finished work against its acceptance criteria | Notices become noise |
 | Free-form approved commands | Install action | Other host commands, written by the Reasoner, shown with risk flags, approved word for word; needed for system package managers and unusual hosts | Forwarded infrastructure signals of one kind recur |
-| Telegram topics | Channel adapter (destination function + startup reconcile) | A product group: one forum topic per component for all of its signals, one General topic for the Operator's own health, the bot as admin with the manage-topics right; a new component gets a topic, a removed one has its topic closed with the history kept; `/goal` in a topic implies the component. The group must hold only the owners, because everyone in it sees project data. About 3 tasks | First extension after the relay; at the latest when the single chat is confusing with two or more components |
+| Telegram topics | Channel adapter (destination function + startup reconcile) | A product group: one forum topic per component for all of its signals, one General topic for the Operator's own health, the bot as admin with the manage-topics right; a new component gets a topic, a removed one has its topic closed with the history kept; `/goal` in a topic implies the component. By default the group must hold only the owners and the bot, because everyone in it sees project data; `allow_other_members = true` accepts other members, who can read the messages but whose taps and messages are ignored, because only `owners` are served. About 3 tasks | First extension after the relay; at the latest when the single chat is confusing with two or more components |
 | Remote components | Command runner + MCP adapter | A component with `host`: its Shikiru link, `start` and host commands run through ssh, installs run on that host with its own facts and lock | The first project on another machine |
 | Review delegation | Handler for category `review` | A pull request goes to a review agent or the CI's review agents; the PO is asked only when they ask or disagree | Reviewing pull requests is the PO's main wait |
 | Model classifier | Classifier adapter | A decision model or a general LLM replaces or precedes the rules | Rule misroutes are frequent |

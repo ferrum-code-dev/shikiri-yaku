@@ -1549,6 +1549,27 @@ Acceptance criteria:
 * No test or source text still uses the word "Acknowledge" for the button.
 * The gate passes.
 
+### E11. A group may have other members (normal)
+
+The owner wants a group with many members where only `owners` can act. Design §3.2 and §13 are
+changed (committed). Today `probe_bot` (adapters/telegram.py) fails when the member count is not the
+owners plus the bot.
+
+1. A new setting `channels.telegram.allow_other_members` (boolean, default `false`, `extra="forbid"`
+   as the rest of the config). With `false` nothing changes.
+2. With `true` the member-count check is skipped; the bot still has to be in the group with its rights,
+   and `doctor` still checks every owner is a member. `doctor` prints one line that names the effect:
+   "Other members of the group can read the messages; only owners can act".
+3. Messages and button taps from a user who is not an owner are ignored, in a group and in a topic. They
+   are not answered and do not create journal entries other than the saved update, so the group is not
+   told that the bot exists. Check that this already holds; fix it where it does not.
+
+Acceptance criteria:
+* Table-driven: member count equal to owners plus bot, and larger, with the setting false and true: fails only for larger with false.
+* A tap and a text message from a non-owner in a topic change nothing and send nothing (composed test with the fake Bot API); an owner's tap works in the same group.
+* `doctor` shows the "Other members" line when the setting is true and not when it is false.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
