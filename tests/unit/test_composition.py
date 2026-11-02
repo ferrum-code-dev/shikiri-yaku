@@ -160,11 +160,16 @@ def _question_event(event_id: int) -> dict[str, Any]:
     )
 
 
-def _resolved_escalation() -> dict[str, Any]:
-    """Return the recorded escalation as Shikiru has it once the answer resolved it."""
+def _resolved_escalation(resolution: dict[str, Any]) -> dict[str, Any]:
+    """Return the recorded escalation as Shikiru has it once `resolution` resolved it.
+
+    Shikiru stores the kind, then a space and the text when there is one.
+    """
     view = _recorded("get_escalation")
+    text = resolution.get("text")
+    stored = f"{resolution['kind']} {text}" if text else resolution["kind"]
     view["result"]["escalation"].update(
-        status="resolved", resolution="answer", resolved_at="2026-10-28T08:10:00Z"
+        status="resolved", resolution=stored, resolved_at="2026-10-28T08:10:00Z"
     )
     return view
 
@@ -213,7 +218,7 @@ class _ShikiruSession:
             payload: dict[str, Any] = {"result": events}
         elif name == "resolve_escalation":
             self.resolutions.append(arguments)
-            self._answers["get_escalation"] = _resolved_escalation()
+            self._answers["get_escalation"] = _resolved_escalation(arguments["resolution"])
             self.resolved.set()
             if self.hangs_resolve:
                 await asyncio.Event().wait()

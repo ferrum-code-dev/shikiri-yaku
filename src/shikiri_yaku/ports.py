@@ -262,6 +262,11 @@ class EscalationRecord(_ShikiruPayload):
     status: str
     resolution: str | None
 
+    def resolved_as(self, kind: str) -> bool:
+        """Whether Shikiru resolved the escalation as `kind`, with or without its text."""
+        stored = self.resolution
+        return stored is not None and (stored == kind or stored.startswith(f"{kind} "))
+
 
 class AgentOption(_ShikiruPayload):
     label: str

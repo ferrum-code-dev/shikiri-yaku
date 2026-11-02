@@ -150,7 +150,7 @@ class InstallReconciler:
         )
 
     def _closed(self, pending: PendingInstall, view: EscalationView, now: datetime) -> None:
-        if view.escalation.resolution != ResolutionKind.ANSWER:
+        if not view.escalation.resolved_as(ResolutionKind.ANSWER):
             self._log.void(pending.op.id, now)
             return
         if pending.ack is None:

@@ -17,6 +17,7 @@ from shikiri_yaku.ports import (
     Ack,
     EngineStatus,
     EscalationView,
+    ResolutionKind,
     ResolvePayload,
     ShikiruClient,
     ShikiruLinkDownError,
@@ -136,6 +137,26 @@ def _only_op(world: _World) -> OpState:
     return op.state
 
 
+def _issue_without_ack(world: _World, kind: str, text: str | None) -> None:
+    """Leave a resolve issued and unacknowledged, as a crash during its send does."""
+    payload = ResolvePayload(
+        number=world.h.number,
+        project="api",
+        task_id="T-1",
+        reason="decision_required",
+        escalation_id="E-1",
+        kind=kind,
+        text=text,
+        label=kind,
+    )
+    log = world.h.log()
+    queued = log.intend_resolve(900, payload, STARTED)
+    assert queued is not None
+    if kind == ResolutionKind.CANCEL:
+        assert log.approve_resolve(queued, world.h.number, STARTED)
+    assert log.claim_resolve(queued, STARTED) is not None
+
+
 def test_queued_resolve_still_open_after_the_wait_is_lost_and_the_question_returns(
     world: _World,
 ) -> None:
@@ -181,18 +202,35 @@ def test_crash_mid_send_with_the_escalation_open_shows_the_question_again(world:
 
 
 @pytest.mark.parametrize(
-    ("resolution", "state", "shown"),
-    [("answer", OpState.CONFIRMED, 0), ("cancel", OpState.FAILED, 0)],
+    ("kind", "text", "resolution", "state"),
+    [
+        (ResolutionKind.ANSWER, "alpha", "answer alpha", OpState.CONFIRMED),
+        (ResolutionKind.ANSWER, "retry", "answer retry", OpState.CONFIRMED),
+        (ResolutionKind.ANSWER, "alpha", ResolutionKind.RETRY, OpState.FAILED),
+        (ResolutionKind.ANSWER, "alpha", ResolutionKind.CANCEL, OpState.FAILED),
+        (ResolutionKind.RETRY, None, ResolutionKind.RETRY, OpState.CONFIRMED),
+        (ResolutionKind.RETRY, None, "answer alpha", OpState.FAILED),
+        (ResolutionKind.RETRY, None, "answer retry", OpState.FAILED),
+        (ResolutionKind.CANCEL, None, ResolutionKind.CANCEL, OpState.CONFIRMED),
+    ],
+    ids=[
+        "answer-with-text",
+        "answer-whose-text-is-a-kind",
+        "answer-resolved-as-retry",
+        "answer-resolved-as-cancel",
+        "retry",
+        "retry-resolved-with-answer-text",
+        "retry-resolved-with-answer-whose-text-is-retry",
+        "cancel",
+    ],
 )
-def test_crash_mid_send_with_the_escalation_resolved_is_decided_by_how_it_was_resolved(
-    world: _World, resolution: str, state: OpState, shown: int
+def test_an_unacknowledged_resolve_is_confirmed_only_when_shikiru_recorded_its_kind(
+    world: _World, kind: str, text: str | None, resolution: str, state: OpState
 ) -> None:
-    world.client.fail = True
-    with pytest.raises(ShikiruLinkDownError):
-        world.h.handle(data="a:1:1")
+    _issue_without_ack(world, kind, text)
     world.resolve_in_shikiru(resolution)
     world.tick(world.restart())
-    assert (_only_op(world), world.reshown()) == (state, shown)
+    assert (_only_op(world), world.reshown()) == (state, 0)
 
 
 def test_an_op_issued_after_the_start_is_not_uncertain(world: _World) -> None:

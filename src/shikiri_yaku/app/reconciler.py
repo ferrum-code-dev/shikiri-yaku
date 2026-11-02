@@ -106,7 +106,7 @@ class ResolveReconciler:
         now = self._clock.now()
         if view.escalation.status != EscalationStatus.OPEN:
             # keep: a queued command's event confirms it; without an acknowledgement there is no id
-            if op.ack is None and view.escalation.resolution == op.payload.kind:
+            if op.ack is None and view.escalation.resolved_as(op.payload.kind):
                 self._log.confirm(op.op_id, now)
             elif op.ack is None:
                 self._log.fail(op.op_id, now)

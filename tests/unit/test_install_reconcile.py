@@ -814,10 +814,17 @@ def test_a_failing_check_leaves_the_op_for_the_next_start(world: _World) -> None
     [
         (None, ResolutionKind.ANSWER, OpState.VOID),
         (DONE, ResolutionKind.ANSWER, OpState.ISSUED),
+        (DONE, f"{ResolutionKind.ANSWER} Installed ffmpeg. Please continue.", OpState.ISSUED),
         (None, ResolutionKind.CANCEL, OpState.VOID),
         (DONE, ResolutionKind.CANCEL, OpState.VOID),
     ],
-    ids=["unattributed-answer", "answer-without-event", "cancelled-unacked", "cancelled-acked"],
+    ids=[
+        "unattributed-answer",
+        "answer-without-event",
+        "answer-with-text-without-event",
+        "cancelled-unacked",
+        "cancelled-acked",
+    ],
 )
 def test_an_issued_install_closed_without_matching_event_is_not_confirmed(
     world: _World, ack: Ack | None, resolution: str, expected: str
