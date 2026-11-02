@@ -1501,6 +1501,29 @@ Acceptance criteria:
 * No other code compares a resolution string with a bare kind.
 * The gate passes.
 
+### E9. Every signal of a component goes to its topic (normal)
+
+Found in drills H1 and H4, reported twice by the owner: the engine-down message of a component, its
+"engine is up again" edit, its finished-work notices and pull-request messages arrive in the General
+topic, because `TelegramDestinations.for_signal` (adapters/telegram_topics.py) sends only
+escalations to the component's topic. Design §13 is changed (committed): every signal of a component
+goes to the component's topic; General keeps what belongs to no component (the Operator's own health:
+the Telegram source, the Reasoner).
+
+1. A signal whose project is a configured component goes to that component's topic, whatever its kind.
+   A signal of the Operator itself (the `OPERATOR_SCOPE` project) goes to General.
+2. The header already omits the component name inside its own topic (`Destinations.component_of`); check
+   that engine, notice and review messages follow that rule now, and that General messages of the
+   Operator itself carry no component name.
+3. Messages already sent keep their place; only new signals are routed differently. A topic that is not
+   open for a component still fails loudly, as today.
+
+Acceptance criteria:
+* Table-driven over signal kinds (`escalation`, `engine_down`, `engine_fault`, `task_done`, `pr_review`, `health` of a component) and the Operator's own health: each lands in the right topic of a fake group.
+* A composed test (as in C7): an engine-down signal of a component and its "Engine is up again" edit use that component's topic, and the header has no component prefix there.
+* Without a group (private chats) nothing changes.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
