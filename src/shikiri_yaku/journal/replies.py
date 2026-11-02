@@ -21,21 +21,23 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
+    from shikiri_yaku.domain.signal import Kind
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.signals import SignalStore
     from shikiri_yaku.ports import Ack
 
 
 _RESOLVE: Final = "resolve"
-ACKNOWLEDGE: Final = "ack"
+# keep: the op that a Stop reminders tap writes; the Scheduler reads it as the silence (design §6.4)
+SILENCE: Final = "ack"
 _BODY = TypeAdapter(Message)
 
 
 class JournalReplies:
-    """Acknowledging a notice whose key starts with a silencing prefix silences its reminders.
+    """A Stop reminders tap on a standing signal silences it, and keeps the signal open.
 
-    The silence keeps the signal open: it is an op named `ack:<number>`, which the Scheduler reads
-    (design §6.4). Any other notice is information, and its Acknowledge closes the signal (§6.1).
+    The silence is an op named `ack:<number>`, which the Scheduler reads (design §6.4). A tap on a
+    notice of any other kind closes its signal, as a button sent before the upgrade always did.
     """
 
     def __init__(
@@ -44,12 +46,12 @@ class JournalReplies:
         signals: SignalStore,
         ops: OpStore,
         *,
-        silencing_prefixes: tuple[str, ...] = (),
+        standing_kinds: frozenset[Kind],
     ) -> None:
         self._database = database
         self._signals = signals
         self._ops = ops
-        self._silencing_prefixes = silencing_prefixes
+        self._standing_kinds = standing_kinds
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None:
         row = self._database.connection.execute(
@@ -165,21 +167,22 @@ class JournalReplies:
     def reject_resolve(self, op_id: int, now: datetime) -> bool:
         return self._ops.transition(op_id, OpState.ISSUED, OpState.FAILED, now)
 
-    def acknowledge_notice(self, number: int, notice_key: str | None, now: datetime) -> None:
+    def stop_notice(self, number: int, now: datetime) -> None:
         stored = self._signals.get(number)
         # keep: a tap that arrives after the signal ended changes nothing, not even its op
         if stored is None or stored.state in {SignalState.RESOLVED, SignalState.CLOSED}:
             return
-        if notice_key is not None and notice_key.startswith(self._silencing_prefixes):
+        if stored.kind in self._standing_kinds:
             op = NewOp(
-                f"{ACKNOWLEDGE}:{number}",
-                ACKNOWLEDGE,
+                f"{SILENCE}:{number}",
+                SILENCE,
                 stored.project,
                 stored.task_id,
                 state=OpState.CONFIRMED,
             )
             self._ops.intend(op, now)
             return
+        # keep: a button sent before the upgrade, with the old label, still closes its signal
         self._signals.transition(
             number,
             SignalState.FORWARDED,

@@ -8,7 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.outbound import fit
+from shikiri_yaku.domain.callback import stop_reminders_data
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, fit
 from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
     AgentOption,
@@ -29,20 +30,18 @@ if TYPE_CHECKING:
 RECOMMENDED: Final = "★"
 CUT_MARK: Final = "…"
 DETAILS_LABEL: Final = "Details"
-ACKNOWLEDGE_LABEL: Final = "Acknowledge"
 TITLE_INFORMATION: Final = "For information"
 
 
 class Tap:
     """The verb at the start of a button's data, the rest being numbers.
 
-    `a` selects a choice (design §7). `d` and `k` are Details and Acknowledge, a clarification
-    to §7 recorded in tasks/plan.md under A9.
+    `a` selects a choice (design §7). `d` is Details, a clarification to §7 recorded in
+    tasks/plan.md under A9. A Stop reminders button carries its own verb (domain/callback.py).
     """
 
     ANSWER: Final = "a"
     DETAILS: Final = "d"
-    ACKNOWLEDGE: Final = "k"
 
 
 REASON_HINTS: Final[Mapping[str, str]] = {
@@ -103,11 +102,16 @@ def information_message(
     in_topic: bool,
     note: str,
     suggestion: str,
+    standing: bool,
 ) -> Message:
+    """Return a message about a signal without a question; only a standing one has a button.
+
+    A standing message stays true until it is fixed, so it keeps Stop reminders (design §6.1).
+    """
     heading = _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION)
     text = join_blocks(signal.text, _notes(note, suggestion))
-    acknowledge = Button(ACKNOWLEDGE_LABEL, f"{Tap.ACKNOWLEDGE}:{number}")
-    return Message(fit(text, text_room(heading)), (acknowledge,), heading)
+    buttons = (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),) if standing else ()
+    return Message(fit(text, text_room(heading)), buttons, heading)
 
 
 def _hint(signal: Signal, view: EscalationView) -> str:

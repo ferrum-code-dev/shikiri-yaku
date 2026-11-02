@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.outbound import fit
+from shikiri_yaku.domain.callback import stop_reminders_data
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, fit
 from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Button, Message
 
 if TYPE_CHECKING:
@@ -15,9 +16,6 @@ if TYPE_CHECKING:
 
 TITLE: Final = "Pull request ready for review"
 OPEN_PR_LABEL: Final = "Open PR"
-ACKNOWLEDGE_LABEL: Final = "Acknowledge"
-# keep: the verb the replies read as Acknowledge (design §7); its notice key makes it silence
-ACKNOWLEDGE_TAP: Final = "k"
 
 
 def review_message(
@@ -31,8 +29,9 @@ def review_message(
 ) -> Message:
     """Return the review message: its header, the title and commit count, and two buttons.
 
-    The Open PR button is a link; Acknowledge carries the signal number as its data. The component
-    name is left out of the header where the message is already in that component's topic.
+    The Open PR button is a link; Stop reminders carries the signal number as its data, and the
+    review stays open until it is fixed (design §6.1). The component name is left out of the header
+    where the message is already in that component's topic.
     """
     text = "\n".join(
         block
@@ -41,7 +40,7 @@ def review_message(
     )
     buttons = (
         Button(OPEN_PR_LABEL, url=pull.url),
-        Button(ACKNOWLEDGE_LABEL, f"{ACKNOWLEDGE_TAP}:{number}"),
+        Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),
     )
     return Message(fit(text, MESSAGE_TEXT_LIMIT), buttons)
 

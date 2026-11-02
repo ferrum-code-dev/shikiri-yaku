@@ -117,7 +117,7 @@ def test_a_link_button_is_posted_as_a_url_beside_a_callback_button() -> None:
     api = _Api([_recorded("send_ok.json")])
     link = Message(
         "S1 · Pull request ready",
-        (Button("Open PR", url="https://example.test/pull/7"), Button("Acknowledge", "k:1")),
+        (Button("Open PR", url="https://example.test/pull/7"), Button("Stop reminders", "k:1")),
     )
 
     _send(api, _Clock(), link)
@@ -125,7 +125,7 @@ def test_a_link_button_is_posted_as_a_url_beside_a_callback_button() -> None:
     assert api.calls[0][1]["reply_markup"] == {
         "inline_keyboard": [
             [{"text": "Open PR", "url": "https://example.test/pull/7"}],
-            [{"text": "Acknowledge", "callback_data": "k:1"}],
+            [{"text": "Stop reminders", "callback_data": "k:1"}],
         ]
     }
 

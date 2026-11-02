@@ -8,7 +8,7 @@ import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.scheduler import Scheduler
-from shikiri_yaku.bootstrap import schedule_log
+from shikiri_yaku.bootstrap import STANDING_KINDS, schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.journal import (
@@ -213,7 +213,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
 
 
 @pytest.mark.parametrize("final_state", [SignalState.ANSWERED, SignalState.CLOSED])
-def test_unacknowledged_review_is_reminded_until_acknowledged_or_closed(
+def test_unstopped_review_is_reminded_until_stopped_or_closed(
     world: _World,
     final_state: SignalState,
 ) -> None:
@@ -231,15 +231,15 @@ def test_unacknowledged_review_is_reminded_until_acknowledged_or_closed(
     assert len(_queued(world)) == 1
 
 
-def test_an_acknowledged_review_is_not_reminded_and_stays_forwarded(world: _World) -> None:
+def test_a_stopped_review_is_not_reminded_and_stays_forwarded(world: _World) -> None:
     number = world.signal("e1", SignalState.FORWARDED, kind="pr_review")
     world.ask(number, purpose=Purpose.NOTICE, key=f"review:{number}")
     JournalReplies(
         world.database,
         world.signals,
         OpStore(world.database),
-        silencing_prefixes=("review:",),
-    ).acknowledge_notice(number, f"review:{number}", START)
+        standing_kinds=STANDING_KINDS,
+    ).stop_notice(number, START)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)
 
@@ -249,25 +249,22 @@ def test_an_acknowledged_review_is_not_reminded_and_stays_forwarded(world: _Worl
     assert _queued(world) == []
 
 
-@pytest.mark.parametrize("registered", [False, True])
-def test_notice_reminders_follow_injected_registration(world: _World, *, registered: bool) -> None:
-    kind = "another_notice_kind"
+@pytest.mark.parametrize(
+    ("kind", "reminded"),
+    [
+        (Kind.ENGINE_DOWN, True),
+        (Kind.ENGINE_FAULT, True),
+        (Kind.HEALTH, True),
+        (Kind.PR_REVIEW, True),
+        (Kind.TASK_DONE, False),
+    ],
+)
+def test_only_a_standing_notice_is_reminded(world: _World, kind: Kind, *, reminded: bool) -> None:
     number = world.signal("n1", SignalState.FORWARDED, kind=kind)
-    world.ask(number, purpose=Purpose.NOTICE, key="original")
-    world.ask(number, chat="1002", purpose=Purpose.NOTICE, key=f"remind:{number}:1")
-    world.ask(world.signal("n2", SignalState.FORWARDED, kind="health"), purpose=Purpose.NOTICE)
-    log = JournalSchedule(
-        world.database,
-        world.signals,
-        world.messages,
-        OpStore(world.database),
-        reminder_notice_kinds=frozenset({kind}) if registered else frozenset(),
-    )
+    world.ask(number, purpose=Purpose.NOTICE, key=f"forward:{number}")
     world.clock.moment = START + timedelta(hours=FIRST_H)
-    asyncio.run(world.scheduler(log).tick())
-    asyncio.run(world.scheduler(log).tick())
-
-    assert [chat for chat, _ in _queued(world)] == ([CHAT] if registered else [])
+    _tick(world)
+    assert [chat for chat, _ in _queued(world)] == ([CHAT] if reminded else [])
 
 
 def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(

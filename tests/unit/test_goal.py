@@ -9,6 +9,7 @@ import pytest
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.submit import Submitter
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, OpStore, SignalStore
@@ -68,7 +69,9 @@ class _Goal:
         self.outbox = JournalOutbox(database, MessageStore(database, _Reporter()))
         clients = {"api": cast("ShikiruClient", self.client)}
         clock = cast("Clock", _Clock())
-        replies = JournalReplies(database, SignalStore(database), OpStore(database))
+        replies = JournalReplies(
+            database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
+        )
         submitter = Submitter(self.submits, clients, clock)
         self.topics = TopicStore(database)
         self.command = GoalCommand(

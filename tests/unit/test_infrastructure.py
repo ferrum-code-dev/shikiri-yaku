@@ -75,9 +75,10 @@ class FakeFallback:
     def __init__(self) -> None:
         self.forwarded: list[str] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         del number, signal, suggestion
         self.forwarded.append(note)
+        return False
 
 
 class ClaimsAgentError:

@@ -4,15 +4,21 @@ from pydantic import PositiveInt, TypeAdapter
 
 type AnswerTap = tuple[Literal["a"], PositiveInt, PositiveInt]
 type DetailsTap = tuple[Literal["d"], PositiveInt]
-type AcknowledgeTap = tuple[Literal["k"], PositiveInt]
+type StopRemindersTap = tuple[Literal["k"], PositiveInt]
 type SubmitTap = tuple[Literal["s"], PositiveInt]
 type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
-type Callback = AnswerTap | DetailsTap | AcknowledgeTap | SubmitTap | InstallTap
+type Callback = AnswerTap | DetailsTap | StopRemindersTap | SubmitTap | InstallTap
 
+STOP_REMINDERS_VERB: Final = "k"
 SUBMIT_VERB: Final = "s"
 INSTALL_VERB: Final = "i"
 DECLINE_VERB: Final = "x"
 _CALLBACK = TypeAdapter[Callback](Callback)
+
+
+def stop_reminders_data(number: int) -> str:
+    """Return the callback data of *Stop reminders*: it silences a standing message's reminders."""
+    return f"{STOP_REMINDERS_VERB}:{number}"
 
 
 def submit_data(op_id: int) -> str:

@@ -17,8 +17,9 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.health_source import LINK_SCOPE, RECOVERED_LINE
 from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.router import Router
-from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES
-from shikiri_yaku.domain.outcome import Notified, Resolved
+from shikiri_yaku.bootstrap import STANDING_KINDS
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL
+from shikiri_yaku.domain.outcome import Informed, Notified, Resolved
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Closing, Kind
 from shikiri_yaku.extensions.notice.extension import notice_extension
@@ -35,7 +36,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import ShikiruLinkDownError, ShikiruTask, TaskStatus
+from shikiri_yaku.ports import Button, ShikiruLinkDownError, ShikiruTask, TaskStatus
 from tests.support.destinations import FixedDestinations
 from tests.support.notices import WHERE, journal_notifier, journal_outbox
 
@@ -85,9 +86,10 @@ class _Fallback:
     def __init__(self) -> None:
         self.forwarded: list[tuple[str, str]] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         del number, suggestion
         self.forwarded.append((signal.id, note))
+        return False
 
 
 @pytest.fixture
@@ -191,7 +193,7 @@ def test_the_last_task_of_a_family_announces_it_once(
 
     outcome = asyncio.run(_handler(memory, _Tasks(tasks)).handle(signal))
 
-    assert outcome == Resolved(SENT)
+    assert outcome == Informed(SENT)
     assert _texts(memory) == texts
 
 
@@ -241,14 +243,15 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
     outbox = journal_outbox(memory)
     [pending] = outbox.pending()
     assert pending.message.text == HEALTH_TEXT
+    assert pending.message.buttons == (Button(STOP_REMINDERS_LABEL, f"k:{number}"),)
     outbox.confirm(pending.message_id, "ref-1")
     signals.close(
         Closing(PROJECT, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE), NOW
     )
     channel = _Channel()
-    replies = JournalReplies(memory, signals, OpStore(memory))
+    replies = JournalReplies(memory, signals, OpStore(memory), standing_kinds=STANDING_KINDS)
     editor = CopyEditor(
-        JournalFinalEdits(memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        JournalFinalEdits(memory, replies),
         cast("Channel", channel),
         _Clock(),
         interval_s=1,
@@ -267,29 +270,32 @@ async def _route(router: Router, number: int, signal: Signal) -> None:
     await router.join()
 
 
-def test_a_notice_that_fails_is_forwarded_with_the_original_signal(memory: Database) -> None:
-    number, signal = _done(memory, "T-1")
-    outbox = journal_outbox(memory)
+def _router(database: Database, client: _Tasks, fallback: _Fallback) -> Router:
+    outbox = journal_outbox(database)
     extension = notice_extension(
-        {PROJECT: cast("ShikiruClient", _Tasks(down=True))},
-        SignalStore(memory),
+        {PROJECT: cast("ShikiruClient", client)},
+        SignalStore(database),
         outbox,
         journal_notifier(outbox, _Clock()),
         _Clock(),
         destinations=FixedDestinations([WHERE]),
     )
-    fallback = _Fallback()
-    router = Router(
+    return Router(
         RuleClassifier([extension, product_extension()]),
         {extension.category: extension.handler},
         fallback,
-        JournalRouting(memory, SignalStore(memory)),
+        JournalRouting(database, SignalStore(database)),
         _Clock(),
         handler_timeout_s=1,
         forward_retry_s=1,
     )
 
-    asyncio.run(_route(router, number, signal))
+
+def test_a_notice_that_fails_is_forwarded_with_the_original_signal(memory: Database) -> None:
+    number, signal = _done(memory, "T-1")
+    fallback = _Fallback()
+
+    asyncio.run(_route(_router(memory, _Tasks(down=True), fallback), number, signal))
 
     [(sent_id, note)] = fallback.forwarded
     assert sent_id == signal.id
@@ -297,6 +303,22 @@ def test_a_notice_that_fails_is_forwarded_with_the_original_signal(memory: Datab
     stored = SignalStore(memory).get(number)
     assert stored is not None
     assert stored.state is SignalState.FORWARDED
+
+
+def test_a_finished_task_is_informed_and_its_signal_closes_without_forwarding(
+    memory: Database,
+) -> None:
+    number, signal = _done(memory, "T-1")
+    fallback = _Fallback()
+    tasks = _Tasks([_task("T-1", TaskStatus.DONE)])
+
+    asyncio.run(_route(_router(memory, tasks, fallback), number, signal))
+
+    stored = SignalStore(memory).get(number)
+    assert stored is not None
+    assert stored.state is SignalState.CLOSED
+    assert _texts(memory) == ["api · Title of T-1 integrated (1 task)"]
+    assert fallback.forwarded == []
 
 
 @pytest.mark.parametrize(

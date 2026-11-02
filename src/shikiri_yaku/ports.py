@@ -672,6 +672,10 @@ class RoutingLog(Protocol):
 
     def forwarded(self, number: int, note: str, now: datetime) -> None: ...
 
+    def informed(self, number: int, note: str, now: datetime) -> None:
+        """Close a signal whose message only informed the PO, when the message is sent."""
+        ...
+
     def park(self, number: int, wake_at: datetime, note: str, now: datetime) -> None: ...
 
 
@@ -698,10 +702,11 @@ class Forwarder(Protocol):
 
     `number` is the signal's journal number, its reference `S<number>`. `note` says what was tried
     and why it stopped. `suggestion` is the note of the classification, the Reasoner's suggestion
-    or its failure, which is model-written and shown as such.
+    or its failure, which is model-written and shown as such. The result is True when the message
+    only informs, so the signal closes with it and does not wait for an answer.
     """
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None: ...
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool: ...
 
 
 class WakeTarget(Protocol):
@@ -1264,8 +1269,8 @@ class ReplyLog(Protocol):
         """Fail an issued op that Shikiru refused; return whether it was still issued."""
         ...
 
-    def acknowledge_notice(self, number: int, notice_key: str | None, now: datetime) -> None:
-        """Silence the reminders of a silencing notice, or close the signal of any other notice."""
+    def stop_notice(self, number: int, now: datetime) -> None:
+        """Silence the reminders of a standing signal's message (its *Stop reminders* tap)."""
         ...
 
 

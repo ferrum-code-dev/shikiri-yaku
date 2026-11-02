@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.outbound import Purpose, fit
-from shikiri_yaku.domain.outcome import Forward, Notified, Resolved
+from shikiri_yaku.domain.callback import stop_reminders_data
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose, fit
+from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.notice.family import family_of
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Message
+from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Button, Message
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -79,7 +80,7 @@ class NoticeHandler:
             fit(text, MESSAGE_TEXT_LIMIT),
             key=f"{INTEGRATED_KEY}:{signal.project}:{family.root.id}",
         )
-        return Resolved(SENT)
+        return Informed(SENT)
 
     def _in_component_topic(self, signal: Signal) -> bool:
         destinations = self._destinations.for_signal(signal.project, signal.kind)
@@ -97,7 +98,10 @@ class NoticeHandler:
             number,
             Purpose.NOTICE,
             self._destinations.for_signal(signal.project, signal.kind),
-            Message(fit(signal.text, MESSAGE_TEXT_LIMIT)),
+            Message(
+                fit(signal.text, MESSAGE_TEXT_LIMIT),
+                (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),),
+            ),
             key=f"{HEALTH_KEY}:{number}",
             now=self._clock.now(),
         )

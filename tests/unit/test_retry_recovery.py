@@ -12,6 +12,7 @@ from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.reconciler import RETRY_AGAIN_NOTE, ResolveReconciler
 from shikiri_yaku.app.router import Router
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.schedule import Destination
@@ -130,9 +131,9 @@ class Fallback:
         self._forwarder = forwarder
         self.forwarded: list[str] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         self.forwarded.append(note)
-        await self._forwarder.forward(number, signal, note, suggestion)
+        return await self._forwarder.forward(number, signal, note, suggestion)
 
 
 class Reporter:
@@ -161,6 +162,7 @@ class World:
             self.clock,
             destinations,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            standing_kinds=STANDING_KINDS,
         )
         self.reshower = Reshower(forwarder)
         self.fallback = Fallback(forwarder)

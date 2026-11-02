@@ -1184,8 +1184,12 @@ def test_a_pull_request_opened_is_sent_for_review_and_the_task_done_closes_its_m
         composition.close()
 
     [review] = [payload for method, payload in bot.calls if method == "sendMessage"]
-    [[open_pr], [acknowledge]] = review["reply_markup"]["inline_keyboard"]
-    assert (open_pr["url"], acknowledge["callback_data"].startswith("k:")) == (_PR_URL, True)
+    [[open_pr], [stop]] = review["reply_markup"]["inline_keyboard"]
+    assert (open_pr["url"], stop["text"], stop["callback_data"].startswith("k:")) == (
+        _PR_URL,
+        "Stop reminders",
+        True,
+    )
     [edit] = [payload for method, payload in bot.calls if method == "editMessageText"]
     final = (edit["message_id"], edit["reply_markup"], MERGED_LINE in str(edit["text"]))
     assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)

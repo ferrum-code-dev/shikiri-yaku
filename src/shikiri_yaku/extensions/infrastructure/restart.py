@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.loop_guard import Refused
-from shikiri_yaku.domain.outcome import Forward, Resolved
+from shikiri_yaku.domain.outcome import Forward, Informed
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.ports import AttemptState, CommandError, ShikiruRejectedError
 
@@ -93,7 +93,7 @@ class RestartAction:
             await self._clock.sleep(min(self._poll, deadline - now).total_seconds())
         self._starts.confirm(signal, self._clock.now())
         self._notifier.tell(signal, _notice(signal.project), key=f"restart:{signal.id}")
-        return Resolved(RESTARTED)
+        return Informed(RESTARTED)
 
     async def _engine_up(self, project: str) -> bool:
         return (await self._clients[project].status()).engine_up

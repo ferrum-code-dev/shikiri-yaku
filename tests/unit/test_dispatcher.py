@@ -73,13 +73,14 @@ class _Fallback:
         self.failures = failures
         self.forwarded: list[str] = []
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         del number, note, suggestion
         if self.failures:
             self.failures -= 1
             message = "chat is down"
             raise ChannelError(message)
         self.forwarded.append(signal.source_id)
+        return False
 
 
 @pytest.fixture

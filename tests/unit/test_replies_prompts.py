@@ -107,9 +107,9 @@ def test_details_queue_full_packet_in_parts_once_per_update(h: Harness) -> None:
     assert h.client.calls == []
 
 
-def test_information_acknowledgement_closes_signal_without_shikiru_resolution(h: Harness) -> None:
+def test_stop_reminders_on_information_closes_without_shikiru(h: Harness) -> None:
     h.number = h.signals.insert_if_absent(
-        NewSignal("api:engine_down:7", "api", "engine_down", "engine_stopped", "engine stopped"),
+        NewSignal("api:task_done:7", "api", "task_done", "task_done", "task done"),
         NOW,
     ).row_id
     h.signals.transition(h.number, SignalState.NEW, SignalState.FORWARDED, NOW)
@@ -124,18 +124,18 @@ def test_information_acknowledgement_closes_signal_without_shikiru_resolution(h:
 
 
 @pytest.mark.parametrize(
-    ("key", "silenced"),
-    [("review", True), ("forward", False)],
-    ids=["review notice silences and stays open", "product fallback closes"],
+    ("kind", "silenced"),
+    [("pr_review", True), ("task_done", False)],
+    ids=["standing notice silences and stays open", "information closes"],
 )
-def test_acknowledging_a_review_silences_it_but_a_product_fallback_for_one_closes(
-    h: Harness, key: str, *, silenced: bool
+def test_stop_reminders_silences_a_standing_notice_and_closes_information(
+    h: Harness, kind: str, *, silenced: bool
 ) -> None:
     h.number = h.signals.insert_if_absent(
-        NewSignal("api:pr_review:T-1", "api", "pr_review", "x", "x", "T-1"), NOW
+        NewSignal(f"api:{kind}:T-1", "api", kind, "x", "x", "T-1"), NOW
     ).row_id
     h.signals.transition(h.number, SignalState.NEW, SignalState.FORWARDED, NOW)
-    h.origin("1001/45", Purpose.NOTICE, (f"k:{h.number}",), key=f"{key}:{h.number}")
+    h.origin("1001/45", Purpose.NOTICE, (f"k:{h.number}",), key=f"notice:{h.number}")
     h.handle(ref="1001/45", data=f"k:{h.number}")
     h.handle(ref="1001/45", data=f"k:{h.number}")
     stored = h.signals.get(h.number)

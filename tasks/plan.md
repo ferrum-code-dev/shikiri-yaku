@@ -1549,6 +1549,23 @@ Acceptance criteria:
 * No test or source text still uses the word "Acknowledge" for the button.
 * The gate passes.
 
+**Split (E10a, E10b).** E10 is more than the 300 lines one change may hold, so it is done in two
+commits, and E10 is ticked only when both pass the gate.
+
+* **E10a**: the outcome that closes an informational signal (`Informed`, and a forward the Product
+  forwarder reports as information); the button *Stop reminders* on the standing kinds (engine down
+  not restarted, Operator health, pull request ready) and none on information; Operator health gets
+  its button and so its reminders; a tap silences the reminders of a standing signal; the label
+  rename; the table over the kinds. The message is not edited on the tap yet.
+* **E10b**: the edit on the tap to "Reminders stopped" and the re-edit when the signal closes (a
+  column `messages.final_line` by migration, so a copy is re-edited when its line changes), the
+  composed engine-down test, and the docs. The help text, README and drills file hold no
+  "Acknowledge" text, so there is nothing in them to change.
+
+Deviation, recorded here: which kind stands is set by composition (`STANDING_KINDS` in bootstrap),
+as the reminder kinds were before, not by the notice key. The forward key `forward:<n>` is shared by
+standing and information messages, so a key cannot say which one a message is.
+
 ### E11. A group may have other members (normal)
 
 The owner wants a group with many members where only `owners` can act. Design §3.2 and §13 are

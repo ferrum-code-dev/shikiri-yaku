@@ -26,6 +26,17 @@ class WaitUntil:
 
 
 @dataclass(frozen=True, slots=True)
+class Informed:
+    """The handler sent the PO a message that only informs; the signal closes when it is sent.
+
+    Such a message has no button, so it never gets a reminder (design §6.1). This outcome is not in
+    design §6: the handler's message is the whole answer (tasks/plan.md E10).
+    """
+
+    note: str
+
+
+@dataclass(frozen=True, slots=True)
 class Notified:
     """The handler sent the PO its own message about the signal, which then waits as a forward does.
 
@@ -36,4 +47,4 @@ class Notified:
     note: str
 
 
-type Outcome = Resolved | Forward | WaitUntil | Notified
+type Outcome = Resolved | Forward | WaitUntil | Notified | Informed

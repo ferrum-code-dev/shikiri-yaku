@@ -21,7 +21,7 @@ from shikiri_yaku.domain.classification import (
     Verdict,
 )
 from shikiri_yaku.domain.extension import Extension, Rule
-from shikiri_yaku.domain.outcome import Forward, Notified, Resolved, WaitUntil
+from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved, WaitUntil
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.journal import (
@@ -111,14 +111,16 @@ class _FirstHangs:
 
 
 class _Fallback:
-    def __init__(self) -> None:
+    def __init__(self, *, informs: bool = False) -> None:
         self.forwarded: list[tuple[str, str]] = []
         self.suggestions: list[str] = []
+        self._informs = informs
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         del number
         self.forwarded.append((signal.id, note))
         self.suggestions.append(suggestion)
+        return self._informs
 
 
 @pytest.fixture
@@ -221,6 +223,28 @@ def test_a_notified_signal_waits_for_the_po_like_a_forward_but_sends_nothing_its
     assert world.stored(number).state is SignalState.FORWARDED
     assert "sent the review" in (world.stored(number).notes or "")
     assert world.fallback.forwarded == []
+
+
+def test_an_informed_outcome_closes_its_signal_and_sends_nothing_itself(world: _World) -> None:
+    number, signal = world.new("E1")
+    router = world.router(_Classifier(), infrastructure=_Handler(Informed("sent the notice")))
+
+    asyncio.run(_route(router, number, signal))
+
+    assert world.stored(number).state is SignalState.CLOSED
+    assert "sent the notice" in (world.stored(number).notes or "")
+    assert world.fallback.forwarded == []
+
+
+def test_a_forward_whose_message_only_informs_closes_its_signal(world: _World) -> None:
+    world.fallback = _Fallback(informs=True)
+    number, signal = world.new("E1")
+    router = world.router(_Classifier(), infrastructure=_Handler(Forward("the engine is down")))
+
+    asyncio.run(_route(router, number, signal))
+
+    assert world.stored(number).state is SignalState.CLOSED
+    assert world.fallback.forwarded == [(signal.id, "the engine is down")]
 
 
 def test_a_signal_is_handled_once(world: _World) -> None:

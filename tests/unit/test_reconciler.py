@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.app.reconciler import ResolveReconciler
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
@@ -90,6 +91,7 @@ class _World:
             self.clock,
             FixedDestinations([Destination("telegram", "1001")]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            standing_kinds=STANDING_KINDS,
         )
         return ResolveReconciler(
             JournalReconcile(h.database, h.signals, h.ops),

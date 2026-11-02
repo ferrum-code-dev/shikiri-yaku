@@ -76,11 +76,9 @@ from shikiri_yaku.extensions.infrastructure.install import (
 from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
 from shikiri_yaku.extensions.infrastructure.preparation import InstallPreparation
 from shikiri_yaku.extensions.notice.extension import notice_extension
-from shikiri_yaku.extensions.notice.handler import HEALTH_KEY as HEALTH_NOTICE_KEY
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
-from shikiri_yaku.extensions.review.handler import NOTICE_KEY as REVIEW_NOTICE_KEY
 from shikiri_yaku.instance import HOST_LOCK_FILE_NAME, JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
     CursorStore,
@@ -149,9 +147,10 @@ if TYPE_CHECKING:
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
-REMINDED_KINDS: Final = frozenset({Kind.PR_REVIEW})
-SILENCING_PREFIXES: Final = (f"{REVIEW_NOTICE_KEY}:",)
-ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_NOTICE_KEY}:",)
+# keep: a standing message keeps Stop reminders; it is set by kind, since one key serves both kinds
+STANDING_KINDS: Final = frozenset(
+    {Kind.ENGINE_DOWN, Kind.ENGINE_FAULT, Kind.HEALTH, Kind.PR_REVIEW}
+)
 REASONER_SCRATCH_DIR: Final = "reasoner-scratch"
 FALLBACK_SHELL: Final = "/bin/sh"
 RUNG_CLASSES: Final[Mapping[str, Callable[..., ReasonerRung]]] = {
@@ -303,6 +302,7 @@ def compose(
         clock,
         destinations,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
+        standing_kinds=STANDING_KINDS,
     )
     host_lock = FileHostLock(
         directory.parent / HOST_LOCK_FILE_NAME, clock, infrastructure.host_lock_poll_s
@@ -651,7 +651,7 @@ def inbound_job(
         name_max_chars=operator.command_name_max_chars,
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal), silencing_prefixes=SILENCING_PREFIXES),
+        JournalReplies(journal, signals, OpStore(journal), standing_kinds=STANDING_KINDS),
         outbox,
         clock,
         clients,
@@ -684,7 +684,9 @@ def goal_command(
 ) -> GoalCommand:
     """Return the /goal command, which journals its submits and replies."""
     submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
-    replies = JournalReplies(journal, SignalStore(journal), OpStore(journal))
+    replies = JournalReplies(
+        journal, SignalStore(journal), OpStore(journal), standing_kinds=STANDING_KINDS
+    )
     return GoalCommand(
         submitter,
         replies,
@@ -709,9 +711,9 @@ def secret_cleanup_job(
 def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
     signals = SignalStore(journal)
-    replies = JournalReplies(journal, signals, OpStore(journal))
+    replies = JournalReplies(journal, signals, OpStore(journal), standing_kinds=STANDING_KINDS)
     editor = CopyEditor(
-        JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        JournalFinalEdits(journal, replies),
         channel,
         clock,
         interval_s=settings.operator.inbound_interval_s,
@@ -865,11 +867,11 @@ def _existing_journal(directory: Path) -> Database:
 
 
 def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
-    """Register notice kinds that need reminders until acknowledged (design §6.4)."""
+    """Build the reminder schedule, which reminds standing kinds until the PO stops them (§6.4)."""
     return JournalSchedule(
         journal,
         SignalStore(journal),
         MessageStore(journal, reporter),
         OpStore(journal),
-        reminder_notice_kinds=REMINDED_KINDS,
+        standing_kinds=STANDING_KINDS,
     )

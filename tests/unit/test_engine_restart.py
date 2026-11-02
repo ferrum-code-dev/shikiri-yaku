@@ -10,7 +10,7 @@ import pytest
 
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.start_reconciler import StartReconciler
-from shikiri_yaku.domain.outcome import Forward, Resolved
+from shikiri_yaku.domain.outcome import Forward, Informed, Resolved
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.infrastructure.restart import RestartFailedError
@@ -208,8 +208,8 @@ def test_a_down_engine_is_started_once_confirmed_and_announced_once(
 ) -> None:
     signal = engine_signal(kind, "S1")
 
-    assert isinstance(world.handle(signal), Resolved)
-    assert isinstance(world.handle(signal), Resolved)
+    assert isinstance(world.handle(signal), Informed)
+    assert isinstance(world.handle(signal), Informed)
 
     assert client.starts == 1
     assert len(world.outbox.pending()) == 1
@@ -268,7 +268,7 @@ def test_an_engine_that_stays_down_forwards_with_the_checks_after_the_window(
 def test_a_second_restart_within_the_hour_is_refused_with_the_failed_checks(
     world: World, client: RestartClient
 ) -> None:
-    assert isinstance(world.handle(engine_signal(Kind.ENGINE_DOWN, "S1")), Resolved)
+    assert isinstance(world.handle(engine_signal(Kind.ENGINE_DOWN, "S1")), Informed)
     client.engine_up = False
     client.starts_up = False
     client.checks = [AGENT_CLI_DOWN]
@@ -305,7 +305,7 @@ def test_a_refused_restart_says_when_the_last_one_was_and_what_the_po_does(
     checks: list[DoctorCheck],
 ) -> None:
     clock.current = first
-    assert isinstance(world.handle(engine_signal(Kind.ENGINE_DOWN, "S1")), Resolved)
+    assert isinstance(world.handle(engine_signal(Kind.ENGINE_DOWN, "S1")), Informed)
     clock.current = refused
     client.engine_up = False
     client.starts_up = False
@@ -346,9 +346,9 @@ def test_a_signal_whose_start_failed_earlier_is_never_started_again(
 @pytest.mark.parametrize(
     ("command_ran", "engine_up", "outcome"),
     [
-        (False, True, Resolved),
+        (False, True, Informed),
         (False, False, Forward),
-        (True, True, Resolved),
+        (True, True, Informed),
         (True, False, Forward),
     ],
 )
@@ -379,7 +379,7 @@ def test_a_crash_mid_restart_is_settled_by_the_engine_and_never_started_again(
 
     assert isinstance(second.handle(signal), outcome)
     assert client.starts == (1 if command_ran else 0)
-    assert len(second.outbox.pending()) == (1 if outcome is Resolved else 0)
+    assert len(second.outbox.pending()) == (1 if outcome is Informed else 0)
 
 
 @pytest.mark.parametrize("command_ran", [False, True])

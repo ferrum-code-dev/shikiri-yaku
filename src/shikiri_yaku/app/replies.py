@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import PositiveInt, TypeAdapter, ValidationError
 
-from shikiri_yaku.domain.callback import DECLINE_VERB, INSTALL_VERB, decode_callback
+from shikiri_yaku.domain.callback import (
+    DECLINE_VERB,
+    INSTALL_VERB,
+    STOP_REMINDERS_VERB,
+    decode_callback,
+)
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
@@ -40,7 +45,6 @@ if TYPE_CHECKING:
 
 _ANSWER: Final = "a"
 _DETAILS: Final = "d"
-_ACKNOWLEDGE: Final = "k"
 _CONFIRM: Final = "confirm"
 type ConfirmKey = (
     tuple[Literal["confirm"], PositiveInt] | tuple[Literal["confirm"], PositiveInt, PositiveInt]
@@ -133,8 +137,8 @@ class Replies:
                 await self._confirm(item, origin)
         elif verb == _DETAILS and origin.purpose == Purpose.QUESTION:
             await self._details(item, origin)
-        elif verb == _ACKNOWLEDGE and origin.purpose == Purpose.NOTICE:
-            self._log.acknowledge_notice(origin.number, origin.key, self._clock.now())
+        elif verb == STOP_REMINDERS_VERB and origin.purpose == Purpose.NOTICE:
+            self._log.stop_notice(origin.number, self._clock.now())
         elif origin.purpose == Purpose.APPROVAL:
             await self._install_tap(item, origin, verb, options[0] if options else None)
 

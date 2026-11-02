@@ -11,7 +11,7 @@ from shikiri_yaku.ports import EscalationStatus, ShikiruError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.domain.signal import Signal
+    from shikiri_yaku.domain.signal import Kind, Signal
     from shikiri_yaku.ports import (
         Clock,
         Destinations,
@@ -26,7 +26,8 @@ class ProductForwarder:
     """The Router's Forwarder: queues the message of a forwarded signal for each destination.
 
     A signal with an escalation is shown as its structured view. A signal without one, or whose
-    escalation Shikiru no longer returns, is shown as information. The task's title is optional:
+    escalation Shikiru no longer returns, is shown as information; a standing kind keeps its Stop
+    reminders button, and any other information closes its signal. The task's title is optional:
     when Shikiru cannot give it, the header names the task alone. A failure to read the view or to
     queue propagates, so the Router retries the forward later.
     """
@@ -40,15 +41,18 @@ class ProductForwarder:
         destinations: Destinations,
         *,
         button_label_max_chars: int,
+        standing_kinds: frozenset[Kind],
     ) -> None:
         self._title_max_chars = title_max_chars
         self._button_label_max_chars = button_label_max_chars
+        self._standing_kinds = standing_kinds
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
         self._destinations = destinations
 
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
+        """Queue the forward's message; True when it only informs, so the signal closes."""
         view = await self._view(signal)
         title = await self._title(signal)
         self._show(
@@ -60,6 +64,7 @@ class ProductForwarder:
             suggestion=suggestion,
             key=f"forward:{number}",
         )
+        return view is None and signal.kind not in self._standing_kinds
 
     async def reshow(
         self,
@@ -127,6 +132,7 @@ class ProductForwarder:
                 in_topic=in_topic,
                 note=note,
                 suggestion=suggestion,
+                standing=signal.kind in self._standing_kinds,
             )
             return Purpose.NOTICE, information
         question = escalation_message(

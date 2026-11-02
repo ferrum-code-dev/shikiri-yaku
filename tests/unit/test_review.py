@@ -10,12 +10,12 @@ import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
-from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward, Notified
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.extensions.review.handler import NOTHING_TRIED, SENT, ReviewHandler
-from shikiri_yaku.extensions.review.message import ACKNOWLEDGE_LABEL, OPEN_PR_LABEL
+from shikiri_yaku.extensions.review.message import OPEN_PR_LABEL
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, NewSignal, SignalStore
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import Button, ShikiruLinkDownError, TaskDetail
@@ -139,7 +139,7 @@ def test_a_pull_request_gets_one_review_message_with_its_link_and_signal_number(
     )
     assert message.buttons == (
         Button(OPEN_PR_LABEL, url=PULL.url),
-        Button(ACKNOWLEDGE_LABEL, f"k:{number}"),
+        Button(STOP_REMINDERS_LABEL, f"k:{number}"),
     )
 
 

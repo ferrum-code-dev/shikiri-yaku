@@ -10,6 +10,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from shikiri_yaku.app.copy_replacer import CopyReplacer
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import REPLACED_LINE, Purpose
 from shikiri_yaku.journal import (
     Database,
@@ -141,7 +142,9 @@ class _Journal:
         return str(row["delivery"])
 
     def to_edit(self) -> list[FinalEdit]:
-        replies = JournalReplies(self.database, self.signals, OpStore(self.database))
+        replies = JournalReplies(
+            self.database, self.signals, OpStore(self.database), standing_kinds=STANDING_KINDS
+        )
         return JournalFinalEdits(self.database, replies).to_edit()
 
     def notices(self) -> int:

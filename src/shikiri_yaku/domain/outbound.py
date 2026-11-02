@@ -30,6 +30,8 @@ def refusal_notice(number: int | None) -> str:
     return f"{prefix}A message was refused and not sent. Its text was not kept."
 
 
+# keep: the button of a message about something that stays true until it is fixed (design §6.1)
+STOP_REMINDERS_LABEL: Final = "Stop reminders"
 # keep: the last line of a message whose signal ended, so the PO sees why its buttons went
 ACKNOWLEDGED_LINE: Final = "Acknowledged"
 ENGINE_UP_LINE: Final = "Engine is up again"

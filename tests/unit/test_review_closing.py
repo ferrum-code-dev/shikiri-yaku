@@ -20,6 +20,7 @@ from shikiri_yaku.app.event_source import (
     WITHDRAWN_LINE,
     EventSource,
 )
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.extensions.review.message import review_message
@@ -147,7 +148,7 @@ def _review_on_screen(database: Database) -> int:
 
 def _replies(database: Database) -> JournalReplies:
     return JournalReplies(
-        database, SignalStore(database), OpStore(database), silencing_prefixes=("review:",)
+        database, SignalStore(database), OpStore(database), standing_kinds=STANDING_KINDS
     )
 
 
@@ -180,7 +181,7 @@ def test_each_way_a_pull_request_closes_edits_every_copy_without_buttons(
         SignalStore(database),
         MessageStore(database, _Reporter()),
         OpStore(database),
-        reminder_notice_kinds=frozenset({"pr_review"}),
+        standing_kinds=STANDING_KINDS,
     )
     assert [awaiting.number for awaiting in schedule.awaiting_answer()] == [number]
 
@@ -200,7 +201,7 @@ def test_each_way_a_pull_request_closes_edits_every_copy_without_buttons(
 
 
 @pytest.mark.parametrize(("closing", "line"), CLOSINGS)
-def test_a_late_acknowledge_after_the_close_changes_nothing(
+def test_a_late_stop_reminders_tap_after_the_close_changes_nothing(
     database: Database, closing: tuple[str, dict[str, Any]], line: str
 ) -> None:
     number = _review_on_screen(database)
@@ -209,7 +210,7 @@ def test_a_late_acknowledge_after_the_close_changes_nothing(
     _tick(database, channel)
     edits = len(channel.edits)
 
-    _replies(database).acknowledge_notice(number, f"review:{number}", NOW)
+    _replies(database).stop_notice(number, NOW)
     _tick(database, channel)
 
     assert len(channel.edits) == edits

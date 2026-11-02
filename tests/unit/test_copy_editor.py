@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import EventSource
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import (
     CursorStore,
@@ -106,7 +107,9 @@ class _Harness:
                 now=NOW,
             )
             messages.confirm_delivery(row.row_id, ref)
-        self.replies = JournalReplies(self.database, self.signals, OpStore(self.database))
+        self.replies = JournalReplies(
+            self.database, self.signals, OpStore(self.database), standing_kinds=STANDING_KINDS
+        )
 
     def resolve(self) -> None:
         payload = ResolvePayload(

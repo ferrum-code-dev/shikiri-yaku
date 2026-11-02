@@ -10,6 +10,7 @@ import pytest
 from shikiri_yaku.app.install_executor import ANSWER, FINAL_LINE, REFUSED, InstallExecutor
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.app.install_reconciler import InstallReconciler
+from shikiri_yaku.bootstrap import STANDING_KINDS
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.recipes import InstallOpPayload
 from shikiri_yaku.domain.schedule import Destination
@@ -247,7 +248,7 @@ class _Files:
 
 
 class _InterruptedForwarder:
-    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> None:
+    async def forward(self, number: int, signal: Signal, note: str, suggestion: str) -> bool:
         del number, signal, note, suggestion
         raise asyncio.CancelledError
 
@@ -417,6 +418,7 @@ def _product_forwarder(world: _World) -> ProductForwarder:
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        standing_kinds=STANDING_KINDS,
     )
 
 
@@ -720,6 +722,7 @@ def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        standing_kinds=STANDING_KINDS,
     )
 
     asyncio.run(world.reconciler(reshower=forwarder).tick())
@@ -762,6 +765,7 @@ def test_rejection_is_durable_when_reshow_lookup_fails_then_escalation_closes(
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        standing_kinds=STANDING_KINDS,
     )
 
     asyncio.run(world.reconciler(reshower=forwarder).tick())

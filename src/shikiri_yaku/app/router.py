@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.classification import Category
-from shikiri_yaku.domain.outcome import Forward, Notified, Resolved, WaitUntil
+from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved, WaitUntil
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Mapping
@@ -113,11 +113,16 @@ class Router:
                 self._log.resolve(number, note, self._clock.now())
             case Forward(note):
                 try:
-                    await self._fallback.forward(number, signal, note, suggestion)
+                    informs = await self._fallback.forward(number, signal, note, suggestion)
                 except Exception as error:  # noqa: BLE001 -- the Channel may fail in any way
                     await self._retry_later(number, error)
                     return
-                self._log.forwarded(number, note, self._clock.now())
+                if informs:
+                    self._log.informed(number, note, self._clock.now())
+                else:
+                    self._log.forwarded(number, note, self._clock.now())
+            case Informed(note):
+                self._log.informed(number, note, self._clock.now())
             case Notified(note):
                 self._log.forwarded(number, note, self._clock.now())
             case WaitUntil(wake_at, note):

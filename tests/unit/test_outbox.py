@@ -8,7 +8,7 @@ import pytest
 
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.scheduler import Scheduler
-from shikiri_yaku.bootstrap import schedule_log
+from shikiri_yaku.bootstrap import STANDING_KINDS, schedule_log
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Signal
@@ -216,6 +216,7 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
         clock,
         FixedDestinations([OWNER]),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        standing_kinds=STANDING_KINDS,
     )
     signal = Signal("api", Kind.PR_REVIEW, "7", "review_ready", "A review is ready.")
     asyncio.run(forwarder.forward(number, signal, "note", ""))

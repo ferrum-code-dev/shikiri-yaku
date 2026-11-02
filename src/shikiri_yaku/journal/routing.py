@@ -66,6 +66,9 @@ class JournalRouting:
             number, SignalState.HANDLING, SignalState.FORWARDED, now, note=note
         )
 
+    def informed(self, number: int, note: str, now: datetime) -> None:
+        self._signals.transition(number, SignalState.HANDLING, SignalState.CLOSED, now, note=note)
+
     def park(self, number: int, wake_at: datetime, note: str, now: datetime) -> None:
         self._signals.transition(
             number, SignalState.HANDLING, SignalState.PARKED, now, wake_at=wake_at, note=note
