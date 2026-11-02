@@ -1482,6 +1482,25 @@ Acceptance criteria:
 * The test fails when the new handling is removed.
 * The gate passes.
 
+### E8. Reconcile an answer by Shikiru's real resolution text (normal)
+
+Found in drill H2: the Operator was killed while its answer was being sent. After the restart the
+`ResolveReconciler` marked the resolve op `failed`, though Shikiru had recorded the answer. Shikiru stores
+a resolution as the kind followed by the text (`answer alpha …`; `retry` and `cancel` have no text), and
+`_decide` in `app/reconciler.py` compares the whole string with the op's kind (`answer`). The composed
+test of E2 passed because its fake Shikiru recorded only the kind.
+
+1. Compare by the kind: the resolution is the kind, or the kind followed by a space and the text.
+2. Make the fake Shikiru in the tests record the resolution the way the real one does (kind, then
+   a space and the text when there is one), so no test can pass on the short form again. Check the
+   other places that read `resolution` (grep for it) for the same comparison.
+
+Acceptance criteria:
+* Table-driven: an uncertain op whose escalation is resolved with `answer <text>`, with `retry`, with `cancel`, with another kind (`retry` expected, `answer …` found), and with a text that begins with the kind of another op (`answer retry`): confirmed only when the kind matches.
+* The mid-resolve composed test of E2 runs with the faithful fake and passes; it fails when the comparison is the old equality.
+* No other code compares a resolution string with a bare kind.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.

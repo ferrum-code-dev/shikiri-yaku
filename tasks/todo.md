@@ -90,6 +90,7 @@ merged and `uv run poe check` passes.
   - [x] E5. Command line in Shikiru's style
   - [x] E6. A cancelled task closes its open signals
   - [ ] E7. A replaced message disappears
+  - [ ] E8. Reconcile an answer by Shikiru's real resolution text
     - [x] E5a. Typer app, global options, product resolution, flat verbs, telegram group
     - [x] E5b. Help palette and help layout
     - [x] E5c. Doctor lines and summary, error lines, colour on a terminal only
