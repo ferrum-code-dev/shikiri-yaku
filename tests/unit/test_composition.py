@@ -78,6 +78,7 @@ _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _DELIVERY_TIMEOUT_S: Final = 20
 # keep: polls a replayed restart gets through, enough for every job to run its tick at least once
 _POLLS: Final = 5
+_SCHEMA_BEFORE_SLOTS: Final = 19
 _ASKED: Final = "I may have submitted this already"
 _RESTARTED: Final = "The engine of api was restarted."
 _FAILED_HANDLER: Final = "handler failed"
@@ -583,6 +584,16 @@ def _claim_interrupted(directory: Path, op_id: int) -> None:
     finally:
         database.close()
     assert claimed is not None
+
+
+def _as_before_slots(directory: Path) -> None:
+    """Make the journal one written before slots existed: no slot column, schema 19."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        database.connection.execute("ALTER TABLE messages DROP COLUMN slot")
+        database.connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
+    finally:
+        database.close()
 
 
 def _delivery_of(directory: Path, message_id: int) -> str | None:
@@ -1693,3 +1704,41 @@ def test_a_deletion_the_platform_refuses_leaves_the_old_copy_marked_replaced(
     assert REPLACED_LINE in edit["text"]
     assert edit["reply_markup"] == {"inline_keyboard": []}
     assert _deleted(bot) == [FIRST_MESSAGE_ID]
+
+
+def test_an_install_asked_again_after_an_upgrade_replaces_the_approval_sent_before_slots(
+    tmp_path: Path,
+) -> None:
+    """An approval sent before slots existed is replaced when its install is asked again.
+
+    The upgrade gives the old approval its install slot, so the one copy left is the new approval,
+    and a replay of the same restart deletes and sends nothing more (design §6.3, §7).
+    """
+    directory = _instance(tmp_path)
+    runner = _InstallRunner()
+    _, op_id, _ = _initial_install(directory, runner)
+    _claim_interrupted(directory, op_id)
+    _as_before_slots(directory)
+    bot = _DeletionBot(directory, [])
+    _deliver_install(
+        directory,
+        runner,
+        bot,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: _delivery_of(directory, FIRST_MESSAGE_ID) == Delivery.DELETED),
+    )
+
+    assert _deleted(bot) == [FIRST_MESSAGE_ID]
+    assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [FIRST_MESSAGE_ID + 1]
+
+    replay = _DeletionBot(directory, [])
+    _deliver_install(
+        directory,
+        runner,
+        replay,
+        _ShikiruSession(asyncio.Event()),
+        _until(lambda: sum(method == "getUpdates" for method, _ in replay.calls) >= _POLLS),
+    )
+    changes = {"sendMessage", "editMessageText", "deleteMessage"}
+    assert [method for method, _ in replay.calls if method in changes] == []
+    assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [FIRST_MESSAGE_ID + 1]

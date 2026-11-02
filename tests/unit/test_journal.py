@@ -4,7 +4,7 @@ import multiprocessing
 import os
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 
@@ -306,3 +306,49 @@ def test_created_times_filter_by_kind_project_cause_and_window(memory: Database)
     assert ops.created_times("retry", PROJECT, cause, NOW - timedelta(days=1)) == [NOW]
     assert ops.created_times("retry", PROJECT, None, None) == [old, NOW, NOW]
     assert ops.created_times("restart", PROJECT, None, None) == []
+
+
+_SCHEMA_BEFORE_SLOTS: Final = 19
+
+
+@pytest.mark.parametrize(
+    ("purpose", "notice_key", "slot"),
+    [
+        (Purpose.QUESTION, "forward:3", "question"),
+        (Purpose.QUESTION, "reshow:9", "question"),
+        (Purpose.QUESTION, "open:700:3", "question"),
+        (Purpose.QUESTION, "input:700", None),
+        (Purpose.QUESTION, "goal:7", None),
+        (Purpose.APPROVAL, "install:5", "install"),
+        (Purpose.APPROVAL, "install:5:open:700", "install"),
+        (Purpose.APPROVAL, "confirm:7", "confirm:7"),
+        (Purpose.APPROVAL, "confirm:7:700", "confirm:7"),
+        (Purpose.APPROVAL, "confirm:123:700", "confirm:123"),
+        (Purpose.NOTICE, "install-refused:5", None),
+        (Purpose.NOTICE, "forward:3", None),
+        (Purpose.NOTICE, "open:700:done:0", None),
+    ],
+)
+def test_a_copy_sent_before_slots_is_given_the_slot_its_kind_has_now(
+    memory: Database, purpose: Purpose, notice_key: str, slot: str | None
+) -> None:
+    """An upgrade gives each old copy the slot its kind gets now, read from its notice key.
+
+    Input prompts, goal replies and notices keep no slot, so they never replace another copy
+    (design §7).
+    """
+    connection = memory.connection
+    connection.execute("ALTER TABLE messages DROP COLUMN slot")
+    connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
+    connection.execute(
+        "INSERT INTO messages (direction, channel, chat, delivery, purpose, notice_key,"
+        " created_at) VALUES ('out', 'telegram', 'owner', 'sent', ?, ?, 'then')",
+        (purpose, notice_key),
+    )
+    for statements in MIGRATIONS[_SCHEMA_BEFORE_SLOTS:]:
+        for statement in statements:
+            connection.execute(statement)
+    row = connection.execute(
+        "SELECT slot FROM messages WHERE notice_key = ?", (notice_key,)
+    ).fetchone()
+    assert row["slot"] == slot

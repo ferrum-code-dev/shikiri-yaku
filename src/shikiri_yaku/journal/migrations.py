@@ -26,8 +26,10 @@ Migration 16 records install outcomes and a resolution event that arrived before
 (design §6.3, §10, §15).
 Migration 17 records a rejected recovery answer before retryable PO notification work begins
 (design §10.1).
-Migration 18 keeps the slot of an outbound message, so a newer copy in the same slot replaces it
+Migration 20 keeps the slot of an outbound message, so a newer copy in the same slot replaces it
 (design §7).
+Migration 21 gives each copy sent before slots the slot its kind has now, read from its notice key,
+so an upgraded journal replaces the approval it already holds (design §7).
 """
 
 from __future__ import annotations
@@ -185,4 +187,20 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE ops ADD COLUMN install_rejection TEXT",),
     ("ALTER TABLE ops ADD COLUMN failure_reason TEXT",),
     ("ALTER TABLE messages ADD COLUMN slot TEXT",),
+    (
+        """
+        UPDATE messages SET slot = 'question'
+        WHERE purpose = 'question' AND (
+            notice_key LIKE 'forward:%' OR notice_key LIKE 'reshow:%' OR notice_key LIKE 'open:%')
+        """,
+        """
+        UPDATE messages SET slot = 'install'
+        WHERE purpose = 'approval' AND notice_key LIKE 'install:%'
+        """,
+        """
+        UPDATE messages
+        SET slot = 'confirm:' || substr(notice_key, 9, instr(substr(notice_key, 9) || ':', ':') - 1)
+        WHERE purpose = 'approval' AND notice_key LIKE 'confirm:%'
+        """,
+    ),
 )
