@@ -1461,6 +1461,27 @@ Acceptance criteria:
 * The test fails when the new handling is removed.
 * The gate passes.
 
+### E7. A replaced message disappears (normal)
+
+Found in drill H2: after a restart the Operator voided an interrupted install and sent a new approval
+for the same signal. The old approval stayed in the chat with live buttons, and a tap on it only
+re-showed the new one. A message that a newer message of the same signal replaces must not stay.
+
+When the Operator sends a message that replaces an earlier copy for the same signal and the same
+destination (a new install approval after a voided one, a question shown again after a restart or
+`/open` for a new op), the earlier copy is deleted through the journaled deletion path that already
+exists for secret messages. If Telegram refuses the deletion (for example the message is older than
+48 hours), the copy is edited to the final line "Replaced by a newer message" without buttons. A tap
+on a copy that is already gone changes nothing and says nothing new.
+
+Acceptance criteria:
+* Composed test: an install interrupted after the claim, then a restart with the tool still missing; exactly one approval message is left in the chat (fake Bot API), the old one deleted, and the deletion is journaled before it is sent.
+* A refused deletion edits the old copy to the final line without buttons.
+* A replay of the same restart deletes and sends nothing more.
+* `/open` that re-shows an open question for the same op does not leave two live copies.
+* The test fails when the new handling is removed.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
