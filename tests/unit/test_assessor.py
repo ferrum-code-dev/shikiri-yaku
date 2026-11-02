@@ -16,13 +16,12 @@ import pytest
 from shikiri_yaku.app.assessor import REASONER_FAILED_NOTE, Assessor
 from shikiri_yaku.app.health_source import REASONER_SCOPE, HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
-from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.classification import Assessment, InstallProposal, Source, Verdict
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind, Signal
 from shikiri_yaku.extensions.infrastructure.handler import InfrastructureHandler
 from shikiri_yaku.extensions.infrastructure.rules import (
     DECISION_REQUIRED,

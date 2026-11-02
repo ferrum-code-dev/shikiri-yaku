@@ -12,8 +12,9 @@ import pytest
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
-from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
+from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE
 from shikiri_yaku.journal import CursorStore, Database, JournalInbound, JournalSources, SignalStore
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError, ShikiruLinkDownError
 from tests.support.telegram_bot import FIXTURES

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward, Notified
 from shikiri_yaku.domain.schedule import Destination
@@ -16,6 +17,7 @@ from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.extensions.review.handler import NOTHING_TRIED, SENT, ReviewHandler
 from shikiri_yaku.extensions.review.message import ACKNOWLEDGE_LABEL, OPEN_PR_LABEL
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, NewSignal, SignalStore
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import Button, ShikiruLinkDownError, TaskDetail
 from tests.support.destinations import FixedDestinations
 
@@ -182,3 +184,31 @@ def test_a_handler_run_again_after_a_restart_queues_the_review_once(memory: Data
         asyncio.run(_handler(memory, _Client(), outbox).handle(signal))
 
     assert len(_journal_outbox(memory).pending()) == 1
+
+
+@pytest.mark.parametrize(
+    ("group_id", "named"),
+    [(None, True), (-1009, False)],
+    ids=["private chat", "component topic"],
+)
+def test_the_review_header_names_the_component_only_outside_its_topic(
+    memory: Database, *, group_id: int | None, named: bool
+) -> None:
+    topics = TopicStore(memory)
+    topics.save(PROJECT, 73, TOPIC_OPEN)
+    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    _, signal = _stored(memory, PULL)
+    outbox = _Outbox()
+    handler = ReviewHandler(
+        {PROJECT: cast("ShikiruClient", _Client())},
+        SignalStore(memory),
+        cast("Outbox", outbox),
+        _Clock(),
+        product=PRODUCT,
+        destinations=destinations,
+    )
+
+    asyncio.run(handler.handle(signal))
+
+    [(_, _, _, message, _)] = outbox.queued
+    assert (PROJECT in message.text.splitlines()[0].split(" · ")) == named

@@ -55,11 +55,16 @@ class ReviewHandler:
             message = f"{signal.id} is not in the journal"
             raise LookupError(message)
         title = await self._title(signal)
+        destinations = self._destinations.for_signal(signal.project, signal.kind)
+        in_topic = all(
+            self._destinations.component_of(destination.thread) == signal.project
+            for destination in destinations
+        )
         self._outbox.queue(
             number,
             Purpose.NOTICE,
-            self._destinations.for_signal(signal.project, signal.kind),
-            review_message(number, signal, pull, title, product=self._product),
+            destinations,
+            review_message(number, signal, pull, title, product=self._product, in_topic=in_topic),
             key=f"{NOTICE_KEY}:{number}",
             now=self._clock.now(),
         )

@@ -45,7 +45,7 @@ from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.inbound_poller import InboundPoller
-from shikiri_yaku.app.inbound_service import OPERATOR_SCOPE, InboundService
+from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.install_executor import InstallExecutor
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.app.install_reconciler import InstallReconciler
@@ -67,7 +67,7 @@ from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.app.tool_check import ToolCheck
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
-from shikiri_yaku.domain.signal import Kind
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.infrastructure.install import (
     InstallAction,

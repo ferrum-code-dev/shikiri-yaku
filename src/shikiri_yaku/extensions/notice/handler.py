@@ -71,13 +71,22 @@ class NoticeHandler:
             raise LookupError(message)
         if not family.settled:
             return Resolved(WAITING)
-        text = f"{signal.project} · {family.root.title} integrated ({_tasks(len(family.members))})"
+        # keep: a notice in its component's topic already names the component, so it is left out
+        prefix = "" if self._in_component_topic(signal) else f"{signal.project} · "
+        text = f"{prefix}{family.root.title} integrated ({_tasks(len(family.members))})"
         self._notifier.tell(
             signal,
             fit(text, MESSAGE_TEXT_LIMIT),
             key=f"{INTEGRATED_KEY}:{signal.project}:{family.root.id}",
         )
         return Resolved(SENT)
+
+    def _in_component_topic(self, signal: Signal) -> bool:
+        destinations = self._destinations.for_signal(signal.project, signal.kind)
+        return all(
+            self._destinations.component_of(destination.thread) == signal.project
+            for destination in destinations
+        )
 
     def _health(self, signal: Signal) -> Outcome:
         number = self._numbers.number_of(signal)

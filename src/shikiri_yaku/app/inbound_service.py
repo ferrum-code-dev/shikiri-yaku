@@ -12,8 +12,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.replies import Replies
     from shikiri_yaku.ports import Clock, InboundLog
 
-# keep: scope of the Operator's own health signals (design §4); the batch is the what-failed key
-OPERATOR_SCOPE: Final = "operator"
+# keep: the batch is the what-failed key of the Operator's own health signal
 INBOUND_BATCH: Final = "telegram_inbound_batch"
 
 

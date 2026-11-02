@@ -127,7 +127,9 @@ def _review_on_screen(database: Database) -> int:
     signals.transition(number, SignalState.HANDLING, SignalState.FORWARDED, NOW)
     stored = signals.get(number)
     assert stored is not None
-    body = review_message(number, stored.to_signal(), PULL, "Add retries", product=PRODUCT)
+    body = review_message(
+        number, stored.to_signal(), PULL, "Add retries", product=PRODUCT, in_topic=False
+    )
     messages = MessageStore(database, _Reporter())
     for index, ref in enumerate(REFS):
         row = messages.record_outbound(

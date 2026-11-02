@@ -1,7 +1,8 @@
 """Telegram's topics: where signals go, and the start-up reconcile of the forum and the journal.
 
-Without a group, a signal goes to the owners' private chats. With a group, a component's
-escalations go to its topic, and every other signal goes to the general topic (design §7).
+Without a group, a signal goes to the owners' private chats. With a group, every signal of a
+component goes to its topic, and the Operator's own signals go to the general topic (design §7,
+§13).
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.domain.signal import Kind
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind
 from shikiri_yaku.ports import ChannelRepairError, ChannelStartupError, CompositionError
 
 if TYPE_CHECKING:
@@ -82,10 +83,11 @@ class TelegramDestinations:
         self._group_id = group_id
         self._reconciler = reconciler
 
-    def for_signal(self, project: str, kind: Kind) -> list[Destination]:
+    def for_signal(self, project: str, kind: Kind) -> list[Destination]:  # noqa: ARG002 -- the port's shape
         if self._group_id is None:
             return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in self._owners]
-        component = project if kind == Kind.ESCALATION else None
+        # keep: a component's signals all belong to its topic; the Operator's own belong to General
+        component = None if project == OPERATOR_SCOPE else project
         topic = self._log.get(component)
         if topic is None or topic.state != TOPIC_OPEN:
             name = GENERAL_TOPIC if component is None else component

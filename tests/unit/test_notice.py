@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.health_source import LINK_SCOPE, RECOVERED_LINE
+from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES
 from shikiri_yaku.domain.outcome import Notified, Resolved
@@ -32,6 +34,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.replies import JournalReplies
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import ShikiruLinkDownError, ShikiruTask, TaskStatus
 from tests.support.destinations import FixedDestinations
 from tests.support.notices import WHERE, journal_notifier, journal_outbox
@@ -294,3 +297,32 @@ def test_a_notice_that_fails_is_forwarded_with_the_original_signal(memory: Datab
     stored = SignalStore(memory).get(number)
     assert stored is not None
     assert stored.state is SignalState.FORWARDED
+
+
+@pytest.mark.parametrize(
+    ("group_id", "prefixed"),
+    [(None, True), (-1009, False)],
+    ids=["private chat", "component topic"],
+)
+def test_the_integrated_notice_names_the_component_only_outside_its_topic(
+    memory: Database, *, group_id: int | None, prefixed: bool
+) -> None:
+    topics = TopicStore(memory)
+    topics.save(PROJECT, 73, TOPIC_OPEN)
+    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    outbox = journal_outbox(memory)
+    handler = NoticeHandler(
+        {PROJECT: cast("ShikiruClient", _Tasks([_task("T-1", TaskStatus.DONE)]))},
+        SignalStore(memory),
+        outbox,
+        Notifier(outbox, destinations, _Clock()),
+        _Clock(),
+        destinations=destinations,
+    )
+    _, signal = _done(memory, "T-1")
+
+    asyncio.run(handler.handle(signal))
+
+    [text] = _texts(memory)
+    assert text.startswith(f"{PROJECT} · ") == prefixed
+    assert "Title of T-1 integrated (1 task)" in text

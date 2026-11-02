@@ -1261,6 +1261,52 @@ def test_an_engine_down_forwarded_for_want_of_a_restart_closes_once_the_engine_i
     assert final == (True, {"inline_keyboard": []})
 
 
+def test_a_component_engine_down_goes_to_its_topic_and_its_recovery_edits_it_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shikiru = bin_dir / "shikiru"
+    shikiru.write_text(_DOCTOR_ONLY_SHIKIRU, encoding="utf-8")
+    shikiru.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    directory = _instance(tmp_path, group_id=_GROUP)
+    _spend_restart(directory)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"status": {"engine_up": False, "quotas": {}}, "list_escalations": {"result": []}},
+        events=[_recorded_event(EventKinds.ENGINE_STARTED, _LAST_EVENT, {})],
+    )
+    bot = _ForumBot([])
+    clock = NapClock()
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=clock,
+    )
+
+    async def engine_comes_back() -> None:
+        await _until(lambda: bool(_in_topic(bot, _ENGINE_DOWN_TEXT)))
+        session.restore_engine()
+        clock.advance(_LIVENESS_GAP)
+        await _until(lambda: _edited(bot, ENGINE_UP_LINE))
+
+    try:
+        composition.recover()
+        asyncio.run(_deliver(composition.jobs, engine_comes_back()))
+    finally:
+        composition.close()
+
+    [sent] = _in_topic(bot, _ENGINE_DOWN_TEXT)
+    assert "api" not in str(sent["text"]).splitlines()[0].split(" · ")
+    [edit] = _edits(bot)
+    final = (edit["message_id"], edit["reply_markup"], str(edit["text"]).endswith(ENGINE_UP_LINE))
+    assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
+    assert _signal_state(directory, _ENGINE_DOWN_ID) is SignalState.CLOSED
+
+
 def _tap(owner: int, message_id: int, data: str, update_id: int) -> dict[str, Any]:
     """Return the owner's tap of the button `data` on the message `message_id`, as an update."""
     recorded = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))

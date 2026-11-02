@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+# keep: scope of the Operator's own health signals (design §4); they belong to no component
+OPERATOR_SCOPE: Final = "operator"
 
 
 class Kind(StrEnum):

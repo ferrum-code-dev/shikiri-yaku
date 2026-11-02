@@ -12,7 +12,7 @@ from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, Tele
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Forward
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind, Signal
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.product.handler import NOTHING_TRIED, ProductHandler
 from shikiri_yaku.extensions.product.message import (
@@ -27,6 +27,7 @@ from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
     Button,
+    CompositionError,
     EscalationView,
     Message,
     Pending,
@@ -225,38 +226,44 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
     assert "`" not in message.text
 
 
-def test_group_escalations_use_the_component_topic_and_other_signals_use_general() -> None:
-    database = Database.open(":memory:")
-    try:
-        topics = TopicStore(database)
-        topics.save("api", 73, TOPIC_OPEN)
-        topics.save("general", 75, TOPIC_OPEN)
-        topics.save(None, 74, TOPIC_OPEN)
-        destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
-        outbox = _Outbox()
-        forwarder = ProductForwarder(
-            MESSAGE_TITLE_MAX_CHARS,
-            {"api": cast("ShikiruClient", _Client(_fixture_view()))},
-            outbox,
-            _Clock(),
-            destinations,
-            button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
-        )
+@pytest.mark.parametrize(
+    ("project", "kind", "thread"),
+    [
+        ("api", Kind.ESCALATION, 73),
+        ("api", Kind.ENGINE_DOWN, 73),
+        ("api", Kind.ENGINE_FAULT, 73),
+        ("api", Kind.TASK_DONE, 73),
+        ("api", Kind.PR_REVIEW, 73),
+        ("api", Kind.HEALTH, 73),
+        (OPERATOR_SCOPE, Kind.HEALTH, 74),
+    ],
+)
+def test_every_signal_of_a_component_goes_to_its_topic_and_the_operators_to_general(
+    topics: TopicStore, project: str, kind: Kind, thread: int
+) -> None:
+    destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
 
-        asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, ""))
-        notice = Signal("api", Kind.TASK_DONE, "event-1", "", "Task finished")
-        asyncio.run(forwarder.forward(NUMBER + 1, notice, "", ""))
+    assert destinations.for_signal(project, kind) == [Destination("telegram", "-1009", thread)]
 
-        assert outbox.queued[0][1] == (Destination("telegram", "-1009", 73),)
-        assert outbox.queued[1][1] == (Destination("telegram", "-1009", 74),)
-        private = TelegramDestinations(topics, owners=(1001,), group_id=None, reconciler=None)
-        assert private.for_signal("api", Kind.ESCALATION) == [Destination("telegram", "1001")]
-        assert private.for_signal("api", Kind.TASK_DONE) == [Destination("telegram", "1001")]
-        assert destinations.for_signal("general", Kind.ESCALATION) == [
-            Destination("telegram", "-1009", 75)
-        ]
-    finally:
-        database.close()
+
+@pytest.mark.parametrize("kind", list(Kind))
+def test_without_a_group_every_signal_goes_to_the_owners_private_chats(
+    topics: TopicStore, kind: Kind
+) -> None:
+    private = TelegramDestinations(topics, owners=(1001, 1002), group_id=None, reconciler=None)
+
+    assert private.for_signal("api", kind) == [
+        Destination("telegram", "1001"),
+        Destination("telegram", "1002"),
+    ]
+
+
+def test_a_component_whose_topic_is_not_open_fails_loudly(topics: TopicStore) -> None:
+    topics.save("api", 73, TOPIC_CLOSED)
+    destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
+
+    with pytest.raises(CompositionError):
+        destinations.for_signal("api", Kind.TASK_DONE)
 
 
 def test_only_an_open_topic_names_its_component() -> None:
@@ -539,8 +546,16 @@ def test_forwarder_queues_one_message_per_destination_keyed_by_the_signal() -> N
             INFORMATION,
             TITLE,
             False,
+            "T-1 · Pick the layout · For information · S41",
+            id="component-topic-information",
+        ),
+        pytest.param(
+            True,
+            INFORMATION,
+            TITLE,
+            False,
             "api · T-1 · Pick the layout · For information · S41",
-            id="general-topic-information",
+            id="private-chat-information",
         ),
         pytest.param(
             True,
