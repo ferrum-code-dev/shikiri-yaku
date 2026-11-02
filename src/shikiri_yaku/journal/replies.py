@@ -53,6 +53,13 @@ class JournalReplies:
         self._ops = ops
         self._standing_kinds = standing_kinds
 
+    def silenced(self, number: int) -> bool:
+        """Whether the PO tapped Stop reminders on the signal, which the Scheduler also reads."""
+        row = self._database.connection.execute(
+            "SELECT 1 FROM ops WHERE identity = ?", (f"{SILENCE}:{number}",)
+        ).fetchone()
+        return row is not None
+
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None:
         row = self._database.connection.execute(
             """

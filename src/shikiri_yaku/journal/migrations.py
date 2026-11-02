@@ -203,4 +203,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         WHERE purpose = 'approval' AND notice_key LIKE 'confirm:%'
         """,
     ),
+    ("ALTER TABLE messages ADD COLUMN final_line TEXT",),
 )

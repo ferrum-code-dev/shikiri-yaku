@@ -338,7 +338,9 @@ def test_a_copy_sent_before_slots_is_given_the_slot_its_kind_has_now(
     (design §7).
     """
     connection = memory.connection
+    # keep: a schema 19 journal has neither column; the replay below adds both, as an upgrade does
     connection.execute("ALTER TABLE messages DROP COLUMN slot")
+    connection.execute("ALTER TABLE messages DROP COLUMN final_line")
     connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
     connection.execute(
         "INSERT INTO messages (direction, channel, chat, delivery, purpose, notice_key,"

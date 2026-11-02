@@ -35,6 +35,8 @@ STOP_REMINDERS_LABEL: Final = "Stop reminders"
 # keep: the last line of a message whose signal ended, so the PO sees why its buttons went
 ACKNOWLEDGED_LINE: Final = "Acknowledged"
 ENGINE_UP_LINE: Final = "Engine is up again"
+# keep: the last line of a standing message once its reminders are stopped; its signal stays open
+REMINDERS_STOPPED_LINE: Final = "Reminders stopped"
 # keep: the last line of a copy that a newer copy replaced, when the platform will not delete it
 REPLACED_LINE: Final = "Replaced by a newer message"
 # keep: a slot names the one live copy of a kind of message for a signal (design §7)

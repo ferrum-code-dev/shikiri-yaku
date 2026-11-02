@@ -947,11 +947,15 @@ class FinalEdits(Protocol):
     """
 
     def unsettled(self) -> list[tuple[int, str]]:
-        """Return the signals whose resolution is not yet shown on every copy, with its line."""
+        """Return the signals whose line is not yet shown on every copy, with that line."""
         ...
 
     def settle(self, number: int, line: str) -> None:
-        """Record, for each sent copy with buttons, its text with the line added and no buttons."""
+        """Record, for each sent copy with buttons, its text with the line added and no buttons.
+
+        A copy already settled to another line is settled again: a standing message reads
+        "Reminders stopped" until its signal ends with its own line.
+        """
         ...
 
     def to_edit(self) -> list[FinalEdit]: ...

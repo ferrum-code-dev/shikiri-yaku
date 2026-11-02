@@ -600,10 +600,11 @@ def _claim_interrupted(directory: Path, op_id: int) -> None:
 
 
 def _as_before_slots(directory: Path) -> None:
-    """Make the journal one written before slots existed: no slot column, schema 19."""
+    """Make the journal one written before slots: no slot or final_line column, schema 19."""
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
         database.connection.execute("ALTER TABLE messages DROP COLUMN slot")
+        database.connection.execute("ALTER TABLE messages DROP COLUMN final_line")
         database.connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
     finally:
         database.close()
