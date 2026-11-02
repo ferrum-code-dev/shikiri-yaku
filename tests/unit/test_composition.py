@@ -431,7 +431,11 @@ class _MarkingBot(FakeBotApi):
 
 
 class _ForumBot(FakeBotApi):
-    """A fake Bot API that creates each forum topic under the next thread id, from `_TOPIC` on."""
+    """A fake Bot API for a forum group: each topic gets the next thread id from `_TOPIC` on.
+
+    A sent message's reply names the chat it was sent to, as Telegram's does, so the message
+    reference of a later edit names the group.
+    """
 
     def __init__(self, updates: list[dict[str, Any]]) -> None:
         super().__init__(updates)
@@ -439,7 +443,11 @@ class _ForumBot(FakeBotApi):
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         if method != "createForumTopic":
-            return await super().call(method, payload)
+            reply = await super().call(method, payload)
+            if method == "sendMessage":
+                sent = cast("dict[str, Any]", reply)
+                sent["result"]["chat"]["id"] = int(str(payload["chat_id"]))
+            return reply
         self.calls.append((method, dict(payload)))
         created = json.loads(_FORUM_TOPIC.read_text(encoding="utf-8"))
         created["result"]["message_thread_id"] = next(self._threads)
@@ -1300,10 +1308,16 @@ def test_a_component_engine_down_goes_to_its_topic_and_its_recovery_edits_it_the
         composition.close()
 
     [sent] = _in_topic(bot, _ENGINE_DOWN_TEXT)
+    assert sent["chat_id"] == str(_GROUP)
     assert "api" not in str(sent["text"]).splitlines()[0].split(" · ")
     [edit] = _edits(bot)
-    final = (edit["message_id"], edit["reply_markup"], str(edit["text"]).endswith(ENGINE_UP_LINE))
-    assert final == (FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
+    final = (
+        edit["chat_id"],
+        edit["message_id"],
+        edit["reply_markup"],
+        str(edit["text"]).endswith(ENGINE_UP_LINE),
+    )
+    assert final == (str(_GROUP), FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
     assert _signal_state(directory, _ENGINE_DOWN_ID) is SignalState.CLOSED
 
 
