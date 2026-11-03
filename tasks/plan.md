@@ -1677,6 +1677,10 @@ Acceptance criteria:
 
 Human check, not in the gate: with a real forum group, one Operator-level message lands in the built-in General topic.
 
+Split: E13 is more than about 300 lines, so it is done as three changes, one per item. **E13a** is item 1
+(its probe rows in the `run` table). **E13b** is item 2 (its composed test, README and help text).
+**E13c** is item 3 (its two tests). Each is one commit that passes the gate; E13 is ticked after E13c.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
