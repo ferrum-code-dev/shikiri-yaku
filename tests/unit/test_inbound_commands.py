@@ -121,7 +121,12 @@ class Harness:
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
         return Replies(
-            JournalReplies(self.database, self.signals, OpStore(self.database)),
+            JournalReplies(
+                self.database,
+                self.signals,
+                OpStore(self.database),
+                channel_name="telegram",
+            ),
             self.outbox,
             _Clock(),
             self.clients,

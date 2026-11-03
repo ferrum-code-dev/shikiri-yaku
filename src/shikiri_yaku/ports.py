@@ -65,6 +65,7 @@ __all__ = [
     "ChannelRepairError",
     "ChannelStartupError",
     "ChannelUnavailableError",
+    "CheckLine",
     "Choice",
     "Classifier",
     "Clock",
@@ -818,6 +819,19 @@ class ChannelCheck(Protocol):
 
     async def verify(self) -> None:
         """Raise ChannelError for a definite failure or ChannelUnavailableError if unverified."""
+
+    async def report(self) -> list[CheckLine]:
+        """Return channel-owned static checks and notes for `doctor`."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class CheckLine:
+    """One channel-owned doctor line; detail is an error, otherwise status is shown."""
+
+    name: str
+    status: str = "ok"
+    detail: str | None = None
 
 
 class Destinations(Protocol):

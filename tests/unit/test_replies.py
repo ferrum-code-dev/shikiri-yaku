@@ -179,6 +179,7 @@ class Harness:
             self.database,
             self.signals,
             OpStore(self.database),
+            channel_name="telegram",
         )
 
     def commands(self, at: datetime) -> Commands:

@@ -252,7 +252,7 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
         Closing(PROJECT, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE), NOW
     )
     channel = _Channel()
-    replies = JournalReplies(memory, signals, OpStore(memory))
+    replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     editor = CopyEditor(
         JournalFinalEdits(memory, replies),
         cast("Channel", channel),
@@ -301,7 +301,7 @@ def test_a_health_copy_sent_before_the_upgrade_is_edited_to_recovered_and_never_
     signals.close(
         Closing(PROJECT, kind=Kind.HEALTH, reason=LINK_SCOPE, final_line=RECOVERED_LINE), NOW
     )
-    replies = JournalReplies(memory, signals, OpStore(memory))
+    replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     channel = _Channel()
     editor = CopyEditor(
         JournalFinalEdits(memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),

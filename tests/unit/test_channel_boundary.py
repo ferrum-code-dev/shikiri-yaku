@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
-from shikiri_yaku.ports import ChannelCheck
+from shikiri_yaku.ports import ChannelCheck, CheckLine
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping, Sequence
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.stats import Measures
     from shikiri_yaku.settings import Settings
 
-_CLI_ALLOWED_MENTIONS = (
-    "settings.telegram",
+# keep: the repair group is the only channel-specific CLI surface
+_CLI_REPAIR_MENTIONS = (
     "telegram = typer.Typer(",
     'app.add_typer(telegram, name="telegram"',
     "@telegram.command",
@@ -37,6 +37,10 @@ class _FakeChannelCheck(ChannelCheck):
     @override
     async def verify(self) -> None:
         self.calls += 1
+
+    @override
+    async def report(self) -> list[CheckLine]:
+        return [CheckLine("fake channel", "reported by the fake channel")]
 
 
 class _Composition:
@@ -91,15 +95,18 @@ def test_cli_and_core_layers_name_no_concrete_channel_outside_config_and_repair_
     cli_file = root / "src" / "shikiri_yaku" / "cli.py"
     files = [
         cli_file,
-        *sorted((root / "src" / "shikiri_yaku" / "app").rglob("*.py")),
-        *sorted((root / "src" / "shikiri_yaku" / "domain").rglob("*.py")),
+        *(
+            path
+            for layer in ("app", "domain", "extensions", "journal")
+            for path in sorted((root / "src" / "shikiri_yaku" / layer).rglob("*.py"))
+        ),
     ]
     violations: list[str] = []
     for path in files:
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if "telegram" not in line.lower():
                 continue
-            if path == cli_file and any(allowed in line for allowed in _CLI_ALLOWED_MENTIONS):
+            if path == cli_file and any(allowed in line for allowed in _CLI_REPAIR_MENTIONS):
                 continue
             violations.append(f"{path.relative_to(root)}:{line_number}: {line.strip()}")
 
@@ -107,7 +114,7 @@ def test_cli_and_core_layers_name_no_concrete_channel_outside_config_and_repair_
 
 
 def test_run_and_doctor_use_fake_channel_check_without_importing_telegram(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     instance = tmp_path / "shop"
     component = tmp_path / "api"
@@ -151,6 +158,7 @@ def test_run_and_doctor_use_fake_channel_check_without_importing_telegram(
                 )
                 == 0
             )
+        assert "Fake channel · reported by the fake channel" in capsys.readouterr().out
         assert check.calls == 2
         assert not any(_TELEGRAM_MODULE.match(name) for name in sys.modules)
         assert blocked == []

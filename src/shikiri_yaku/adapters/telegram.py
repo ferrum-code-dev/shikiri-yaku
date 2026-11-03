@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import html
+import stat
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 from urllib.parse import urlsplit
 
@@ -17,16 +18,20 @@ from shikiri_yaku.ports import (
     ChannelError,
     ChannelRefusedError,
     ChannelUnavailableError,
+    CheckLine,
     join_blocks,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import Clock, Copies, Message
 
 TELEGRAM_CHANNEL: Final = "telegram"
+TOKEN_MODE: Final = 0o600
+OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 # keep: the Bot API's parse mode for the markup a message carries (design §7)
@@ -389,12 +394,14 @@ class TelegramChannelCheck:
     def __init__(
         self,
         api: BotApi,
+        token_file: Path,
         group_id: int | None = None,
         owners: tuple[int, ...] = (),
         *,
         allow_other_members: bool = False,
     ) -> None:
         self._api = api
+        self._token_file = token_file
         self._group_id = group_id
         self._owners = owners
         self._allow_other_members = allow_other_members
@@ -406,6 +413,25 @@ class TelegramChannelCheck:
             self._owners,
             allow_other_members=self._allow_other_members,
         )
+
+    async def report(self) -> list[CheckLine]:
+        lines = [CheckLine("token file", detail=_token_problem(self._token_file))]
+        if self._allow_other_members:
+            lines.append(CheckLine("group", status=OTHER_MEMBERS_NOTE))
+        return lines
+
+
+def _token_problem(token: Path) -> str | None:
+    try:
+        status = token.stat()
+    except FileNotFoundError:
+        return f"{token} does not exist"
+    except OSError as error:
+        return f"{token} cannot be read: {error}"
+    if not stat.S_ISREG(status.st_mode):
+        return f"{token} is not a regular file"
+    mode = stat.S_IMODE(status.st_mode)
+    return None if mode == TOKEN_MODE else f"{token} has mode {mode:04o}, must be {TOKEN_MODE:04o}"
 
 
 async def _probe_webhook(api: BotApi) -> None:

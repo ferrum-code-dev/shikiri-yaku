@@ -14,7 +14,7 @@ from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.messages import MessageStore
-from shikiri_yaku.journal.ops import OpState, OpStore
+from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal, SignalState, SignalStore
 from shikiri_yaku.ports import (
@@ -107,7 +107,7 @@ def test_stop_reminders_silences_a_standing_notice_and_closes_information(
     )
     messages.confirm_delivery(stored.row_id, "1001/42")
 
-    replies = JournalReplies(memory, signals, OpStore(memory))
+    replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     replies.stop_notice(number, NOW)
 
     stored = signals.get(number)
@@ -147,7 +147,7 @@ def test_a_tap_on_information_closes_it_and_edits_every_copy_once(memory: Databa
             now=NOW,
         )
         messages.confirm_delivery(stored.row_id, reference)
-    replies = JournalReplies(memory, signals, OpStore(memory))
+    replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     final = JournalFinalEdits(memory, replies)
 
     replies.stop_notice(number, NOW)
@@ -193,7 +193,7 @@ def test_origin_binds_only_delivered_outbound_copy_to_channel_and_purpose(purpos
         notice_key=None,
         now=NOW,
     )
-    replies = JournalReplies(database, signals, OpStore(database))
+    replies = JournalReplies(database, signals, OpStore(database), channel_name="telegram")
     assert replies.origin("telegram", "1001/42") is None
     messages.confirm_delivery(stored.row_id, "1001/42")
     origin = replies.origin("telegram", "1001/42")
@@ -215,13 +215,27 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
 ) -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops)
+    replies = JournalReplies(database, SignalStore(database), ops, channel_name="telegram")
+    seeded = ops.intend(
+        NewOp(
+            "telegram:resolve:700",
+            "resolve",
+            PAYLOAD.project,
+            task_id=PAYLOAD.task_id,
+            reason=PAYLOAD.reason,
+            payload=PAYLOAD.model_dump_json(),
+        ),
+        NOW,
+    )
     op_id = replies.intend_resolve(700, PAYLOAD, NOW)
     assert op_id is not None
+    assert op_id == seeded.row_id
     changed = PAYLOAD.model_copy(update={"text": "a different answer"})
     assert replies.intend_resolve(700, changed, NOW) == op_id
     assert replies.claim_resolve(op_id, NOW) == PAYLOAD
-    restarted = JournalReplies(database, SignalStore(database), OpStore(database))
+    restarted = JournalReplies(
+        database, SignalStore(database), OpStore(database), channel_name="telegram"
+    )
     assert restarted.claim_resolve(op_id, NOW) is None
     ack = Ack(id=12, status=status, result=None, message=None)
     restarted.acknowledge_resolve(op_id, ack, NOW)
@@ -236,7 +250,9 @@ def test_update_identity_stores_first_payload_and_claims_once_across_reconstruct
 @pytest.mark.parametrize("kind", ["accept", "cancel"])
 def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) -> None:
     database = Database.open(":memory:")
-    replies = JournalReplies(database, SignalStore(database), OpStore(database))
+    replies = JournalReplies(
+        database, SignalStore(database), OpStore(database), channel_name="telegram"
+    )
     payload = PAYLOAD.model_copy(update={"kind": kind, "text": None})
     op_id = replies.intend_resolve(700, payload, NOW)
     assert op_id is not None
@@ -244,7 +260,9 @@ def test_confirmation_requires_durable_approval_of_the_same_signal(kind: str) ->
     assert not replies.approve_resolve(op_id, payload.number + 1, NOW)
     assert replies.claim_resolve(op_id, NOW) is None
     assert replies.approve_resolve(op_id, payload.number, NOW)
-    restarted = JournalReplies(database, SignalStore(database), OpStore(database))
+    restarted = JournalReplies(
+        database, SignalStore(database), OpStore(database), channel_name="telegram"
+    )
     assert restarted.claim_resolve(op_id, NOW) == payload
     assert restarted.claim_resolve(op_id, NOW) is None
     database.close()
@@ -266,7 +284,7 @@ def test_only_a_resolve_shikiru_confirmed_is_the_recorded_resolution(
 ) -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops)
+    replies = JournalReplies(database, SignalStore(database), ops, channel_name="telegram")
     op_id = replies.intend_resolve(700, PAYLOAD, NOW)
     assert op_id is not None
     assert ops.transition(op_id, OpState.INTENDED, state, LATER)
@@ -278,7 +296,7 @@ def test_only_a_resolve_shikiru_confirmed_is_the_recorded_resolution(
 def test_recorded_resolution_is_never_another_signals() -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops)
+    replies = JournalReplies(database, SignalStore(database), ops, channel_name="telegram")
     other = replies.intend_resolve(700, PAYLOAD.model_copy(update={"number": 2}), NOW)
     assert other is not None
     assert ops.transition(other, OpState.INTENDED, OpState.CONFIRMED, LATER)
@@ -289,7 +307,7 @@ def test_recorded_resolution_is_never_another_signals() -> None:
 def test_an_unconfirmed_attempt_never_displaces_the_confirmed_winner() -> None:
     database = Database.open(":memory:")
     ops = OpStore(database)
-    replies = JournalReplies(database, SignalStore(database), ops)
+    replies = JournalReplies(database, SignalStore(database), ops, channel_name="telegram")
     winner = replies.intend_resolve(700, PAYLOAD, NOW)
     loser = replies.intend_resolve(701, PAYLOAD.model_copy(update={"label": "Change"}), NOW)
     assert winner is not None

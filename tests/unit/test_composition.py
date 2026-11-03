@@ -1061,7 +1061,9 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
         composition.close()
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
-        [interrupted] = JournalSubmits(database, OpStore(database)).unfinished()
+        [interrupted] = JournalSubmits(
+            database, OpStore(database), channel_name="telegram"
+        ).unfinished()
         if handled:
             JournalInbound(database).mark_handled(_goal_update()["update_id"])
     finally:

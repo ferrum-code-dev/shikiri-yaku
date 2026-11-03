@@ -9,7 +9,7 @@ import pytest
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal.database import Database
-from shikiri_yaku.journal.ops import OpStore
+from shikiri_yaku.journal.ops import NewOp, OpStore
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import (
     Ack,
@@ -76,7 +76,7 @@ def client() -> _Client:
 
 @pytest.fixture
 def log(database: Database) -> JournalSubmits:
-    return JournalSubmits(database, OpStore(database))
+    return JournalSubmits(database, OpStore(database), channel_name="telegram")
 
 
 @pytest.fixture
@@ -86,12 +86,25 @@ def submitter(log: JournalSubmits, client: _Client) -> Submitter:
 
 
 def test_a_duplicate_update_id_submits_once_and_returns_the_stored_outcome(
-    submitter: Submitter, client: _Client, log: JournalSubmits
+    database: Database,
+    submitter: Submitter,
+    client: _Client,
+    log: JournalSubmits,
 ) -> None:
+    seeded = OpStore(database).intend(
+        NewOp(
+            "telegram:submit:41",
+            "submit",
+            PAYLOAD.component,
+            payload=PAYLOAD.model_dump_json(),
+        ),
+        NOW,
+    )
     first = asyncio.run(submitter.submit(UPDATE, PAYLOAD))
     second = asyncio.run(submitter.submit(UPDATE, PAYLOAD))
     assert first.status == SubmitStatus.CONFIRMED
     assert first.task_id == "T-9"
+    assert first.id == seeded.row_id
     assert second == first == log.get(first.id)
     assert client.requests == [PAYLOAD.request]
 

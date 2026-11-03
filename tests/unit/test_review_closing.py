@@ -147,7 +147,9 @@ def _review_on_screen(database: Database) -> int:
 
 
 def _replies(database: Database) -> JournalReplies:
-    return JournalReplies(database, SignalStore(database), OpStore(database))
+    return JournalReplies(
+        database, SignalStore(database), OpStore(database), channel_name="telegram"
+    )
 
 
 def _close(database: Database, event: ShikiruEvent) -> None:

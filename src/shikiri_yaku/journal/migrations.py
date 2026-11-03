@@ -10,7 +10,7 @@ Migration 5 keeps the body of an outbound message, so a restart can send what wa
 (design §7, §10).
 Migration 6 keeps the reason of a refused outbound message, the only thing a refusal leaves
 behind (design §7).
-Migration 7 keeps what the PO sent in the messages table, one row per Telegram update id, and the
+Migration 7 keeps what the PO sent in the messages table, one row per channel update id, and the
 offset the polling resumes from (design §7, §9). The body column holds an inbound item's text.
 Migration 8 keeps the acknowledgement of a resolve op (design §10.1).
 Migration 9 keeps the final body of a sent copy whose edit is journaled and not yet confirmed, so a
@@ -18,7 +18,7 @@ restart finishes the edit (design §7).
 Migration 10 marks that edit confirmed without replacing the body: the body keeps the buttons the
 copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
 Migration 11 claims each logical command reply in the same transaction as all of its parts.
-Migration 12 stores Telegram topic threads on outbox rows and records the reconciled topic ids.
+Migration 12 stores channel topic threads on outbox rows and records the reconciled topic ids.
 Migration 13 keeps the pull request of a review signal: its link and its commit count (design §4).
 Migration 14 keeps a Reasoner call's usage and duration for a signal's verdict, as JSON (design §8).
 Migration 15 keeps the typed host-tool proposal from the classification, as JSON (design §5).

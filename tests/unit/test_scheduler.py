@@ -241,6 +241,7 @@ def test_a_stopped_review_is_not_reminded_and_stays_forwarded(world: _World) -> 
         world.database,
         world.signals,
         OpStore(world.database),
+        channel_name="telegram",
     ).stop_notice(number, START)
     world.clock.moment = START + timedelta(hours=FIRST_H)
     _tick(world)

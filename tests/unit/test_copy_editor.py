@@ -106,7 +106,9 @@ class _Harness:
                 now=NOW,
             )
             messages.confirm_delivery(row.row_id, ref)
-        self.replies = JournalReplies(self.database, self.signals, OpStore(self.database))
+        self.replies = JournalReplies(
+            self.database, self.signals, OpStore(self.database), channel_name="telegram"
+        )
 
     def resolve(self) -> None:
         payload = ResolvePayload(

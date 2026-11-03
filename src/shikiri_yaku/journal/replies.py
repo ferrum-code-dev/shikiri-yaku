@@ -39,10 +39,13 @@ class JournalReplies:
     signal with no standing notice closes it, as a button sent before the upgrade always did.
     """
 
-    def __init__(self, database: Database, signals: SignalStore, ops: OpStore) -> None:
+    def __init__(
+        self, database: Database, signals: SignalStore, ops: OpStore, *, channel_name: str
+    ) -> None:
         self._database = database
         self._signals = signals
         self._ops = ops
+        self._channel_name = channel_name
 
     def silenced(self, number: int) -> bool:
         """Whether the PO tapped Stop reminders on the signal, which the Scheduler also reads."""
@@ -102,7 +105,7 @@ class JournalReplies:
         form = secret_form([payload.text or ""])
         inserted = self._ops.intend(
             NewOp(
-                identity=f"telegram:resolve:{update_id}",
+                identity=f"{self._channel_name}:resolve:{update_id}",
                 kind=_RESOLVE,
                 project=payload.project,
                 task_id=payload.task_id,

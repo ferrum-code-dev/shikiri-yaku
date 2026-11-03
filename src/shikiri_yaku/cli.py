@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import signal
-import stat
 import sys
 from dataclasses import dataclass
 from functools import partial
@@ -56,9 +55,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.settings import Settings
 
 _PROGRAM = "shikiri-yaku"
-TOKEN_MODE: Final = 0o600
-# keep: the effect of allow_other_members as the PO reads it in doctor's output (design §13)
-OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 _THREAD_ID_PATTERN: Final = r"[1-9][0-9]*"
 _DESCRIPTION: Final = "An autonomous Operator for product development with Shikiru."
 _BOLD: Final = "bold"
@@ -385,20 +381,11 @@ def _doctor(directory: Path, compose: Compose, *, as_json: bool) -> int:
     return _report(
         [
             _Check("components", _components_problem(settings)),
-            _Check("token file", _token_problem(settings.telegram.token_file)),
             _lock_check(directory),
             *_composed_checks(settings, directory, compose),
-            *_group_checks(settings),
         ],
         as_json=as_json,
     )
-
-
-def _group_checks(settings: Settings) -> list[_Check]:
-    """Name what other group members can see, when the config admits them."""
-    if not settings.telegram.allow_other_members:
-        return []
-    return [_Check("group", status=OTHER_MEMBERS_NOTE)]
 
 
 def _report(checks: Sequence[_Check], *, as_json: bool) -> int:
@@ -433,19 +420,6 @@ def _is_directory(path: Path) -> bool:
         return False
 
 
-def _token_problem(token: Path) -> str | None:
-    try:
-        status = token.stat()
-    except FileNotFoundError:
-        return f"{token} does not exist"
-    except OSError as error:
-        return f"{token} cannot be read: {error}"
-    if not stat.S_ISREG(status.st_mode):
-        return f"{token} is not a regular file"
-    mode = stat.S_IMODE(status.st_mode)
-    return None if mode == TOKEN_MODE else f"{token} has mode {mode:04o}, must be {TOKEN_MODE:04o}"
-
-
 def _lock_check(directory: Path) -> _Check:
     try:
         with instance_lock(directory):
@@ -462,6 +436,7 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
     except CompositionError as error:
         return [_Check("journal", str(error))]
     try:
+        channel_lines = asyncio.run(composition.channel_check.report())
         links = [
             _Check(f"link {name}", _probe_problem(probe))
             for name, probe in composition.link_probes.items()
@@ -473,7 +448,8 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
         channel = _Check("channel", _probe_problem(composition.channel_check.verify))
     finally:
         composition.close()
-    return [*links, *rungs, channel, _Check("journal")]
+    reported = [_Check(line.name, line.detail, line.status) for line in channel_lines]
+    return [*reported, *links, *rungs, channel, _Check("journal")]
 
 
 def _verify_channel(channel_check: ChannelCheck) -> None:

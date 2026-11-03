@@ -141,7 +141,9 @@ class _Journal:
         return str(row["delivery"])
 
     def to_edit(self) -> list[FinalEdit]:
-        replies = JournalReplies(self.database, self.signals, OpStore(self.database))
+        replies = JournalReplies(
+            self.database, self.signals, OpStore(self.database), channel_name="telegram"
+        )
         return JournalFinalEdits(self.database, replies).to_edit()
 
     def notices(self) -> int:

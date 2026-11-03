@@ -21,14 +21,15 @@ _KIND: Final = "submit"
 class JournalSubmits:
     """Submit ops in the ops table; every move is guarded on the expected state."""
 
-    def __init__(self, database: Database, ops: OpStore) -> None:
+    def __init__(self, database: Database, ops: OpStore, *, channel_name: str) -> None:
         self._database = database
         self._ops = ops
+        self._channel_name = channel_name
 
     def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
         inserted = self._ops.intend(
             NewOp(
-                identity=_identity(update_id),
+                identity=_identity(self._channel_name, update_id),
                 kind=_KIND,
                 project=payload.component,
                 payload=payload.model_dump_json(),
@@ -63,7 +64,7 @@ class JournalSubmits:
         The check and the intent are one transaction, so two taps cannot both consume a prompt.
         A replay finds the replacement its tap intended, because the identity is the tap's.
         """
-        identity = _identity(update_id)
+        identity = _identity(self._channel_name, update_id)
         with self._database.transaction():
             taken_by = self._taken_by(prompt_id)
             if taken_by is not None and taken_by != identity:
@@ -117,8 +118,8 @@ class JournalSubmits:
         return moved == 1
 
 
-def _identity(update_id: int) -> str:
-    return f"telegram:submit:{update_id}"
+def _identity(channel_name: str, update_id: int) -> str:
+    return f"{channel_name}:submit:{update_id}"
 
 
 def _submit_op(op: StoredOp) -> SubmitOp:

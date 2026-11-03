@@ -63,11 +63,13 @@ class _Goal:
 
     def __init__(self, database: Database) -> None:
         self.client = _Client()
-        self.submits = JournalSubmits(database, OpStore(database))
+        self.submits = JournalSubmits(database, OpStore(database), channel_name="telegram")
         self.outbox = JournalOutbox(database, MessageStore(database, _Reporter()))
         clients = {"api": cast("ShikiruClient", self.client)}
         clock = cast("Clock", _Clock())
-        replies = JournalReplies(database, SignalStore(database), OpStore(database))
+        replies = JournalReplies(
+            database, SignalStore(database), OpStore(database), channel_name="telegram"
+        )
         submitter = Submitter(self.submits, clients, clock)
         self.topics = TopicStore(database)
         self.command = GoalCommand(

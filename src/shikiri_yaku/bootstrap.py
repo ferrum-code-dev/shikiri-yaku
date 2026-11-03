@@ -394,6 +394,7 @@ def compose(
         link_probes=probes,
         channel_check=TelegramChannelCheck(
             bot_api,
+            settings.telegram.token_file,
             settings.telegram.group_id,
             settings.telegram.owners,
             allow_other_members=settings.telegram.allow_other_members,
@@ -677,7 +678,7 @@ def inbound_job(
         name_max_chars=operator.command_name_max_chars,
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal)),
+        JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
         outbox,
         clock,
         clients,
@@ -715,8 +716,12 @@ def goal_command(
     destinations: Destinations,
 ) -> GoalCommand:
     """Return the /goal command, which journals its submits and replies."""
-    submitter = Submitter(JournalSubmits(journal, OpStore(journal)), clients, clock)
-    replies = JournalReplies(journal, SignalStore(journal), OpStore(journal))
+    submitter = Submitter(
+        JournalSubmits(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL), clients, clock
+    )
+    replies = JournalReplies(
+        journal, SignalStore(journal), OpStore(journal), channel_name=TELEGRAM_CHANNEL
+    )
     return GoalCommand(
         submitter,
         replies,
@@ -741,7 +746,7 @@ def secret_cleanup_job(
 def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
     signals = SignalStore(journal)
-    replies = JournalReplies(journal, signals, OpStore(journal))
+    replies = JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL)
     editor = CopyEditor(
         JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
         channel,

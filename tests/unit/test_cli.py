@@ -22,6 +22,7 @@ from typer.main import get_command
 
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
+from shikiri_yaku.adapters.telegram import OTHER_MEMBERS_NOTE
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, main, stats_measures
 from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
@@ -420,7 +421,7 @@ def test_doctor_names_the_effect_of_allowing_other_members_only_when_allowed(
 
     assert _run_doctor(tmp_path, bot=lambda _settings: _GroupBot()) == 0
     checks, _summary = _doctor_lines(capsys.readouterr().out)
-    assert any(cli.OTHER_MEMBERS_NOTE in line for line in checks) is allow_other_members
+    assert any(OTHER_MEMBERS_NOTE in line for line in checks) is allow_other_members
 
 
 @pytest.mark.parametrize(
