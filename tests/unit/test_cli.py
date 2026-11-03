@@ -87,12 +87,14 @@ def _instance(home: Path) -> Path:
     return directory
 
 
-def _group_instance(home: Path) -> Path:
+def _group_instance(home: Path, *, allow_other_members: bool = False) -> Path:
     directory = _instance(home)
     config = directory / "config.toml"
+    allowed = "true" if allow_other_members else "false"
     config.write_text(
         config.read_text(encoding="utf-8").replace(
-            "owners = [123456789]", f"owners = [123456789]\ngroup_id = {_GROUP_ID}"
+            "owners = [123456789]",
+            f"owners = [123456789]\ngroup_id = {_GROUP_ID}\nallow_other_members = {allowed}",
         ),
         encoding="utf-8",
     )
@@ -356,13 +358,25 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
 
 
 @pytest.mark.parametrize(
-    ("forum", "bot_admin", "manage_topics", "extra_member", "expected"),
+    (
+        "forum",
+        "bot_admin",
+        "manage_topics",
+        "extra_member",
+        "allow_other_members",
+        "expected",
+    ),
     [
-        (True, True, True, False, 0),
-        (True, True, True, True, 1),
-        (True, True, False, False, 1),
-        (True, False, True, False, 1),
-        (False, True, True, False, 1),
+        pytest.param(True, True, True, False, False, 0, id="equal-refused"),
+        pytest.param(True, True, True, False, True, 0, id="equal-allowed"),
+        pytest.param(True, True, True, True, False, 1, id="larger-refused"),
+        pytest.param(True, True, True, True, True, 0, id="larger-allowed"),
+        pytest.param(True, True, False, False, False, 1, id="no-topic-right-refused"),
+        pytest.param(True, True, False, False, True, 1, id="no-topic-right-allowed"),
+        pytest.param(True, False, True, False, False, 1, id="bot-not-admin-refused"),
+        pytest.param(True, False, True, True, True, 1, id="bot-not-admin-allowed"),
+        pytest.param(False, True, True, False, False, 1, id="not-forum-refused"),
+        pytest.param(False, True, True, False, True, 1, id="not-forum-allowed"),
     ],
 )
 def test_doctor_checks_topic_group_configuration(
@@ -373,9 +387,10 @@ def test_doctor_checks_topic_group_configuration(
     bot_admin: bool,
     manage_topics: bool,
     extra_member: bool,
+    allow_other_members: bool,
     expected: int,
 ) -> None:
-    _group_instance(tmp_path)
+    _group_instance(tmp_path, allow_other_members=allow_other_members)
 
     assert (
         _run_doctor(
@@ -390,6 +405,17 @@ def test_doctor_checks_topic_group_configuration(
         == expected
     )
     assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"telegram"})
+
+
+@pytest.mark.parametrize("allow_other_members", [True, False])
+def test_doctor_names_the_effect_of_allowing_other_members_only_when_allowed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], *, allow_other_members: bool
+) -> None:
+    _group_instance(tmp_path, allow_other_members=allow_other_members)
+
+    assert _run_doctor(tmp_path, bot=lambda _settings: _GroupBot()) == 0
+    checks, _summary = _doctor_lines(capsys.readouterr().out)
+    assert any(cli.OTHER_MEMBERS_NOTE in line for line in checks) is allow_other_members
 
 
 @pytest.mark.parametrize(

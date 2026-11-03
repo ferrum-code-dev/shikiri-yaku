@@ -358,7 +358,13 @@ def _keyboard_button(button: Button) -> dict[str, str]:
     return {"text": button.label, "callback_data": button.data}
 
 
-async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int, ...] = ()) -> None:
+async def probe_bot(
+    api: BotApi,
+    group_id: int | None = None,
+    owners: tuple[int, ...] = (),
+    *,
+    allow_other_members: bool = False,
+) -> None:
     """Check bot authentication and the configured group's topic and membership requirements."""
     body = await api.call(GET_ME, {})
     reply = _validated(body, _PROBE_REPLY)
@@ -368,7 +374,9 @@ async def probe_bot(api: BotApi, group_id: int | None = None, owners: tuple[int,
         raise ChannelError(BOT_NOT_IDENTIFIED)
     await _probe_webhook(api)
     if group_id is not None:
-        await _probe_group(api, group_id, owners, reply.result.id)
+        await _probe_group(
+            api, group_id, owners, reply.result.id, allow_other_members=allow_other_members
+        )
 
 
 async def _probe_webhook(api: BotApi) -> None:
@@ -405,7 +413,14 @@ class TelegramForumTopics:
             raise ChannelError(NOT_ACCEPTED)
 
 
-async def _probe_group(api: BotApi, group_id: int, owners: tuple[int, ...], bot_id: int) -> None:
+async def _probe_group(
+    api: BotApi,
+    group_id: int,
+    owners: tuple[int, ...],
+    bot_id: int,
+    *,
+    allow_other_members: bool,
+) -> None:
     group = _validated(await api.call(GET_CHAT, {"chat_id": group_id}), _CHAT_REPLY)
     if isinstance(group, _Failed):
         raise ChannelError(GROUP_NOT_READABLE)
@@ -420,12 +435,18 @@ async def _probe_group(api: BotApi, group_id: int, owners: tuple[int, ...], bot_
         if not _is_member(owner, owner_id):
             raise ChannelError(OWNER_NOT_MEMBER)
 
+    if not allow_other_members:
+        await _probe_member_count(api, group_id, len(set(owners) | {bot_id}))
+
+
+async def _probe_member_count(api: BotApi, group_id: int, expected: int) -> None:
+    # keep: every member of the group reads its messages, so by default it holds only the owners
     count = _validated(
         await api.call(GET_CHAT_MEMBER_COUNT, {"chat_id": group_id}), _CHAT_MEMBER_COUNT_REPLY
     )
     if isinstance(count, _Failed):
         raise ChannelError(GROUP_MEMBER_COUNT_UNAVAILABLE)
-    if count.result != len(set(owners) | {bot_id}):
+    if count.result != expected:
         raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
 
 

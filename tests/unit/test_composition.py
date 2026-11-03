@@ -115,6 +115,7 @@ _LAST_EVENT: Final = 40
 # keep: a liveness check runs once its interval has passed, which a test moves the clock past for
 _LIVENESS_GAP: Final = timedelta(minutes=2)
 _SECOND_OWNER: Final = 1002
+_OUTSIDER: Final = 1003
 _QUESTION_TEXT: Final = "Which behavior should remain?"
 _ANSWER_TAP: Final = "a:1:1"
 _RESOLVED_IN_SHIKIRU: Final = "Resolved in Shikiru: answer"
@@ -509,6 +510,18 @@ class _GatedBot(FakeBotApi):
             sent = cast("dict[str, Any]", reply)
             sent["result"]["chat"]["id"] = int(str(payload["chat_id"]))
         return reply
+
+
+class _GatedForumBot(_GatedBot):
+    """A gated fake Bot API for a forum group whose one topic has the thread id `_TOPIC`."""
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method != "createForumTopic":
+            return await super().call(method, payload)
+        self.calls.append((method, dict(payload)))
+        created = json.loads(_FORUM_TOPIC.read_text(encoding="utf-8"))
+        created["result"]["message_thread_id"] = _TOPIC
+        return created
 
 
 class _HangingSendBot(FakeBotApi):
@@ -1384,16 +1397,36 @@ def test_a_component_engine_down_goes_to_its_topic_and_its_recovery_edits_it_the
     assert _signal_state(directory, _ENGINE_DOWN_ID) is SignalState.CLOSED
 
 
-def _tap(owner: int, message_id: int, data: str, update_id: int) -> dict[str, Any]:
-    """Return the owner's tap of the button `data` on the message `message_id`, as an update."""
+def _tap(
+    owner: int, message_id: int, data: str, update_id: int, chat: int | None = None
+) -> dict[str, Any]:
+    """Return the tap of the button `data` by `owner` on the message `message_id`, as an update.
+
+    The tap is made in the owner's private chat unless `chat` names the group it was made in.
+    """
     recorded = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
     update = recorded["result"][2]
     update["update_id"] = update_id
     tapped = update["callback_query"]
     tapped["from"]["id"] = owner
     tapped["message"]["message_id"] = message_id
-    tapped["message"]["chat"]["id"] = owner
+    tapped["message"]["chat"]["id"] = owner if chat is None else chat
     tapped["data"] = data
+    return update
+
+
+def _topic_text(sender: int, text: str, update_id: int) -> dict[str, Any]:
+    """Return a text `sender` wrote in the group's topic, as an update, replying to the topic."""
+    recorded = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
+    update = recorded["result"][0]
+    update["update_id"] = update_id
+    update["message"].update(
+        chat={"id": _GROUP},
+        message_thread_id=_TOPIC,
+        reply_to_message={"message_id": _TOPIC},
+        text=text,
+    )
+    update["message"]["from"]["id"] = sender
     return update
 
 
@@ -1444,6 +1477,33 @@ def _resolve_states(directory: Path) -> list[str]:
     finally:
         database.close()
     return [row["state"] for row in rows]
+
+
+def _next_offset(directory: Path) -> int:
+    """Return the Telegram update offset the journal has reached, read on its own connection."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute("SELECT next_offset FROM polling").fetchone()
+    finally:
+        database.close()
+    return 0 if row is None else int(row["next_offset"])
+
+
+def _messages_from(directory: Path, sender: int) -> int:
+    """Return how many journal rows name `sender` as the account that wrote them."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            "SELECT COUNT(*) AS kept FROM messages WHERE sender = ?", (sender,)
+        ).fetchone()
+    finally:
+        database.close()
+    return int(row["kept"])
+
+
+def _non_polls(bot: FakeBotApi) -> list[tuple[str, dict[str, Any]]]:
+    """Return the calls the bot got other than polls, which are what the Operator sent or asked."""
+    return [call for call in bot.calls if call[0] != "getUpdates"]
 
 
 def _play(
@@ -1507,6 +1567,39 @@ def test_two_answers_to_one_question_from_two_chats_resolve_once(tmp_path: Path)
     _play(directory, session, bot, two_chats())
     assert len(session.resolutions) == 1
     assert [payload["chat_id"] for payload in _sent(bot, _ALREADY_RESOLVED)] == [str(_SECOND_OWNER)]
+
+
+def test_a_non_owner_in_the_group_changes_nothing_and_an_owners_tap_is_still_answered(
+    tmp_path: Path,
+) -> None:
+    """A message or tap from someone who is not an owner is dropped, even when it is in the group.
+
+    Other members of the group can read it, so only the owners may act. The outsider's text and
+    tap come first; the owner's tap on the same question, in the same group, is still answered
+    (design §7).
+    """
+    directory = _instance(tmp_path, group_id=_GROUP)
+    outsider, owner = asyncio.Event(), asyncio.Event()
+    bot = _GatedForumBot(
+        [
+            (_topic_text(_OUTSIDER, "/help", update_id=901), outsider),
+            (_tap(_OUTSIDER, FIRST_MESSAGE_ID, _ANSWER_TAP, update_id=902, chat=_GROUP), outsider),
+            (_tap(_OWNER, FIRST_MESSAGE_ID, _ANSWER_TAP, update_id=903, chat=_GROUP), owner),
+        ]
+    )
+    session = _ShikiruSession(asyncio.Event(), events=[_question_event(41)])
+
+    async def outsiders_then_the_owner() -> None:
+        await _until(lambda: bool(_in_topic(bot, _QUESTION_TEXT)))
+        asked = _non_polls(bot)
+        outsider.set()
+        await _until(lambda: _next_offset(directory) > 902)
+        assert _non_polls(bot) == asked
+        owner.set()
+        await _until(session.resolved.is_set)
+
+    _play(directory, session, bot, outsiders_then_the_owner())
+    assert (len(session.resolutions), _messages_from(directory, _OUTSIDER)) == (1, 0)
 
 
 def test_an_answer_given_in_tmux_closes_the_question_in_telegram(tmp_path: Path) -> None:

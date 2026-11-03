@@ -18,6 +18,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StrictBool,
     StrictInt,
     ValidationError,
     model_validator,
@@ -135,6 +136,7 @@ class TelegramSettings(_FrozenModel):
     )
     owners: Annotated[tuple[StrictInt, ...], _AT_LEAST_ONE]
     group_id: StrictInt | None = None
+    allow_other_members: StrictBool = False
 
 
 class OperatorSettings(_FrozenModel):

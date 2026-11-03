@@ -55,6 +55,8 @@ if TYPE_CHECKING:
 
 _PROGRAM = "shikiri-yaku"
 TOKEN_MODE: Final = 0o600
+# keep: the effect of allow_other_members as the PO reads it in doctor's output (design §13)
+OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 _THREAD_ID_PATTERN: Final = r"[1-9][0-9]*"
 _DESCRIPTION: Final = "An autonomous Operator for product development with Shikiru."
 _BOLD: Final = "bold"
@@ -382,9 +384,17 @@ def _doctor(directory: Path, compose: Compose, *, as_json: bool) -> int:
             _Check("token file", _token_problem(settings.telegram.token_file)),
             _lock_check(directory),
             *_composed_checks(settings, directory, compose),
+            *_group_checks(settings),
         ],
         as_json=as_json,
     )
+
+
+def _group_checks(settings: Settings) -> list[_Check]:
+    """Name what other group members can see, when the config admits them."""
+    if not settings.telegram.allow_other_members:
+        return []
+    return [_Check("group", status=OTHER_MEMBERS_NOTE)]
 
 
 def _report(checks: Sequence[_Check], *, as_json: bool) -> int:
