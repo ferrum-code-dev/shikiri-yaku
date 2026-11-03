@@ -180,10 +180,15 @@ def _config(home: Path) -> str:
     )
 
 
-def _journal(home: Path, row: Row | None) -> Path:
+def _configured(home: Path) -> Path:
     directory = home / PRODUCT
     directory.mkdir()
     (directory / "config.toml").write_text(_config(home), encoding="utf-8")
+    return directory
+
+
+def _journal(home: Path, row: Row | None) -> Path:
+    directory = _configured(home)
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
         _save(TopicStore(database), COMPONENT, row)
@@ -227,3 +232,30 @@ def test_topic_commands_change_the_journal_only_when_allowed(
         assert main(["--product", PRODUCT, "--home", str(tmp_path), *command]) == exit_code
 
     assert _journal_row(directory) == after
+
+
+def test_adopt_creates_the_journal_of_a_fresh_configured_instance(tmp_path: Path) -> None:
+    directory = _configured(tmp_path)
+
+    assert main(["--product", PRODUCT, "--home", str(tmp_path), *_ADOPT_COMMAND]) == 0
+
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        topics = TopicStore(database)
+        assert _row(topics, COMPONENT) == _ADOPTED
+        forum = _Forum()
+        asyncio.run(TopicReconciler(topics, forum, [COMPONENT], product=PRODUCT).run())
+        assert COMPONENT not in forum.created
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("command", [["stats"], _FORGET_COMMAND])
+def test_commands_that_need_an_existing_journal_do_not_create_one(
+    tmp_path: Path, command: list[str]
+) -> None:
+    directory = _configured(tmp_path)
+
+    assert main(["--product", PRODUCT, "--home", str(tmp_path), *command]) == 1
+
+    assert not (directory / JOURNAL_FILE_NAME).exists()

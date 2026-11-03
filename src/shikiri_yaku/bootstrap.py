@@ -862,13 +862,16 @@ def adopt_topic(directory: Path, component: str, thread_id: int) -> str:
     The component must be named in config.toml: start-up reads only those components' topics.
     """
     names = _component_names(directory)
-    return _change_topics(directory, names, lambda repair: repair.adopt(component, thread_id))
+    # keep: the config was read, so the directory is an instance, and a journal may start here
+    journal = _open_journal(directory)
+    return _change_topics(journal, names, lambda repair: repair.adopt(component, thread_id))
 
 
 def forget_topic(directory: Path, component: str) -> str:
     """Delete the creating topic of a component, or of general, so that start-up creates one."""
     # keep: forget needs no config, so a damaged config.toml does not stop it
-    return _change_topics(directory, (), lambda repair: repair.forget(component))
+    journal = _existing_journal(directory)
+    return _change_topics(journal, (), lambda repair: repair.forget(component))
 
 
 def _component_names(directory: Path) -> list[str]:
@@ -880,9 +883,8 @@ def _component_names(directory: Path) -> list[str]:
 
 
 def _change_topics(
-    directory: Path, components: Sequence[str], change: Callable[[TopicRepair], str]
+    journal: Database, components: Sequence[str], change: Callable[[TopicRepair], str]
 ) -> str:
-    journal = _existing_journal(directory)
     try:
         return change(TopicRepair(TopicStore(journal), components))
     finally:
@@ -895,8 +897,12 @@ def _existing_journal(directory: Path) -> Database:
     if not path.exists():
         message = f"no journal at {path}"
         raise CompositionError(message)
+    return _open_journal(directory)
+
+
+def _open_journal(directory: Path) -> Database:
     try:
-        return Database.open(path)
+        return Database.open(directory / JOURNAL_FILE_NAME)
     except JournalError as error:
         raise CompositionError(str(error)) from error
 
