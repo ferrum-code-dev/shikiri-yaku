@@ -1648,6 +1648,16 @@ Found while rewriting design §7 (the design text for 1 and 2 is already changed
    members, missing rights, a webhook, the bot not in the group) refuses to start with the probe's
    message. "Could not verify" (Telegram unreachable) does not refuse: the Operator starts and the
    existing Telegram health signal reports it.
+
+   **Channel-agnostic.** The check goes through a port, not through Telegram names. Add to `ports.py`
+   a small `ChannelCheck` contract (`async def verify(self) -> None`, raising `ChannelError` with the
+   reason for a definite failure and `ChannelUnavailableError` when it could not verify). The Telegram
+   adapter implements it with its existing probe. The composition exposes it as `channel_check` (rename
+   the current `telegram_probe` field and every use of that name in `bootstrap.py` and `cli.py`), and
+   `doctor` and `run` both call `composition.channel_check` without knowing which channel it is. `cli.py`,
+   `app/` and `domain/` contain no word `telegram` except the config section name and the
+   channel-specific repair group (`telegram adopt|forget`), which receives its functions from `bootstrap`
+   as today. A test runs `run` and `doctor` with a fake channel check and no Telegram module imported.
 2. **The built-in General topic.** The Operator no longer creates a topic named "General". The
    Operator's own signals go to the group without a thread id (Telegram posts them in the built-in
    General topic); `component_of` returns nothing for them. The reconcile no longer creates or looks at a
@@ -1658,6 +1668,7 @@ Found while rewriting design §7 (the design text for 1 and 2 is already changed
    was replaced) is dropped as obsolete and never sent; its row ends in a final state that says so.
 
 Acceptance criteria:
+* `run` and `doctor` work with a fake `ChannelCheck`; a grep-style test fails when `cli.py`, `app/` or `domain/` mention `telegram` outside the allowed places named above.
 * Table-driven over the probe outcomes at `run`: other members (setting false) refuses; other members with `allow_other_members = true` starts; webhook set refuses; missing manage-topics right refuses; Telegram unreachable starts.
 * Composed test: an Operator-level health signal is sent without `message_thread_id`, a component signal with its topic's; the reconcile makes no `createForumTopic` call for General; a journal with an old `general` row still runs.
 * A queued health message whose signal closed before the send is not sent; a queued question whose signal is still open is sent as before.
