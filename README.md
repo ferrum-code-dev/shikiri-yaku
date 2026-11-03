@@ -42,8 +42,8 @@ shikiri-yaku [--product NAME] [--home PATH] [--json] [--version] COMMAND
 - `doctor` checks one product's instance.
 - `stats` prints the figures of one product's journal.
 - `install-service` writes the launchd or systemd unit that runs `run` at login.
-- `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`
-  repair an uncertain Telegram topic, or reuse one made by hand, as described below.
+- `telegram adopt <component> <thread-id>` and `telegram forget <component>` repair an uncertain
+  Telegram topic, or reuse one made by hand, as described below.
 - `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text.
   The other commands ignore it. Exit codes are the same. `doctor` reports its failed checks inside
   the object. When `stats` cannot run, it prints one `✘` line on standard error and nothing on
@@ -61,13 +61,14 @@ unavailable. The last five keys each map a label to its count.
 
 ## Telegram topics
 
-With a group that has forum topics, the Operator creates one topic per component and a General
-topic at start-up, but only when its own journal has no open topic for that component. It never
-looks at the forum, because the Telegram Bot API cannot list a forum's topics. Telegram accepts
-duplicate topic names, so a fresh `--home`, a deleted journal or
-`shikiri-yaku --product <product> telegram forget <component|general>` makes the next start create
-a second topic with the same name. A topic created by hand is never adopted automatically. To reuse
-one, run `shikiri-yaku --product <product> telegram adopt <component|general> <thread-id>` before the
-first start; the thread id is the number at the end of the topic's link. If a start-up is
+With a group that has forum topics, the Operator creates one topic per component at start-up, but
+only when its own journal has no open topic for that component. It never looks at the forum,
+because the Telegram Bot API cannot list a forum's topics. The forum's built-in General topic needs
+no setup: the Operator's own messages go there without a thread id, and the Operator neither
+creates nor adopts it. Telegram accepts duplicate topic names, so a fresh `--home`, a deleted
+journal or `shikiri-yaku --product <product> telegram forget <component>` makes the next start
+create a second topic with the same name. A topic created by hand is never adopted automatically.
+To reuse one, run `shikiri-yaku --product <product> telegram adopt <component> <thread-id>` before
+the first start; the thread id is the number at the end of the topic's link. If a start-up is
 interrupted while a topic is being created, the next start refuses and names `telegram adopt` and
 `telegram forget`.

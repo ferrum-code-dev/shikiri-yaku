@@ -202,7 +202,6 @@ def topics() -> Generator[TopicStore]:
     database = Database.open(":memory:")
     store = TopicStore(database)
     store.save("api", 73, TOPIC_OPEN)
-    store.save(None, 74, TOPIC_OPEN)
     yield store
     database.close()
 
@@ -236,11 +235,11 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
         ("api", Kind.TASK_DONE, 73),
         ("api", Kind.PR_REVIEW, 73),
         ("api", Kind.HEALTH, 73),
-        (OPERATOR_SCOPE, Kind.HEALTH, 74),
+        (OPERATOR_SCOPE, Kind.HEALTH, None),
     ],
 )
 def test_every_signal_of_a_component_goes_to_its_topic_and_the_operators_to_general(
-    topics: TopicStore, project: str, kind: Kind, thread: int
+    topics: TopicStore, project: str, kind: Kind, thread: int | None
 ) -> None:
     destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
 

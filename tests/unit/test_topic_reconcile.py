@@ -43,8 +43,7 @@ class _FixtureBotApi:
         if method == "createForumTopic":
             name = payload["name"]
             assert isinstance(name, str)
-            component = None if name == "General" else name
-            topic = self.topics.get(component)
+            topic = self.topics.get(name)
             assert topic is not None
             assert topic.state == TOPIC_CREATING
             reply = _fixture("forum_topic_created.json")
@@ -82,22 +81,16 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
 
         asyncio.run(TopicReconciler(topics, forum, ["api"], product=PRODUCT).run())
         api_topic = topics.get("api")
-        general_topic = topics.get(None)
         assert api_topic is not None
-        assert general_topic is not None
         assert (api_topic.component, api_topic.thread_id, api_topic.state) == (
             "api",
             73,
             TOPIC_OPEN,
         )
-        assert (general_topic.component, general_topic.thread_id, general_topic.state) == (
-            None,
-            74,
-            TOPIC_OPEN,
-        )
+        assert topics.get(None) is None
 
         asyncio.run(TopicReconciler(topics, forum, ["api"], product=PRODUCT).run())
-        assert [method for method, _payload in api.calls].count("createForumTopic") == 2
+        assert api.created_names == ["api"]
 
         asyncio.run(TopicReconciler(topics, forum, [], product=PRODUCT).run())
         assert [method for method, _payload in api.calls].count("closeForumTopic") == 1
@@ -106,6 +99,28 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         assert closed_topic.state == TOPIC_CLOSED
         assert closed_topic.thread_id == 73
         assert not any(method == "deleteForumTopic" for method, _payload in api.calls)
+    finally:
+        database.close()
+
+
+def test_start_up_leaves_an_old_general_row_alone_and_creates_no_general_topic() -> None:
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
+        api = _FixtureBotApi(topics)
+
+        asyncio.run(
+            TopicReconciler(
+                topics, TelegramForumTopics(api, GROUP_ID), ["api"], product=PRODUCT
+            ).run()
+        )
+
+        assert api.created_names == ["api"]
+        general = topics.get(None)
+        assert general is not None
+        assert (general.thread_id, general.state) == (GENERAL_THREAD, TOPIC_OPEN)
+        assert not any(method == "closeForumTopic" for method, _payload in api.calls)
     finally:
         database.close()
 

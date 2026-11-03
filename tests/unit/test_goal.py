@@ -34,7 +34,6 @@ GOAL: Final = "/goal api Add the export"
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 GROUP: Final = -1005
 TOPIC: Final = 77
-GENERAL_THREAD: Final = 5
 
 
 class _Clock:
@@ -211,9 +210,8 @@ def test_a_goal_in_a_component_topic_is_submitted_to_that_component_in_that_topi
 def test_a_goal_in_the_general_topic_without_a_component_gets_usage_and_submits_nothing(
     goal: _Goal,
 ) -> None:
-    goal.topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
-    goal.send("/goal fix the export", chat=GROUP, thread=GENERAL_THREAD)
+    goal.send("/goal fix the export", chat=GROUP)
     [pending] = goal.outbox.pending()
     assert "/goal" in pending.message.text
-    assert pending.destination == Destination("telegram", str(GROUP), GENERAL_THREAD)
+    assert pending.destination == Destination("telegram", str(GROUP))
     assert goal.client.requests == []

@@ -1,8 +1,8 @@
 """Telegram's topics: where signals go, and the start-up reconcile of the forum and the journal.
 
 Without a group, a signal goes to the owners' private chats. With a group, every signal of a
-component goes to its topic, and the Operator's own signals go to the general topic (design §7,
-§13).
+component goes to its topic, and the Operator's own signals go to the forum's built-in General
+topic, which has no thread id (design §7, §13).
 """
 
 from __future__ import annotations
@@ -22,8 +22,6 @@ TOPIC_CLOSED: Final = "closed"
 TOPIC_CREATING: Final = "creating"
 TOPIC_CLOSING: Final = "closing"
 UNASSIGNED_THREAD: Final = 0
-GENERAL_TOPIC: Final = "general"
-GENERAL_TOPIC_NAME: Final = "General"
 
 
 class TopicEntry(Protocol):
@@ -40,7 +38,10 @@ class TopicEntry(Protocol):
 
 
 class TopicLog(Protocol):
-    """The journal's mapping of each component, and of the general signals, to its topic."""
+    """The journal's mapping of each component to its topic.
+
+    A row without a component is the General row of an older journal; no code makes one now.
+    """
 
     def get(self, component: str | None) -> TopicEntry | None: ...
 
@@ -86,12 +87,12 @@ class TelegramDestinations:
     def for_signal(self, project: str, kind: Kind) -> list[Destination]:  # noqa: ARG002 -- the port's shape
         if self._group_id is None:
             return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in self._owners]
-        # keep: a component's signals all belong to its topic; the Operator's own belong to General
-        component = None if project == OPERATOR_SCOPE else project
-        topic = self._log.get(component)
+        # keep: the Operator's own signals go to the built-in General topic, which has no thread id
+        if project == OPERATOR_SCOPE:
+            return [Destination(TELEGRAM_CHANNEL, str(self._group_id))]
+        topic = self._log.get(project)
         if topic is None or topic.state != TOPIC_OPEN:
-            name = GENERAL_TOPIC if component is None else component
-            message = f"Telegram topic '{name}' is not open"
+            message = f"Telegram topic '{project}' is not open"
             raise CompositionError(message)
         return [Destination(TELEGRAM_CHANNEL, str(self._group_id), topic.thread_id)]
 
@@ -118,29 +119,27 @@ class TopicReconciler:
     async def run(self) -> None:
         active = set(self._components)
         for topic in self._log.all():
+            # keep: a General row of an older journal is no component's, so start-up leaves it alone
+            if topic.component is None:
+                continue
             if topic.state == TOPIC_CREATING:
                 raise ChannelStartupError(_uncertain_creation(self._product, topic.component))
-            if (
-                topic.component is not None
-                and topic.component not in active
-                and topic.state != TOPIC_CLOSED
-            ):
+            if topic.component not in active and topic.state != TOPIC_CLOSED:
                 await self._close(topic.component, topic.thread_id)
         for component in self._components:
-            await self._ensure(component, component)
-        await self._ensure(None, GENERAL_TOPIC_NAME)
+            await self._ensure(component)
 
-    async def _ensure(self, component: str | None, name: str) -> None:
+    async def _ensure(self, component: str) -> None:
         topic = self._log.get(component)
         if topic is not None and topic.state == TOPIC_OPEN:
             return
         if topic is not None and topic.state == TOPIC_CLOSING:
             await self._close(component, topic.thread_id)
         self._log.save(component, UNASSIGNED_THREAD, TOPIC_CREATING)
-        thread_id = await self._forum.create(name)
+        thread_id = await self._forum.create(component)
         self._log.save(component, thread_id, TOPIC_OPEN)
 
-    async def _close(self, component: str | None, thread_id: int) -> None:
+    async def _close(self, component: str, thread_id: int) -> None:
         self._log.save(component, thread_id, TOPIC_CLOSING)
         await self._forum.close(thread_id)
         self._log.save(component, thread_id, TOPIC_CLOSED)
@@ -154,43 +153,36 @@ class TopicRepair:
         self._components = tuple(components)
 
     def adopt(self, name: str, thread_id: int) -> str:
-        component = _component(name)
-        if component is not None and component not in self._components:
+        if name not in self._components:
             message = f"no component {name!r} in the config; nothing changed"
             raise ChannelRepairError(message)
-        if self._log.get(component) is None:
+        if self._log.get(name) is None:
             # keep: a topic made by hand has no row; an open row stops start-up creating another
-            self._log.save(component, thread_id, TOPIC_OPEN)
+            self._log.save(name, thread_id, TOPIC_OPEN)
             return f"Telegram topic {name!r} had no row; it is open with thread {thread_id}"
-        if not self._log.replace_if(component, TOPIC_CREATING, thread_id, TOPIC_OPEN):
-            raise ChannelRepairError(self._refusal(name, component))
+        if not self._log.replace_if(name, TOPIC_CREATING, thread_id, TOPIC_OPEN):
+            raise ChannelRepairError(self._refusal(name))
         return f"Telegram topic {name!r} was creating; it is open with thread {thread_id}"
 
     def forget(self, name: str) -> str:
-        component = _component(name)
-        if not self._log.delete_if(component, TOPIC_CREATING):
-            raise ChannelRepairError(self._refusal(name, component))
+        if not self._log.delete_if(name, TOPIC_CREATING):
+            raise ChannelRepairError(self._refusal(name))
         return (
             f"Telegram topic {name!r} was creating; its journal row is removed, so start-up "
             "creates a new topic. A forum topic that the uncertain creation made is not deleted."
         )
 
-    def _refusal(self, name: str, component: str | None) -> str:
-        topic = self._log.get(component)
+    def _refusal(self, name: str) -> str:
+        topic = self._log.get(name)
         if topic is None:
             return f"no Telegram topic {name!r} in the journal; nothing changed"
         return f"Telegram topic {name!r} is {topic.state!r}, not creating; nothing changed"
 
 
-def _component(name: str) -> str | None:
-    return None if name == GENERAL_TOPIC else name
-
-
-def _uncertain_creation(product: str, component: str | None) -> str:
-    name = GENERAL_TOPIC if component is None else component
+def _uncertain_creation(product: str, component: str) -> str:
     return (
-        f"Telegram topic creation for {name!r} has an uncertain result; inspect the forum. "
-        f"If the topic exists, run `shikiri-yaku --product {product} telegram adopt {name} "
+        f"Telegram topic creation for {component!r} has an uncertain result; inspect the forum. "
+        f"If the topic exists, run `shikiri-yaku --product {product} telegram adopt {component} "
         f"<thread-id>`; if it does not, run "
-        f"`shikiri-yaku --product {product} telegram forget {name}`."
+        f"`shikiri-yaku --product {product} telegram forget {component}`."
     )

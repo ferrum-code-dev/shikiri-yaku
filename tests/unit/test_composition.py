@@ -20,6 +20,8 @@ from mcp.types import CallToolResult
 
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.telegram import BAD_REQUEST
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN
+from shikiri_yaku.adapters.telegram_updates import GET_UPDATES
 from shikiri_yaku.app.event_source import CLOSED_UNMERGED_LINE, MERGED_LINE, PR_CLOSED_REASON
 from shikiri_yaku.app.health_source import RECOVERED_LINE
 from shikiri_yaku.app.loop_guard import LoopGuard
@@ -48,6 +50,7 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.submits import JournalSubmits
+from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
     INSTALL_DECLINED,
     INSTALL_VOID,
@@ -75,6 +78,7 @@ _PRODUCT: Final = "shop"
 _OWNER: Final = 1001
 _GROUP: Final = -1009
 _TOPIC: Final = 73
+_OLD_GENERAL_THREAD: Final = 5
 _PROMPT_ID: Final = FIRST_MESSAGE_ID + 1
 _HELP_LINE: Final = "/help · this list"
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
@@ -458,6 +462,15 @@ class _ForumBot(FakeBotApi):
         created = json.loads(_FORUM_TOPIC.read_text(encoding="utf-8"))
         created["result"]["message_thread_id"] = next(self._threads)
         return created
+
+
+class _ForumOutageBot(_ForumBot):
+    """A forum fake whose getUpdates is refused, as one with a webhook set refuses it."""
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        if method == GET_UPDATES:
+            return _CONFLICT
+        return await super().call(method, payload)
 
 
 class _StagedBot(FakeBotApi):
@@ -1395,6 +1408,61 @@ def test_a_component_engine_down_goes_to_its_topic_and_its_recovery_edits_it_the
     )
     assert final == (str(_GROUP), FIRST_MESSAGE_ID, {"inline_keyboard": []}, True)
     assert _signal_state(directory, _ENGINE_DOWN_ID) is SignalState.CLOSED
+
+
+def _journal_general_row(directory: Path) -> None:
+    """Journal the General row of an older Operator, which start-up must leave alone."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        TopicStore(database).save(None, _OLD_GENERAL_THREAD, TOPIC_OPEN)
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("old_general_row", [False, True])
+def test_an_operator_health_message_goes_to_general_and_a_component_one_to_its_topic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, old_general_row: bool
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shikiru = bin_dir / "shikiru"
+    shikiru.write_text(_DOCTOR_ONLY_SHIKIRU, encoding="utf-8")
+    shikiru.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    directory = _instance(tmp_path, group_id=_GROUP)
+    _spend_restart(directory)
+    if old_general_row:
+        _journal_general_row(directory)
+    session = _ShikiruSession(
+        asyncio.Event(),
+        answers={"status": {"engine_up": False, "quotas": {}}, "list_escalations": {"result": []}},
+        events=[_recorded_event(EventKinds.ENGINE_STARTED, _LAST_EVENT, {})],
+    )
+    bot = _ForumOutageBot([])
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: bot,
+        clock=NapClock(),
+    )
+
+    def delivered() -> bool:
+        return _health_delivered(directory) and bool(_in_topic(bot, _ENGINE_DOWN_TEXT))
+
+    try:
+        composition.recover()
+        asyncio.run(_deliver(composition.jobs, _until(delivered)))
+    finally:
+        composition.close()
+
+    [health] = _sent(bot, f"{GET_UPDATES} was refused")
+    assert health["chat_id"] == str(_GROUP)
+    assert "message_thread_id" not in health
+    [engine_down] = _in_topic(bot, _ENGINE_DOWN_TEXT)
+    assert engine_down["chat_id"] == str(_GROUP)
+    created = [payload["name"] for method, payload in bot.calls if method == "createForumTopic"]
+    assert created == ["api"]
 
 
 def _tap(

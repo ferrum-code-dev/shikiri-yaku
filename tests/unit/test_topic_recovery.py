@@ -120,6 +120,21 @@ def test_repair_changes_only_the_rows_the_table_allows(
         database.close()
 
 
+def test_adopt_refuses_general_because_the_built_in_topic_is_not_a_component() -> None:
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        repair = TopicRepair(topics, [COMPONENT])
+
+        with pytest.raises(ChannelRepairError):
+            repair.adopt("general", ADOPTED_THREAD)
+
+        assert topics.get(None) is None
+        assert topics.get("general") is None
+    finally:
+        database.close()
+
+
 def test_start_up_does_not_create_a_topic_that_was_adopted() -> None:
     database = Database.open(":memory:")
     try:

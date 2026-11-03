@@ -209,7 +209,7 @@ JSON_OPTION = Annotated[
 ]
 COMPONENT_ARGUMENT = Annotated[
     str,
-    typer.Argument(metavar="COMPONENT", help="A component's name, or general."),
+    typer.Argument(metavar="COMPONENT", help="A component's name."),
 ]
 THREAD_ID_ARGUMENT = Annotated[
     str,
@@ -261,9 +261,7 @@ def build_app(
         rich_markup_mode="rich",
     )
     telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
-    app.add_typer(
-        telegram, name="telegram", help="Repair the Telegram topic of a component or general."
-    )
+    app.add_typer(telegram, name="telegram", help="Repair the Telegram topic of a component.")
 
     @app.callback()
     def global_options(

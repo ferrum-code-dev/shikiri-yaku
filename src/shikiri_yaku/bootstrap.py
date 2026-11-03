@@ -857,7 +857,7 @@ def stats_measures(directory: Path) -> Measures:
 
 
 def adopt_topic(directory: Path, component: str, thread_id: int) -> str:
-    """Mark the topic of a component, or of general, open with a thread of the forum.
+    """Mark the topic of a component open with a thread of the forum.
 
     The component must be named in config.toml: start-up reads only those components' topics.
     """
@@ -868,7 +868,7 @@ def adopt_topic(directory: Path, component: str, thread_id: int) -> str:
 
 
 def forget_topic(directory: Path, component: str) -> str:
-    """Delete the creating topic of a component, or of general, so that start-up creates one."""
+    """Delete the creating topic of a component, so that start-up creates one."""
     # keep: forget needs no config, so a damaged config.toml does not stop it
     journal = _existing_journal(directory)
     return _change_topics(journal, (), lambda repair: repair.forget(component))
