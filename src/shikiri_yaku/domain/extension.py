@@ -49,10 +49,12 @@ class LegacyCopy:
     """A notice sent before the standing flag existed, which its category recognizes (design §7).
 
     Its notice key is `key_prefix` and the signal's number, and the signal has one of `kinds`.
+    Some legacy notices also require the signal's pull request to be recorded.
     """
 
     key_prefix: str
     kinds: frozenset[Kind]
+    requires_pull_request: bool = False
 
 
 @dataclass(frozen=True, slots=True)

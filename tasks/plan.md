@@ -1589,10 +1589,11 @@ The consultation of the E10 rework (`05-consult-i2`) settled the rest:
   new code. A copy is standing again when its category recognizes it: its notice key has the
   category's prefix, its signal has one of its kinds, and it has the Stop reminders button (`k:`).
   Engine copies are `forward:` with an engine kind; health copies are `health:` and the `forward:`
-  of a failed health handler; pull-request copies are `review:`. A buttonless health copy, a
-  `restart:` copy and a task_done `forward:` copy are not recognized. Neither is a `forward:` copy
-  of a pull request: its key is shared with the informational "nothing on record" forward, so the
-  repair cannot tell them apart. Silences (`ack:<n>`) and the final-state fields are not touched.
+  of a failed health handler; pull-request copies are `review:` or `forward:` with stored
+  pull-request metadata. The latter distinguishes a real failed-review fallback from the
+  informational "nothing on record" forward, which has no pull request on the signal. A buttonless
+  health copy, a `restart:` copy and a task_done `forward:` copy are not recognized. Silences
+  (`ack:<n>`) and the final-state fields are not touched.
   The repair is recorded in the `repairs` table, so it runs once.
 
 ### E11. A group may have other members (normal)

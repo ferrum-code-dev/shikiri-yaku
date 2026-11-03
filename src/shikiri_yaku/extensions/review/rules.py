@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 REVIEW: Final = Category("review")
 
 REVIEW_RULE: Final = Rule(kinds=frozenset({Kind.PR_REVIEW}))
-LEGACY_COPIES: Final = (LegacyCopy(f"{NOTICE_KEY}:", frozenset({Kind.PR_REVIEW})),)
+LEGACY_COPIES: Final = (
+    LegacyCopy(f"{NOTICE_KEY}:", frozenset({Kind.PR_REVIEW})),
+    LegacyCopy("forward:", frozenset({Kind.PR_REVIEW}), requires_pull_request=True),
+)
 
 
 def stands_on_failure(signal: Signal) -> bool:

@@ -58,8 +58,15 @@ def _recognized(connection: sqlite3.Connection, copy: LegacyCopy) -> list[int]:
         FROM messages m JOIN signals s ON s.number = m.signal_number
         WHERE m.direction = :out AND m.purpose = :notice AND m.standing = 0
             AND m.body IS NOT NULL AND m.notice_key = :prefix || m.signal_number
+            AND (:requires_pull_request = 0 OR
+                (s.pr_url IS NOT NULL AND s.pr_commits IS NOT NULL))
         """,
-        {"out": Direction.OUT, "notice": Purpose.NOTICE, "prefix": copy.key_prefix},
+        {
+            "out": Direction.OUT,
+            "notice": Purpose.NOTICE,
+            "prefix": copy.key_prefix,
+            "requires_pull_request": copy.requires_pull_request,
+        },
     ).fetchall()
     return [
         row["id"]

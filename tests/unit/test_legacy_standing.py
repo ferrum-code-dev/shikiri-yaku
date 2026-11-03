@@ -15,10 +15,11 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.app.copy_editor import CopyEditor
+from shikiri_yaku.app.event_source import MERGED_LINE
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
 from shikiri_yaku.domain.callback import stop_reminders_data
 from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, REMINDERS_STOPPED_LINE, Purpose
-from shikiri_yaku.domain.signal import Closing, Kind
+from shikiri_yaku.domain.signal import Closing, Kind, PullRequest
 from shikiri_yaku.extensions.infrastructure.rules import LEGACY_COPIES as INFRASTRUCTURE_COPIES
 from shikiri_yaku.extensions.notice.rules import LEGACY_COPIES as NOTICE_COPIES
 from shikiri_yaku.extensions.review.rules import LEGACY_COPIES as REVIEW_COPIES
@@ -73,9 +74,11 @@ def h() -> Generator[Harness]:
     harness.database.close()
 
 
-def _forwarded(h: Harness, identity: str, kind: Kind) -> int:
+def _forwarded(
+    h: Harness, identity: str, kind: Kind, *, pull_request: PullRequest | None = None
+) -> int:
     number = h.signals.insert_if_absent(
-        NewSignal(identity, PROJECT, kind, kind.value, "text"), NOW
+        NewSignal(identity, PROJECT, kind, kind.value, "text", pull_request=pull_request), NOW
     ).row_id
     assert h.signals.transition(number, SignalState.NEW, SignalState.FORWARDED, NOW)
     return number
@@ -220,6 +223,39 @@ def test_a_restart_or_task_done_copy_with_a_stop_button_is_not_promoted(
 def test_an_engine_forward_without_a_stop_button_stays_information(h: Harness) -> None:
     number = _forwarded(h, f"{PROJECT}:engine_down:1", Kind.ENGINE_DOWN)
     _record(h, number, REF, f"forward:{number}", ())
+    _open_from_22(h)
+
+    assert _repair(h) == 0
+    assert _awaiting(h) == []
+
+
+def test_a_legacy_pr_fallback_is_adopted_silenced_and_edited_when_the_pr_merges(
+    h: Harness,
+) -> None:
+    pull = PullRequest("https://github.com/acme/api/pull/7", 3)
+    number = _forwarded(h, f"{PROJECT}:pr_review:1", Kind.PR_REVIEW, pull_request=pull)
+    _record(h, number, REF, f"forward:{number}", (stop_reminders_data(number),))
+    _open_from_22(h)
+
+    assert _repair(h) == 1
+    assert _awaiting(h) == [number]
+    h.handle(ref=REF, data=_stop_data(h, REF))
+    assert _awaiting(h) == []
+    assert h.log().silenced(number)
+    assert _state(h, number) is SignalState.FORWARDED
+
+    SignalStore(h.database).close(Closing(PROJECT, Kind.PR_REVIEW, final_line=MERGED_LINE), LATER)
+    channel = _Channel()
+    _edit(h, channel)
+
+    assert [ref for ref, _ in channel.edits] == [REF]
+    assert channel.edits[0][1].text.endswith(MERGED_LINE)
+    assert channel.edits[0][1].buttons == ()
+
+
+def test_a_legacy_pr_fallback_without_recorded_pr_metadata_is_not_adopted(h: Harness) -> None:
+    number = _forwarded(h, f"{PROJECT}:pr_review:1", Kind.PR_REVIEW)
+    _record(h, number, REF, f"forward:{number}", (stop_reminders_data(number),))
     _open_from_22(h)
 
     assert _repair(h) == 0
