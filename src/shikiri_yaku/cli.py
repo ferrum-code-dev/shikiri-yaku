@@ -39,6 +39,7 @@ from shikiri_yaku.ports import (
     ChannelError,
     ChannelRepairError,
     ChannelStartupError,
+    ChannelUnverifiedError,
     CompositionError,
     ReasonerError,
     ShikiruError,
@@ -340,6 +341,7 @@ def _run(directory: Path, compose: Compose) -> int:
         with instance_lock(directory):
             composition = compose(settings, directory)
             try:
+                _check_telegram(composition.telegram_probe)
                 composition.recover()
                 asyncio.run(_serve(composition.jobs))
             finally:
@@ -473,6 +475,14 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
     finally:
         composition.close()
     return [*links, *rungs, telegram, _Check("journal")]
+
+
+def _check_telegram(probe: Callable[[], Awaitable[None]]) -> None:
+    # keep: an unverified check starts, because Telegram may be unreachable only for the moment
+    try:
+        asyncio.run(probe())
+    except ChannelUnverifiedError:
+        return
 
 
 def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:

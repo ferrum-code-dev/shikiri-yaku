@@ -16,6 +16,7 @@ from shikiri_yaku.ports import (
     Button,
     ChannelError,
     ChannelRefusedError,
+    ChannelUnverifiedError,
     join_blocks,
 )
 
@@ -49,7 +50,10 @@ MEMBER_STATUSES: Final = frozenset({CREATOR, ADMINISTRATOR, MEMBER})
 
 # keep: Telegram's error codes (Bot API, "Making requests"); the rest are transient
 BAD_REQUEST: Final = 400
+FORBIDDEN: Final = 403
 TOO_MANY_REQUESTS: Final = 429
+# keep: Telegram answered that a check does not hold; any other code may pass on a retry
+DEFINITE_REFUSAL_CODES: Final = frozenset({BAD_REQUEST, FORBIDDEN})
 
 # keep: the Channel's own reasons; platform text is never kept, since it could repeat a secret
 TEXT_TOO_LONG: Final = "text_too_long"
@@ -74,7 +78,7 @@ UNKNOWN_HOST: Final = "unknown"
 class BotApi(Protocol):
     """One Bot API method call. It returns the decoded reply, whatever its `ok` says.
 
-    It raises ChannelError when no reply comes back at all.
+    It raises ChannelUnverifiedError when no reply comes back at all.
     """
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object: ...
@@ -369,7 +373,7 @@ async def probe_bot(
     body = await api.call(GET_ME, {})
     reply = _validated(body, _PROBE_REPLY)
     if isinstance(reply, _Failed):
-        raise ChannelError(NOT_ACCEPTED)
+        raise ChannelUnverifiedError(NOT_ACCEPTED)
     if not reply.result.is_bot:
         raise ChannelError(BOT_NOT_IDENTIFIED)
     await _probe_webhook(api)
@@ -383,7 +387,7 @@ async def _probe_webhook(api: BotApi) -> None:
     # keep: getUpdates is refused while a webhook is set, so the PO's replies would never be read
     reply = _validated(await api.call(GET_WEBHOOK_INFO, {}), _WEBHOOK_REPLY)
     if isinstance(reply, _Failed):
-        raise ChannelError(NOT_ACCEPTED)
+        raise ChannelUnverifiedError(NOT_ACCEPTED)
     if reply.result.url:
         host = urlsplit(reply.result.url).hostname or UNKNOWN_HOST
         raise ChannelError(WEBHOOK_SET.format(host=host))
@@ -423,7 +427,7 @@ async def _probe_group(
 ) -> None:
     group = _validated(await api.call(GET_CHAT, {"chat_id": group_id}), _CHAT_REPLY)
     if isinstance(group, _Failed):
-        raise ChannelError(GROUP_NOT_READABLE)
+        raise _probe_refusal(group, GROUP_NOT_READABLE)
     if group.result.type != SUPERGROUP or group.result.is_forum is not True:
         raise ChannelError(GROUP_NOT_FORUM)
 
@@ -445,7 +449,7 @@ async def _probe_member_count(api: BotApi, group_id: int, expected: int) -> None
         await api.call(GET_CHAT_MEMBER_COUNT, {"chat_id": group_id}), _CHAT_MEMBER_COUNT_REPLY
     )
     if isinstance(count, _Failed):
-        raise ChannelError(GROUP_MEMBER_COUNT_UNAVAILABLE)
+        raise ChannelUnverifiedError(GROUP_MEMBER_COUNT_UNAVAILABLE)
     if count.result != expected:
         raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
 
@@ -456,8 +460,15 @@ async def _chat_member(api: BotApi, group_id: int, user_id: int, failure: str) -
         _CHAT_MEMBER_REPLY,
     )
     if isinstance(reply, _Failed):
-        raise ChannelError(failure)
+        raise _probe_refusal(reply, failure)
     return reply.result
+
+
+def _probe_refusal(reply: _Failed, failure: str) -> ChannelError:
+    """Return the error of a refused check: definite for 400 and 403, otherwise unverified."""
+    if reply.error_code in DEFINITE_REFUSAL_CODES:
+        return ChannelError(failure)
+    return ChannelUnverifiedError(failure)
 
 
 def _has_topic_right(member: _ChatMember) -> bool:
@@ -478,4 +489,4 @@ def _validated[T](body: object, adapter: TypeAdapter[T]) -> T:
     try:
         return adapter.validate_python(body)
     except ValidationError as error:
-        raise ChannelError(UNEXPECTED_REPLY) from error
+        raise ChannelUnverifiedError(UNEXPECTED_REPLY) from error

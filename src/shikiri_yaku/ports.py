@@ -1135,6 +1135,15 @@ class ChannelError(Exception):
     """A message could not be sent or edited; it may be tried again."""
 
 
+class ChannelUnverifiedError(ChannelError):
+    """The platform gave no usable answer, so a check of it could not be made.
+
+    No reply, a refused call and a reply in another shape all qualify. A start is not refused on
+    it, because the platform may only be unreachable for the moment; a definite refusal is a plain
+    ChannelError.
+    """
+
+
 class ChannelProtocolError(ChannelError):
     """The platform answered in a shape the Channel does not read; retrying alone will not help."""
 

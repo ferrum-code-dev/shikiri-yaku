@@ -238,22 +238,27 @@ class _GroupBot(FakeBotApi):
             reply["result"]["is_forum"] = self.forum
             return reply
         if method == "getChatMember":
-            if payload["user_id"] == _BOT_ID:
-                if not self.bot_admin:
-                    reply = _telegram_fixture("forum_owner_member.json")
-                    reply["result"]["user"]["id"] = _BOT_ID
-                    reply["result"]["user"]["is_bot"] = True
-                    return reply
-                reply = _telegram_fixture("forum_bot_member.json")
-                reply["result"]["can_manage_topics"] = self.manage_topics
-                return reply
-            return _telegram_fixture("forum_owner_member.json")
+            return self._member(payload["user_id"])
         if method == "getChatMemberCount":
             reply = _telegram_fixture("forum_member_count.json")
             if self.extra_member:
                 reply["result"] += 1
             return reply
+        if method == "createForumTopic":
+            return _telegram_fixture("forum_topic_created.json")
         return await super().call(method, payload)
+
+    def _member(self, user_id: object) -> object:
+        if user_id != _BOT_ID:
+            return _telegram_fixture("forum_owner_member.json")
+        if not self.bot_admin:
+            reply = _telegram_fixture("forum_owner_member.json")
+            reply["result"]["user"]["id"] = _BOT_ID
+            reply["result"]["user"]["is_bot"] = True
+            return reply
+        reply = _telegram_fixture("forum_bot_member.json")
+        reply["result"]["can_manage_topics"] = self.manage_topics
+        return reply
 
 
 def _telegram_fixture(name: str) -> Any:
@@ -639,6 +644,102 @@ def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> N
     _lock_becomes_directory(tmp_path)
 
     assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
+
+
+def _started(home: Path, bot: BotFactory) -> int:
+    """Run `run` with a job that ends at once, so the exit code shows the start-up checks only."""
+
+    def composed(settings: Settings, directory: Path) -> Composition:
+        composition = compose(
+            settings,
+            directory,
+            link=lambda _executable, _project: _answering_link,
+            bot=bot,
+        )
+        return replace(composition, jobs=[_finished])
+
+    return cli.main(
+        ["--product", _PRODUCT, "--home", str(home), "run"],
+        composed,
+        stats_measures,
+        adopt_topic,
+        forget_topic,
+    )
+
+
+async def _finished() -> None: ...
+
+
+def _unreachable(_request: httpx.Request) -> httpx.Response:
+    message = "no route to api.telegram.org"
+    raise httpx.ConnectError(message)
+
+
+def _fixed_bot(make: Callable[[], FakeBotApi]) -> BotFactory:
+    return lambda _settings: make()
+
+
+# keep: the unreachable row has no group, since a start with one creates topics through Telegram
+@pytest.mark.parametrize(
+    ("group", "allow_other_members", "bot", "started"),
+    [
+        pytest.param(
+            True,
+            False,
+            _fixed_bot(lambda: _GroupBot(extra_member=True)),
+            False,
+            id="other-members",
+        ),
+        pytest.param(
+            True,
+            True,
+            _fixed_bot(lambda: _GroupBot(extra_member=True)),
+            True,
+            id="other-members-allowed",
+        ),
+        pytest.param(
+            False,
+            False,
+            _fixed_bot(lambda: _WebhookBot(_WEBHOOK_URL)),
+            False,
+            id="webhook-set",
+        ),
+        pytest.param(
+            True,
+            False,
+            _fixed_bot(lambda: _GroupBot(manage_topics=False)),
+            False,
+            id="no-topic-right",
+        ),
+        pytest.param(
+            False,
+            False,
+            _http_bot_on(httpx.MockTransport(_unreachable)),
+            True,
+            id="telegram-unreachable",
+        ),
+    ],
+)
+def test_run_refuses_a_definite_telegram_refusal_and_starts_otherwise(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    group: bool,
+    allow_other_members: bool,
+    bot: BotFactory,
+    started: bool,
+) -> None:
+    if group:
+        _group_instance(tmp_path, allow_other_members=allow_other_members)
+    else:
+        _instance(tmp_path)
+
+    assert _started(tmp_path, bot) == (0 if started else 1)
+    captured = capsys.readouterr()
+    if started:
+        assert captured.err == ""
+    else:
+        assert captured.err.startswith(_FAILED_MARK)
 
 
 def _exit_when_serving(argv: list[str], serving: Event) -> None:
