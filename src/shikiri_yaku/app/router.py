@@ -7,10 +7,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.classification import Category
+from shikiri_yaku.domain.extension import no_standing
 from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved, WaitUntil
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Mapping
+    from collections.abc import Callable, Coroutine, Mapping
 
     from shikiri_yaku.domain.classification import Classification, Classifier
     from shikiri_yaku.domain.extension import Handler
@@ -28,7 +29,9 @@ class Router:
     Each signal runs as its own asyncio task, so a slow handler holds no other signal. The handler
     is stored with the signal, and a parked signal wakes the handler that parked it. This is the
     only place where a failure becomes a Forward; the handlers and ports let exceptions cross. A
-    forward the Channel cannot take returns the signal to `new` after `forward_retry_s`.
+    failure stands when `standing_on_failure` says so for its signal, whether or not the signal
+    found a handler. A forward the Channel cannot take returns the signal to `new` after
+    `forward_retry_s`.
     """
 
     def __init__(
@@ -41,6 +44,7 @@ class Router:
         *,
         handler_timeout_s: float,
         forward_retry_s: float,
+        standing_on_failure: Callable[[Signal], bool] = no_standing,
     ) -> None:
         self._classifier = classifier
         self._handlers = handlers
@@ -49,6 +53,7 @@ class Router:
         self._clock = clock
         self._timeout_s = handler_timeout_s
         self._retry_s = forward_retry_s
+        self._stands = standing_on_failure
         self._tasks: set[asyncio.Task[None]] = set()
 
     def submit(self, number: int, signal: Signal) -> asyncio.Task[None]:
@@ -71,7 +76,7 @@ class Router:
         if not self._log.begin(number, classification, name, self._clock.now()):
             return
         if handler is None:
-            outcome = Forward(failure or _unknown(classification))
+            outcome = self._failed(signal, failure or _unknown(classification))
         else:
             outcome = await self._run(handler, signal)
         await self._settle(number, signal, outcome, classification.note if classification else "")
@@ -79,7 +84,9 @@ class Router:
     async def _resume(self, parked: Parked) -> None:
         handler = self._handlers.get(Category(parked.handler))
         if handler is None:
-            outcome: Outcome = Forward(f"no handler '{parked.handler}' to wake the signal")
+            outcome: Outcome = self._failed(
+                parked.signal, f"no handler '{parked.handler}' to wake the signal"
+            )
         else:
             outcome = await self._run(handler, parked.signal)
         suggestion = self._log.suggestion(parked.number)
@@ -104,8 +111,11 @@ class Router:
                 return await handler.handle(signal)
         except Exception as error:  # noqa: BLE001 -- any failure must end as a Forward
             if limit.expired():
-                return Forward(f"handler timed out after {self._timeout_s:g} s")
-            return Forward(f"handler failed: {_describe(error)}")
+                return self._failed(signal, f"handler timed out after {self._timeout_s:g} s")
+            return self._failed(signal, f"handler failed: {_describe(error)}")
+
+    def _failed(self, signal: Signal, note: str) -> Forward:
+        return Forward(note, standing=self._stands(signal))
 
     async def _settle(self, number: int, signal: Signal, outcome: Outcome, suggestion: str) -> None:
         match outcome:

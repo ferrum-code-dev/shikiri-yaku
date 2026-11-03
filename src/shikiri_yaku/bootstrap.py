@@ -120,6 +120,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
     from shikiri_yaku.domain.extension import Extension, Handler
+    from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Channel,
         Clock,
@@ -329,6 +330,7 @@ def compose(
         fallback=forwarder,
         reporter=reporter,
         settled=starts_reconciler.settled,
+        standing_on_failure=failure_policy(extensions),
     )
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
@@ -548,6 +550,16 @@ def project_jobs(
     return [client.supervise, after_settled(settled, project_sources.run)]
 
 
+def failure_policy(extensions: Sequence[Extension]) -> Callable[[Signal], bool]:
+    """Return the Router's policy: a failure stands when an extension's predicate says so."""
+    predicates = [extension.stands_on_failure for extension in extensions]
+
+    def stands(signal: Signal) -> bool:
+        return any(predicate(signal) for predicate in predicates)
+
+    return stands
+
+
 def routing_jobs(
     settings: Settings,
     journal: Database,
@@ -558,6 +570,7 @@ def routing_jobs(
     fallback: Forwarder,
     reporter: Reporter,
     settled: asyncio.Event,
+    standing_on_failure: Callable[[Signal], bool],
 ) -> list[Job]:
     """Return the Dispatcher and the Scheduler, which share one Router and wait for `settled`."""
     operator = settings.operator
@@ -571,6 +584,7 @@ def routing_jobs(
         clock,
         handler_timeout_s=operator.handler_timeout_s,
         forward_retry_s=operator.forward_retry_s,
+        standing_on_failure=standing_on_failure,
     )
     dispatcher = Dispatcher(routing, router, clock, interval_s=operator.dispatch_interval_s)
     scheduler = Scheduler(

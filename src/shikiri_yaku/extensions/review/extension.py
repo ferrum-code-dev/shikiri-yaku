@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.extensions.review.handler import ReviewHandler
-from shikiri_yaku.extensions.review.rules import REVIEW, REVIEW_RULE
+from shikiri_yaku.extensions.review.rules import REVIEW, REVIEW_RULE, stands_on_failure
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -27,4 +27,4 @@ def review_extension(
     handler = ReviewHandler(
         clients, numbers, outbox, clock, product=product, destinations=destinations
     )
-    return Extension(REVIEW, (REVIEW_RULE,), handler)
+    return Extension(REVIEW, (REVIEW_RULE,), handler, stands_on_failure=stands_on_failure)

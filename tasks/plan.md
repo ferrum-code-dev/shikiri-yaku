@@ -1549,8 +1549,8 @@ Acceptance criteria:
 * No test or source text still uses the word "Acknowledge" for the button.
 * The gate passes.
 
-**Split (E10a, E10b).** E10 is more than the 300 lines one change may hold, so it is done in two
-commits, and E10 is ticked only when both pass the gate.
+**Split (E10a to E10d).** E10 is more than the 300 lines one change may hold, so it is done in four
+commits, and E10 is ticked only when all of them pass the gate.
 
 * **E10a**: the outcome that closes an informational signal (`Informed`, and a forward the Product
   forwarder reports as information); the button *Stop reminders* on the standing kinds (engine down
@@ -1561,13 +1561,39 @@ commits, and E10 is ticked only when both pass the gate.
   column `messages.final_line` by migration, so a copy is re-edited when its line changes), the
   composed engine-down test, and the docs. The help text, README and drills file hold no
   "Acknowledge" text, so there is nothing in them to change.
+* **E10c**: the Router's failure policy (`standing_on_failure`, false by default) used by every
+  failure forward; `Extension.stands_on_failure`, with the three predicates composed in bootstrap;
+  the table over the failure modes, the composed failed engine restart (the tap silences, the
+  engine's return still edits the copy) and a failure of an informational category.
+* **E10d**: migration 24 (the `repairs` table), `Extension.legacy_copies`, and
+  `Repairs.adopt_legacy_standing`, run once from `build`; the upgrade test over a schema 22 journal:
+  the pull-request tap, the engine tap, buttonless health, `restart:` and task_done copies, a stored
+  silence, the recovery edits, and a copy added after the repair.
 
-Standing is decided by the handler, not by the signal's kind (item 3). `Forward(note, standing=True)`
-marks a forward that stays true (the restart give-ups); the health and review handlers queue their
-notice with `standing=True`. The flag is stored per copy in `messages.standing` (migration 23,
-default 0), and the scheduler and the Stop reminders tap read that column. A new notice is
-informational unless its handler says otherwise. A copy sent before migration 23 is not standing, so
-it is not reminded after the upgrade; the PO has to decide whether that is acceptable.
+Standing is decided by the handler for its own outcomes, not by the signal's kind (item 3).
+`Forward(note, standing=True)` marks a forward that stays true (the restart give-ups); the health and
+review handlers queue their notice with `standing=True`. The flag is stored per copy in
+`messages.standing` (migration 23, default 0); the scheduler and the Stop reminders tap read that
+column. A new notice is informational unless its handler says otherwise.
+
+The consultation of the E10 rework (`05-consult-i2`) settled the rest:
+
+* A failure the Router turns into a Forward (a classifier or handler that raises, a handler that
+  times out, no handler for the category, a parked signal with no handler) stands when the category
+  of the signal says so. Each extension names its predicate: the infrastructure extension for an
+  engine that is down or faulted, the notice extension for health, the review extension for a pull
+  request ready. Bootstrap composes them into the Router's policy. The Router names no kind and
+  creates no standing forward of its own.
+* A successful restart and completed work stay informational.
+* The copies sent before the standing flag existed are repaired once, by the first start of the
+  new code. A copy is standing again when its category recognizes it: its notice key has the
+  category's prefix, its signal has one of its kinds, and it has the Stop reminders button (`k:`).
+  Engine copies are `forward:` with an engine kind; health copies are `health:` and the `forward:`
+  of a failed health handler; pull-request copies are `review:`. A buttonless health copy, a
+  `restart:` copy and a task_done `forward:` copy are not recognized. Neither is a `forward:` copy
+  of a pull request: its key is shared with the informational "nothing on record" forward, so the
+  repair cannot tell them apart. Silences (`ack:<n>`) and the final-state fields are not touched.
+  The repair is recorded in the `repairs` table, so it runs once.
 
 ### E11. A group may have other members (normal)
 

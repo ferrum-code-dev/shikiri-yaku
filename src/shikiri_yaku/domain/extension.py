@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from shikiri_yaku.domain.classification import Category, Verdict
     from shikiri_yaku.domain.outcome import Outcome
     from shikiri_yaku.domain.signal import Kind, Signal
@@ -36,9 +38,18 @@ class Action(Protocol):
     async def run(self, signal: Signal) -> Outcome: ...
 
 
+def no_standing(signal: Signal) -> bool:
+    """Refuse standing: a failure of any signal is forwarded as information, the default."""
+    del signal
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class Extension:
+    """`stands_on_failure` says whether a failure of one of its signals keeps the signal open."""
+
     category: Category
     rules: tuple[Rule, ...]
     handler: Handler
     actions: tuple[Action, ...] = ()
+    stands_on_failure: Callable[[Signal], bool] = no_standing

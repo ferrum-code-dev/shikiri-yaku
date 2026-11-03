@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.classification import Category, Verdict
 from shikiri_yaku.domain.extension import Rule
 from shikiri_yaku.domain.signal import Kind
+
+if TYPE_CHECKING:
+    from shikiri_yaku.domain.signal import Signal
 
 INFRASTRUCTURE: Final = Category("infrastructure")
 DECISION_REQUIRED: Final = "decision_required"
@@ -35,6 +38,13 @@ REASONS: Final = frozenset(
 KINDS: Final = frozenset({Kind.ENGINE_DOWN, Kind.ENGINE_FAULT})
 
 INFRASTRUCTURE_RULE: Final = Rule(reasons=REASONS, kinds=KINDS)
+
+
+def stands_on_failure(signal: Signal) -> bool:
+    """Keep the signal of a failed engine restart open, since the engine is still down (§6.2)."""
+    return signal.kind in KINDS
+
+
 HOST_TOOL_RULE: Final = Rule(
     reasons=frozenset({DECISION_REQUIRED}), verdicts=frozenset({Verdict.HOST_TOOL})
 )

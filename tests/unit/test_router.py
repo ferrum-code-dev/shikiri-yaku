@@ -20,7 +20,7 @@ from shikiri_yaku.domain.classification import (
     Source,
     Verdict,
 )
-from shikiri_yaku.domain.extension import Extension, Rule
+from shikiri_yaku.domain.extension import Extension, Rule, no_standing
 from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved, WaitUntil
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import Kind, Signal
@@ -34,7 +34,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.ports import CommandResult, CommandRunner
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping, Sequence
+    from collections.abc import Callable, Generator, Mapping, Sequence
 
     from shikiri_yaku.domain.classification import Assessment, Classifier
     from shikiri_yaku.domain.outcome import Outcome
@@ -113,14 +113,16 @@ class _FirstHangs:
 class _Fallback:
     def __init__(self, *, informs: bool = False) -> None:
         self.forwarded: list[tuple[str, str]] = []
+        self.standing: list[bool] = []
         self.suggestions: list[str] = []
         self._informs = informs
 
     async def forward(
         self, number: int, signal: Signal, note: str, suggestion: str, *, standing: bool
     ) -> bool:
-        del number, standing
+        del number
         self.forwarded.append((signal.id, note))
+        self.standing.append(standing)
         self.suggestions.append(suggestion)
         return self._informs
 
@@ -138,7 +140,13 @@ class _World:
         self.signals = SignalStore(database)
         self.fallback = _Fallback()
 
-    def router(self, classifier: Classifier, **handlers: object) -> Router:
+    def router(
+        self,
+        classifier: Classifier,
+        *,
+        standing_on_failure: Callable[[Signal], bool] = no_standing,
+        **handlers: object,
+    ) -> Router:
         return Router(
             classifier,
             {Category(name): handler for name, handler in handlers.items()},  # type: ignore[misc]
@@ -147,6 +155,7 @@ class _World:
             _Clock(),
             handler_timeout_s=TIMEOUT_S,
             forward_retry_s=RETRY_S,
+            standing_on_failure=standing_on_failure,
         )
 
     def new(self, name: str) -> tuple[int, Signal]:
@@ -172,27 +181,47 @@ async def _route(router: Router, number: int, signal: Signal) -> None:
     await router.join()
 
 
+def _failure(mode: str) -> tuple[_Classifier, object, str]:
+    # keep: each test gets its own handler, because a handler's outcomes are consumed when it runs
+    match mode:
+        case "raises":
+            return _Classifier(), _Handler(ValueError("boom")), "ValueError: boom"
+        case "times out":
+            return _Classifier(), _Hanging(), "timed out"
+        case "unregistered category":
+            return _Classifier(Category("access")), _Handler(), "category 'access'"
+        case _:
+            return _Classifier(failing=True), _Handler(), "RuntimeError: model is down"
+
+
+def _policy(*, stands: bool) -> Callable[[Signal], bool]:
+    def decide(signal: Signal) -> bool:
+        del signal
+        return stands
+
+    return decide
+
+
+@pytest.mark.parametrize("stands", [True, False], ids=["the policy stands", "the policy informs"])
 @pytest.mark.parametrize(
-    ("classifier", "handler", "note"),
-    [
-        (_Classifier(), _Handler(ValueError("boom")), "ValueError: boom"),
-        (_Classifier(), _Hanging(), "timed out"),
-        (_Classifier(Category("access")), _Handler(), "category 'access'"),
-        (_Classifier(failing=True), _Handler(), "RuntimeError: model is down"),
-    ],
-    ids=["raises", "times out", "unregistered category", "classifier fails"],
+    "mode",
+    ["raises", "times out", "unregistered category", "classifier fails"],
 )
-def test_a_failure_is_forwarded_with_its_cause(
-    world: _World, classifier: _Classifier, handler: object, note: str
+def test_a_failure_is_forwarded_with_its_cause_and_the_policy_decides_whether_it_stands(
+    world: _World, mode: str, *, stands: bool
 ) -> None:
     number, signal = world.new("E1")
-    router = world.router(classifier, infrastructure=handler)
+    classifier, handler, note = _failure(mode)
+    router = world.router(
+        classifier, standing_on_failure=_policy(stands=stands), infrastructure=handler
+    )
 
     asyncio.run(_route(router, number, signal))
 
     assert [(sent_id, note in sent_note) for sent_id, sent_note in world.fallback.forwarded] == [
         (signal.id, True)
     ]
+    assert world.fallback.standing == [stands]
     assert world.stored(number).state is SignalState.FORWARDED
     assert note in (world.stored(number).notes or "")
 
@@ -334,6 +363,31 @@ def test_the_classification_note_reaches_the_forward_also_after_a_park(world: _W
     assert world.stored(number).classification_note == note
     assert world.stored(number).classified_by == "reasoner"
     assert world.fallback.suggestions == [note]
+
+
+@pytest.mark.parametrize("stands", [True, False], ids=["the policy stands", "the policy informs"])
+def test_a_parked_signal_whose_handler_is_gone_is_a_failure_the_policy_judges(
+    world: _World, *, stands: bool
+) -> None:
+    number, signal = world.new("E1")
+    wake_at = NOW + timedelta(hours=1)
+    parking = world.router(_Classifier(), infrastructure=_Handler(WaitUntil(wake_at, "waiting")))
+    without_handler = world.router(_Classifier(), standing_on_failure=_policy(stands=stands))
+
+    async def park_then_wake() -> None:
+        await _route(parking, number, signal)
+        log = schedule_log(world.database, StderrReporter())
+        parked = log.due_parked(wake_at)[0]
+        assert log.claim(parked.number, wake_at)
+        await without_handler.wake(parked)
+        await without_handler.join()
+
+    asyncio.run(park_then_wake())
+
+    assert world.fallback.forwarded == [
+        (signal.id, "no handler 'infrastructure' to wake the signal")
+    ]
+    assert world.fallback.standing == [stands]
 
 
 def test_the_call_record_of_a_reasoner_verdict_is_kept_in_the_verdict_record(world: _World) -> None:

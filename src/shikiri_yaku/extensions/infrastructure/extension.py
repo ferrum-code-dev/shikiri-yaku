@@ -13,6 +13,7 @@ from shikiri_yaku.extensions.infrastructure.rules import (
     HOST_TOOL_RULE,
     INFRASTRUCTURE,
     INFRASTRUCTURE_RULE,
+    stands_on_failure,
 )
 from shikiri_yaku.extensions.infrastructure.wait import WaitAction
 
@@ -74,4 +75,5 @@ def infrastructure_extension(
         (INFRASTRUCTURE_RULE, HOST_TOOL_RULE),
         InfrastructureHandler(actions),
         actions,
+        stands_on_failure=stands_on_failure,
     )
