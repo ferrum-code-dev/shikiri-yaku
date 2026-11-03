@@ -1635,6 +1635,37 @@ Acceptance criteria:
 * After adopting a missing topic, start-up creates no topic for it, and the group fake sees no `createForumTopic` call for that component.
 * The gate passes.
 
+### E13. Findings from the topics documentation (normal)
+
+Found while rewriting design §7 (the design text for 1 and 2 is already changed, committed). E12
+(adopt a topic made by hand) is a separate task. If this needs much more than 300 lines, split it
+(one part per item) and record the split here.
+
+1. **The group check runs at start-up.** The Telegram probe (forum supergroup, bot is an administrator
+   with the manage-topics right, owners are members, no other members unless `allow_other_members`, no
+   webhook) runs only in `doctor`, so the default rule "the group holds only the owners" is not enforced
+   when the Operator runs. `run` calls the same probe before it serves. A definite failure (other
+   members, missing rights, a webhook, the bot not in the group) refuses to start with the probe's
+   message. "Could not verify" (Telegram unreachable) does not refuse: the Operator starts and the
+   existing Telegram health signal reports it.
+2. **The built-in General topic.** The Operator no longer creates a topic named "General". The
+   Operator's own signals go to the group without a thread id (Telegram posts them in the built-in
+   General topic); `component_of` returns nothing for them. The reconcile no longer creates or looks at a
+   `general` row, `telegram adopt|forget` take a component only, and a `general` row left in an older
+   journal is ignored. Messages already sent keep their references.
+3. **A recovered health notice is not sent.** A health message that was still queued when its signal
+   recovered (for example the "getUpdates was refused with 401" notice, sent hours later after the token
+   was replaced) is dropped as obsolete and never sent; its row ends in a final state that says so.
+
+Acceptance criteria:
+* Table-driven over the probe outcomes at `run`: other members (setting false) refuses; other members with `allow_other_members = true` starts; webhook set refuses; missing manage-topics right refuses; Telegram unreachable starts.
+* Composed test: an Operator-level health signal is sent without `message_thread_id`, a component signal with its topic's; the reconcile makes no `createForumTopic` call for General; a journal with an old `general` row still runs.
+* A queued health message whose signal closed before the send is not sent; a queued question whose signal is still open is sent as before.
+* README and help text match (no `general` argument).
+* The gate passes.
+
+Human check, not in the gate: with a real forum group, one Operator-level message lands in the built-in General topic.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
