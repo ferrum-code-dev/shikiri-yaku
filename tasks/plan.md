@@ -1682,6 +1682,28 @@ Split: E13 is more than about 300 lines, so it is done as three changes, one per
 (its probe rows in the `run` table). **E13b** is item 2 (its composed test, README and help text).
 **E13c** is item 3 (its two tests). Each is one commit that passes the gate; E13 is ticked after E13c.
 
+### E14. No channel names in the CLI checks and the journal (normal)
+
+Review of E13 found two Telegram leaks outside the adapter. The port-adapter rule: nothing outside
+`adapters/`, `bootstrap.py` and the config model names a channel.
+
+1. `doctor` in `cli.py` reads `settings.telegram` for the "token file" check and for the "other
+   members" note. Move both behind the channel: `ChannelCheck` gains a way to report its own static
+   checks and notes (for example `async def report(self) -> list[CheckLine]`, a small dataclass of name,
+   status and detail defined in `ports.py`), the Telegram implementation returns the token-file line and
+   the other-members note, and `doctor` prints whatever lines the channel gives. `cli.py` keeps only the
+   `telegram adopt|forget` repair group (it receives its functions from `bootstrap`).
+2. `journal/replies.py` and `journal/submits.py` build op identities with a literal `telegram:` prefix.
+   The channel supplies the prefix: the journal classes take it in their constructor (`bootstrap` passes
+   the Telegram adapter's name constant), so the journal names no channel. The prefix value stays
+   `telegram`, so identities already stored keep matching; no migration.
+
+Acceptance criteria:
+* A grep-style test: no file under `app/`, `domain/`, `extensions/`, `journal/` or `cli.py` contains the word `telegram` (case-insensitive), except the allowed places listed in the test with a reason each (the `telegram` repair group in `cli.py`; the config model is outside these folders).
+* `doctor` with a fake channel that reports its own lines prints them, and shows the existing token-file line and the "other members" note when the Telegram adapter reports them (same texts as today).
+* A resolve and a submit op recorded before the change (identity `telegram:resolve:<id>`, `telegram:submit:<id>` seeded in the journal) are still found by the same update after the change.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
