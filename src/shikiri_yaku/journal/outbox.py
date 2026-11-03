@@ -22,9 +22,16 @@ class JournalOutbox:
     rows.
     """
 
-    def __init__(self, database: Database, messages: MessageStore) -> None:
+    def __init__(
+        self,
+        database: Database,
+        messages: MessageStore,
+        *,
+        ending_prefixes: tuple[str, ...] = (),
+    ) -> None:
         self._database = database
         self._messages = messages
+        self._endings = ending_prefixes
 
     def queue(
         self,
@@ -89,6 +96,7 @@ class JournalOutbox:
                     )
 
     def pending(self) -> list[Pending]:
+        self._messages.retire_obsolete(self._endings)
         return [
             Pending(
                 stored.id,

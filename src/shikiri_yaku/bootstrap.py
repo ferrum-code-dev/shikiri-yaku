@@ -152,6 +152,7 @@ if TYPE_CHECKING:
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
 # keep: a copy without buttons that the signal ends, sent before the upgrade, still gets its edit
+# keep: a notice with these prefixes still unsent when its signal has closed is never sent
 ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_KEY}:",)
 REASONER_SCRATCH_DIR: Final = "reasoner-scratch"
 FALLBACK_SHELL: Final = "/bin/sh"
@@ -241,7 +242,9 @@ def compose(
             settled=starts_reconciler.settled,
         )
     ]
-    outbox = JournalOutbox(journal, MessageStore(journal, reporter))
+    outbox = JournalOutbox(
+        journal, MessageStore(journal, reporter), ending_prefixes=ENDING_NOTICE_PREFIXES
+    )
     bot_api = bot(settings)
     topics = TopicStore(journal)
     group_id = settings.telegram.group_id

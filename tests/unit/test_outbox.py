@@ -8,10 +8,11 @@ import pytest
 
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.scheduler import Scheduler
-from shikiri_yaku.bootstrap import schedule_log
+from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.domain.signal import Kind, Signal
+from shikiri_yaku.domain.signal import Closing, Kind, Signal
+from shikiri_yaku.extensions.notice.handler import HEALTH_KEY
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     Database,
@@ -36,6 +37,7 @@ START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
 OTHER = Destination("telegram", "1002")
 QUESTION = Message("S1 · Which way?", (Button("1", "a:1:1"),))
+HEALTH = Message("api: Shikiru link down for 10 minutes")
 SENT = "1001/42"
 TOKEN = SECRETS["telegram_bot_token"]
 
@@ -108,7 +110,17 @@ def _signal(database: Database, kind: str = "escalation") -> int:
 
 
 def _outbox(database: Database, reporter: _Reporter | None = None) -> JournalOutbox:
-    return JournalOutbox(database, MessageStore(database, reporter or _Reporter()))
+    return JournalOutbox(
+        database,
+        MessageStore(database, reporter or _Reporter()),
+        ending_prefixes=ENDING_NOTICE_PREFIXES,
+    )
+
+
+def _queue_health(database: Database, number: int) -> None:
+    _outbox(database).queue(
+        number, Purpose.NOTICE, [OWNER], HEALTH, key=f"{HEALTH_KEY}:{number}", now=START
+    )
 
 
 def _sender(
@@ -364,3 +376,33 @@ def test_a_deletion_of_a_copy_the_journal_does_not_know_journals_nothing(memory:
 
     assert _outbox(memory).record_deletion("9/9", "telegram_bot_token", now=START) is False
     assert MessageStore(memory, _Reporter()).for_signal(number) == []
+
+
+def test_a_health_notice_still_unsent_when_its_signal_closes_is_never_sent(
+    memory: Database,
+) -> None:
+    number = _signal(memory, kind="health")
+    _queue_health(memory, number)
+    SignalStore(memory).close(Closing("api", kind=Kind.HEALTH, final_line="Recovered"), START)
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel).tick())
+
+    assert channel.sent == []
+    assert _outbox(memory).pending() == []
+    [stored] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert stored.delivery == Delivery.OBSOLETE
+
+
+def test_a_question_and_a_health_notice_are_sent_while_their_signals_are_open(
+    memory: Database,
+) -> None:
+    question = _signal(memory)
+    health = _signal(memory, kind="health")
+    _outbox(memory).queue(question, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    _queue_health(memory, health)
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel).tick())
+
+    assert [message for _, message in channel.sent] == [QUESTION, HEALTH]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from enum import StrEnum
@@ -10,6 +11,7 @@ from pydantic import TypeAdapter
 from shikiri_yaku.domain.outbound import Purpose, message_label, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import Inserted, stamp
+from shikiri_yaku.journal.signals import SignalState
 from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
@@ -35,6 +37,7 @@ class Delivery(StrEnum):
     HANDLED = "handled"
     DELETE_ATTEMPTED = "delete_attempted"
     DELETED = "deleted"
+    OBSOLETE = "obsolete"
 
 
 _BODY = TypeAdapter(Message)
@@ -310,6 +313,34 @@ class MessageStore:
             (Direction.OUT, Delivery.PENDING),
         )
         return [_message(row) for row in rows]
+
+    def retire_obsolete(self, ending_prefixes: tuple[str, ...]) -> None:
+        """Mark unsent copies of an ending notice obsolete once their signal has closed.
+
+        A notice the signal ends, such as a health message, reports a state that is over by then,
+        so sending it would tell the PO something false. The row keeps its body and is never sent.
+        """
+        self._database.connection.execute(
+            """
+            UPDATE messages SET delivery = :obsolete
+            WHERE direction = :out AND delivery = :pending AND body IS NOT NULL
+                AND signal_number IN (
+                    SELECT number FROM signals WHERE state IN (:resolved, :closed)
+                )
+                AND EXISTS (
+                    SELECT 1 FROM json_each(:prefixes) AS prefix
+                    WHERE substr(messages.notice_key, 1, length(prefix.value)) = prefix.value
+                )
+            """,
+            {
+                "obsolete": Delivery.OBSOLETE,
+                "out": Direction.OUT,
+                "pending": Delivery.PENDING,
+                "resolved": SignalState.RESOLVED,
+                "closed": SignalState.CLOSED,
+                "prefixes": json.dumps(ending_prefixes),
+            },
+        )
 
     def for_signal(self, signal_number: int) -> list[StoredMessage]:
         rows = self._database.connection.execute(

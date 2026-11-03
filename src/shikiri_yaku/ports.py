@@ -911,7 +911,13 @@ class Outbox(Protocol):
         """Journal a command reply claim and every bounded part atomically, once per update."""
         ...
 
-    def pending(self) -> list[Pending]: ...
+    def pending(self) -> list[Pending]:
+        """Return the recorded messages not yet confirmed, oldest first.
+
+        A notice that ends with its signal (a health message) is not returned once that signal has
+        closed: it is marked obsolete instead, because the state it reports is over.
+        """
+        ...
 
     def confirm(self, message_id: int, message_ref: str) -> None: ...
 

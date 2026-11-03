@@ -100,3 +100,4 @@ merged and `uv run poe check` passes.
     - [x] E5c. Doctor lines and summary, error lines, colour on a terminal only
     - [x] E5d. Stats as titled rich tables
     - [x] E5e. --json for doctor and stats
+  - [x] E13. Findings from the topics documentation
