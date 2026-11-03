@@ -99,6 +99,7 @@ from shikiri_yaku.journal import (
     JournalWaits,
     MessageStore,
     OpStore,
+    Repairs,
     SignalStore,
 )
 from shikiri_yaku.journal.install_reconcile import JournalInstallReconcile
@@ -262,8 +263,6 @@ def compose(
         retry_budget_per_day=settings.handlers.infrastructure.retry_budget_per_day,
         restart_budget_per_hour=settings.handlers.infrastructure.restart_budget_per_hour,
     )
-    retries = JournalRetries(journal, OpStore(journal))
-    waits = JournalWaits(journal, OpStore(journal))
     notifier = Notifier(outbox, destinations, clock)
     infrastructure = settings.handlers.infrastructure
     install_shell = os.environ.get("SHELL", FALLBACK_SHELL)
@@ -278,9 +277,9 @@ def compose(
     extensions = registered_extensions(
         clients,
         guard,
-        retries,
+        JournalRetries(journal, OpStore(journal)),
         clock,
-        waits=waits,
+        waits=JournalWaits(journal, OpStore(journal)),
         starts=JournalStarts(journal, OpStore(journal), SignalStore(journal)),
         notifier=notifier,
         install_preparation=install_preparation,
@@ -294,6 +293,10 @@ def compose(
         numbers=SignalStore(journal),
         outbox=outbox,
         destinations=destinations,
+    )
+    # keep: copies of an older journal are marked before any signal is routed or any copy is sent
+    Repairs(journal).adopt_legacy_standing(
+        [copy for extension in extensions for copy in extension.legacy_copies]
     )
     forwarder = ProductForwarder(
         settings.handlers.product.message_title_max_chars,

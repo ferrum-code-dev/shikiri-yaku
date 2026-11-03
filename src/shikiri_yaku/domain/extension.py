@@ -45,11 +45,26 @@ def no_standing(signal: Signal) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class LegacyCopy:
+    """A notice sent before the standing flag existed, which its category recognizes (design §7).
+
+    Its notice key is `key_prefix` and the signal's number, and the signal has one of `kinds`.
+    """
+
+    key_prefix: str
+    kinds: frozenset[Kind]
+
+
+@dataclass(frozen=True, slots=True)
 class Extension:
-    """`stands_on_failure` says whether a failure of one of its signals keeps the signal open."""
+    """`stands_on_failure` says whether a failure of one of its signals keeps the signal open.
+
+    `legacy_copies` names the notices an upgrade marks standing when they carry the button.
+    """
 
     category: Category
     rules: tuple[Rule, ...]
     handler: Handler
     actions: tuple[Action, ...] = ()
     stands_on_failure: Callable[[Signal], bool] = no_standing
+    legacy_copies: tuple[LegacyCopy, ...] = ()

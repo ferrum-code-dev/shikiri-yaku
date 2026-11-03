@@ -43,6 +43,8 @@ REPLACED_LINE: Final = "Replaced by a newer message"
 # keep: a newer copy in the same slot, chat and thread replaces the older one once accepted
 QUESTION_SLOT: Final = "question"
 INSTALL_SLOT: Final = "install"
+# keep: the notice key of a forwarded signal is this name, a colon and its number (design §7)
+FORWARD_KEY: Final = "forward"
 TIME_FORMAT: Final = "%H:%M UTC"  # keep: the Operator has no time zone setting; its clock is UTC
 _CUT_MARK: Final = "…"
 

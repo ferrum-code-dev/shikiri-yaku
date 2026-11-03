@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.classification import Category, Verdict
-from shikiri_yaku.domain.extension import Rule
+from shikiri_yaku.domain.extension import LegacyCopy, Rule
+from shikiri_yaku.domain.outbound import FORWARD_KEY
 from shikiri_yaku.domain.signal import Kind
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ REASONS: Final = frozenset(
 KINDS: Final = frozenset({Kind.ENGINE_DOWN, Kind.ENGINE_FAULT})
 
 INFRASTRUCTURE_RULE: Final = Rule(reasons=REASONS, kinds=KINDS)
+LEGACY_COPIES: Final = (LegacyCopy(f"{FORWARD_KEY}:", KINDS),)
 
 
 def stands_on_failure(signal: Signal) -> bool:

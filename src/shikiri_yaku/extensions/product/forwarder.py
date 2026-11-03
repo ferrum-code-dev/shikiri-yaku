@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.outbound import QUESTION_SLOT, Purpose, fit
+from shikiri_yaku.domain.outbound import FORWARD_KEY, QUESTION_SLOT, Purpose, fit
 from shikiri_yaku.extensions.product.message import escalation_message, information_message
 from shikiri_yaku.ports import EscalationStatus, ShikiruError
 
@@ -68,7 +68,7 @@ class ProductForwarder:
             title=title,
             note=note,
             suggestion=suggestion,
-            key=f"forward:{number}",
+            key=f"{FORWARD_KEY}:{number}",
             standing=standing,
         )
         return view is None and not standing

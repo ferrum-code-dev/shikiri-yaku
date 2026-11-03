@@ -30,6 +30,8 @@ Migration 20 keeps the slot of an outbound message, so a newer copy in the same 
 (design §7).
 Migration 21 gives each copy sent before slots the slot its kind has now, read from its notice key,
 so an upgraded journal replaces the approval it already holds (design §7).
+Migration 24 keeps the name of each one-time repair that ran, so an upgraded journal repairs once
+(design §7).
 """
 
 from __future__ import annotations
@@ -205,4 +207,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE messages ADD COLUMN final_line TEXT",),
     ("ALTER TABLE messages ADD COLUMN standing INTEGER NOT NULL DEFAULT 0",),
+    ("CREATE TABLE repairs (name TEXT PRIMARY KEY)",),
 )

@@ -1566,7 +1566,7 @@ commits, and E10 is ticked only when all of them pass the gate.
   the table over the failure modes, the composed failed engine restart (the tap silences, the
   engine's return still edits the copy) and a failure of an informational category.
 * **E10d**: migration 24 (the `repairs` table), `Extension.legacy_copies`, and
-  `Repairs.adopt_legacy_standing`, run once from `build`; the upgrade test over a schema 22 journal:
+  `Repairs.adopt_legacy_standing`, run once from `compose`; the upgrade test over a schema 22 journal:
   the pull-request tap, the engine tap, buttonless health, `restart:` and task_done copies, a stored
   silence, the recovery edits, and a copy added after the repair.
 

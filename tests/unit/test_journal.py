@@ -277,6 +277,7 @@ def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> No
         "signals",
         "cursors",
         "polling",
+        "repairs",
     ):
         connection.execute(f"DROP TABLE {table}")
     for statement in MIGRATIONS[0]:
@@ -342,6 +343,7 @@ def test_a_copy_sent_before_slots_is_given_the_slot_its_kind_has_now(
     connection.execute("ALTER TABLE messages DROP COLUMN slot")
     connection.execute("ALTER TABLE messages DROP COLUMN final_line")
     connection.execute("ALTER TABLE messages DROP COLUMN standing")
+    connection.execute("DROP TABLE repairs")
     connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
     connection.execute(
         "INSERT INTO messages (direction, channel, chat, delivery, purpose, notice_key,"

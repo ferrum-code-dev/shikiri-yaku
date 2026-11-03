@@ -11,7 +11,7 @@ import copy
 import itertools
 import json
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -24,7 +24,7 @@ from shikiri_yaku.app.event_source import CLOSED_UNMERGED_LINE, MERGED_LINE, PR_
 from shikiri_yaku.app.health_source import RECOVERED_LINE
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.bootstrap import REMOVED_NOTE, compose
-from shikiri_yaku.domain.callback import decline_data
+from shikiri_yaku.domain.callback import decline_data, stop_reminders_data
 from shikiri_yaku.domain.outbound import ENGINE_UP_LINE, REPLACED_LINE, Purpose
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.install_replies import CANCELLED_NOTE, DECLINED_NOTE
@@ -40,6 +40,7 @@ from shikiri_yaku.journal import (
     JournalActions,
     JournalInbound,
     JournalStarts,
+    MessageStore,
     NewSignal,
     OpStore,
     SignalState,
@@ -51,19 +52,21 @@ from shikiri_yaku.ports import (
     INSTALL_DECLINED,
     INSTALL_VOID,
     AttemptState,
+    Button,
     CommandResult,
     EventKinds,
+    Message,
     ResolutionKind,
     SubmitStatus,
 )
 from shikiri_yaku.settings import load_settings
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIRST_MESSAGE_ID, FakeBotApi
+from tests.unit.test_replies import Reporter
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
     from contextlib import AbstractAsyncContextManager
-    from datetime import datetime
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
     from shikiri_yaku.cli import Job
@@ -79,6 +82,8 @@ _DELIVERY_TIMEOUT_S: Final = 20
 # keep: polls a replayed restart gets through, enough for every job to run its tick at least once
 _POLLS: Final = 5
 _SCHEMA_BEFORE_SLOTS: Final = 19
+_SCHEMA_BEFORE_STANDING: Final = 22
+_NOW: Final = datetime(2026, 10, 28, tzinfo=UTC)
 _ASKED: Final = "I may have submitted this already"
 _RESTARTED: Final = "The engine of api was restarted."
 _FAILED_HANDLER: Final = "handler failed"
@@ -606,9 +611,61 @@ def _as_before_slots(directory: Path) -> None:
         database.connection.execute("ALTER TABLE messages DROP COLUMN slot")
         database.connection.execute("ALTER TABLE messages DROP COLUMN final_line")
         database.connection.execute("ALTER TABLE messages DROP COLUMN standing")
+        database.connection.execute("DROP TABLE repairs")
         database.connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_SLOTS}")
     finally:
         database.close()
+
+
+def _as_before_standing(directory: Path) -> None:
+    """Make the journal one written at schema 22: no standing flag and no repair record."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        database.connection.execute("ALTER TABLE messages DROP COLUMN standing")
+        database.connection.execute("DROP TABLE repairs")
+        database.connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_STANDING}")
+    finally:
+        database.close()
+
+
+def _sent_engine_forward_with_stop(directory: Path) -> int:
+    """Record an engine forward sent with Stop reminders, as before standing; return its signal."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        number = (
+            SignalStore(database)
+            .insert_if_absent(
+                NewSignal("api:engine_down:1", "api", Kind.ENGINE_DOWN, "agent_error", "down"),
+                _NOW,
+            )
+            .row_id
+        )
+        messages = MessageStore(database, Reporter())
+        row = messages.record_outbound(
+            signal_number=number,
+            channel="telegram",
+            chat=str(_OWNER),
+            purpose=Purpose.NOTICE,
+            body=Message("forward", (Button("Stop reminders", stop_reminders_data(number)),)),
+            notice_key=f"forward:{number}",
+            now=_NOW,
+        )
+        messages.confirm_delivery(row.row_id, "77")
+    finally:
+        database.close()
+    return number
+
+
+def _standing_of(directory: Path, number: int) -> int:
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        row = database.connection.execute(
+            "SELECT standing FROM messages WHERE notice_key = ?", (f"forward:{number}",)
+        ).fetchone()
+    finally:
+        database.close()
+    assert row is not None
+    return int(row["standing"])
 
 
 def _delivery_of(directory: Path, message_id: int) -> str | None:
@@ -1813,3 +1870,28 @@ def test_an_install_asked_again_after_an_upgrade_replaces_the_approval_sent_befo
     changes = {"sendMessage", "editMessageText", "deleteMessage"}
     assert [method for method, _ in replay.calls if method in changes] == []
     assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [FIRST_MESSAGE_ID + 1]
+
+
+def test_composing_an_upgraded_journal_marks_its_stop_button_copies_standing(
+    tmp_path: Path,
+) -> None:
+    """An engine copy sent before standing stands once the upgraded instance is composed.
+
+    The repair runs when the instance is composed, before any copy is sent, so the copy a PO was
+    shown before the upgrade keeps its reminders and its Stop reminders tap silences it (design §7).
+    """
+    directory = _instance(tmp_path)
+    number = _sent_engine_forward_with_stop(directory)
+    _as_before_standing(directory)
+    session = _ShikiruSession(asyncio.Event())
+
+    composition = compose(
+        load_settings(directory),
+        directory,
+        link=lambda _executable, _project: _shikiru_link(session),
+        bot=lambda _settings: FakeBotApi(),
+        clock=NapClock(),
+    )
+    composition.close()
+
+    assert _standing_of(directory, number) == 1

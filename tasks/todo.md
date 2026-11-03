@@ -92,7 +92,7 @@ merged and `uv run poe check` passes.
   - [x] E7. A replaced message disappears
   - [x] E8. Reconcile an answer by Shikiru's real resolution text
   - [x] E9. Every signal of a component goes to its topic
-  - [ ] E10. The Acknowledge button says what it does
+  - [x] E10. The Acknowledge button says what it does
   - [ ] E11. A group may have other members
     - [x] E5a. Typer app, global options, product resolution, flat verbs, telegram group
     - [x] E5b. Help palette and help layout
