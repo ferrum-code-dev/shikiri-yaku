@@ -33,7 +33,10 @@ class OutboxSender:
             await self._clock.sleep(self._interval_s)
 
     async def tick(self) -> None:
-        for pending in self._outbox.pending():
+        for candidate in self._outbox.pending():
+            pending = self._outbox.pending_message(candidate.message_id)
+            if pending is None:
+                continue
             try:
                 ref = await self._channel.send(pending.destination, pending.message)
             except ChannelRefusedError as error:

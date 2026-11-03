@@ -107,6 +107,17 @@ class JournalOutbox:
             if stored.body is not None
         ]
 
+    def pending_message(self, message_id: int) -> Pending | None:
+        self._messages.retire_obsolete(self._endings)
+        stored = self._messages.unconfirmed_message(message_id)
+        if stored is None or stored.body is None:
+            return None
+        return Pending(
+            stored.id,
+            Destination(stored.channel, stored.chat, stored.thread),
+            stored.body,
+        )
+
     def confirm(self, message_id: int, message_ref: str) -> None:
         self._messages.confirm_delivery(message_id, message_ref)
 

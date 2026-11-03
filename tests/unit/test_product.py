@@ -170,6 +170,10 @@ class _Outbox:
     def pending(self) -> list[Pending]:
         raise NotImplementedError
 
+    def pending_message(self, message_id: int) -> Pending | None:
+        del message_id
+        raise NotImplementedError
+
     def confirm(self, message_id: int, message_ref: str) -> None:
         raise NotImplementedError
 

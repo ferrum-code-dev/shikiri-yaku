@@ -928,6 +928,10 @@ class Outbox(Protocol):
         """
         ...
 
+    def pending_message(self, message_id: int) -> Pending | None:
+        """Recheck one message for delivery immediately before its send begins."""
+        ...
+
     def confirm(self, message_id: int, message_ref: str) -> None: ...
 
     def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:

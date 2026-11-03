@@ -76,6 +76,19 @@ class _Channel:
         raise NotImplementedError
 
 
+class _WaitingChannel(_Channel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send(self, destination: Destination, message: Message) -> str:
+        if self.attempts == 0:
+            self.started.set()
+            await self.release.wait()
+        return await super().send(destination, message)
+
+
 class _Reporter:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -391,6 +404,29 @@ def test_a_health_notice_still_unsent_when_its_signal_closes_is_never_sent(
     assert channel.sent == []
     assert _outbox(memory).pending() == []
     [stored] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert stored.delivery == Delivery.OBSOLETE
+
+
+def test_a_health_notice_closes_while_an_earlier_message_is_delivered(
+    memory: Database,
+) -> None:
+    question = _signal(memory)
+    health = _signal(memory, kind="health")
+    _outbox(memory).queue(question, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    _queue_health(memory, health)
+    channel = _WaitingChannel()
+
+    async def deliver_and_recover() -> None:
+        sending = asyncio.create_task(_sender(memory, channel).tick())
+        await channel.started.wait()
+        SignalStore(memory).close(Closing("api", kind=Kind.HEALTH, final_line="Recovered"), START)
+        channel.release.set()
+        await sending
+
+    asyncio.run(deliver_and_recover())
+
+    assert channel.sent == [(OWNER, QUESTION)]
+    [stored] = MessageStore(memory, _Reporter()).for_signal(health)
     assert stored.delivery == Delivery.OBSOLETE
 
 

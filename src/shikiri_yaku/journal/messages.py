@@ -314,6 +314,16 @@ class MessageStore:
         )
         return [_message(row) for row in rows]
 
+    def unconfirmed_message(self, message_id: int) -> StoredMessage | None:
+        row = self._database.connection.execute(
+            """
+            SELECT * FROM messages
+            WHERE id = ? AND direction = ? AND delivery = ? AND body IS NOT NULL
+            """,
+            (message_id, Direction.OUT, Delivery.PENDING),
+        ).fetchone()
+        return None if row is None else _message(row)
+
     def retire_obsolete(self, ending_prefixes: tuple[str, ...]) -> None:
         """Mark unsent copies of an ending notice obsolete once their signal has closed.
 
