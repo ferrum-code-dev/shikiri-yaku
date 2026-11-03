@@ -1,4 +1,4 @@
-"""An extension: the rules, handler and actions of one category (design §5, §6, §12)."""
+"""An extension: the rules, handler and actions of one category."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def no_standing(signal: Signal) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class LegacyCopy:
-    """A notice sent before the standing flag existed, which its category recognizes (design §7).
+    """A notice sent before the standing flag existed, which its category recognizes.
 
     Its notice key is `key_prefix` and the signal's number, and the signal has one of `kinds`.
     Some legacy notices also require the signal's pull request to be recorded.

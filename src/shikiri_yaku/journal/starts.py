@@ -1,4 +1,4 @@
-"""Engine starts as start ops, so a restart finds the op instead of starting again (§6.2)."""
+"""Engine starts as start ops, so a restart finds the op instead of starting again."""
 
 from __future__ import annotations
 

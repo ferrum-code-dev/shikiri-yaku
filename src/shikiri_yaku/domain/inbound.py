@@ -1,4 +1,4 @@
-"""What the PO sent, as the channel hands it over (design §7)."""
+"""What the PO sent, as the channel hands it over."""
 
 from __future__ import annotations
 

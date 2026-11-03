@@ -1,4 +1,4 @@
-"""Submit ops: a goal is journaled before Shikiru is asked to take it (design §7, §9, §10.1)."""
+"""Submit ops: a goal is journaled before Shikiru is asked to take it."""
 
 from __future__ import annotations
 

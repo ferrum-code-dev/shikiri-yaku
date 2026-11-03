@@ -1,4 +1,4 @@
-"""Read-only queries behind `stats` (design §15): the only SQL that reports on the journal."""
+"""Read-only queries behind `stats`: the only SQL that reports on the journal."""
 
 from __future__ import annotations
 

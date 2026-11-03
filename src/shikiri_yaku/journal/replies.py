@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 _RESOLVE: Final = "resolve"
-# keep: the op that a Stop reminders tap writes; the Scheduler reads it as the silence (design §6.4)
+# keep: the op that a Stop reminders tap writes; the Scheduler reads it as the silence
 SILENCE: Final = "ack"
 _BODY = TypeAdapter(Message)
 
@@ -35,7 +35,7 @@ _BODY = TypeAdapter(Message)
 class JournalReplies:
     """A Stop reminders tap on a standing notice silences its signal, and keeps the signal open.
 
-    The silence is an op named `ack:<number>`, which the Scheduler reads (design §6.4). A tap on a
+    The silence is an op named `ack:<number>`, which the Scheduler reads. A tap on a
     signal with no standing notice closes it, as a button sent before the upgrade always did.
     """
 

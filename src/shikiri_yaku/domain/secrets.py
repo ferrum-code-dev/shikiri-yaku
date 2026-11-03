@@ -1,4 +1,4 @@
-"""The forms of secret that must never travel through chat (design §7).
+"""The forms of secret that must never travel through chat.
 
 A message that carries one of these is refused and its body is never kept. The list covers the
 first release's forms and is not exhaustive. A form is named by its key here; the key is the only

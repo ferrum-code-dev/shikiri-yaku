@@ -1,4 +1,4 @@
-"""Quota waits as wait ops: the op, not memory, says when a parked signal is due (§6.2)."""
+"""Quota waits as wait ops: the op, not memory, says when a parked signal is due."""
 
 from __future__ import annotations
 

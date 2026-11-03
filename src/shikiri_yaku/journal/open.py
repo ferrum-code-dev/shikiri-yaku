@@ -1,4 +1,4 @@
-"""What /open shows again: forwarded questions and approvals awaiting Confirm (design §7)."""
+"""What /open shows again: forwarded questions and approvals awaiting Confirm."""
 
 from __future__ import annotations
 

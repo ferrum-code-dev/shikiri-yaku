@@ -1,4 +1,4 @@
-"""Categories, verdicts and the classification of a signal (design §5)."""
+"""Categories, verdicts and the classification of a signal."""
 
 from __future__ import annotations
 
@@ -52,8 +52,8 @@ class Assessment:
     """The Reasoner's answer for one signal: its verdict and the one-line suggestion for the PO.
 
     `tool`, `manager`, `package` and `why` are the model's words as it gave them, None when it
-    named none. Code checks the names before any of them is used (design §6.3). `call` is the
-    usage and timing of the call, None when its CLI reported none (design §8).
+    named none. Code checks the names before any of them is used. `call` is the
+    usage and timing of the call, None when its CLI reported none.
     """
 
     verdict: Verdict

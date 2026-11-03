@@ -1,4 +1,4 @@
-"""What the Scheduler hands on: a woken signal and a message nobody has answered (design §6.1)."""
+"""What the Scheduler hands on: a woken signal and a message nobody has answered."""
 
 from __future__ import annotations
 

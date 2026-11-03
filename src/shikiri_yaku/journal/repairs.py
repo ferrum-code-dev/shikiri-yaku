@@ -1,4 +1,4 @@
-"""The repairs an upgraded journal gets once, when this code first opens it (design §7)."""
+"""The repairs an upgraded journal gets once, when this code first opens it."""
 
 from __future__ import annotations
 

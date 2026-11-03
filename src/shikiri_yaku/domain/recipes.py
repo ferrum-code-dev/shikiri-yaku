@@ -1,4 +1,4 @@
-"""The names and recipes of an install (design §6.3): the only argument lists that may run.
+"""The names and recipes of an install: the only argument lists that may run.
 
 The Reasoner names a tool, a manager and a package. Pydantic accepts them only inside a strict
 pattern, and code builds the argument list from a fixed row of the recipe table, so no model text
@@ -128,7 +128,7 @@ def validate_install(
 ) -> InstallPlan | Refusal:
     """Return the plan that installs `package` with `manager` as `tool`, or why it is refused.
 
-    `host_managers` is the set of managers found on this host (design §6.3, step 1).
+    `host_managers` is the set of managers found on this host.
     """
     if not is_tool_name(tool):
         return Refusal(RefusalReason.BAD_TOOL)

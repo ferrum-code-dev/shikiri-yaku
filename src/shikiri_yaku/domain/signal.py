@@ -1,4 +1,4 @@
-"""A signal: one thing that may need attention, whatever source it came from (design §4)."""
+"""A signal: one thing that may need attention, whatever source it came from."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from datetime import datetime
 
-# keep: scope of the Operator's own health signals (design §4); they belong to no component
+# keep: scope of the Operator's own health signals; they belong to no component
 OPERATOR_SCOPE: Final = "operator"
 
 
@@ -24,7 +24,7 @@ class Kind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PullRequest:
-    """The pull request a task opened for review: its link and its commit count (design §4)."""
+    """The pull request a task opened for review: its link and its commit count."""
 
     url: str
     commits: int
@@ -32,7 +32,7 @@ class PullRequest:
 
 @dataclass(frozen=True, slots=True)
 class Signal:
-    """`reason` matters for escalations only; the other kinds are sorted by `kind` (design §5)."""
+    """`reason` matters for escalations only; the other kinds are sorted by `kind`."""
 
     project: str
     kind: Kind

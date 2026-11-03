@@ -1,4 +1,4 @@
-"""The journal steps of settling an install a restart found unsettled (design §10).
+"""The journal steps of settling an install a restart found unsettled.
 
 Each step moves the op only from the state the reconciler read, so a second reader of the same op
 changes it once. The run steps in `install_runs` are not used here: a restart has no claim to make.

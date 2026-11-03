@@ -28,7 +28,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R3
 
-- [ ] R3. Clean core contract and journal references
+- [x] R3. Clean core contract and journal references
 
 ## Acceptance criteria
 

@@ -1,4 +1,4 @@
-"""The ports: what the core asks of the outside world (design §12).
+"""The ports: what the core asks of the outside world.
 
 The core and the extensions depend on these protocols only. Adapters implement them, and
 bootstrap.py is the one place that chooses an implementation. A port fails with one of the typed
@@ -168,12 +168,12 @@ INSTALL_FAILED: Final = "failed"
 INSTALL_INTENDED: Final = "intended"
 INSTALL_ISSUED: Final = "issued"
 INSTALL_VOID: Final = "void"
-# keep: the failure reason of an install that a cancelled task left unrun (design §6.3)
+# keep: the failure reason of an install that a cancelled task left unrun
 TASK_CANCELLED_REASON: Final = "task cancelled"
 
 
 class _ShikiruPayload(BaseModel):
-    """A payload of Shikiru's MCP server (design §11).
+    """A payload of Shikiru's MCP server.
 
     Only the fields the Operator reads are declared, and none has a default: a declared field that
     is missing or has the wrong type fails as a ShikiruProtocolError. Fields Shikiru adds are
@@ -206,7 +206,7 @@ class ShikiruEvent(_ShikiruPayload):
 
 
 class EventKinds:
-    """Event kinds the Operator acts on (design §4). Shikiru adds kinds, so these are text."""
+    """Event kinds the Operator acts on. Shikiru adds kinds, so these are text."""
 
     ESCALATION: Final = "escalation"
     ESCALATION_RESOLVED: Final = "escalation_resolved"
@@ -226,7 +226,7 @@ class EscalationStatus:
 
 
 class ResolutionKind:
-    """Resolutions `resolve_escalation` takes (design §10.1). Shikiru may add kinds."""
+    """Resolutions `resolve_escalation` takes. Shikiru may add kinds."""
 
     ANSWER: Final = "answer"
     RETRY: Final = "retry"
@@ -235,7 +235,7 @@ class ResolutionKind:
 
 
 class AckStatus:
-    """Answers of Shikiru to a command (design §10.1). Shikiru may add more, so these are text."""
+    """Answers of Shikiru to a command. Shikiru may add more, so these are text."""
 
     DONE: Final = "done"
     REJECTED: Final = "rejected"
@@ -285,7 +285,7 @@ class EscalationResolution(_ShikiruPayload):
 
 
 class EscalationView(_ShikiruPayload):
-    """An escalation with the decision fields Shikiru parses from its packet (design §11, S1)."""
+    """An escalation with the decision fields Shikiru parses from its packet."""
 
     escalation: EscalationRecord
     packet: str | None
@@ -328,7 +328,7 @@ class DoctorReport(_ShikiruPayload):
 
 
 class ShikiruClient(Protocol):
-    """One project's Shikiru, reached through its MCP link (design §11).
+    """One project's Shikiru, reached through its MCP link.
 
     Every verb raises ShikiruLinkDownError while the link is down, ShikiruRejectedError when
     Shikiru answers with a tool error, and ShikiruProtocolError for a result it cannot read. A
@@ -374,7 +374,7 @@ class ShikiruClient(Protocol):
 
 
 class EventJournal(Protocol):
-    """What an event source keeps in the journal (design §4, §9)."""
+    """What an event source keeps in the journal."""
 
     def last_event_id(self, project: str) -> int | None:
         """Return the project's cursor, or None until its first sync is recorded."""
@@ -395,7 +395,7 @@ class EventJournal(Protocol):
 
 
 class LifecycleJournal(Protocol):
-    """What the liveness source reads and saves in the journal (design §4, §9)."""
+    """What the liveness source reads and saves in the journal."""
 
     def state(self, project: str) -> LifecycleState | None:
         """Return the project's cursor facts, or None until its first sync is recorded."""
@@ -494,7 +494,7 @@ class InstallLog(Protocol):
 
 
 class InstallReaskLog(Protocol):
-    """The journal steps of asking the PO again after a failed check (design §6.3).
+    """The journal steps of asking the PO again after a failed check.
 
     The new op is intended before its approval is queued; the old op is voided only after that,
     so a crash between the two leaves the old op issued for the next start to ask again.
@@ -532,7 +532,7 @@ class InstallFiles(Protocol):
 
 
 class InstallRunLog(Protocol):
-    """The journal steps of an install run (design §6.3, §9, §10.1): claimed, then one outcome.
+    """The journal steps of an install run: claimed, then one outcome.
 
     A claim returns None, and voids an approved op, when its escalation is no longer forwarded.
     An acknowledged op stays issued until the `escalation_resolved` event that names its command
@@ -564,7 +564,7 @@ class PendingInstall:
 
 
 class InstallReconcileLog(Protocol):
-    """The journal steps of settling an install a restart found unsettled (design §10).
+    """The journal steps of settling an install a restart found unsettled.
 
     `unsettled_op` reads one op again, so a decision never acts on an earlier snapshot.
     """
@@ -601,7 +601,7 @@ class InstallRunner(Protocol):
 
 
 class ActionLog(Protocol):
-    """The automatic actions the loop guard counts and records (design §6, §9)."""
+    """The automatic actions the loop guard counts and records."""
 
     def times(
         self, kind: str, project: str, cause: Cause | None, since: datetime | None
@@ -618,7 +618,7 @@ class ActionLog(Protocol):
 
 
 class Guard(Protocol):
-    """The loop guard as the actions see it: an automatic action asks before it runs (design §6)."""
+    """The loop guard as the actions see it: an automatic action asks before it runs."""
 
     def retry(self, project: str, task_id: str | None, reason: str) -> Granted | Refused: ...
 
@@ -626,7 +626,7 @@ class Guard(Protocol):
 
 
 class ScheduleLog(Protocol):
-    """What the Scheduler reads and writes in the journal (design §6, §9)."""
+    """What the Scheduler reads and writes in the journal."""
 
     def due_parked(self, now: datetime) -> list[Parked]: ...
 
@@ -644,7 +644,7 @@ class ScheduleLog(Protocol):
 
 
 class RoutingLog(Protocol):
-    """What the Router writes in the journal about one signal's handling (design §6, §9).
+    """What the Router writes in the journal about one signal's handling.
 
     Every move is conditional on the state the Router expects, so a signal is handled once.
     """
@@ -689,7 +689,7 @@ class InstallProposalLog(Protocol):
 
 
 class DispatchLog(Protocol):
-    """What the Dispatcher reads in the journal (design §10)."""
+    """What the Dispatcher reads in the journal."""
 
     def recover(self, now: datetime) -> int:
         """Put every signal left in `handling` back to `new`; return how many."""
@@ -707,7 +707,7 @@ class Forwarder(Protocol):
     and why it stopped. `suggestion` is the note of the classification, the Reasoner's suggestion
     or its failure, which is model-written and shown as such. The result is True when the message
     only informs, so the signal closes with it and does not wait for an answer. `standing` says the
-    message is about something that stays true, so its copy keeps Stop reminders (design §6.1).
+    message is about something that stays true, so its copy keeps Stop reminders.
     """
 
     async def forward(
@@ -731,10 +731,10 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
     """Everything the liveness source needs of the journal."""
 
 
-# keep: Telegram's limits (design §7), named here because the Channel is the only user of them
+# keep: Telegram's limits, named here because the Channel is the only user of them
 MESSAGE_TEXT_LIMIT: Final = 4096
 CALLBACK_DATA_LIMIT: Final = 64
-# keep: the blank line that sets each block of a message off from the next (design §6.1)
+# keep: the blank line that sets each block of a message off from the next
 BLOCK_SEPARATOR: Final = "\n\n"
 
 
@@ -751,7 +751,7 @@ def text_room(heading: str) -> int:
 
 @dataclass(frozen=True, slots=True)
 class Button:
-    """An inline button: a tap sends its `data` back, or a link opens its `url` (design §6.4, §7).
+    """An inline button: a tap sends its `data` back, or a link opens its `url`.
 
     `data` carries numbers only, so it stays short; a button has exactly one of the two.
     """
@@ -768,7 +768,7 @@ class Button:
 
 @dataclass(frozen=True, slots=True)
 class Message:
-    """What the Channel shows: a heading, a text and the buttons under it (design §6.1).
+    """What the Channel shows: a heading, a text and the buttons under it.
 
     The heading comes first, set off from the text by a blank line. The Channel decides how to show
     the heading; the characters the PO reads, which the limit counts, are `shown()`.
@@ -800,7 +800,7 @@ class Message:
 
 
 class Channel(Protocol):
-    """The PO's chat (design §7), Telegram first.
+    """The PO's chat, Telegram first.
 
     `send` returns the reference the platform gives the message, and `edit` and `delete` take it
     back. A message the platform refuses for good raises ChannelRefusedError; any other failure
@@ -835,7 +835,7 @@ class CheckLine:
 
 
 class Destinations(Protocol):
-    """Where a Channel's messages go, and what an inbound item says of its component (design §13).
+    """Where a Channel's messages go, and what an inbound item says of its component.
 
     The core asks for destinations by project and kind, and for the component an inbound thread
     implies, and never reads how the channel organises its chats. `prepare` runs once at start-up,
@@ -859,7 +859,7 @@ class Updates(Protocol):
 
 
 class InboundLog(Protocol):
-    """Inbound items in the journal, kept until Replies has handled them (design §7, §9)."""
+    """Inbound items in the journal, kept until Replies has handled them."""
 
     def next_offset(self, channel: str) -> int:
         """Return the offset to poll from: past the last batch that was journaled, 0 at first."""
@@ -892,7 +892,7 @@ class Pending:
 
 
 class Outbox(Protocol):
-    """Every message to the PO is recorded here before it is sent (design §7, §10).
+    """Every message to the PO is recorded here before it is sent.
 
     One sender drains it: a restart sends what was recorded and not confirmed, and a confirmed
     message is never offered again. A recorded body carries its signal reference (`S41`), so a
@@ -914,8 +914,8 @@ class Outbox(Protocol):
         """Record the message once per key and destination; a key seen before records nothing.
 
         A message with a slot replaces the older copies of the same slot, chat and thread once the
-        platform has accepted it (design §7). A standing message keeps Stop reminders until the PO
-        stops them (design §6.1); the handler that queues it says so, not the kind of its signal.
+        platform has accepted it. A standing message keeps Stop reminders until the PO
+        stops them; the handler that queues it says so, not the kind of its signal.
         """
         ...
 
@@ -957,7 +957,7 @@ class Outbox(Protocol):
 
 
 class Copies(Protocol):
-    """The journal's record of a sent message, which an edit of it can be refused for (design §7).
+    """The journal's record of a sent message, which an edit of it can be refused for.
 
     Each call is journaled before the platform is asked. False means the journal does not know a
     sent copy at that reference: then nothing is journaled and nothing is deleted.
@@ -1010,7 +1010,7 @@ class FinalEdits(Protocol):
 
 
 class SecretLog(Protocol):
-    """Inbound messages that carried a secret, and the attempt to delete each (design §7).
+    """Inbound messages that carried a secret, and the attempt to delete each.
 
     The attempt is journaled before the platform is asked. An attempt the platform refuses is never
     repeated; one that fails for a transient reason goes back to be tried again.
@@ -1028,7 +1028,7 @@ class SecretLog(Protocol):
 
 
 class Replacements(Protocol):
-    """Sent copies that a newer copy of the same slot has replaced, and their deletion (design §7).
+    """Sent copies that a newer copy of the same slot has replaced, and their deletion.
 
     `superseded` lists them, oldest first. Each deletion is journaled before the platform is asked.
     A deletion the platform refuses for good keeps the copy as its final state, with the line that
@@ -1053,7 +1053,7 @@ class Reporter(Protocol):
 
 
 class Reasoner(Protocol):
-    """The Reasoner's one job, `assess_blocker` (design §8). Its ladder sits behind this interface.
+    """The Reasoner's one job, `assess_blocker`. Its ladder sits behind this interface.
 
     `host_facts` are the lines the prompt gives the model about this host. `deadline` represents
     the overall assessment timeout, so the ladder can distinguish its expiry from cancellation.
@@ -1076,7 +1076,7 @@ class AssessmentDeadline(Protocol):
 
 
 class ReasonerRung(Protocol):
-    """One rung of the ladder: one agent CLI and model (design §8). Raises ReasonerError on failure.
+    """One rung of the ladder: one agent CLI and model. Raises ReasonerError on failure.
 
     `host_facts` are the lines the prompt gives the model about this host: OS, package managers.
     """
@@ -1100,7 +1100,7 @@ class RungState:
 
 
 class RungStates(Protocol):
-    """The state of each rung of the ladder, in ladder order (design §8)."""
+    """The state of each rung of the ladder, in ladder order."""
 
     def rung_states(self) -> Sequence[RungState]: ...
 
@@ -1113,7 +1113,7 @@ class CommandResult:
 
 
 class HostLock(Protocol):
-    """The lock under which one host command runs at a time, across instances (design §3.1, §6.3).
+    """The lock under which one host command runs at a time, across instances.
 
     `hold` waits until the lock is free and releases it when the block ends, also when it is
     cancelled while it waits.
@@ -1123,7 +1123,7 @@ class HostLock(Protocol):
 
 
 class CommandRunner(Protocol):
-    """Runs one stored argument list on this host, for at most `timeout_s` (design §6.3, §12).
+    """Runs one stored argument list on this host, for at most `timeout_s`.
 
     The list runs as given: no shell, and nothing a model wrote. `cwd` is the directory it starts
     in, and `env` is added to this process's environment. Raises CommandError when the command
@@ -1141,7 +1141,7 @@ class CommandRunner(Protocol):
 
 
 class Clock(Protocol):
-    """The only source of time for the core (design §12). Every time it gives is timezone-aware."""
+    """The only source of time for the core. Every time it gives is timezone-aware."""
 
     def now(self) -> datetime: ...
 
@@ -1294,7 +1294,7 @@ class RecordedResolution:
 
 
 class ReplyLog(Protocol):
-    """Origin binding and once-only resolve issuance; issued ops await observation in A12."""
+    """Bind resolve ops to their origin and issue each resolve once; confirm by observation."""
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
 
@@ -1343,7 +1343,7 @@ class Unsettled:
 
 
 class ReconcileLog(Protocol):
-    """The issued resolves to reconcile by observation (design §10.1)."""
+    """The issued resolves to reconcile by observation."""
 
     def unsettled(self) -> list[Unsettled]: ...
 
@@ -1377,7 +1377,7 @@ class RetryLog(Protocol):
 
 
 class AttemptState:
-    """States of an automatic attempt, a retry or an engine start, as text (design §6.2, §9)."""
+    """States of an automatic attempt, a retry or an engine start, as text."""
 
     ISSUED: Final = "issued"
     CONFIRMED: Final = "confirmed"
@@ -1392,7 +1392,7 @@ class RetryAttempt:
 
 
 class Notifier(Protocol):
-    """Queues an informational message about a signal, once per key (design §7).
+    """Queues an informational message about a signal, once per key.
 
     A notice is not a question, so it has no signal number. The key names what the notice is
     about, so a handler that runs again sends nothing twice.
@@ -1403,7 +1403,7 @@ class Notifier(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class WaitAttempt:
-    """The quota wait journaled for a signal: when it is due (design §6.2)."""
+    """The quota wait journaled for a signal: when it is due."""
 
     wake_at: datetime
 
@@ -1440,7 +1440,7 @@ class UnsettledStart:
 
 
 class StartLog(Protocol):
-    """Engine starts, journaled as start ops before Shikiru's `start` runs (design §6.2, §10)."""
+    """Engine starts, journaled as start ops before Shikiru's `start` runs."""
 
     def existing(self, signal: Signal) -> StartAttempt | None:
         """Find the start already journaled for this signal, if any."""
@@ -1464,7 +1464,7 @@ class StartLog(Protocol):
 
 
 class SubmitStatus:
-    """States of a submit op (design §9, §10.1), as text: ports cannot import the journal's enum."""
+    """States of a submit op, as text: ports cannot import the journal's enum."""
 
     INTENDED: Final = "intended"
     ISSUED: Final = "issued"
@@ -1474,7 +1474,7 @@ class SubmitStatus:
 
 
 class SubmitPayload(BaseModel):
-    """What a submit op sends: the component whose Shikiru takes it, and the request (§7).
+    """What a submit op sends: the component whose Shikiru takes it, and the request.
 
     `destination` is the chat the outcome is reported in. `retry_of` is the unknown submit that a
     replacement consumed; it is None for a goal the PO sent.
@@ -1498,7 +1498,7 @@ class SubmitOp:
 
 
 class SubmitLog(Protocol):
-    """Submit ops in the journal (design §7, §9). A submit is sent only from an intended op."""
+    """Submit ops in the journal. A submit is sent only from an intended op."""
 
     def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
         """Journal the submit once per Telegram update id, and return the op as stored."""
@@ -1594,7 +1594,7 @@ class CompletedEscalation:
 
 
 class StatsLog(Protocol):
-    """What `stats` reads of the journal (design §15).
+    """What `stats` reads of the journal.
 
     Counts are per category, reason, verdict, current op state or recorded install outcome; a None
     category or verdict is an absent one. The states are not outcomes.

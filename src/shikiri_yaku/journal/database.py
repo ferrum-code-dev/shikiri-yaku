@@ -1,4 +1,4 @@
-"""The SQLite connection of the journal: WAL, numbered migrations, and transactions (design §9)."""
+"""The SQLite connection of the journal: WAL, numbered migrations, and transactions."""
 
 from __future__ import annotations
 

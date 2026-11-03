@@ -1,7 +1,7 @@
-"""The journal steps of an install run (design §6.3, §9): claimed, then acknowledged or failed.
+"""The journal steps of an install run: claimed, then acknowledged or failed.
 
 Each step is one conditional change, so two executors that meet on one op change it once. The op
-is confirmed by the event that names its command, in the event journal (design §10.1), not here.
+is confirmed by the event that names its command, in the event journal, not here.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class JournalInstallRuns:
             if stored is None:
                 return None
             if stored.state != SignalState.FORWARDED:
-                # keep: design §6.3: an approval for an escalation resolved elsewhere is void
+                # keep: an approval for an escalation resolved elsewhere is void
                 self._ops.transition(op_id, OpState.APPROVED, OpState.VOID, now)
                 return None
             if not self._ops.transition(op_id, OpState.APPROVED, OpState.ISSUED, now):

@@ -1,4 +1,4 @@
-"""The journal: SQLite access, and the only place with SQL (design §9, §12)."""
+"""The journal: SQLite access, and the only place with SQL."""
 
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal.cursors import Cursor, CursorStore, Lifecycle

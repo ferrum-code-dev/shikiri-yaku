@@ -1,4 +1,4 @@
-"""The rule classifier: the rules of the registered extensions, in order (design §5)."""
+"""The rule classifier: the rules of the registered extensions, in order."""
 
 from __future__ import annotations
 

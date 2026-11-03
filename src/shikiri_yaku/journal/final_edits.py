@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 _BODY = TypeAdapter(Message)
 # keep: a copy with buttons is edited to its final state, as a question is
 # keep: a copy without buttons is edited only when its key has a prefix the caller names, because
-# keep: a copy sent before the upgrade has no button and still needs its recovery edit (design §6.5)
+# keep: a copy sent before the upgrade has no button and still needs its recovery edit
 _SHOWS_BUTTONS = """
     direction = :out AND delivery = :sent
     AND refusal IS NULL AND body IS NOT NULL

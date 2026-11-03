@@ -30,7 +30,7 @@ def _inbound(row: sqlite3.Row) -> Inbound:
 
 
 class JournalInbound:
-    """What the PO sent: inbound rows of the messages table, one per update id (design §7, §9).
+    """What the PO sent: inbound rows of the messages table, one per update id.
 
     Update ids are unique per bot, and an instance has one bot, so the id alone identifies an item.
     """

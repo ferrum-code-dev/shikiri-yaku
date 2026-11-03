@@ -1,37 +1,33 @@
 """The numbered migrations of the journal: migration N is MIGRATIONS[N - 1] and is never edited.
 
 Migration 2 makes a notice unique per key and chat, not per key: the key names the notice and each
-owner's chat gets its own copy of it (design §7).
+owner's chat gets its own copy of it.
 Migration 3 keeps the time of the newest lifecycle event: the liveness rule needs to know whether
-a clean stop happened before this run of the Operator (design §4).
+a clean stop happened before this run of the Operator.
 Migration 4 keeps the note that came with a signal's classification: the Reasoner's suggestion or
-its failure, which the message to the PO must carry (design §5).
-Migration 5 keeps the body of an outbound message, so a restart can send what was recorded
-(design §7, §10).
+its failure, which the message to the PO must carry.
+Migration 5 keeps the body of an outbound message, so a restart can send what was recorded.
 Migration 6 keeps the reason of a refused outbound message, the only thing a refusal leaves
-behind (design §7).
+behind.
 Migration 7 keeps what the PO sent in the messages table, one row per channel update id, and the
-offset the polling resumes from (design §7, §9). The body column holds an inbound item's text.
-Migration 8 keeps the acknowledgement of a resolve op (design §10.1).
+offset the polling resumes from. The body column holds an inbound item's text.
+Migration 8 keeps the acknowledgement of a resolve op.
 Migration 9 keeps the final body of a sent copy whose edit is journaled and not yet confirmed, so a
-restart finishes the edit (design §7).
+restart finishes the edit.
 Migration 10 marks that edit confirmed without replacing the body: the body keeps the buttons the
-copy was sent with, so a tap made before the edit is still recognized and answered (design §7).
+copy was sent with, so a tap made before the edit is still recognized and answered.
 Migration 11 claims each logical command reply in the same transaction as all of its parts.
 Migration 12 stores channel topic threads on outbox rows and records the reconciled topic ids.
-Migration 13 keeps the pull request of a review signal: its link and its commit count (design §4).
-Migration 14 keeps a Reasoner call's usage and duration for a signal's verdict, as JSON (design §8).
-Migration 15 keeps the typed host-tool proposal from the classification, as JSON (design §5).
-Migration 16 records install outcomes and a resolution event that arrived before its acknowledgement
-(design §6.3, §10, §15).
-Migration 17 records a rejected recovery answer before retryable PO notification work begins
-(design §10.1).
-Migration 20 keeps the slot of an outbound message, so a newer copy in the same slot replaces it
-(design §7).
+Migration 13 keeps the pull request of a review signal: its link and its commit count.
+Migration 14 keeps a Reasoner call's usage and duration for a signal's verdict, as JSON.
+Migration 15 keeps the typed host-tool proposal from the classification, as JSON.
+Migration 16 records install outcomes and a resolution event that arrived before its
+acknowledgement.
+Migration 17 records a rejected recovery answer before retryable PO notification work begins.
+Migration 20 keeps the slot of an outbound message, so a newer copy in the same slot replaces it.
 Migration 21 gives each copy sent before slots the slot its kind has now, read from its notice key,
-so an upgraded journal replaces the approval it already holds (design §7).
-Migration 24 keeps the name of each one-time repair that ran, so an upgraded journal repairs once
-(design §7).
+so an upgraded journal replaces the approval it already holds.
+Migration 24 keeps the name of each one-time repair that ran, so an upgraded journal repairs once.
 """
 
 from __future__ import annotations

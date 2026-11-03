@@ -1,4 +1,4 @@
-"""What the loop guard decides about an automatic action (design §6)."""
+"""What the loop guard decides about an automatic action."""
 
 from __future__ import annotations
 

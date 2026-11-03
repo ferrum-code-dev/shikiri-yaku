@@ -1,4 +1,4 @@
-"""What a handler returns for one signal (design §6)."""
+"""What a handler returns for one signal."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class Resolved:
 class Forward:
     """The signal goes to the PO; `standing` says its message is about something that stays true.
 
-    A standing message keeps Stop reminders (design §6.1). The handler decides, not the kind of the
+    A standing message keeps Stop reminders. The handler decides, not the kind of the
     signal, so a new notice is informational unless its handler says otherwise.
     """
 
@@ -36,8 +36,7 @@ class WaitUntil:
 class Informed:
     """The handler sent the PO a message that only informs; the signal closes when it is sent.
 
-    Such a message has no button, so it never gets a reminder (design §6.1). This outcome is not in
-    design §6: the handler's message is the whole answer (tasks/plan.md E10).
+    Such a message has no button, so it never gets a reminder; its message is the whole answer.
     """
 
     note: str
@@ -47,8 +46,8 @@ class Informed:
 class Notified:
     """The handler sent the PO its own message about the signal, which then waits as a forward does.
 
-    Reminders apply to it as to a forward. This outcome is not in design §6: the review handler
-    needs it, because a forward would send the Product message (tasks/plan.md C4).
+    Reminders apply to it as to a forward. The Review handler can send its own message without also
+    sending the Product message.
     """
 
     note: str

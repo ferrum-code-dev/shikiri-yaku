@@ -1,4 +1,4 @@
-"""The copies a newer copy of their slot replaced, and the journal of their deletion (§7).
+"""The copies a newer copy of their slot replaced, and the journal of their deletion.
 
 A copy is superseded when a newer copy of the same slot, signal, chat and thread has been sent. Its
 deletion is journaled before the platform is asked. A copy the platform will not delete keeps its
