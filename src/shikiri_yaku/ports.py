@@ -58,11 +58,13 @@ __all__ = [
     "AttemptState",
     "Button",
     "Channel",
+    "ChannelCheck",
     "ChannelError",
     "ChannelProtocolError",
     "ChannelRefusedError",
     "ChannelRepairError",
     "ChannelStartupError",
+    "ChannelUnavailableError",
     "Choice",
     "Classifier",
     "Clock",
@@ -811,6 +813,13 @@ class Channel(Protocol):
     async def delete(self, message_ref: str) -> None: ...
 
 
+class ChannelCheck(Protocol):
+    """Verifies that the configured channel is ready to serve the Operator."""
+
+    async def verify(self) -> None:
+        """Raise ChannelError for a definite failure or ChannelUnavailableError if unverified."""
+
+
 class Destinations(Protocol):
     """Where a Channel's messages go, and what an inbound item says of its component (design §13).
 
@@ -1138,14 +1147,14 @@ class ShikiruProtocolError(ShikiruError):
 
 
 class ChannelError(Exception):
-    """A message could not be sent or edited; it may be tried again."""
+    """A channel operation failed; it may be tried again."""
 
 
-class ChannelUnverifiedError(ChannelError):
-    """The platform gave no usable answer, so a check of it could not be made.
+class ChannelUnavailableError(ChannelError):
+    """The channel gave no usable answer, so a check of it could not be made.
 
     No reply, a refused call and a reply in another shape all qualify. A start is not refused on
-    it, because the platform may only be unreachable for the moment; a definite refusal is a plain
+    it, because the channel may only be unavailable for the moment; a definite refusal is a plain
     ChannelError.
     """
 

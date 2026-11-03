@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, InboundLog
 
 # keep: the batch is the what-failed key of the Operator's own health signal
-INBOUND_BATCH: Final = "telegram_inbound_batch"
+INBOUND_BATCH: Final = "inbound_batch"
 
 
 class InboundService:
@@ -33,6 +33,7 @@ class InboundService:
         clock: Clock,
         *,
         interval_s: float,
+        health_scope: str = INBOUND_BATCH,
     ) -> None:
         self._poller = poller
         self._log = log
@@ -40,6 +41,7 @@ class InboundService:
         self._health = health
         self._clock = clock
         self._interval_s = interval_s
+        self._health_scope = health_scope
 
     async def run(self) -> None:
         while True:
@@ -59,8 +61,8 @@ class InboundService:
         try:
             await self._poller.poll_once()
         except ChannelProtocolError as error:
-            self._health.source_failed(INBOUND_BATCH, error)
+            self._health.source_failed(self._health_scope, error)
         except ChannelError:
             pass
         else:
-            self._health.source_recovered(INBOUND_BATCH)
+            self._health.source_recovered(self._health_scope)

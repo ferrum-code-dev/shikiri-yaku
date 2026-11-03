@@ -1668,7 +1668,8 @@ Found while rewriting design §7 (the design text for 1 and 2 is already changed
    was replaced) is dropped as obsolete and never sent; its row ends in a final state that says so.
 
 Acceptance criteria:
-* `run` and `doctor` work with a fake `ChannelCheck`; a grep-style test fails when `cli.py`, `app/` or `domain/` mention `telegram` outside the allowed places named above.
+* `run` and `doctor` work with a fake `ChannelCheck`; a grep-style test fails when `cli.py`, `app/` or
+  `domain/` mention `telegram` outside the allowed places named above.
 * Table-driven over the probe outcomes at `run`: other members (setting false) refuses; other members with `allow_other_members = true` starts; webhook set refuses; missing manage-topics right refuses; Telegram unreachable starts.
 * Composed test: an Operator-level health signal is sent without `message_thread_id`, a component signal with its topic's; the reconcile makes no `createForumTopic` call for General; a journal with an old `general` row still runs.
 * A queued health message whose signal closed before the send is not sent; a queued question whose signal is still open is sent as before.

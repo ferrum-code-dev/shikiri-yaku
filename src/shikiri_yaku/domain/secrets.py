@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 # keep: a leading \b fails after '_', which a token may follow, so no form takes one
 # keep: sk- may not follow a letter or digit, so "desk-" in ordinary text is not taken for a key
 FORMS: Final[dict[str, re.Pattern[str]]] = {
-    "telegram_bot_token": re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35}"),
+    "bot_token": re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35}"),
     "sk_key": re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}"),
     "pem_private_key": re.compile(r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
     "github_token": re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"),

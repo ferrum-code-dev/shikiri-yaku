@@ -33,7 +33,7 @@ class Commands:
 
     Free text gets the command list. A message that starts with `/` and names no known command gets
     the name as typed, cut to `name_max_chars`, and the list. Names match without case (a phone
-    keyboard capitalises the first letter) and without the `@bot` of Telegram's addressed form.
+    keyboard capitalises the first letter) and without the `@bot` of the channel's addressed form.
 
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.

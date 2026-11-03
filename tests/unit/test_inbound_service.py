@@ -77,7 +77,15 @@ class Harness:
             updates, self.log, _Clock(), channel="telegram", owners=[OWNER], wait_s=1
         )
         replies: Replies = self.replies  # pyright: ignore[reportAssignmentType]
-        self.service = InboundService(poller, self.log, replies, health, _Clock(), interval_s=1)
+        self.service = InboundService(
+            poller,
+            self.log,
+            replies,
+            health,
+            _Clock(),
+            interval_s=1,
+            health_scope="telegram_inbound_batch",
+        )
 
     def tick(self) -> None:
         asyncio.run(self.service.tick())

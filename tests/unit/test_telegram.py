@@ -35,7 +35,7 @@ _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "telegram"
 SENT: Final = "1001/42"
 MESSAGE: Final = Message("S1 · Which way?", (Button("1", "a:1:1"),))
 HEADING: Final = "S1 · Which way? · decision"
-TOKEN: Final = SECRETS["telegram_bot_token"]
+TOKEN: Final = SECRETS["bot_token"]
 
 
 def _recorded(name: str) -> dict[str, Any]:
@@ -374,7 +374,7 @@ def test_a_failed_deletion_stays_journaled_and_the_refusal_stands() -> None:
     with pytest.raises(ChannelRefusedError):
         asyncio.run(TelegramChannel(api, _Clock(), copies).edit(SENT, Message(f"S1 {TOKEN}")))
 
-    assert copies.recorded == ["telegram_bot_token"]
+    assert copies.recorded == ["bot_token"]
     assert copies.confirmed == []
 
 

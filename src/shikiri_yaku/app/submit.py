@@ -1,4 +1,4 @@
-"""Sends a goal to Shikiru once per Telegram update and records the answer (§7, §10.1)."""
+"""Sends a goal to Shikiru once per inbound update and records the answer (§7, §10.1)."""
 
 from __future__ import annotations
 

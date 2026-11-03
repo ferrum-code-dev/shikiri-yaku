@@ -39,7 +39,7 @@ from shikiri_yaku.ports import (
     ChannelError,
     ChannelRepairError,
     ChannelStartupError,
-    ChannelUnverifiedError,
+    ChannelUnavailableError,
     CompositionError,
     ReasonerError,
     ShikiruError,
@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
     from shikiri_yaku.app.stats import Measures
+    from shikiri_yaku.ports import ChannelCheck
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
 
@@ -76,7 +77,7 @@ class Lifecycle(Protocol):
     def link_probes(self) -> Mapping[str, Callable[[], Awaitable[None]]]: ...
 
     @property
-    def telegram_probe(self) -> Callable[[], Awaitable[None]]: ...
+    def channel_check(self) -> ChannelCheck: ...
 
     @property
     def rung_probes(self) -> Mapping[str, Callable[[], Awaitable[None]]]: ...
@@ -339,7 +340,7 @@ def _run(directory: Path, compose: Compose) -> int:
         with instance_lock(directory):
             composition = compose(settings, directory)
             try:
-                _check_telegram(composition.telegram_probe)
+                _verify_channel(composition.channel_check)
                 composition.recover()
                 asyncio.run(_serve(composition.jobs))
             finally:
@@ -469,17 +470,17 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
             _Check(f"reasoner {name}", _probe_problem(probe))
             for name, probe in composition.rung_probes.items()
         ]
-        telegram = _Check("telegram", _probe_problem(composition.telegram_probe))
+        channel = _Check("channel", _probe_problem(composition.channel_check.verify))
     finally:
         composition.close()
-    return [*links, *rungs, telegram, _Check("journal")]
+    return [*links, *rungs, channel, _Check("journal")]
 
 
-def _check_telegram(probe: Callable[[], Awaitable[None]]) -> None:
-    # keep: an unverified check starts, because Telegram may be unreachable only for the moment
+def _verify_channel(channel_check: ChannelCheck) -> None:
+    # keep: a temporary outage is reported by the channel's existing health source
     try:
-        asyncio.run(probe())
-    except ChannelUnverifiedError:
+        asyncio.run(channel_check.verify())
+    except ChannelUnavailableError:
         return
 
 

@@ -7,7 +7,7 @@ from typing import Final
 from shikiri_yaku.ports import Button, Message
 
 SECRETS: Final = {
-    "telegram_bot_token": "123456789:" + "A" * 35,
+    "bot_token": "123456789:" + "A" * 35,
     "sk_key": "sk-" + "a" * 20,
     "pem_private_key": "-----BEGIN PRIVATE KEY-----",
     "github_token": "ghp_" + "a" * 36,
@@ -32,7 +32,7 @@ def _carriers(secret: str) -> list[Message]:
 def secret_cases() -> list[tuple[str, str, Message]]:
     """Each form with its secret, in every place a message can carry it: (form, secret, message)."""
     cases = list(SECRETS.items())
-    cases += [("telegram_bot_token", HYPHEN_ENDED_TOKEN + tail) for tail in TAILS]
+    cases += [("bot_token", HYPHEN_ENDED_TOKEN + tail) for tail in TAILS]
     return [(form, secret, message) for form, secret in cases for message in _carriers(secret)]
 
 

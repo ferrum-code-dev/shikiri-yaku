@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 NOW = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
 COMPONENTS: Final = 60
-TOKEN: Final = SECRETS["telegram_bot_token"]
+TOKEN: Final = SECRETS["bot_token"]
 
 
 class _InterruptedParts(Sequence[Message]):

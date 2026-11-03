@@ -39,7 +39,7 @@ OTHER = Destination("telegram", "1002")
 QUESTION = Message("S1 · Which way?", (Button("1", "a:1:1"),))
 HEALTH = Message("api: Shikiru link down for 10 minutes")
 SENT = "1001/42"
-TOKEN = SECRETS["telegram_bot_token"]
+TOKEN = SECRETS["bot_token"]
 
 
 class _Clock:
@@ -332,7 +332,7 @@ def test_a_notice_that_cannot_be_journaled_is_reported_as_metadata_and_the_refus
     )
 
     [stored] = MessageStore(memory, reporter).for_signal(number)
-    assert (stored.delivery, stored.refusal) == (Delivery.REFUSED, "telegram_bot_token")
+    assert (stored.delivery, stored.refusal) == (Delivery.REFUSED, "bot_token")
     [line] = reporter.lines
     assert f"S{number}" in line
     assert TOKEN not in line
@@ -357,12 +357,12 @@ def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platf
     number = _sent(memory)
     outbox = _outbox(memory)
 
-    assert outbox.record_deletion(SENT, "telegram_bot_token", now=START)
+    assert outbox.record_deletion(SENT, "bot_token", now=START)
     [attempted, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (attempted.delivery, attempted.body, attempted.refusal) == (
         Delivery.DELETE_ATTEMPTED,
         None,
-        "telegram_bot_token",
+        "bot_token",
     )
     assert not any(TOKEN in str(value) for value in _stored_values(memory))
 
@@ -374,7 +374,7 @@ def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platf
 def test_a_deletion_of_a_copy_the_journal_does_not_know_journals_nothing(memory: Database) -> None:
     number = _signal(memory)
 
-    assert _outbox(memory).record_deletion("9/9", "telegram_bot_token", now=START) is False
+    assert _outbox(memory).record_deletion("9/9", "bot_token", now=START) is False
     assert MessageStore(memory, _Reporter()).for_signal(number) == []
 
 

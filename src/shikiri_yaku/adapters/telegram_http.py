@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final
 
 import httpx
 
-from shikiri_yaku.ports import ChannelUnverifiedError
+from shikiri_yaku.ports import ChannelUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -23,7 +23,7 @@ class HttpBotApi:
     """Posts each method as a JSON body and returns the decoded reply, whatever its `ok` says.
 
     The token file is read once, here, and the token is kept only in the base URL of this object.
-    A file that cannot be read is not an error here: each call then raises ChannelUnverifiedError,
+    A file that cannot be read is not an error here: each call then raises ChannelUnavailableError,
     so the service starts and `doctor` names the problem. An error reply is a reply, which the
     Channel reads. No error names the URL or the token.
     """
@@ -43,7 +43,7 @@ class HttpBotApi:
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         if self._base_url is None:
-            raise ChannelUnverifiedError(NO_TOKEN)
+            raise ChannelUnavailableError(NO_TOKEN)
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout_s, transport=self._transport
@@ -51,7 +51,7 @@ class HttpBotApi:
                 response = await client.post(f"{self._base_url}/{method}", json=payload)
             reply: object = response.json()
         except httpx.HTTPError, ValueError:
-            raise ChannelUnverifiedError(NO_REPLY) from None
+            raise ChannelUnavailableError(NO_REPLY) from None
         return reply
 
 

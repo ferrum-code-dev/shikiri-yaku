@@ -25,8 +25,8 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import (
     TELEGRAM_CHANNEL,
     TelegramChannel,
+    TelegramChannelCheck,
     TelegramForumTopics,
-    probe_bot,
 )
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_topics import (
@@ -125,6 +125,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Channel,
+        ChannelCheck,
         Clock,
         CommandRunner,
         Destinations,
@@ -151,6 +152,7 @@ if TYPE_CHECKING:
 
 SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
+INBOUND_HEALTH_SCOPE: Final = "telegram_inbound_batch"
 # keep: a copy without buttons that the signal ends, sent before the upgrade, still gets its edit
 # keep: a notice with these prefixes still unsent when its signal has closed is never sent
 ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_KEY}:",)
@@ -171,7 +173,7 @@ class Composition:
     clock: Clock
     journal: Database
     link_probes: Mapping[str, Callable[[], Awaitable[None]]]
-    telegram_probe: Callable[[], Awaitable[None]]
+    channel_check: ChannelCheck
     rung_probes: Mapping[str, Callable[[], Awaitable[None]]]
     jobs: Sequence[Job]
     recover: Callable[[], None]
@@ -386,20 +388,19 @@ def compose(
 
     rung_probes = {} if reasoning is None else {rung.name: rung.probe for rung in reasoning.rungs}
     return Composition(
-        settings,
-        clock,
-        journal,
-        probes,
-        partial(
-            probe_bot,
+        settings=settings,
+        clock=clock,
+        journal=journal,
+        link_probes=probes,
+        channel_check=TelegramChannelCheck(
             bot_api,
             settings.telegram.group_id,
             settings.telegram.owners,
             allow_other_members=settings.telegram.allow_other_members,
         ),
-        rung_probes,
-        jobs,
-        recover,
+        rung_probes=rung_probes,
+        jobs=jobs,
+        recover=recover,
     )
 
 
@@ -695,7 +696,13 @@ def inbound_job(
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(
-        poller, log, replies, health, clock, interval_s=operator.inbound_interval_s
+        poller,
+        log,
+        replies,
+        health,
+        clock,
+        interval_s=operator.inbound_interval_s,
+        health_scope=INBOUND_HEALTH_SCOPE,
     )
     return service.run
 

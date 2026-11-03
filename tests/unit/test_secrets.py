@@ -11,7 +11,7 @@ from tests.support.secrets import HYPHEN_ENDED_TOKEN, TAILS
 @pytest.mark.parametrize(
     ("text", "form"),
     [
-        ("bot 123456789:" + "A" * 35, "telegram_bot_token"),
+        ("bot 123456789:" + "A" * 35, "bot_token"),
         ("key sk-" + "a" * 20, "sk_key"),
         ("key_sk-" + "a" * 20, "sk_key"),
         ("-----BEGIN RSA PRIVATE KEY-----", "pem_private_key"),
@@ -31,7 +31,7 @@ def test_each_secret_form_is_found(text: str, form: str) -> None:
 
 @pytest.mark.parametrize("tail", TAILS)
 def test_a_token_whose_suffix_ends_in_a_hyphen_is_found_before_any_separator(tail: str) -> None:
-    assert secret_form([f"S1 {HYPHEN_ENDED_TOKEN}{tail}"]) == "telegram_bot_token"
+    assert secret_form([f"S1 {HYPHEN_ENDED_TOKEN}{tail}"]) == "bot_token"
 
 
 @pytest.mark.parametrize(

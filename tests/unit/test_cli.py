@@ -409,7 +409,7 @@ def test_doctor_checks_topic_group_configuration(
         )
         == expected
     )
-    assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"telegram"})
+    assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"channel"})
 
 
 @pytest.mark.parametrize("allow_other_members", [True, False])
@@ -489,7 +489,7 @@ def test_doctor_names_a_telegram_bot_that_refuses_the_token(
     _instance(tmp_path)
 
     assert _run_doctor(tmp_path, bot=lambda _settings: _RefusingBotApi()) == 1
-    assert _failed(capsys.readouterr().out) == {"telegram"}
+    assert _failed(capsys.readouterr().out) == {"channel"}
 
 
 _WEBHOOK_URL: Final = "https://hooks.example.net/shikiri/secret-path-7f3a"
@@ -508,7 +508,7 @@ class _WebhookBot(FakeBotApi):
         return await super().call(method, payload)
 
 
-@pytest.mark.parametrize(("url", "failed"), [("", set[str]()), (_WEBHOOK_URL, {"telegram"})])
+@pytest.mark.parametrize(("url", "failed"), [("", set[str]()), (_WEBHOOK_URL, {"channel"})])
 def test_doctor_fails_a_bot_with_a_webhook_and_passes_one_without(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], url: str, failed: set[str]
 ) -> None:
@@ -541,7 +541,7 @@ def test_doctor_names_a_missing_token_file_and_the_telegram_check_that_needs_it(
         return httpx.Response(_HTTP_OK)
 
     assert _run_doctor(tmp_path, bot=_http_bot_on(httpx.MockTransport(handle))) == 1
-    assert _failed(capsys.readouterr().out) == {"token file", "telegram"}
+    assert _failed(capsys.readouterr().out) == {"token file", "channel"}
     assert seen == []
 
 
