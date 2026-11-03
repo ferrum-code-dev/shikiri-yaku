@@ -1,5 +1,109 @@
 # Todo
 
+## Release documentation cleanup
+
+R1 to R9 replace the T-81 parent request. Details and shared constraints are in tasks/plan.md.
+
+### R1
+
+- [ ] R1. Document installation and instance configuration
+
+## Acceptance criteria
+
+- README.md gives an installation and first-run sequence for the existing Python 3.14 package, Shikiru prerequisite, instance directory, protected token file, doctor and foreground run, without claiming an unverified package release exists.
+- The documented TOML parses with load_settings using a temporary fake token and local paths; required keys, optional settings/defaults, local-only components, owner IDs, forum prerequisites and Reasoner syntax match the implementation.
+- Only README.md and this task's checklist entry change; no host setup, live service, network probe or real secret is used for verification.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R2
+
+- [ ] R2. Document daily operation and recovery
+
+## Acceptance criteria
+
+- README.md covers current global option placement, CLI verbs and JSON output, /status, /open, /help and /goal in private chats and topics, confirmation/Details/Stop reminders behavior and exact-command install approval.
+- Service instructions distinguish writing a unit from activating it and cover macOS launchd and Linux user systemd; topic adoption/forgetting, duplicate-topic risk, doctor, logs, configuration changes and uncertain restart recovery match current code.
+- README.md states the current safety and operational limits, including data sent to Telegram, authorized owners, optional-model behavior, supported install recipes, uncertain goal submissions and clean-stop timing, without speculative roadmap promises.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R3
+
+- [ ] R3. Clean core contract and journal references
+
+## Acceptance criteria
+
+- Domain, ports and journal documentation contains no obsolete design section numbers or historical task citations and still explains relevant safety/recovery invariants.
+- Python syntax trees excluding docstrings are unchanged in edited files; SQL, migration data, stored identities, public interfaces and other runtime literals are unchanged.
+- The comment rule remains satisfied without removing a useful why-comment merely to satisfy a search.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R4
+
+- [ ] R4. Clean application and adapter references
+
+## Acceptance criteria
+
+- The scoped source files contain no obsolete design section or historical-task citations; retained comments explain the actual behavior without assuming removed prose.
+- Python syntax trees excluding docstrings are unchanged, including prompts, command recipes, error text, settings, composition, imports and public interfaces.
+- Any behavior mismatch discovered while editing is reported rather than fixed in production code.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R5
+
+- [ ] R5. Clean test script and gate references
+
+## Acceptance criteria
+
+- Tests, scripts and gate descriptions no longer cite obsolete design section numbers or historical build phases; behavior explanations, fixture provenance and human-run script instructions remain useful.
+- Test assertions, fixture payloads, executable statements, test collection and script arguments are unchanged; any test-name adjustment updates retained drill mappings in the same change.
+- pyproject.toml changes only comments and human-readable gate/contract descriptions; dependencies, banned APIs, ignores, contract boundaries and gate commands retain the same enforcement.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R6
+
+- [ ] R6. Remove migrated operational detail from the design
+
+## Acceptance criteria
+
+- The old configuration example, user message/button walkthroughs, recipe/tutorial details and long signal/rule/handler operational tables are removed from docs/design.md, with user-facing guidance available in README.md.
+- The intermediate design still explains the signal-to-handler/channel flow, fallback, typed outcomes and approval boundary, and has no broken internal links caused by this pruning.
+- Only documentation and this task's checklist entry change; missing or contradictory old-design details are resolved from implementation or explicitly reported.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R7
+
+- [ ] R7. Finish the concise purpose and architecture document
+
+## Acceptance criteria
+
+- docs/design.md is a concise description of the implemented purpose and architecture, including source/classifier/router/scheduler/handler/reply/channel roles, SQLite recovery and registration in bootstrap.
+- The final design contains no speculative roadmap, implementation staging, no-code claim, duplicated user setup guide or stale numbered cross-reference; retained internal links resolve.
+- Architecture descriptions match the current ports, outcomes and composition, and preserve the approval and stored-argument guarantees without introducing new requirements or behavior.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R8
+
+- [ ] R8. Retire obsolete planning artifacts and contributor citations
+
+## Acceptance criteria
+
+- docs/plan.md and tasks/reasoner-spike.md are removed; useful current Reasoner constraints, contributor validation instructions and fixture provenance are retained in appropriate existing documentation.
+- AGENTS.md accurately points to the concise architecture, README and active trackers without weakening gate, dependency, safety or task-size instructions.
+- The drill map and fixture READMEs have no broken references to deleted files or removed design sections; human-only checks remain explicitly outside the offline gate.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R9
+
+- [ ] R9. Clean historical tracker references and verify documentation
+
+## Acceptance criteria
+
+- tasks/plan.md and tasks/todo.md retain all active release entries and historical completion states, clearly separate current work from historical implementation records, and no longer depend on deleted artifacts or obsolete design section numbers.
+- A repository-wide audit finds no broken retained local Markdown links/anchors or obsolete numbered-design citations in maintained docs, source, tests, scripts or gate descriptions; intentional runtime tracker text and historical records are distinguished from documentation dependencies.
+- Final diff review confirms production behavior, prompts, public interfaces, SQL/migrations, dependencies, assertions and gate enforcement are unchanged, and reports any unresolved mismatch or unavailable live verification.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+
 Details and acceptance criteria are in `tasks/plan.md`. Mark a task `[x]` only when its change is
 merged and `uv run poe check` passes.
 

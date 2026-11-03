@@ -1,5 +1,118 @@
 # Task plan
 
+## Release documentation cleanup
+
+This section replaces the T-81 parent request with R1 to R9, executed in order.
+The explicit request authorizes editing docs/design.md for this cleanup despite AGENTS.md's
+general restriction. This plan does not authorize runtime changes or implementing old unchecked tasks.
+README is the user guide; docs/design.md describes purpose and architecture.
+Shared acceptance: uv run poe check passes before completion; unrelated pinned-dependency or gate failures are reported with evidence rather than worked around. Each task ticks only its own R-line in tasks/todo.md except the explicit historical-reference cleanup assigned to R8/R9. No production behavior changes, host package installs, real secrets, live Telegram/agent calls or host/service mutation. Read and write only this worktree; the external Shikiru comparison checkout remains out of scope.
+
+The two design passes and three code-reference passes keep changes near 300 lines each.
+If a task needs much more, report a further split before implementing it. Preserve useful existing
+text instead of expanding scope. No documented commit-message convention was found; use
+Conventional Commits. The implementation is the factual source when old prose differs.
+
+### R1. Document installation and instance configuration (normal)
+
+Expand README.md with prerequisites, a source-based installation path, first-run setup, a minimal valid config.toml, and a concise reference for supported configuration sections and settings. Cover Telegram bot/token/owner setup, optional forum groups and Reasoner ladders. Read settings.py, pyproject.toml, bootstrap.py, adapter contracts and tests; do not assume the old design is current. Replace the obsolete design-stage status. Keep this change around 300 lines; leave daily operation to R2.
+
+## Acceptance criteria
+
+- README.md gives an installation and first-run sequence for the existing Python 3.14 package, Shikiru prerequisite, instance directory, protected token file, doctor and foreground run, without claiming an unverified package release exists.
+- The documented TOML parses with load_settings using a temporary fake token and local paths; required keys, optional settings/defaults, local-only components, owner IDs, forum prerequisites and Reasoner syntax match the implementation.
+- Only README.md and this task's checklist entry change; no host setup, live service, network probe or real secret is used for verification.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R2. Document daily operation and recovery (normal)
+
+Complete README.md as the user guide. Preserve and correct existing CLI/JSON and topic guidance; add chat commands, answering and approvals, reminders, service activation/stopping/log inspection, diagnostics, restart behavior, state/output locations, practical limits, and a short contributor validation section. Base examples on cli.py, service.py, app commands and tests, not on historical plans. Link to retained fixture/drill guidance for contributor-only details. Keep this change around 300 lines.
+
+## Acceptance criteria
+
+- README.md covers current global option placement, CLI verbs and JSON output, /status, /open, /help and /goal in private chats and topics, confirmation/Details/Stop reminders behavior and exact-command install approval.
+- Service instructions distinguish writing a unit from activating it and cover macOS launchd and Linux user systemd; topic adoption/forgetting, duplicate-topic risk, doctor, logs, configuration changes and uncertain restart recovery match current code.
+- README.md states the current safety and operational limits, including data sent to Telegram, authorized owners, optional-model behavior, supported install recipes, uncertain goal submissions and clean-stop timing, without speculative roadmap promises.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R3. Clean core contract and journal references (normal)
+
+Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/domain/, ports.py and journal/. Retain useful explanations of invariants, recovery, identities and approval safety as self-contained contract documentation. In particular remove claims that Informed/Notified are absent from the design. Limit the diff to comments and docstrings, around 300 lines; journal SQL and migration definitions must stay byte-for-byte unchanged.
+
+## Acceptance criteria
+
+- Domain, ports and journal documentation contains no obsolete design section numbers or historical task citations and still explains relevant safety/recovery invariants.
+- Python syntax trees excluding docstrings are unchanged in edited files; SQL, migration data, stored identities, public interfaces and other runtime literals are unchanged.
+- The comment rule remains satisfied without removing a useful why-comment merely to satisfy a search.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R4. Clean application and adapter references (normal)
+
+Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/app/, extensions/, adapters/ and top-level package modules other than ports.py. Preserve useful behavior and trust-boundary explanations as self-contained comments/docstrings. This is documentation-only cleanup, including Reasoner and install constraints, not an opportunity to change implementation. Keep the change around 300 lines.
+
+## Acceptance criteria
+
+- The scoped source files contain no obsolete design section or historical-task citations; retained comments explain the actual behavior without assuming removed prose.
+- Python syntax trees excluding docstrings are unchanged, including prompts, command recipes, error text, settings, composition, imports and public interfaces.
+- Any behavior mismatch discovered while editing is reported rather than fixed in production code.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R5. Clean test script and gate references (normal)
+
+Clean stale design/phase citations in tests/, scripts/ and pyproject.toml. Preserve behavior-focused test descriptions, script usage/provenance and all assertions/fixtures. Gate diagnostic descriptions and import-contract display names may lose old section citations, but their enforcement must not change. Do not change the contract script's submitted task text merely because it mentions a tracker: that is executable behavior. Keep the change around 300 lines.
+
+## Acceptance criteria
+
+- Tests, scripts and gate descriptions no longer cite obsolete design section numbers or historical build phases; behavior explanations, fixture provenance and human-run script instructions remain useful.
+- Test assertions, fixture payloads, executable statements, test collection and script arguments are unchanged; any test-name adjustment updates retained drill mappings in the same change.
+- pyproject.toml changes only comments and human-readable gate/contract descriptions; dependencies, banned APIs, ignores, contract boundaries and gate commands retain the same enforcement.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R6. Remove migrated operational detail from the design (normal)
+
+After README guides and reference cleanup land, prune the old design in a bounded first pass. Remove the user configuration/instance instructions and detailed operational specifications now documented in README, principally old sections 3.1/3.2 and 4 through 7. Keep a short architectural description of signals, classification, outcomes and channel ports where needed; remove or repair internal links affected by this pass. Preserve the architecture diagram and safety principles for the final pass. Target roughly 300 changed lines.
+
+## Acceptance criteria
+
+- The old configuration example, user message/button walkthroughs, recipe/tutorial details and long signal/rule/handler operational tables are removed from docs/design.md, with user-facing guidance available in README.md.
+- The intermediate design still explains the signal-to-handler/channel flow, fallback, typed outcomes and approval boundary, and has no broken internal links caused by this pruning.
+- Only documentation and this task's checklist entry change; missing or contradictory old-design details are resolved from implementation or explicitly reported.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R7. Finish the concise purpose and architecture document (normal)
+
+Finish simplifying docs/design.md after the operational pruning. Keep the purpose, current processing flow/diagram, module and dependency boundaries, composition/extension registration, journal-before-effect and observation-based recovery, model trust boundary and owner approval. Remove speculative extension/candidate lists, scenarios, estimates/build staging, stale status claims and duplicated user guides. Retain useful engineering constraints, preferably by reusing concise existing passages and linking to AGENTS.md/README rather than stylistic rewrites, to keep this change around 300 lines. Use stable descriptive headings.
+
+## Acceptance criteria
+
+- docs/design.md is a concise description of the implemented purpose and architecture, including source/classifier/router/scheduler/handler/reply/channel roles, SQLite recovery and registration in bootstrap.
+- The final design contains no speculative roadmap, implementation staging, no-code claim, duplicated user setup guide or stale numbered cross-reference; retained internal links resolve.
+- Architecture descriptions match the current ports, outcomes and composition, and preserve the approval and stored-argument guarantees without introducing new requirements or behavior.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R8. Retire obsolete planning artifacts and contributor citations (normal)
+
+Delete docs/plan.md and the one-off tasks/reasoner-spike.md after moving any still-useful operational constraints into README or existing self-contained adapter comments. Update AGENTS.md to remove obsolete status, old section citations and the deleted effort-plan pointer while preserving architecture, safety, gate and task-sizing rules. Keep tasks/drills.md as a contributor validation map; remove obsolete section/NEW/build-phase framing, retain human drills and fixture provenance. Update only the obsolete spike link on its historical todo line, with that out-of-task-line adjustment recorded in the report. Keep the change around 300 lines.
+
+## Acceptance criteria
+
+- docs/plan.md and tasks/reasoner-spike.md are removed; useful current Reasoner constraints, contributor validation instructions and fixture provenance are retained in appropriate existing documentation.
+- AGENTS.md accurately points to the concise architecture, README and active trackers without weakening gate, dependency, safety or task-size instructions.
+- The drill map and fixture READMEs have no broken references to deleted files or removed design sections; human-only checks remain explicitly outside the offline gate.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R9. Clean historical tracker references and verify documentation (normal)
+
+Finish tracker hygiene after all documentation changes. Keep the existing implementation records and their completion states, but mark them historical, remove obsolete docs/plan.md/Reasoner-spike pointers and numbered-design dependencies, and trim the stale future-phase outline. Do not complete unrelated unchecked tasks or delete active release entries. This is a bounded reference edit to existing records, not a rewrite of the 1700-line history. Audit all retained Markdown local links/anchors, stale design citations, source AST differences and gate configuration differences for the full release cleanup; repair documentation references within scope. Keep this task around 300 lines and report anything requiring a further split.
+
+## Acceptance criteria
+
+- tasks/plan.md and tasks/todo.md retain all active release entries and historical completion states, clearly separate current work from historical implementation records, and no longer depend on deleted artifacts or obsolete design section numbers.
+- A repository-wide audit finds no broken retained local Markdown links/anchors or obsolete numbered-design citations in maintained docs, source, tests, scripts or gate descriptions; intentional runtime tracker text and historical records are distinguished from documentation dependencies.
+- Final diff review confirms production behavior, prompts, public interfaces, SQL/migrations, dependencies, assertions and gate enforcement are unchanged, and reports any unresolved mismatch or unavailable live verification.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+
 The specification is `docs/design.md`; section numbers (§) refer to it. The effort estimate and the
 phases are in `docs/plan.md`. Each task is about 300 lines of change, ends with `uv run poe check`
 green, and leaves the repository usable. Tasks run one at a time, in the order below.
