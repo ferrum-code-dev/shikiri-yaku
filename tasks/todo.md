@@ -94,7 +94,7 @@ merged and `uv run poe check` passes.
   - [x] E9. Every signal of a component goes to its topic
   - [x] E10. The Acknowledge button says what it does
   - [x] E11. A group may have other members
-  - [ ] E12. Adopt a topic that was made by hand
+  - [x] E12. Adopt a topic that was made by hand
     - [x] E5a. Typer app, global options, product resolution, flat verbs, telegram group
     - [x] E5b. Help palette and help layout
     - [x] E5c. Doctor lines and summary, error lines, colour on a terminal only

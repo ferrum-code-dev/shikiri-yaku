@@ -295,7 +295,10 @@ def build_app(
             _stats(_target(ctx).directory, read_measures, as_json=_options(ctx).json_output)
         )
 
-    @telegram.command("adopt", help="Mark an uncertain topic open with the thread that it has.")
+    @telegram.command(
+        "adopt",
+        help="Mark a topic open with the thread it has: an uncertain one, or one made by hand.",
+    )
     def adopt(
         ctx: typer.Context, component: COMPONENT_ARGUMENT, thread_id: THREAD_ID_ARGUMENT
     ) -> None:

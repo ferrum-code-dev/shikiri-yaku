@@ -1,4 +1,4 @@
-"""Recovery of a topic whose creation was uncertain: the PO adopts its thread, or forgets it."""
+"""The PO's repair of a topic: adopt a thread for it, or forget an uncertain topic's row."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from shikiri_yaku.adapters.telegram_topics import (
+    TOPIC_CLOSED,
+    TOPIC_CLOSING,
     TOPIC_CREATING,
     TOPIC_OPEN,
     UNASSIGNED_THREAD,
@@ -27,17 +29,22 @@ if TYPE_CHECKING:
 
 PRODUCT: Final = "shop"
 COMPONENT: Final = "api"
+UNKNOWN_COMPONENT: Final = "web"
 GENERAL_THREAD: Final = 5
 OPEN_THREAD: Final = 72
 ADOPTED_THREAD: Final = 73
 CREATED_THREAD: Final = 90
 
 type Row = tuple[str, int]
+type Change = Callable[[TopicRepair, str], str]
 
 _CREATING: Final = (TOPIC_CREATING, UNASSIGNED_THREAD)
 _OPEN: Final = (TOPIC_OPEN, OPEN_THREAD)
+_CLOSING: Final = (TOPIC_CLOSING, OPEN_THREAD)
+_CLOSED: Final = (TOPIC_CLOSED, OPEN_THREAD)
 _ADOPTED: Final = (TOPIC_OPEN, ADOPTED_THREAD)
 _ADOPT_COMMAND: Final = ["telegram", "adopt", COMPONENT, str(ADOPTED_THREAD)]
+_ADOPT_UNKNOWN_COMMAND: Final = ["telegram", "adopt", UNKNOWN_COMPONENT, str(ADOPTED_THREAD)]
 _FORGET_COMMAND: Final = ["telegram", "forget", COMPONENT]
 
 
@@ -53,39 +60,44 @@ class _Forum:
         raise AssertionError(thread_id)
 
 
-def _adopt(repair: TopicRepair) -> str:
-    return repair.adopt(COMPONENT, ADOPTED_THREAD)
+def _adopt(repair: TopicRepair, name: str) -> str:
+    return repair.adopt(name, ADOPTED_THREAD)
 
 
-def _forget(repair: TopicRepair) -> str:
-    return repair.forget(COMPONENT)
+def _forget(repair: TopicRepair, name: str) -> str:
+    return repair.forget(name)
 
 
-def _save(topics: TopicStore, row: Row | None) -> None:
+def _save(topics: TopicStore, name: str, row: Row | None) -> None:
     if row is not None:
         state, thread_id = row
-        topics.save(COMPONENT, thread_id, state)
+        topics.save(name, thread_id, state)
 
 
-def _row(topics: TopicStore) -> Row | None:
-    topic = topics.get(COMPONENT)
+def _row(topics: TopicStore, name: str) -> Row | None:
+    topic = topics.get(name)
     return None if topic is None else (topic.state, topic.thread_id)
 
 
 @pytest.mark.parametrize(
-    ("before", "change", "accepted", "after"),
+    ("name", "before", "change", "accepted", "after"),
     [
-        (_CREATING, _adopt, True, _ADOPTED),
-        (_CREATING, _forget, True, None),
-        (_OPEN, _adopt, False, _OPEN),
-        (_OPEN, _forget, False, _OPEN),
-        (None, _adopt, False, None),
-        (None, _forget, False, None),
+        (COMPONENT, _CREATING, _adopt, True, _ADOPTED),
+        (COMPONENT, _CREATING, _forget, True, None),
+        (COMPONENT, None, _adopt, True, _ADOPTED),
+        (COMPONENT, None, _forget, False, None),
+        (COMPONENT, _OPEN, _adopt, False, _OPEN),
+        (COMPONENT, _OPEN, _forget, False, _OPEN),
+        (COMPONENT, _CLOSING, _adopt, False, _CLOSING),
+        (COMPONENT, _CLOSED, _adopt, False, _CLOSED),
+        (UNKNOWN_COMPONENT, None, _adopt, False, None),
+        (UNKNOWN_COMPONENT, _CREATING, _adopt, False, _CREATING),
     ],
 )
-def test_adopt_and_forget_change_only_a_creating_topic(
+def test_repair_changes_only_the_rows_the_table_allows(
+    name: str,
     before: Row | None,
-    change: Callable[[TopicRepair], str],
+    change: Change,
     *,
     accepted: bool,
     after: Row | None,
@@ -94,21 +106,18 @@ def test_adopt_and_forget_change_only_a_creating_topic(
     try:
         topics = TopicStore(database)
         topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
-        _save(topics, before)
+        _save(topics, name, before)
+        repair = TopicRepair(topics, [COMPONENT])
 
         if accepted:
-            change(TopicRepair(topics))
+            change(repair, name)
         else:
             with pytest.raises(ChannelRepairError):
-                change(TopicRepair(topics))
+                change(repair, name)
 
-        assert _row(topics) == after
+        assert _row(topics, name) == after
     finally:
         database.close()
-
-
-def _reconciler(topics: TopicStore, forum: _Forum) -> TopicReconciler:
-    return TopicReconciler(topics, forum, [COMPONENT], product=PRODUCT)
 
 
 def test_start_up_does_not_create_a_topic_that_was_adopted() -> None:
@@ -116,14 +125,14 @@ def test_start_up_does_not_create_a_topic_that_was_adopted() -> None:
     try:
         topics = TopicStore(database)
         topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
-        _save(topics, _CREATING)
-        TopicRepair(topics).adopt(COMPONENT, ADOPTED_THREAD)
+        _save(topics, COMPONENT, _CREATING)
+        TopicRepair(topics, [COMPONENT]).adopt(COMPONENT, ADOPTED_THREAD)
         forum = _Forum()
 
-        asyncio.run(_reconciler(topics, forum).run())
+        asyncio.run(TopicReconciler(topics, forum, [COMPONENT], product=PRODUCT).run())
 
         assert forum.created == []
-        assert _row(topics) == _ADOPTED
+        assert _row(topics, COMPONENT) == _ADOPTED
     finally:
         database.close()
 
@@ -133,14 +142,14 @@ def test_start_up_creates_a_topic_that_was_forgotten() -> None:
     try:
         topics = TopicStore(database)
         topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
-        _save(topics, _CREATING)
-        TopicRepair(topics).forget(COMPONENT)
+        _save(topics, COMPONENT, _CREATING)
+        TopicRepair(topics, [COMPONENT]).forget(COMPONENT)
         forum = _Forum()
 
-        asyncio.run(_reconciler(topics, forum).run())
+        asyncio.run(TopicReconciler(topics, forum, [COMPONENT], product=PRODUCT).run())
 
         assert forum.created == [COMPONENT]
-        assert _row(topics) == (TOPIC_OPEN, CREATED_THREAD)
+        assert _row(topics, COMPONENT) == (TOPIC_OPEN, CREATED_THREAD)
     finally:
         database.close()
 
@@ -150,11 +159,11 @@ def test_start_up_refusal_names_both_recovery_commands() -> None:
     try:
         topics = TopicStore(database)
         topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
-        _save(topics, _CREATING)
+        _save(topics, COMPONENT, _CREATING)
         forum = _Forum()
 
         with pytest.raises(ChannelStartupError) as refusal:
-            asyncio.run(_reconciler(topics, forum).run())
+            asyncio.run(TopicReconciler(topics, forum, [COMPONENT], product=PRODUCT).run())
 
         message = str(refusal.value)
         assert f"--product {PRODUCT} telegram adopt {COMPONENT}" in message
@@ -164,12 +173,20 @@ def test_start_up_refusal_names_both_recovery_commands() -> None:
         database.close()
 
 
+def _config(home: Path) -> str:
+    return (
+        f'product = "{PRODUCT}"\n\n[[components]]\nname = "{COMPONENT}"\n'
+        f'path = "{home / COMPONENT}"\n\n[channels.telegram]\nowners = [123456789]\n'
+    )
+
+
 def _journal(home: Path, row: Row | None) -> Path:
     directory = home / PRODUCT
     directory.mkdir()
+    (directory / "config.toml").write_text(_config(home), encoding="utf-8")
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
-        _save(TopicStore(database), row)
+        _save(TopicStore(database), COMPONENT, row)
     finally:
         database.close()
     return directory
@@ -178,29 +195,33 @@ def _journal(home: Path, row: Row | None) -> Path:
 def _journal_row(directory: Path) -> Row | None:
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
-        return _row(TopicStore(database))
+        return _row(TopicStore(database), COMPONENT)
     finally:
         database.close()
 
 
 @pytest.mark.parametrize(
-    ("command", "running", "exit_code", "after"),
+    ("row", "command", "running", "exit_code", "after"),
     [
-        (_ADOPT_COMMAND, False, 0, _ADOPTED),
-        (_ADOPT_COMMAND, True, 1, _CREATING),
-        (_FORGET_COMMAND, False, 0, None),
-        (_FORGET_COMMAND, True, 1, _CREATING),
+        (_CREATING, _ADOPT_COMMAND, False, 0, _ADOPTED),
+        (_CREATING, _ADOPT_COMMAND, True, 1, _CREATING),
+        (None, _ADOPT_COMMAND, False, 0, _ADOPTED),
+        (None, _ADOPT_COMMAND, True, 1, None),
+        (None, _ADOPT_UNKNOWN_COMMAND, False, 1, None),
+        (_CREATING, _FORGET_COMMAND, False, 0, None),
+        (_CREATING, _FORGET_COMMAND, True, 1, _CREATING),
     ],
 )
-def test_topic_commands_change_the_journal_only_when_no_operator_is_running(
+def test_topic_commands_change_the_journal_only_when_allowed(
     tmp_path: Path,
+    row: Row | None,
     command: list[str],
     *,
     running: bool,
     exit_code: int,
     after: Row | None,
 ) -> None:
-    directory = _journal(tmp_path, _CREATING)
+    directory = _journal(tmp_path, row)
 
     with instance_lock(directory) if running else nullcontext():
         assert main(["--product", PRODUCT, "--home", str(tmp_path), *command]) == exit_code

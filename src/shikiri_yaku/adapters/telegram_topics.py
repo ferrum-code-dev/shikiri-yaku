@@ -147,13 +147,21 @@ class TopicReconciler:
 
 
 class TopicRepair:
-    """The PO's changes to a topic whose creation was uncertain: adopt its thread, or forget it."""
+    """The PO's changes to a topic: adopt a thread for it, or forget its uncertain row."""
 
-    def __init__(self, log: TopicLog) -> None:
+    def __init__(self, log: TopicLog, components: Sequence[str]) -> None:
         self._log = log
+        self._components = tuple(components)
 
     def adopt(self, name: str, thread_id: int) -> str:
         component = _component(name)
+        if component is not None and component not in self._components:
+            message = f"no component {name!r} in the config; nothing changed"
+            raise ChannelRepairError(message)
+        if self._log.get(component) is None:
+            # keep: a topic made by hand has no row; an open row stops start-up creating another
+            self._log.save(component, thread_id, TOPIC_OPEN)
+            return f"Telegram topic {name!r} had no row; it is open with thread {thread_id}"
         if not self._log.replace_if(component, TOPIC_CREATING, thread_id, TOPIC_OPEN):
             raise ChannelRepairError(self._refusal(name, component))
         return f"Telegram topic {name!r} was creating; it is open with thread {thread_id}"

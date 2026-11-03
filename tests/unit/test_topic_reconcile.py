@@ -15,6 +15,7 @@ from shikiri_yaku.adapters.telegram_topics import (
     TOPIC_CREATING,
     TOPIC_OPEN,
     TopicReconciler,
+    TopicRepair,
 )
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.topics import TopicStore
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
 
 GROUP_ID: Final = -1009
 PRODUCT: Final = "shop"
+GENERAL_THREAD: Final = 74
+ADOPTED_THREAD: Final = 73
 
 
 class _FixtureBotApi:
@@ -103,6 +106,29 @@ def test_startup_creates_topics_once_and_closes_a_removed_component_topic() -> N
         assert closed_topic.state == TOPIC_CLOSED
         assert closed_topic.thread_id == 73
         assert not any(method == "deleteForumTopic" for method, _payload in api.calls)
+    finally:
+        database.close()
+
+
+def test_start_up_creates_no_topic_for_a_hand_made_topic_that_was_adopted() -> None:
+    database = Database.open(":memory:")
+    try:
+        topics = TopicStore(database)
+        topics.save(None, GENERAL_THREAD, TOPIC_OPEN)
+        api = _FixtureBotApi(topics)
+        TopicRepair(topics, ["api"]).adopt("api", ADOPTED_THREAD)
+
+        asyncio.run(
+            TopicReconciler(
+                topics, TelegramForumTopics(api, GROUP_ID), ["api"], product=PRODUCT
+            ).run()
+        )
+
+        assert api.created_names == []
+        assert not any(method == "createForumTopic" for method, _payload in api.calls)
+        adopted = topics.get("api")
+        assert adopted is not None
+        assert (adopted.state, adopted.thread_id) == (TOPIC_OPEN, ADOPTED_THREAD)
     finally:
         database.close()
 

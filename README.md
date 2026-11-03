@@ -43,7 +43,7 @@ shikiri-yaku [--product NAME] [--home PATH] [--json] [--version] COMMAND
 - `stats` prints the figures of one product's journal.
 - `install-service` writes the launchd or systemd unit that runs `run` at login.
 - `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`
-  repair an uncertain Telegram topic, as described below.
+  repair an uncertain Telegram topic, or reuse one made by hand, as described below.
 - `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text.
   The other commands ignore it. Exit codes are the same. `doctor` reports its failed checks inside
   the object. When `stats` cannot run, it prints one `✘` line on standard error and nothing on

@@ -111,6 +111,7 @@ from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import CompositionError
+from shikiri_yaku.settings import SettingsError, load_settings
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -856,19 +857,34 @@ def stats_measures(directory: Path) -> Measures:
 
 
 def adopt_topic(directory: Path, component: str, thread_id: int) -> str:
-    """Mark the creating topic of a component, or of general, open with a thread of the forum."""
-    return _change_topics(directory, lambda repair: repair.adopt(component, thread_id))
+    """Mark the topic of a component, or of general, open with a thread of the forum.
+
+    The component must be named in config.toml: start-up reads only those components' topics.
+    """
+    names = _component_names(directory)
+    return _change_topics(directory, names, lambda repair: repair.adopt(component, thread_id))
 
 
 def forget_topic(directory: Path, component: str) -> str:
     """Delete the creating topic of a component, or of general, so that start-up creates one."""
-    return _change_topics(directory, lambda repair: repair.forget(component))
+    # keep: forget needs no config, so a damaged config.toml does not stop it
+    return _change_topics(directory, (), lambda repair: repair.forget(component))
 
 
-def _change_topics(directory: Path, change: Callable[[TopicRepair], str]) -> str:
+def _component_names(directory: Path) -> list[str]:
+    try:
+        settings = load_settings(directory)
+    except SettingsError as error:
+        raise CompositionError(str(error)) from error
+    return [component.name for component in settings.components]
+
+
+def _change_topics(
+    directory: Path, components: Sequence[str], change: Callable[[TopicRepair], str]
+) -> str:
     journal = _existing_journal(directory)
     try:
-        return change(TopicRepair(TopicStore(journal)))
+        return change(TopicRepair(TopicStore(journal), components))
     finally:
         journal.close()
 
