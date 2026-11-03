@@ -1617,6 +1617,24 @@ Acceptance criteria:
 * `doctor` shows the "Other members" line when the setting is true and not when it is false.
 * The gate passes.
 
+### E12. Adopt a topic that was made by hand (normal)
+
+Found while documenting topics (design §7 rewrite): the README tells the owner to run `telegram adopt`
+before the first start to reuse a topic made by hand, but `adopt` refuses a topic that is not in state
+`creating` ("no Telegram topic ... in the journal; nothing changed"), so on a fresh journal it cannot be
+used. Without it the Operator creates a second topic of the same name.
+
+1. `telegram adopt <component|general> <thread-id>` also works when the journal has no row for that
+   topic: it saves the row as open with that thread. It still refuses a topic that is open, closing or
+   closed, and still needs the instance lock and a component named in the config (or `general`).
+2. `doctor` and the start-up message do not change. Fix the README text if it then differs from the
+   behaviour (it should now be true as written).
+
+Acceptance criteria:
+* Table-driven: adopt on a missing row, on a `creating` row (as before), on an open row (refused) and on an unknown component name (refused).
+* After adopting a missing topic, start-up creates no topic for it, and the group fake sees no `createForumTopic` call for that component.
+* The gate passes.
+
 ## Later phases (outline)
 
 * **B Topics:** tasks B1 to B4 above.
