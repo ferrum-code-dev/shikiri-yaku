@@ -83,7 +83,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R8
 
-- [ ] R8. Retire obsolete planning artifacts and contributor citations
+- [x] R8. Retire obsolete planning artifacts and contributor citations
 
 ## Acceptance criteria
 
@@ -166,7 +166,7 @@ merged and `uv run poe check` passes.
 - [x] C11. A message in a topic is not a reply to the topic
 - [x] C12. Commands answer when they have nothing to show
 - [x] Phase D: Install
-  - [x] D1. Reasoner spike (`tasks/reasoner-spike.md`)
+  - [x] D1. Reasoner spike (note removed; its constraints are in `src/shikiri_yaku/adapters/reasoner_cli.py`)
   - [x] D2. Reasoner adapters and `assess_blocker`
   - [x] D3. Ladder and the safe tool list
   - [x] D3b. Wiring, host facts, health and doctor

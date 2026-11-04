@@ -456,7 +456,9 @@ requested. Telegram group members can read posted messages, including non-owners
 Components must be local Shikiru project directories. Telegram is the only chat channel. The
 Reasoner is optional and uses configured local Claude or Codex CLIs. When enabled, it receives the
 escalation details and host facts needed for its assessment; the CLI/provider handles those inputs.
-Without a Reasoner, escalations that need a model assessment go to the Product Owner. If all
+A Claude rung gets no file-reading tool, only the web and package lookups its adapter lists. A Codex
+rung's read-only sandbox stops writes but not reads, so its model can read any file your user
+account can read. Without a Reasoner, escalations that need a model assessment go to the Product Owner. If all
 configured Reasoner rungs fail, the escalation still goes to the Product Owner with a note and a
 Reasoner health signal. Automatic quota waits are limited to 24 hours by default, retries to one
 per day, and engine restarts to one per component per hour. These operational values can be
@@ -471,6 +473,19 @@ uv run poe check
 ```
 
 It uses fakes and local fixtures, not a live Telegram bot or agent CLI. The [Telegram fixture
-guide](tests/fixtures/telegram/README.md) explains payload provenance; the [Shikiru fixture guide](tests/fixtures/shikiru/README.md)
-explains its MCP payloads. Human checks that need a real host or Telegram test bot are listed in
-[tasks/drills.md](tasks/drills.md) and are outside the offline gate.
+guide](tests/fixtures/telegram/README.md) explains payload provenance, and the [Shikiru fixture
+guide](tests/fixtures/shikiru/README.md) explains its MCP payloads.
+
+Two scripts are run by a human, outside the gate:
+
+- `scripts/contract_check.py --shikiru-checkout <path>` checks the Shikiru behavior the Operator
+  relies on, against a real engine and its fake agent in a temporary project. It needs git, tmux
+  and a Shikiru checkout.
+- `scripts/record_telegram.py` records real Bot API replies from a test bot into
+  `tests/fixtures/telegram/recorded/`, with the token and ids replaced, and prints how each differs
+  from the fixture of the same name. Use a bot made for this, never the production bot, and stop the
+  Operator first.
+
+Human checks that need a real host or Telegram test bot are listed in
+[tasks/drills.md](tasks/drills.md) and are outside the offline gate. Run them on a throwaway host,
+with the test bot and a test chat.

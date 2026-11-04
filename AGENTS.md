@@ -2,25 +2,31 @@
 
 shikiri-yaku is a background service that watches the escalations of Shikiru projects, sorts each
 one into a category, hands it to a handler, and forwards what it cannot fix to the Product Owner
-(PO) in Telegram. You are building it.
+(PO) in Telegram.
 
 ## Read first
 
-1. `docs/design.md` is the specification. Section numbers below refer to it. When this file and the
-   design differ, the design wins; report the difference in your result instead of choosing silently.
-2. `tasks/plan.md` has your task list with acceptance criteria; `tasks/todo.md` is the checklist.
-3. `docs/plan.md` is the effort estimate. You do not need it to implement a task.
+1. `docs/design.md` describes the purpose and the architecture: the processing flow, the module and
+   dependency boundaries, the journal and recovery, and the approval boundary. When this file and
+   the design differ, the design wins; report the difference in your result instead of choosing
+   silently.
+2. `README.md` is the user guide: installation, configuration, daily operation and recovery, and
+   the contributor validation section.
+3. `tasks/plan.md` holds the task list with acceptance criteria, and `tasks/todo.md` is the
+   checklist. `tasks/drills.md` maps each human drill to the offline test that covers it.
 
 Do not edit `docs/design.md`. If the design is wrong or silent about something you need, say so in
 your report (or escalate); do not invent behavior.
 
 ## Commands
 
-The quality gate is `uv run poe check`. It must pass before a task is done. Task 0 creates it from
-Shikiru's gate: ruff (`select = ["ALL"]`), the comment rule, the literal rule, import-linter,
-basedpyright, vulture and pytest. Use `uv run poe fix` to format.
+The quality gate is `uv run poe check`. It must pass before a task is done. It runs the format
+check, ruff (`select = ["ALL"]`), the comment and literal rules, import-linter, basedpyright, vulture
+and pytest. Use `uv run poe fix` to format.
 
-## Architecture rules (design §12)
+## Architecture rules
+
+The architecture is described in `docs/design.md` under Architecture. These rules enforce it.
 
 * Layout: `src/shikiri_yaku/` with `domain/` (pure, no I/O), `app/`, `extensions/` (one folder per
   category: its rules, handler and actions), `ports.py`, `adapters/`, `journal/`, `bootstrap.py`,
@@ -33,8 +39,9 @@ basedpyright, vulture and pytest. Use `uv run poe fix` to format.
   from `ShikiruClient`.
 * Only the Router turns failures into `Forward`. Other code lets typed exceptions cross ports.
 * SQL lives only in `journal/`. The journal is concrete SQLite; tests use an in-memory database.
-* Every number is a setting with a default in the settings object (design §3.2), not a literal in
-  handler code. Limits that belong to others (Telegram sizes, name validation) are named constants.
+* Every number is a setting with a default in the settings object
+  (`src/shikiri_yaku/settings.py`), not a literal in handler code. Limits that belong to others
+  (Telegram sizes, name validation) are named constants.
 * A new category, handler, action, source, Reasoner job, classifier or channel is added by writing
   it and registering it in `bootstrap.py`. The Router, classifier and journal do not switch on a
   specific category or kind.
@@ -42,8 +49,8 @@ basedpyright, vulture and pytest. Use `uv run poe fix` to format.
 ## Safety rules
 
 * Principle 4: a model never writes a command. Code validates the model's typed fields and builds
-  every host command from fixed recipes (design §6.3). Nothing runs on the host without the PO's
-  approval, and what runs is the stored argument list.
+  every host command from fixed recipes (`src/shikiri_yaku/domain/recipes.py`). Nothing runs on the
+  host without the PO's approval, and what runs is the stored argument list.
 * Never run package installs, `sudo`, or anything that changes the host from code you write for
   tests. Tests use fakes or harmless commands (`sleep`, `echo`) through `CommandRunner`.
 * No live network in the gate. No real Telegram, no real agent CLI. The token file and secrets
@@ -52,10 +59,11 @@ basedpyright, vulture and pytest. Use `uv run poe fix` to format.
 
 ## Tests
 
-Write tests that protect a stated behavior, as listed in design §12 "Tests that earn their place".
-Table-driven where the rule is a table. Fakes for ports; real SQLite in memory; payload fixtures
-for Telegram. Do not write tests of message wording, getters, config defaults, or mocks of internal
-classes, and do not chase a coverage number.
+Write tests that protect a stated behavior, such as the guarantees under Verification in
+`docs/design.md`. Human checks and their offline test mapping are in `tasks/drills.md`; they are
+outside the gate. Table-driven where the rule is a table. Fakes for ports; real SQLite in memory;
+payload fixtures for Telegram. Do not write tests of message wording, getters, config defaults, or
+mocks of internal classes, and do not chase a coverage number.
 
 ## Style
 

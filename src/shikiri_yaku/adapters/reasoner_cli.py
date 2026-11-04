@@ -215,7 +215,12 @@ class _CliRung(ABC):
 class ClaudeRung(_CliRung):
     """One Claude model with read-only web and package lookups, and no install tools.
 
-    The effort, when the rung names one, is passed as `--effort`; the call reports its usage.
+    The rung passes an explicit tool list. `Read` is not on it: it cannot be confined to the
+    scratch directory, and a model that can read any host file has a way to send what it reads
+    out, including text injected through an escalation. `dontAsk` refuses any tool outside the
+    list, since a headless call has no one to answer. `--setting-sources ""` loads no settings,
+    hooks or CLAUDE.md. The effort, when the rung names one, is passed as `--effort`; the call
+    reports its usage.
     """
 
     _adapter = "claude"
@@ -258,7 +263,11 @@ class CodexRung(_CliRung):
     """One Codex model, read-only in the scratch directory, with no lookups.
 
     `codex exec` has no flag for the effort, so the effort of a rung is not passed to it. The call
-    reports the token count Codex prints, and no duration or cost.
+    reports the last token count Codex prints, which comes before its answer, and no duration or
+    cost. Codex cannot limit its shell to named commands, and web search is off unless `--search`
+    is given; this adapter never gives it, so the rung has no lookups at all. `-s read-only` stops
+    writes only: the model can still read files on the host. That is accepted, because it writes
+    nothing and its answer is validated here.
     """
 
     _adapter = "codex"
