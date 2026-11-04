@@ -76,117 +76,21 @@ One Python process with one asyncio loop, one SQLite journal, one TOML config an
 
 **Why a separate service, not a plugin in an agent session.** Watching, pending questions and message delivery must keep working when an agent runs out of quota, changes or crashes.
 
-### 3.1 One instance per product
-
-A product consists of one or more **components**; each component is one Shikiru project (one repository), on this machine or on another host. One Operator instance serves one product: a directory `~/.shikiri-yaku/<product>/` (the **instance directory**) with `config.toml` ([§3.2](#32-configuration)), `journal.db`, `secrets/` and `output/` (install logs); a service unit named `shikiri-yaku-<product>`; and one chat bot. `--home <dir>` replaces `~/.shikiri-yaku`. The command line follows Shikiru's: global options come before the verb (`--product <name>`, `--home <dir>`, `--json`), and the product defaults to the only one under the home (`shikiri-yaku --product shop run`, `doctor`, `stats`, `install-service`; channel repair is `telegram adopt|forget`); the config is written by hand and `doctor` validates it. `run` holds `instance.lock` in the directory, so a product never runs twice. Several products mean several instances. There is no registry of products.
-
-* **A bot per product.** Telegram allows one long-polling consumer per bot token, and the chat itself shows the PO which product is speaking.
-* **Shared on the host:** one lock file for running host commands (`~/.shikiri-yaku/host.lock`), so two instances never change the host at the same time. A component on another host has its own lock on that host. Two instances pointed at the same repository is a configuration mistake that `shikiri-yaku doctor` warns about; nothing else guards against it.
-
-### 3.2 Configuration
-
-One `config.toml` in the instance directory. Agent ladders, models and integration settings of the *projects* stay in each project's Shikiru configuration; this file holds only what the Operator itself needs.
-
-```toml
-product = "shop"
-
-[[components]]                  # one per Shikiru project
-name = "api"
-path = "~/src/shop-api"
-
-[[components]]
-name = "web"
-path = "~/src/shop-web"
-# host = "build-box"            # optional: ssh destination of a remote project; default is this machine
-
-[channels.telegram]
-token_file = "secrets/telegram.token"   # mode 0600; never in the journal, chat or a repository
-owners = [123456789]                    # allow-listed user ids
-# group_id = -1001234567890              # optional: a forum group; one topic per component (§7)
-# allow_other_members = false             # true: other group members may read; only owners can act
-
-[reasoner]                      # optional: without it every decision_required goes to the PO
-ladder = ["claude:<model>:<effort>", "codex:<model>:<effort>"]   # tried in order
-timeout_s = 120
-cooldown_min = 5                # a rung that failed is skipped for this long
-max_parallel = 2
-
-[operator]
-liveness_interval_s = 60
-stop_grace_min = 2              # a clean engine stop is respected after this long (§4)
-lost_command_min = 2
-link_unreachable_min = 10
-
-[handlers.infrastructure]
-command_timeout_min = 10
-quota_wait_max_h = 24
-retry_budget_per_day = 1
-restart_budget_per_hour = 1
-approval_expiry_h = 24
-
-[handlers.product]
-reminder_first_h = 4
-reminder_repeat_h = 24
-```
-
-Every value except `product`, `components` and `channels.telegram` has a default, and **every number in this document is such a setting** (liveness interval, `stop_grace_min`, lost-command wait, unreachable-link time and so on), except the limits that belong to others: Telegram's message and button sizes and the name validation of [§6.3](#63-install-a-missing-tool). A remote component runs its Shikiru link, its `start` and its host commands through ssh on that host; the first release implements the local case only ([§13](#13-extensions)). `shikiri-yaku install-service` writes the service unit with the PATH of the user's login shell, so `shikiru` and the agent CLIs are found when launchd or systemd starts the process. A component is added or removed by editing the file and restarting; a removed component's open signals are closed with a note. `shikiri-yaku doctor` validates the file, the paths, the token, each project's MCP link and the Reasoner's CLIs.
+One Operator instance serves one product, with its own instance directory, `journal.db`, chat bot and service unit. There is no registry of products; several products mean several instances. The layout, the configuration, the command line and the service setup are documented in the [README](../README.md) and are not repeated here.
 
 ## 4. Signals
 
-A **signal** is one thing that may need attention. All signals have the same shape, so classification and routing do not care where they came from:
+A **signal** is one thing that may need attention. All signals have the same shape, so classification and routing do not care where they came from: a stable `id`, the `project`, the `task_id` and `escalation_id` when known, a `kind` (`escalation`, `engine_down`, `engine_fault`, `task_done`, `pr_review` or `health`), the `reason` (Shikiru's escalation reason, or the stop reason of an engine) and a `text` for the message.
 
-| Field | Meaning |
-|---|---|
-| `id` | Stable identity, unique in the journal (below) |
-| `project`, `task_id`, `escalation_id` | Where it happened, when known |
-| `kind` | `escalation`, `engine_down`, `engine_fault`, `task_done`, `pr_review`, `health` |
-| `reason` | The escalation `reason` from Shikiru, or the stop reason of an engine |
-| `text` | The escalation headline and question, or the event message |
+**Identity.** The id has the pattern `<project>:<kind>:<source id>`, where the source id comes from the escalation, the event or, for `health`, the failure and its start. It is the same after a restart, so duplicates are impossible.
 
-**Identity.** An id has one pattern, `<project>:<kind>:<source id>`, and must come out the same after a restart, so duplicates are impossible:
+**Event source.** One reader per project long-polls Shikiru's events. An escalation, a finished task, a pull request ready for review and an engine stopped by a fault each raise a signal. A pull request's signal closes when it is withdrawn, when its task is done (merged) or when Shikiru escalates `pr_closed`. `escalation_resolved` closes the signal of that escalation, whoever resolved it ([§10](#10-restarts-and-failures)). A `task_cancelled` creates no signal; it closes the open signals of its task. Lifecycle events only update the project's state. Shikiru retries engine faults itself, so only a fault stop raises a signal. The cursor and the journal rows it causes commit in one transaction, so a crash replays at most one batch.
 
-| Signal | Source id | Example |
-|---|---|---|
-| `escalation` | the escalation id | `api:escalation:E12` |
-| `task_done`, `engine_fault`, `pr_review` | the id of the event | `api:task_done:5531` |
-| `engine_down` | the id of the newest event of that project | `api:engine_down:5540` |
-| `health` | what failed and when it started (scope `operator` for the Reasoner) | `api:health:link:2026-10-27T08:00Z` |
+**First sync.** A project's history is read once, and only its current state is kept: its lifecycle, the escalations still open and the pull requests still waiting. History is never replayed as signals.
 
-**Event source.** One reader per project long-polls `wait_for_events(since_id)`. These events matter:
+**Liveness.** A crashed engine raises no escalation, so the liveness source checks `status.engine_up` every minute. An engine that is down after it was started raises `engine_down`; one that was never started is only shown in `/status`. A clean stop records no reason, so a deliberate stop and a host shutdown look alike, and the Operator tells them apart by time. A stop observed while the Operator runs is **respected** once the engine stays down for `stop_grace_min`: it is saved and never triggers a restart, also after the Operator restarts. A clean stop that happened before this run and was never respected is treated as `engine_down` at once. So no engine is restarted against the PO's will, and none is left down after a reboot.
 
-| Event | Effect |
-|---|---|
-| `escalation` (data: `escalation_id`, `reason`) | A signal; its text comes from `get_escalation` |
-| `task_done` | A signal |
-| `pr_opened` (data: `url`, `branch`, `commits`; Shikiru's pull-request integration mode) | A `pr_review` signal; the task stays *integrating* until the PR is merged or closed |
-| `pr_withdrawn` | Closes the open `pr_review` signal of that task |
-| `engine_stopped` that carries a stop reason (Shikiru stopped the engine because of repeated faults) | An `engine_fault` signal |
-| `escalation_resolved` | Closes the open signal of that escalation, whoever resolved it ([§10](#10-restarts-and-failures)) |
-| `engine_started`, `engine_stopped` | Update the project's lifecycle state in `cursors`; no signal |
-
-A `pr_review` signal also closes when its task is `task_done` (merged) or raises a `pr_closed` escalation (closed unmerged).
-
-A `task_cancelled` event creates no signal. It closes every open signal of that task with the final line "Task cancelled", and an install of that task that was approved but has not started is voided (state `failed`, reason `task cancelled`); an install already running settles on its own. Only live events do this: a first sync or a gap recovery does not apply earlier cancellations.
-
-Everything else is ignored, including the `engine_fault` events of an engine that is still running: Shikiru retries those itself, and if they persist it stops the engine, which is the signal above. The cursor advance and the journal rows it causes commit in one transaction, so a crash replays at most one batch, and signals are deduplicated by id.
-
-**First sync of a project.** Read all events once (paging until none are left) and keep only the state: the lifecycle and which pull requests are still open (a `pr_opened` with no later `pr_withdrawn`, `task_done` or `pr_closed` escalation for its task); then create signals for the currently open escalations from `list_escalations` and a `pr_review` signal for each open pull request; the cursor is the last event read. History is never replayed as signals, but a pull request waiting for the PO is current state, not history. A clean stop already in the history counts as respected (below), so a project the PO left stopped is not restarted when the Operator is first installed.
-
-**Liveness source.** A crashed engine raises no escalation. Every minute the source reads `status.engine_up`:
-
-| Engine up? | Last lifecycle event | Result |
-|---|---|---|
-| yes | any | nothing |
-| no | `engine_started` | The engine died: an `engine_down` signal |
-| no | `engine_stopped` with a reason | Already signaled as `engine_fault`: nothing more |
-| no | `engine_stopped` without a reason | See below |
-| no | none ever recorded | The project was never started: shown in `/status`, not restarted |
-
-**A clean stop.** Shikiru stops gracefully on SIGTERM and records `engine_stopped` without a reason, so a deliberate stop by the PO and a host shutdown look the same. The Operator tells them apart by time. If the engine is still down `stop_grace_min` (default 2) after a stop that happened while the Operator was running, the stop is **respected**: its event id is saved in `cursors` and it never triggers a restart, also after the Operator itself restarts. A clean stop that happened before the current run started and was never respected (the Operator was down, or stopped within the grace time, as happens at a reboot) is treated as `engine_down` at once. The cost: a project the PO stopped while the Operator was down is started again, and the PO stops it once more.
-
-If the cursor falls behind Shikiru's retention, the source repeats the first sync.
-
-**Health source.** The Operator's own problems are signals too: a project's MCP link that stays unreachable for `link_unreachable_min` (default 10), and the Reasoner when its whole ladder fails ([§8](#8-reasoner)). A `health` signal opens once on the failure, closes on recovery, and is not repeated while it stays open.
+**Health.** The Operator's own problems are signals too: a project's MCP link that stays unreachable for `link_unreachable_min`, and the Reasoner when its whole ladder fails ([§8](#8-reasoner)). A `health` signal opens once on the failure, closes on recovery, and is not repeated while it stays open.
 
 PO messages are not signals. They go through Replies ([§7](#7-the-po-channel)).
 
@@ -203,17 +107,7 @@ A **category** names who should deal with a signal. Categories are an open set; 
 
 **The Classifier is an interface:** `classify(signal) → Classification(category, source, note)`. The first implementation, `RuleClassifier`, applies the rules that the registered extensions contribute. A decision model or a general LLM can replace or precede it later by changing only the composition root; the categories it may choose from come from the registered extensions.
 
-**Rules.** Each extension contributes its own rules, and the classifier checks them in registration order, first match wins. The product extension registers last, and its catch-all rule is the fallback. Startup fails if two extensions claim the same reason. Every signal except `decision_required` is sorted by its typed `reason` or `kind`, at no token cost. A reason Shikiru adds later falls to the catch-all. Together the rules read:
-
-| Signal | Category | Rule of | Why |
-|---|---|---|---|
-| `decision_required` | The Reasoner's verdict: `host_tool` gives `infrastructure`, anything else `product` | infrastructure | Only the text says what kind of question it is |
-| `integration_conflict`, `integration_blocked`, `agent_error`, `agent_stuck`, `agent_protocol` | `infrastructure` | infrastructure | Shikiru's own recommended option is a retry |
-| `quota_exhausted`, `ladder_exhausted` | `infrastructure` | infrastructure | Waiting for the reset is the usual answer |
-| `engine_error`, `engine_down`, `engine_fault` | `infrastructure` | infrastructure | Restart, then forward |
-| `pr_review` | `review` | review | The PO merges or rejects the pull request |
-| `task_done`, `health` | `notice` | notice | Information |
-| anything else, including `iterations_exhausted`, `pr_closed`, `dependency_cancelled`, `agent_auth`, `uncommitted_work`, `off_task_branch` | `product` | product | Each needs a person; no action exists yet |
+**Rules.** Each extension contributes its own rules, and the classifier checks them in registration order; the first match wins. The product extension registers last, and its catch-all rule is the fallback. Startup fails if two extensions claim the same reason. Every signal except `decision_required` is sorted by its typed `reason` or `kind`, at no token cost, so a reason Shikiru adds later falls to the catch-all. In short: agent, integration, quota and engine problems go to infrastructure; a pull request ready for review goes to review; finished work and health go to notice; everything else, including reasons that have no action yet, goes to product.
 
 **`decision_required`.** Without a configured Reasoner this is always `product`, so the first phases forward it at once. With one, the question waits for the verdict at most `reasoner.timeout_s`. Before the verdict, code collects host facts (OS, which package managers exist, PATH). The Reasoner's `assess_blocker` job ([§8](#8-reasoner)) reads the reason, the question, the agent's options and these facts. Its verdict is `host_tool` (a program is missing on the machine), `project_dependency` (a library the project itself must declare) or `other`. On a model failure, a timeout, an invalid answer or any other verdict the category is `product`, and the model's one-line suggestion becomes a note on the message, marked as model-written; when the Reasoner failed, the note says so. A `project_dependency` is never installed on the host: it would work here and fail everywhere else, and the fix is a change to the project's dependency file, which is the agent's job. The PO sees the suggestion "add it to `<file>`". The Operator never writes into a repository. A wrong verdict is cheap by design: the infrastructure path forwards whatever it cannot fix, and it never acts on the host without the PO's approval. Verdicts are logged with the signal so misroutes can be reviewed by hand ([§15](#15-proving-it-works)). If they prove unreliable, a typed category set by the asking agent becomes a Shikiru requirement.
 
@@ -239,41 +133,24 @@ Each handler gets what it needs through its constructor (the Channel, the journa
 
 **The Router guarantees the fallback.** An exception, a timeout or an unknown category becomes `Forward`. Signals are handled as independent asyncio tasks, and the only shared resources are the host lock and the Reasoner (at most `reasoner.max_parallel` calls at once).
 
-**Loop guard.** An automatic action is recorded in `ops` with its `(project, task, reason, action)`. A handler asks the guard before acting. Budgets: `retry_budget_per_day` (default 1) retry per `(project, task, reason)` per 24 hours, and `restart_budget_per_hour` (default 1) engine restart per project per hour. A spent budget becomes `Forward` with the history, so a fix that does not hold never loops.
+**Loop guard.** An automatic action is recorded in `ops` with its `(project, task, reason, action)`, and a handler asks the guard before acting. The budgets are settings ([configuration reference](../README.md#configuration-reference)). A spent budget becomes `Forward` with the history, so a fix that does not hold never loops.
 
 ### 6.1 Product handler
 
-It forwards. The message is a template over Shikiru's fields, so it needs no model:
+It forwards. The message is a template over Shikiru's fields, so it needs no model. The question and the agent's options, with their consequences and the recommended one, come from the structured escalation view ([S1](#11-shikiru-what-is-used-what-is-needed)). An escalation without agent options offers Shikiru's own resolutions (`retry`, `accept`, `cancel`), each only where the escalation allows it.
 
-> **T-12 · Export invoices older than 90 days · S41**
->
-> *Export invoices older than 90 days?* The payment provider only keeps 90 days of invoices.
->
-> ★ 1. Ship export for new invoices now (history later)
-> 2. Add a second data source first (delivery moves)
->
-> *What I tried:* nothing, this is a product question.
->
-> [★ 1. Ship export for new…] [2. Add a second data source…] [Reply with text] [Cancel task] [Details]
-
-* **Layout.** The header is bold and every block (question, options, notes, hint) is separated by a blank line. An option button carries its number and label, cut to `button_label_max_chars` (default 30), with the ★ when the option is recommended; the consequences stay in the text. The Message the core builds has a `heading`; the Channel decides how to show it (Telegram: bold, with all text escaped).
-* **Header.** The task's id and title (from `get_task`; the id alone if Shikiru does not answer) and the signal number last, as a reference (`S41`). The component name comes first only where the message is not already in that component's topic (a private chat). The product name is never shown: an instance serves one product. A message for information keeps its "For information" label after the title.
-* **Content.** The question, the agent's options with consequences and the ★ come from the structured escalation view ([S1](#11-shikiru-what-is-used-what-is-needed)). For escalations that carry no agent options, the buttons are Shikiru's own resolutions (`retry`, `accept`, `cancel`, with their consequences), each offered only where the escalation allows it. A reason-specific hint is added for a few reasons, from a small table in code (for example `agent_auth`: log in again in a terminal, then tap Retry). The note of a forwarding handler is added as *What I tried*.
-* **Answers.** An option button resolves the escalation with `answer` and the option's label and consequences as text. An option that needs input asks for a reply first. A free-text reply to the message is sent as the answer. `accept` (integrates the work as it stands) and `cancel` ask for a confirming tap.
-* **Signals without an escalation** (a stopped engine that could not be restarted, or a notice, review or health message whose own handler failed) are shown as information. A message that only informs (finished work, an engine restart that worked) has no button and its signal closes when it is sent, so it never gets a reminder. A message about something that stays true until it is fixed (an engine that could not be restarted, the Operator's own health, a pull request waiting) has the button *Stop reminders*: it removes the reminders, the message is edited to say "Reminders stopped", and the signal stays open until it closes by itself (the engine is up again, the problem is gone, the pull request is merged or closed). Such a message does not repeat while the engine stays down without new events.
-* **Reminders.** An unanswered message is reminded after `reminder_first_h` (default 4) hours, then every `reminder_repeat_h` (default 24). Silence never approves anything.
+* **Answers.** An option resolves the escalation with `answer`, with the option's label and consequences as text. An option that needs input asks for a reply first, and a free-text reply to the message is sent as the answer. `accept` and `cancel` ask for a confirming tap.
+* **Information.** A signal without an escalation is shown as information. A message that only informs closes when it is sent. A message about something that stays true until it is fixed carries *Stop reminders*, which silences its reminders and leaves the signal open.
+* **Silence never approves anything.**
 
 ### 6.2 Infrastructure handler
 
-The handler picks an **action** by the signal's reason or kind, from a dictionary built from the registered actions:
+The handler picks an **action** by the signal's reason or kind, from the registered actions:
 
-| Signal | Action | Outcome |
-|---|---|---|
-| `agent_error`, `agent_stuck`, `agent_protocol`, `integration_conflict`, `integration_blocked` | **Retry**: `resolve_escalation(retry)` at once. Shikiru has already backed off before escalating | `Resolved`; a second escalation of the same cause forwards (loop guard) |
-| `quota_exhausted`, `ladder_exhausted` | **Wait**: the reset time is the latest `resets_at` among the exhausted windows (`used_pct` of 100 or more) in `status.quotas`. Tell the PO the time, record a `wait` op, park until then plus one minute, then `resolve_escalation(retry)` | `WaitUntil`; no known reset time, or one more than `quota_wait_max_h` away, forwards |
-| `engine_down`, `engine_fault` (a fault stop) | **Restart**: `shikiru --project <path> start`, then confirm `status.engine_up`. Shikiru resumes its tasks itself. This also brings engines back after a host reboot | `Resolved`; a second restart within an hour forwards with the failed checks of `shikiru doctor --json` |
-| `engine_error` | **Restart** as above if the engine is down, then `resolve_escalation(retry)` | As above |
-| `decision_required` with verdict `host_tool` | **Install a missing tool** ([§6.3](#63-install-a-missing-tool)) | `Resolved` after the check passes; any failure forwards |
+* **Retry**: `agent_error`, `agent_stuck`, `agent_protocol`, `integration_conflict` and `integration_blocked` are given back to Shikiru with `resolve_escalation(retry)` at once; Shikiru has already backed off before escalating. The loop guard forwards a second escalation of the same cause.
+* **Wait**: `quota_exhausted` and `ladder_exhausted` are parked until the latest reset of the windows that are used up, plus a margin, and then retried. A signal with no known reset, or one beyond `quota_wait_max_h`, is forwarded.
+* **Restart**: `engine_down` and `engine_fault` start the engine with `shikiru start` and confirm `status.engine_up`; Shikiru resumes its tasks itself. A failed or repeated start is forwarded with the failed checks of `shikiru doctor`. `engine_error` gets the same restart if the engine is down, and then its escalation is retried.
+* **Install**: `decision_required` with the verdict `host_tool` goes to the install action ([§6.3](#63-install-a-missing-tool)); any failure is forwarded.
 
 Shikiru already waits for quota resets of up to 8 hours on its own, so a `quota_exhausted` escalation means the reset is further away or unknown. The Operator uses `resolve_escalation(retry)`, never `retry_task`. The first is rejected by Shikiru if the escalation is already resolved; the second interrupts and requeues whatever the task is doing, so repeating it after a restart would be harmful. Product code is never repaired by the Operator; retrying gives the work back to Shikiru's agents.
 
@@ -291,42 +168,29 @@ decision_required, verdict host_tool
   → resolve         answer "Installed <tool> ..." to the Leader
 ```
 
-1. **Validate.** The Reasoner returns `tool` (an executable name), `manager` and `package`. Code accepts them only if the names match a strict pattern (letters, digits, `.`, `_`, `-`, `+`, and for npm `@` and `/`; at most 100 characters), the manager is on the allow-list and exists on the host, and the pair has a recipe. Anything else is forwarded. Recipes are fixed argument lists, never a shell string:
-
-   | Manager | Command |
-   |---|---|
-   | `brew` | `brew install <package>` |
-   | `uv` | `uv tool install <package>` |
-   | `npm` | `npm install -g <package>` |
-   | `pipx` | `pipx install <package>` |
-   | `cargo` | `cargo install <package>` |
-
-   The recipes are rows of one table in code; supporting another user-level manager means adding a row and its name pattern. These managers work the same on macOS and Linux and need no root. A system package manager (`apt`, `dnf`), `sudo` or any other command is never run: they need a password the Operator cannot enter. The signal is forwarded with the suggestion, and the PO runs it personally and answers "done". A model writing the command itself is the "free-form approved commands" extension ([§13](#13-extensions)).
-2. **Is it really missing?** Code runs `command -v <tool>` in the user's login shell. It is built from the validated name, so it is safe to run before approval. If the tool is found, nothing is installed: the agent could not see a tool that exists, which points to its PATH or sandbox. The signal is forwarded with the path found.
-3. **The PO approves the exact command.** The message shows the tool, the model's reason (marked as model-written), the command as code built it, the manager, and the effect: "adds `<tool>` for every component on this host; the package manager may also update dependencies of that tool". The command and the argument list are stored in `ops` before the message is sent, and what runs is that stored list, never re-derived. **Decline** forwards the original escalation. The approval is taken once, by a conditional state change in `ops` (`intended → approved`), so two taps cannot start two installs. An approval older than 24 hours, or for an escalation that was resolved elsewhere, is void.
-4. **It runs like the PO would run it**: the argument list is quoted and run through the user's login shell (`$SHELL -lc`) so PATH and tool setup match the PO's terminal; with closed stdin and non-interactive variables (`CI=1`, `NONINTERACTIVE=1`); in a scratch directory outside every repository; with a timeout (`command_timeout_min`) after which the whole process group is killed. A password prompt fails fast. One host command runs at a time, under the host lock.
+1. **Validate.** The Reasoner's `tool`, `manager` and `package` must match strict name patterns, the manager must be on an allow-list and exist on the host, and the pair must have a recipe. Anything else is forwarded. A recipe is a fixed argument list, never a shell string; the supported managers are in the [README](../README.md#install-approval). A system package manager or `sudo` is never run, so the signal is forwarded with the suggestion instead.
+2. **Is it really missing?** Code runs `command -v <tool>` in the user's login shell. If the tool is found, nothing is installed: the agent could not see a tool that exists, so the signal is forwarded with the path found.
+3. **The PO approves the exact command.** The message shows the tool, the model's reason (marked as model-written), the command as code built it and its effect. The argument list is stored before the message is sent, and what runs is that stored list, never re-derived. **Decline** forwards the original escalation. The approval is a conditional state change (`intended → approved`), so two taps cannot start two installs, and it is void after 24 hours or once the escalation is resolved elsewhere.
+4. **It runs like the PO would run it:** in the login shell, outside every repository, under the host lock, with a timeout after which the whole process group is killed. A password prompt fails fast.
 5. **Success means the check passes,** not exit code 0. The output goes to a file in the instance directory, and on failure its tail goes to the PO with the forward.
-6. **Resolve.** `resolve_escalation(answer)` with "Installed `<tool>` with `<manager>` (found at `<path>`). Please continue." Only `answer` and `cancel` exist for `decision_required`, so a retry is not available here.
-7. **Journaled before it runs.** After a restart an interrupted install is never repeated blindly: the check decides, and if it fails the PO is asked again.
+6. **Resolve.** `resolve_escalation(answer)` tells the Leader that the tool is installed and where it is. Only `answer` and `cancel` exist for `decision_required`, so a retry is not offered.
+7. **Journaled before it runs.** An issued install is never repeated blindly: after a restart the check decides, and if the tool is still missing the PO is asked again.
+
+A model writing the command itself is the "free-form approved commands" extension ([§13](#13-extensions)).
 
 ### 6.4 Review handler
 
-Shikiru's pull-request integration mode opens a pull request for a finished task and keeps the task *integrating* until the PR is merged or closed. Nobody is asked, so there is no escalation; the PO simply has to look. The handler sends the link:
+Shikiru's pull-request integration mode opens a pull request for a finished task and keeps the task *integrating* until the PR is merged or closed. Nobody is asked, so there is no escalation; the PO simply has to look. The handler sends one message with the task title, the commit count, an *Open PR* link button and *Stop reminders*. The Operator does not merge, comment or review.
 
-> **Shop · api · T-12 · Pull request ready for review**
-> *Export invoices older than 90 days* · 3 commits
-> [Open PR] [Stop reminders]
-
-* **Content.** The task title comes from `get_task`; the link and the commit count from the `pr_opened` event. *Open PR* is a link button. The Operator does not merge, comment or review.
 * **Closing.** The signal closes when the task is done (merged), when the PR is withdrawn, or when Shikiru escalates `pr_closed`; the message is then edited to its final state. *Stop reminders* only silences the reminders.
 * **Reminders** follow the Product handler's. A PR left unmerged beyond Shikiru's wait budget raises `integration_blocked`; the retry of the Infrastructure handler then just starts another wait, spent once by the loop guard, and the review message and its reminders continue.
 * **Later:** a review by an agent or by the CI's review agents is another handler for the `review` category, which forwards only when asked ([§13](#13-extensions)).
 
 ### 6.5 Notice handler
 
-**Task finished.** A plan task spawns child tasks, so a message per `task_done` would be noise. On each `task_done` the handler reads `list_tasks`, follows `parent_id` to the family root, and stays silent while any task of that family is `queued`, `running`, `integrating` or `escalated`. When none is left it sends one message per family root: "api · *root title* integrated (N tasks)". Its key is recorded in `messages`, so the message is never sent twice. Shikiru records a task as done only after integration settles, so the message says *integrated*, and release is not tracked.
+**Task finished.** A plan task spawns child tasks, so a message per `task_done` would be noise. The handler reads the task list, follows `parent_id` to the family root, and stays silent while any task of that family is `queued`, `running`, `integrating` or `escalated`. When none is left it sends one message per family root, saying the root is *integrated* with its number of tasks. Its key is recorded in `messages`, so the message is never sent twice. Shikiru records a task as done only after integration settles, so release is not tracked.
 
-**Health.** A `health` signal becomes one message ("Reasoner unavailable: every rung failed; decisions are forwarded without a suggestion", "api: Shikiru link down for 10 minutes"), edited to "recovered" when the signal closes.
+**Health.** A `health` signal becomes one message, edited to say that it has recovered when the signal closes.
 
 The infrastructure handler sends its own messages when it acts (a quota wait and its time, an engine restart) through the same Channel. A daily digest is a later extension.
 
@@ -336,31 +200,12 @@ The infrastructure handler sends its own messages when it acts (a quota wait and
 
 **Telegram adapter.** One bot per instance, long polling, inline buttons, edit in place. Updates are saved before the offset advances. Only allow-listed user ids are served. Without `channels.telegram.group_id` the destination is the private chat of each owner; with it, the destinations are the group's forum topics (below). Handlers see topics only through the Destinations port: a signal's destinations, and the component a thread belongs to.
 
-* **Size limits.** A message is at most 4096 characters. A long question or option list is cut to fit, with a *Details* button that sends the full packet text in parts. Button data is at most 64 bytes, so it carries numbers only: `a:<signal no>:<option no>` selects a choice (every escalation choice, including answer, retry, accept and cancel, has an option number; input and confirmation follow from the choice), `d:<signal no>` is *Details* and `k:<signal no>` is *Stop reminders*. The signal number is the journal row id (shown as `S41`).
+* **Size limits.** A long question or option list is cut to fit Telegram, with a *Details* button that sends the full packet in parts. Button data is small, so it carries numbers only: the signal number (shown as `S41`, the journal row id) and the choice. A tap is matched to the journal by these numbers.
 * **Answers apply once.** Replies are matched by the message they reply to; an approval message accepts only its buttons. Shikiru rejects a resolution for an escalation that is no longer open, so "first answer wins" is Shikiru's guarantee; the Operator tells the later answer "Already resolved: B at 12:03" from its own journal. After resolving, every copy of the message is edited to its final state and its buttons are removed ([§10.1](#101-commands-to-shikiru)).
 
-**Forum topics.** With `channels.telegram.group_id` set, the group is a forum and signals go to its topics.
+**Forum topics.** With `channels.telegram.group_id` set, the group is a forum and signals go to its topics. One topic per component carries every signal of that component; the built-in General topic carries the Operator's own health, and a component's signals never go to General. Start-up creates the missing topics and closes those of removed components, deciding from its own journal alone, because the Bot API cannot list a forum's topics. A topic made by hand is not adopted automatically, and an uncertain topic creation stops start-up until `telegram adopt` or `telegram forget` repairs it. Only owners are served, whatever other members the group holds.
 
-* **Topics.** One topic per component carries every signal of that component: escalations, engine, finished work, pull requests and the health of its link. The forum's built-in General topic carries what belongs to no component: the Operator's own health (Telegram, the Reasoner). The Operator does not create a topic for it; its messages carry no thread id. A component's signals never go to General.
-* **Start-up.** The Operator creates the missing topics and closes the topics of components removed from the configuration, deciding from its own journal alone. The Bot API cannot list a forum's topics, so a topic made by hand is not adopted; start-up creates a second topic with the same name. A component added again gets a new topic. Start-up checks no rights or membership: if Telegram refuses a topic it has to create or close, start-up stops with that error.
-* **Repair.** A start-up interrupted while a topic was being created refuses to run and names the two commands. `telegram adopt <component> <thread-id>` marks that topic open with the given thread, and works also when the journal has no row, which is how a topic made by hand is reused; `telegram forget <component>` removes a row whose creation is uncertain, so the next start creates a new topic. Both are refused while the instance runs and delete no forum topic.
-* **Checks.** `doctor` requires the group to be a forum supergroup, the bot to be an administrator with the manage-topics right, and each owner to be a member. By default the group may hold only the owners and the bot, so doctor compares its member count. `allow_other_members = true` skips that count, and doctor then notes that other members can read the messages. In either case only owners are served: taps and messages from other members are dropped.
-* **Messages in a topic.** A reply is matched by the message it answers, wherever that is. Each message in a topic names the topic's first message as the one it replies to; the Operator does not count that as a reply. `/goal <request>` in a component's topic implies the component, and its outcome goes back to that topic. `/status` and `/open` are not scoped by topic: they cover every component, and `/open` shows each open question in its component's topic.
-* **Private chats.** In group mode an owner can still message the bot privately, and commands there are answered in that chat.
-* **Headers.** A message names its component first only outside that component's topic; inside the topic the name is left out.
-
-**Commands.**
-
-| Command | Effect |
-|---|---|
-| `/status` | Per component: engine up, down or never started; running, queued and escalated tasks; quota blocks |
-| `/open` | Open escalations and pending approvals, with their buttons again |
-| `/goal <component> <text>` | `submit_task` in that component with the text as the request; Shikiru's Leader triages and plans it. The PO gets the task id and later its `task_done` notice. In a component's topic the component is the topic's and can be left out |
-| `/help` | The list |
-
-Free text that is neither a reply nor a command gets the command list. Reading free text with a model is a later extension.
-
-**`/goal` and restarts.** The command is journaled as an op before it is sent, identified by the Telegram update id, so a duplicate delivery cannot submit twice. If the Operator dies after queueing the task but before recording Shikiru's acknowledgement, it cannot tell whether the task exists, and Shikiru's submit cannot be safely repeated. After a restart such a goal is not resubmitted. The PO gets: "I may have submitted this already: *text*. Check `/status`, or tap Submit again."
+**Commands.** `/status`, `/open`, `/goal` and `/help` are documented in the [README](../README.md#chat-commands). `/goal` is journaled before it is sent, identified by the Telegram update id, so a duplicate delivery cannot submit twice. After a crash, a goal whose acknowledgement was not recorded is never resubmitted; the PO is asked to check first.
 
 **Secrets never travel through chat.** A message that looks like a secret is refused and, where the platform allows, deleted.
 
@@ -398,7 +243,7 @@ Not stored: tasks, escalation packets, logs, agent usage. They stay in Shikiru a
 
 ## 10. Restarts and failures
 
-On start the Operator takes `instance.lock` ([§3.1](#31-one-instance-per-product)), then:
+On start the Operator takes `instance.lock` (see the [README](../README.md#diagnostics-and-recovery)), then:
 
 1. **Ops.** Every op that is not final is reconciled by observation ([§10.1](#101-commands-to-shikiru)): a `resolve` by the escalation's state and events, a `start` by `status.engine_up`, an `install` by its check, a `submit` by asking the PO.
 2. **Signals.** Signals that were `new` or `handling` when the Operator stopped are handled again: a handler may run twice for one signal, so its effects are keyed by the signal (an op identity, a message per signal). Parked signals whose wake-up time has passed are dispatched. Open forwarded messages are re-sent only if their delivery was not confirmed, carrying their stable reference (`S41`), so a duplicate is recognizable.
@@ -477,7 +322,7 @@ shikiri-yaku/
 * Open for extension, closed for edits: a category, handler, action, source, Reasoner job, Classifier or channel is added by writing it and registering it in `bootstrap.py`. An extension owns its rules, so the Router, the classifier and the journal do not switch on a specific category or kind.
 * Failures cross a port as typed exceptions. Only the Router turns them into `Forward`; no other code swallows them.
 * Names come from this document's vocabulary (signal, category, handler, outcome). Functions are short, comments explain why, and no code exists for a case this document does not describe.
-* Numbers are settings with defaults in one settings object ([§3.2](#32-configuration)), not literals in handlers.
+* Numbers are settings with defaults in one settings object (see the [configuration reference](../README.md#configuration-reference)), not literals in handlers.
 
 **Tests that earn their place.**
 

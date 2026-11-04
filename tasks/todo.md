@@ -61,7 +61,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R6
 
-- [ ] R6. Remove migrated operational detail from the design
+- [x] R6. Remove migrated operational detail from the design
 
 ## Acceptance criteria
 

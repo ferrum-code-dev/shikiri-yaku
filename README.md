@@ -116,7 +116,8 @@ Only the sections and keys listed here are accepted. Misspelled or unknown keys 
 Product and component names must start with an ASCII letter or digit and may then contain letters,
 digits, `_` or `-`. Component names must be unique. At least one component is required. Components
 run on this machine: `path` must be an absolute path or begin with `~`; remote `host` components
-are not supported.
+are not supported. A component removed from the file has its open signals closed with a note at the
+next start.
 
 | Section | Keys and defaults |
 | --- | --- |
@@ -289,6 +290,39 @@ recorded. It may update dependencies of the installed tool. Tap **Decline** to r
 forward the original escalation to you. An approval expires after 24 hours by default; `/open`
 shows only approvals that remain valid and open.
 
+## Automatic actions and notices
+
+The Operator acts on its own only in the cases below. Anything else reaches you as a question,
+with what it tried.
+
+- **Agent and integration errors** (`agent_error`, `agent_stuck`, `agent_protocol`,
+  `integration_conflict`, `integration_blocked`): the escalation is given back to Shikiru's agents
+  at once. Each cause gets `retry_budget_per_day` retries a day (one by default); after that the
+  escalation is forwarded to you.
+- **Quota exhausted** (`quota_exhausted`, `ladder_exhausted`): the bot tells you when the quota
+  resets and retries the escalation after that time plus `quota_wait_margin_min`. A reset that is
+  unknown, or further away than `quota_wait_max_h`, is forwarded at once.
+- **Engine down or faulted** (`engine_down`, `engine_fault`): the bot asks Shikiru to start the
+  engine, waits until it is up and tells you. If the start is refused, fails or is not confirmed, it
+  forwards the failed checks from `shikiru doctor` and asks you to run `shikiru start` in that
+  project. An `engine_error` escalation gets the same restart if the engine is down, and is then
+  retried. Restarts are limited to `restart_budget_per_hour` per component (one an hour by default).
+- **Missing tool**: an install runs only after you tap **Install** (see
+  [Install approval](#install-approval)).
+- **Pull request ready for review**: when Shikiru reports an open pull request for a task, the bot
+  sends its title, its commit count and an **Open PR** link, with **Stop reminders**. When the pull
+  request is merged, closed unmerged or withdrawn, the message is edited to a final line that says
+  how it ended. The Operator never merges, comments on or reviews a pull request.
+- **Finished work**: when a task and its child tasks have all settled, the bot sends one notice per
+  task family, such as "api · Export invoices integrated (3 tasks)". It has no buttons.
+- **Health**: when every configured Reasoner rung fails, decisions are forwarded without a
+  suggestion; when a component's Shikiru link stays unreachable for `link_unreachable_min` (10
+  minutes by default), the bot says so. Either notice has **Stop reminders** and is edited to
+  "Recovered" when the problem clears.
+
+Standing messages (the pull-request message and health notices) keep their **Stop reminders**
+button, which silences their reminders without closing the underlying signal.
+
 ## Service operation
 
 Run `shikiri-yaku --product shop install-service` after installing the command and creating a
@@ -365,8 +399,8 @@ missing, the bot asks for a fresh approval. Telegram may show one duplicate mess
 stopped after Telegram accepted a send but before the journal recorded its acknowledgement.
 
 Unexpected engine-down signals can trigger one automatic restart per component per hour by
-default. If a start fails or the budget is exhausted, the bot forwards the reason and tells you
-to start it with `shikiru start` in that component's project. A clean Shikiru engine stop observed
+default. If a start fails or the budget is exhausted, the bot forwards the reason and the failed checks
+from `shikiru doctor`, and tells you to start it with `shikiru start` in that component's project. A clean Shikiru engine stop observed
 while the Operator is running is treated as intentional after `stop_grace_min` (2 minutes by
 default). If the Operator restarts before recording that grace period, an unrespected stop may be
 treated as an engine-down signal on the next run. A stop already marked respected remains so
