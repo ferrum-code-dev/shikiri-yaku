@@ -1,4 +1,4 @@
-"""An automatic retry settles like an answer: by its event, or by the reconciler (§10.1)."""
+"""An automatic retry settles like an answer: by its event, or by the reconciler."""
 
 from __future__ import annotations
 

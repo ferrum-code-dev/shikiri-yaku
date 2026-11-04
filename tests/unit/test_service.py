@@ -1,4 +1,4 @@
-"""Unit tests for the service units: their content and place, per platform (design §3.1).
+"""Unit tests for the service units: their content and place, per platform.
 
 The renderers are pure, so these tests only build content; nothing is written to a real launchd or
 systemd directory.

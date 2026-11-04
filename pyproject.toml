@@ -55,7 +55,7 @@ sequence = ["format-check", "lint", "comments", "literals", "imports", "types", 
 line-length = 100
 target-version = "py314"
 src = ["src"]
-extend-exclude = ["*.md"]  # the gate formats Python; docs/design.md is the spec and stays as written
+extend-exclude = ["*.md"]  # the gate formats Python; the Markdown docs are not reformatted
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -72,26 +72,26 @@ ignore = [
   "D213",    # conflicts with D212 (multi-line docstring summary on first line)
   "COM812",  # formatter already governs trailing commas
   "ASYNC109", # injected timeout parameters are the project's convention, not asyncio.timeout
-  "PLR0913", # constructors take their collaborators as parameters (design §12)
+  "PLR0913", # constructors take their collaborators as parameters
 ]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"sqlite3" = { msg = "SQL only in shikiri_yaku.journal (docs/design.md §12)" }
-"subprocess" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
-"asyncio.create_subprocess_exec" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
-"asyncio.create_subprocess_shell" = { msg = "Subprocesses only through the CommandRunner port (docs/design.md §12)" }
-"time.sleep" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"asyncio.sleep" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.time" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.time_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.monotonic" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.monotonic_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.perf_counter" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"time.perf_counter_ns" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"datetime.datetime.now" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"datetime.datetime.utcnow" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"datetime.datetime.today" = { msg = "Time only through the Clock port (docs/design.md §12)" }
-"datetime.date.today" = { msg = "Time only through the Clock port (docs/design.md §12)" }
+"sqlite3" = { msg = "SQL only in shikiri_yaku.journal" }
+"subprocess" = { msg = "Subprocesses only through the CommandRunner port" }
+"asyncio.create_subprocess_exec" = { msg = "Subprocesses only through the CommandRunner port" }
+"asyncio.create_subprocess_shell" = { msg = "Subprocesses only through the CommandRunner port" }
+"time.sleep" = { msg = "Time only through the Clock port" }
+"asyncio.sleep" = { msg = "Time only through the Clock port" }
+"time.time" = { msg = "Time only through the Clock port" }
+"time.time_ns" = { msg = "Time only through the Clock port" }
+"time.monotonic" = { msg = "Time only through the Clock port" }
+"time.monotonic_ns" = { msg = "Time only through the Clock port" }
+"time.perf_counter" = { msg = "Time only through the Clock port" }
+"time.perf_counter_ns" = { msg = "Time only through the Clock port" }
+"datetime.datetime.now" = { msg = "Time only through the Clock port" }
+"datetime.datetime.utcnow" = { msg = "Time only through the Clock port" }
+"datetime.datetime.today" = { msg = "Time only through the Clock port" }
+"datetime.date.today" = { msg = "Time only through the Clock port" }
 
 [tool.ruff.lint.per-file-ignores]
 "src/shikiri_yaku/journal/**" = ["TID251"]  # the journal is the only place with SQL
@@ -113,7 +113,7 @@ venv = ".venv"
 root_package = "shikiri_yaku"
 
 [[tool.importlinter.contracts]]
-name = "Domain imports nothing else of the project (docs/design.md §12)"
+name = "Domain imports nothing else of the project"
 type = "forbidden"
 source_modules = ["shikiri_yaku.domain"]
 forbidden_modules = [
@@ -127,7 +127,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "App and extensions import domain and ports only (docs/design.md §12)"
+name = "App and extensions import domain and ports only"
 type = "forbidden"
 source_modules = ["shikiri_yaku.app", "shikiri_yaku.extensions"]
 forbidden_modules = [
@@ -138,7 +138,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Adapters and journal implement ports, not the application (docs/design.md §12)"
+name = "Adapters and journal implement ports, not the application"
 type = "forbidden"
 source_modules = ["shikiri_yaku.adapters", "shikiri_yaku.journal"]
 forbidden_modules = [
@@ -149,19 +149,19 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "The journal does not import adapters; bootstrap wires them (docs/design.md §12)"
+name = "The journal does not import adapters; bootstrap wires them"
 type = "forbidden"
 source_modules = ["shikiri_yaku.journal"]
 forbidden_modules = ["shikiri_yaku.adapters"]
 
 [[tool.importlinter.contracts]]
-name = "Only bootstrap builds concrete objects (docs/design.md §12)"
+name = "Only bootstrap builds concrete objects"
 type = "forbidden"
 source_modules = ["shikiri_yaku.ports", "shikiri_yaku.cli"]
 forbidden_modules = ["shikiri_yaku.adapters", "shikiri_yaku.journal"]
 
 [[tool.importlinter.contracts]]
-name = "Nothing but the CLI imports the composition root (docs/design.md §12)"
+name = "Nothing but the CLI imports the composition root"
 type = "forbidden"
 source_modules = [
   "shikiri_yaku.domain",

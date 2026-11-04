@@ -1,6 +1,6 @@
 """A Stop reminders tap on an engine-down message ends its reminders and its message.
 
-Design §6.1 and §6.4: the tap removes the reminders and the message reads "Reminders stopped"; the
+The tap removes the reminders and the message reads "Reminders stopped"; the
 signal stays open until the engine is up again, and then the message reads "Engine is up again".
 No reminder is sent in between, even when the clock is past the time one would be due.
 """

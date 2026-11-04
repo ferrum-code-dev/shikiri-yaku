@@ -1,4 +1,4 @@
-"""The redaction of recorded Bot API replies: the token and the ids are replaced everywhere (E3)."""
+"""The redaction of recorded Bot API replies: the token and the ids are replaced everywhere."""
 
 from __future__ import annotations
 

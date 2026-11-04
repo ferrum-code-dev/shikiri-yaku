@@ -1,4 +1,4 @@
-"""An upgraded journal marks the copies its categories recognize as standing, once (design §7).
+"""An upgraded journal marks the copies its categories recognize as standing, once.
 
 A copy sent before the standing flag existed has its reminders and its Stop reminders button, but
 no flag, so its tap would close the signal. The repair marks the copies whose category, signal

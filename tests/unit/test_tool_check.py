@@ -1,4 +1,4 @@
-"""The existence check: `command -v` in the login shell, the name as an argument (design §6.3)."""
+"""The existence check: `command -v` in the login shell, the name as an argument."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""A failed handler of an unresolved condition stands until the condition ends (design §6.1, §6.2).
+"""A failed handler of an unresolved condition stands until the condition ends.
 
 A restart that Shikiru refuses, whose checks cannot be read, or that never returns keeps its
 engine-down message on screen with Stop reminders. The tap silences the reminders, and the engine's

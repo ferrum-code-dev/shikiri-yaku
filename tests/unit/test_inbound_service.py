@@ -1,4 +1,4 @@
-"""The inbound job: unreadable batches are visible once, transport failures are not (design §7)."""
+"""The inbound job: unreadable batches are visible once, transport failures are not."""
 
 from __future__ import annotations
 

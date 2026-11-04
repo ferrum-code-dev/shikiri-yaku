@@ -19,12 +19,12 @@ the reply it stands for. A recording needs the bot token and the network, and th
 | `forum_member_count.json` | the reply to `getChatMemberCount`: an integer | Bot API, "Available methods" (getChatMemberCount) |
 | `get_webhook_info.json` | the reply to `getWebhookInfo` with no webhook: `url` is empty; a test sets a URL to stand for a webhook | Bot API, "Available methods" (getWebhookInfo) and "WebhookInfo" |
 
-In A10d the official page was read in part: the getMe entry, the required User fields, the response
+The official page was read in part: the getMe entry, the required User fields, the response
 shape (`ok`, `result`, `description`, `error_code`, `parameters`) and ResponseParameters with
 `retry_after`. The part read states no HTTP status code for error replies, so the status codes above
 come from third-party copies, not from the page. No `description` is checked against Telegram. The
 adapter reads a `description` in two places only: a refused `getUpdates` shows it, with the code, in
-the health message (C8); a `getWebhookInfo` reply with a webhook URL names only that URL's host.
+the health message; a `getWebhookInfo` reply with a webhook URL names only that URL's host.
 Elsewhere a refusal carries the Channel's own reason, and platform text is never kept.
 
 `get_updates_ok.json` was written from the documented Update, Message and CallbackQuery shapes

@@ -1,4 +1,4 @@
-"""The Telegram Channel against the Bot API replies in tests/fixtures/telegram/ (design §7, §12)."""
+"""The Telegram Channel against the Bot API replies in tests/fixtures/telegram/."""
 
 from __future__ import annotations
 

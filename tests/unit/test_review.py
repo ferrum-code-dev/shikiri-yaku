@@ -1,4 +1,4 @@
-"""The review handler: one review message per pull request, with its link and number (§6.4)."""
+"""The review handler: one review message per pull request, with its link and number."""
 
 from __future__ import annotations
 

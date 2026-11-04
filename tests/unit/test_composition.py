@@ -1,7 +1,7 @@
 """A source-created escalation ends as a sent message with buttons, through the composed jobs.
 
 A goal whose submit a crash interrupted is asked about after the restart, and never submitted again.
-The Shikiru link and the Bot API are fakes, so no process and no network take part (design §7, §12).
+The Shikiru link and the Bot API are fakes, so no process and no network take part.
 """
 
 from __future__ import annotations
@@ -919,9 +919,8 @@ def test_a_source_escalation_ends_as_a_sent_message_with_buttons(tmp_path: Path)
 def test_host_tool_approval_survives_restart_open_and_reply(tmp_path: Path) -> None:
     """An approval that comes after a restart runs the install and confirms it.
 
-    Changed by D6d: this test used to stop at `approved`, because nothing ran the op. The composed
-    executor now runs the one stored command, the check finds the tool, and the op ends `confirmed`
-    once the `escalation_resolved` event names the answer's command.
+    The composed executor runs the one stored command, the check finds the tool, and the op ends
+    `confirmed` once the `escalation_resolved` event names the answer's command.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
@@ -1603,7 +1602,7 @@ def test_two_answers_to_one_question_from_two_chats_resolve_once(tmp_path: Path)
     """A second owner's answer to a question already answered is told so and sends nothing.
 
     The question goes to both owners. The second tap comes once the first answer is confirmed,
-    so the journal holds the resolution it must report (design §15 drill 6).
+    so the journal holds the resolution it must report.
     """
     directory = _instance(tmp_path, owners=(_OWNER, _SECOND_OWNER))
     first_chat, second_chat = asyncio.Event(), asyncio.Event()
@@ -1645,8 +1644,7 @@ def test_a_non_owner_in_the_group_changes_nothing_and_an_owners_tap_is_still_ans
     """A message or tap from someone who is not an owner is dropped, even when it is in the group.
 
     Other members of the group can read it, so only the owners may act. The outsider's text and
-    tap come first; the owner's tap on the same question, in the same group, is still answered
-    (design §7).
+    tap come first; the owner's tap on the same question, in the same group, is still answered.
     """
     directory = _instance(tmp_path, group_id=_GROUP)
     outsider, owner = asyncio.Event(), asyncio.Event()
@@ -1675,7 +1673,7 @@ def test_a_non_owner_in_the_group_changes_nothing_and_an_owners_tap_is_still_ans
 def test_an_answer_given_in_tmux_closes_the_question_in_telegram(tmp_path: Path) -> None:
     """An escalation answered outside Telegram closes its question there, once the PO has seen it.
 
-    The resolving event comes after the question is sent (design §15 drill 6, "an answer in tmux").
+    The resolving event comes after the question is sent.
     """
     directory = _instance(tmp_path)
     bot = _MarkingBot(_QUESTION_TEXT)
@@ -1694,8 +1692,7 @@ def test_an_answer_given_in_tmux_closes_the_question_in_telegram(tmp_path: Path)
 def test_a_pull_request_closed_unmerged_closes_its_review_message(tmp_path: Path) -> None:
     """A pull request closed without a merge ends its review message as closed unmerged.
 
-    The review is sent first; Shikiru then raises the escalation for the closed pull request
-    (design §15 drill 5).
+    The review is sent first; Shikiru then raises the escalation for the closed pull request.
     """
     directory = _instance(tmp_path)
     bot = _MarkingBot(_REVIEW_MARKER)
@@ -1720,7 +1717,7 @@ def test_a_question_killed_mid_send_is_sent_once_more_and_then_confirmed(tmp_pat
     """A question the Channel took but the Operator never confirmed is sent again after a restart.
 
     The copy carries the same signal number, so the PO can recognize the duplicate; the journal
-    then holds the message as sent (design §7, §15 drill 4).
+    then holds the message as sent.
     """
     directory = _instance(tmp_path)
     session = _ShikiruSession(
@@ -1740,8 +1737,7 @@ def test_an_operator_killed_mid_resolve_confirms_the_answer_shikiru_recorded(
 ) -> None:
     """A resolve cut short by a crash is confirmed on restart from the escalation's own state.
 
-    The answer is not sent again, and the PO is not asked the question once more
-    (design §15 drill 4).
+    The answer is not sent again, and the PO is not asked the question once more.
     """
     directory = _instance(tmp_path)
     tap = _tap(_OWNER, FIRST_MESSAGE_ID, _ANSWER_TAP, update_id=801)
@@ -1764,7 +1760,7 @@ def test_an_engine_the_po_stopped_stays_stopped_across_an_operator_restart(
     """A clean stop is respected once its grace has passed, so a restart does not reopen it.
 
     The restart starts after the stop, so the stop would read as a host shutdown unless the first
-    run respected it (design §15 drill 4).
+    run respected it.
     """
     # keep: a wrong verdict would start the engine, and no command it runs may be found on this PATH
     monkeypatch.setenv("PATH", str(tmp_path))
@@ -1807,7 +1803,7 @@ def test_a_declined_install_runs_no_command_and_leaves_the_escalation_to_the_po(
 ) -> None:
     """Declining an install approval runs no host command and forwards the escalation with a note.
 
-    Design §15 drill 1 ("the same with Decline") and principle 4: nothing runs without approval.
+    Principle 4: nothing runs without approval.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
@@ -1861,7 +1857,7 @@ def test_a_cancelled_task_ends_its_question_and_its_unrun_install_and_a_tap_says
     """Cancelling a task finishes its forwarded question and its pending install approval.
 
     Neither keeps its buttons, the install runs no host command, and an Install tap after the
-    cancellation says why (design §6.3; plan E6).
+    cancellation says why.
     """
     directory = _instance(tmp_path)
     _add_reasoner_ladder(directory)
@@ -1933,7 +1929,7 @@ def test_an_install_interrupted_after_its_claim_is_asked_again_and_its_old_appro
     """A restart that finds the tool still missing asks again once and deletes the old approval.
 
     The old copy's deletion is journaled before the platform is asked, and the new approval is the
-    one copy left. A replay of the same restart deletes and sends nothing more (design §6.3, §7).
+    one copy left. A replay of the same restart deletes and sends nothing more.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
@@ -1975,8 +1971,7 @@ def test_a_deletion_the_platform_refuses_leaves_the_old_copy_marked_replaced(
 ) -> None:
     """A copy the platform will not delete, such as one older than 48 hours, is edited to say so.
 
-    The edit is its final line and leaves no buttons, so the old approval cannot be tapped
-    (design §7).
+    The edit is its final line and leaves no buttons, so the old approval cannot be tapped.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
@@ -2003,7 +1998,7 @@ def test_an_install_asked_again_after_an_upgrade_replaces_the_approval_sent_befo
     """An approval sent before slots existed is replaced when its install is asked again.
 
     The upgrade gives the old approval its install slot, so the one copy left is the new approval,
-    and a replay of the same restart deletes and sends nothing more (design §6.3, §7).
+    and a replay of the same restart deletes and sends nothing more.
     """
     directory = _instance(tmp_path)
     runner = _InstallRunner()
@@ -2041,7 +2036,7 @@ def test_composing_an_upgraded_journal_marks_its_stop_button_copies_standing(
     """An engine copy sent before standing stands once the upgraded instance is composed.
 
     The repair runs when the instance is composed, before any copy is sent, so the copy a PO was
-    shown before the upgrade keeps its reminders and its Stop reminders tap silences it (design §7).
+    shown before the upgrade keeps its reminders and its Stop reminders tap silences it.
     """
     directory = _instance(tmp_path)
     number = _sent_engine_forward_with_stop(directory)

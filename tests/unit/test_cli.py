@@ -1,4 +1,4 @@
-"""Integration tests of run and doctor through bootstrap.main (design §3.1, §10)."""
+"""Integration tests of run and doctor through bootstrap.main."""
 
 from __future__ import annotations
 

@@ -335,8 +335,7 @@ def test_a_copy_sent_before_slots_is_given_the_slot_its_kind_has_now(
 ) -> None:
     """An upgrade gives each old copy the slot its kind gets now, read from its notice key.
 
-    Input prompts, goal replies and notices keep no slot, so they never replace another copy
-    (design §7).
+    Input prompts, goal replies and notices keep no slot, so they never replace another copy.
     """
     connection = memory.connection
     # keep: a schema 19 journal has neither column; the replay below adds both, as an upgrade does

@@ -1,4 +1,4 @@
-"""The names, the recipes and the refusals of an install (design §6.3, principle 4)."""
+"""The names, the recipes and the refusals of an install (principle 4)."""
 
 from __future__ import annotations
 

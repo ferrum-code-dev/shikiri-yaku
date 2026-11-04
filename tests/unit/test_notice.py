@@ -1,6 +1,6 @@
 """The notice handler: a finished family is announced once, and a health message ends on recovery.
 
-Design §6.5: the last task of a family to finish sends one message for the family, and a replay
+The last task of a family to finish sends one message for the family, and a replay
 sends nothing more. A health signal is sent once and edited to "Recovered" when it closes.
 """
 

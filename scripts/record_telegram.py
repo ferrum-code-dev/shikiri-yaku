@@ -1,4 +1,4 @@
-r"""Records real Bot API replies from the PO's test bot as fixtures (design §12, Phase E3).
+r"""Records real Bot API replies from the PO's test bot as fixtures.
 
 A human runs it; the quality gate never does. The script sends a harmless message to the PO's chat
 with the bot, edits it, waits while the PO replies to it and taps its button, reads the updates,

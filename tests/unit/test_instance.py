@@ -1,4 +1,4 @@
-"""Unit tests for the instance directory and its lock (design §3.1)."""
+"""Unit tests for the instance directory and its lock."""
 
 from __future__ import annotations
 

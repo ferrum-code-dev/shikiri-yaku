@@ -1,4 +1,4 @@
-"""The Shikiru MCP client against a fake session and payloads recorded from Shikiru's S1 branch."""
+"""The Shikiru MCP client against a fake session and payloads recorded from Shikiru's MCP server."""
 
 from __future__ import annotations
 

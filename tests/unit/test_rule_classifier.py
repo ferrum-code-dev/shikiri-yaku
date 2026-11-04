@@ -48,7 +48,7 @@ class _Stub:
 
 
 def _extensions() -> list[Extension]:
-    """The rule table of design §5, written as the extensions that would own it."""
+    """The rule table, written as the extensions that would own it."""
     return [
         Extension(
             INFRASTRUCTURE,

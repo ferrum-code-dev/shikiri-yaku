@@ -1,4 +1,4 @@
-"""The Reasoner's ladder: rung order, the cooldown of a failed rung, the parallel bound (§8)."""
+"""The Reasoner's ladder: rung order, the cooldown of a failed rung, the parallel bound."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Unit tests for the instance settings (design §3.2)."""
+"""Unit tests for the instance settings."""
 
 from __future__ import annotations
 

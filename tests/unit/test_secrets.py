@@ -1,4 +1,4 @@
-"""The secret forms the outbound scan refuses (design §7)."""
+"""The secret forms the outbound scan refuses."""
 
 from __future__ import annotations
 

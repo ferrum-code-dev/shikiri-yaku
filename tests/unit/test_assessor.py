@@ -1,4 +1,4 @@
-"""The Reasoner as the classifier uses it: a failing ladder, the prompt's facts, verdicts (§5, §8).
+"""The Reasoner as the classifier uses it: a failing ladder, the prompt's facts, verdicts.
 
 The classifier, the assessor, the ladder and the health source are the real ones. The rung and the
 host's shell are fakes, and the journal is in memory.

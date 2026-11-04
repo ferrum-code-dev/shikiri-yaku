@@ -1,4 +1,4 @@
-"""The HTTP transport on a mock transport: replies, failures, the token and the log (design §7).
+"""The HTTP transport on a mock transport: replies, failures, the token and the log.
 
 No socket is opened and no token file of the Operator is read, so the gate makes no network call.
 """

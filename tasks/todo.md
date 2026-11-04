@@ -50,7 +50,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R5
 
-- [ ] R5. Clean test script and gate references
+- [x] R5. Clean test script and gate references
 
 ## Acceptance criteria
 

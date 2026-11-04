@@ -1,4 +1,4 @@
-"""Unsettled starts are settled by observing the engine, and never started again (§10)."""
+"""Unsettled starts are settled by observing the engine, and never started again."""
 
 from __future__ import annotations
 

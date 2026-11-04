@@ -1,4 +1,4 @@
-"""The host facts of the Reasoner's prompt: read in the login shell, and never raising (design §5).
+"""The host facts of the Reasoner's prompt: read in the login shell, and never raising.
 
 The shell is a fake except in one test, which runs the script in `sh` with read-only commands.
 """

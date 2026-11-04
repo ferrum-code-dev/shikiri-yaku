@@ -1,6 +1,6 @@
 """A pull request that closes ends its review message on every copy; a late tap changes nothing.
 
-Design §4 and §6.4: the task is done (merged), the pull request is withdrawn, or Shikiru escalates
+The task is done (merged), the pull request is withdrawn, or Shikiru escalates
 `pr_closed`. Each closes the review signal, its copies are edited to the final state, and its
 reminders stop.
 """

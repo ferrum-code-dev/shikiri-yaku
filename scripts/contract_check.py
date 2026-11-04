@@ -1,4 +1,4 @@
-"""Checks the Shikiru assumptions of design §11 against a real engine with its offline fake agent.
+"""Checks the Shikiru assumptions the Operator relies on against a real engine and its fake agent.
 
 A human runs it; the quality gate does not. Needs git and tmux on PATH and a Shikiru checkout:
 
