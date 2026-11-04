@@ -173,7 +173,7 @@ def _write(directory: Path, config: str) -> Path:
     return directory
 
 
-def test_the_design_sample_loads_with_its_documented_values(tmp_path: Path) -> None:
+def test_the_full_sample_config_loads_with_the_values_it_sets(tmp_path: Path) -> None:
     settings = load_settings(_write(tmp_path, _SAMPLE))
 
     assert settings == Settings(

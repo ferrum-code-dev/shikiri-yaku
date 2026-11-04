@@ -121,7 +121,7 @@ def test_a_manager_missing_on_this_host_is_refused() -> None:
         ("cargo", "ripgrep", ("cargo", "install", "ripgrep")),
     ],
 )
-def test_each_recipe_yields_its_argument_list_of_the_design(
+def test_each_recipe_yields_its_fixed_argument_list(
     manager: str, package: str, argv: tuple[str, ...]
 ) -> None:
     result = validate_install("ffmpeg", manager, package, ALL_MANAGERS)

@@ -1,8 +1,11 @@
 # Task plan
 
-## Release documentation cleanup
+## Current work: release documentation cleanup
 
-This section replaces the T-81 parent request with R1 to R9, executed in order.
+This section replaces the T-81 parent request with R1 to R9, executed in order. R1 to R8 are
+done, and R9 closes the cleanup. Entries keep their original wording, except that R9 removes
+references to numbered design sections. An entry that names a deleted path (docs/plan.md and
+tasks/reasoner-spike.md, removed in R8) describes the change that removed it.
 The explicit request authorizes editing docs/design.md for this cleanup despite AGENTS.md's
 general restriction. This plan does not authorize runtime changes or implementing old unchecked tasks.
 README is the user guide; docs/design.md describes purpose and architecture.
@@ -70,7 +73,7 @@ Clean stale design/phase citations in tests/, scripts/ and pyproject.toml. Prese
 
 ### R6. Remove migrated operational detail from the design (normal)
 
-After README guides and reference cleanup land, prune the old design in a bounded first pass. Remove the user configuration/instance instructions and detailed operational specifications now documented in README, principally old sections 3.1/3.2 and 4 through 7. Keep a short architectural description of signals, classification, outcomes and channel ports where needed; remove or repair internal links affected by this pass. Preserve the architecture diagram and safety principles for the final pass. Target roughly 300 changed lines.
+After README guides and reference cleanup land, prune the old design in a bounded first pass. Remove the user configuration/instance instructions and detailed operational specifications now documented in README, principally the old numbered sections covering those topics. Keep a short architectural description of signals, classification, outcomes and channel ports where needed; remove or repair internal links affected by this pass. Preserve the architecture diagram and safety principles for the final pass. Target roughly 300 changed lines.
 
 ## Acceptance criteria
 
@@ -113,16 +116,20 @@ Finish tracker hygiene after all documentation changes. Keep the existing implem
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 
-The specification is `docs/design.md`; section numbers (§) refer to it. The effort estimate and the
-phases are in `docs/plan.md`. Each task is about 300 lines of change, ends with `uv run poe check`
-green, and leaves the repository usable. Tasks run one at a time, in the order below.
+## Historical implementation records
+
+Everything from here to the end of this file records how T0 to E14 were implemented. It is kept
+for its completion states and is not current guidance. Section numbers (§) in these records refer
+to the design as it stood before the R6 and R7 rewrites, which removed the numbered sections; they
+are history, not a pointer. The order below is the order the tasks ran, one at a time. Each task
+was about 300 lines of change, ended with `uv run poe check` green, and left the repository usable.
 
 **Complexity** is the Leader's hint for the ladder: `high` marks tasks where a mistake loses data or
 breaks the "every route ends at the PO" guarantee. From Phase B4 on, tasks are `normal` unless a
 strong argument is written next to the task title.
 
-Phases B to E are outlined at the end and get detailed tasks after Phase A runs and the gate in
-`docs/plan.md` §2.3 has been decided.
+Phases B to E were outlined at the end and got their detailed tasks after Phase A ran and the gate
+was decided.
 
 ## Phase 0: setup
 
@@ -1053,8 +1060,9 @@ Acceptance criteria:
 
 ## Phase D: install a missing tool
 
-Design §3.2, §5, §6.3, §8. All tasks are `normal`. D1 (the spike) is done: `tasks/reasoner-spike.md`
-holds the verified flags, and the adapters follow it. Rules for the phase: a model never writes a
+Design §3.2, §5, §6.3, §8. All tasks are `normal`. D1 (the spike) is done: its verified flags are recorded
+in the docstrings of `adapters/reasoner_cli.py`, which the adapters follow. The spike note itself was
+removed in R8. Rules for the phase: a model never writes a
 command, names are validated by code, every command is a stored argument list built from a fixed
 recipe, nothing runs without the PO's tap, and no test calls a real agent CLI, a real package manager
 or the network (fakes and `echo`/`sleep` through `CommandRunner`).
@@ -1062,7 +1070,7 @@ or the network (fakes and `echo`/`sleep` through `CommandRunner`).
 ### D2. Reasoner adapters and `assess_blocker` (normal)
 
 `adapters/reasoner_cli.py`: a Claude adapter and a Codex adapter that implement one rung, run through
-`CommandRunner` with the flags of `tasks/reasoner-spike.md`, in a scratch directory under the instance
+`CommandRunner` with the flags recorded in `adapters/reasoner_cli.py`, in a scratch directory under the instance
 directory, with an input cap and `reasoner.timeout_s`. Extend `CommandRunner.run` with optional `cwd`
 and `env` (the adapter and the Executor need them). The prompt is a fixed template that marks the
 escalation text as evidence, not instruction, and lists the host facts. The answer is parsed by a
@@ -1072,7 +1080,7 @@ that cannot run, times out, exits with an error or returns invalid output raises
 naming the rung and the reason.
 
 Acceptance criteria:
-* With a fake runner that returns the recorded shape of each CLI's output, both adapters return the same `Assessment`; the argument list holds the spike's flags and the schema, and never the escalation text as a flag value other than the prompt argument.
+* With a fake runner that returns the recorded shape of each CLI's output, both adapters return the same `Assessment`; the argument list holds the flags recorded in the adapter and the schema, and never the escalation text as a flag value other than the prompt argument.
 * A timeout, a non-zero exit, text that is not JSON and JSON that misses a required field each raise `ReasonerError` that names the rung.
 * An escalation text that looks like an instruction (for example "ignore the schema") is passed as evidence inside the prompt template and changes no flag.
 * The gate passes.
@@ -1083,9 +1091,9 @@ Found in the D2 review. (1) Remove `Read` from the Claude tool list in `adapters
 cannot be limited to the scratch directory, and a model that can read any host file and fetch web pages
 is an exfiltration path for injected escalation text. Keep the web lookups and the two `brew` queries and
 `command -v`. Change design §8 to say the same (the tool list has no file reading), and keep
-`tasks/reasoner-spike.md` in step. (2) Rungs take `adapter:model:effort`: parse it in the settings model
+`adapters/reasoner_cli.py` in step. (2) Rungs take `adapter:model:effort`: parse it in the settings model
 (an unknown adapter fails at start) and pass the effort to the CLI where it has a flag, else ignore it
-and say so in the spike note. (3) Record usage and duration per call when the CLI reports them, in the
+and say so in the adapter's docstring. (3) Record usage and duration per call when the CLI reports them, in the
 signal's verdict record (design §8). (4) `app/reasoner_ladder.py`: `LadderReasoner` implements `Reasoner`
 over the rungs, tried in order; a failed rung is skipped for `cooldown_min`; at most `reasoner.max_parallel`
 calls run at once; every rung failing raises `ReasonerError` with each rung's reason.
@@ -1817,16 +1825,11 @@ Acceptance criteria:
 * A resolve and a submit op recorded before the change (identity `telegram:resolve:<id>`, `telegram:submit:<id>` seeded in the journal) are still found by the same update after the change.
 * The gate passes.
 
-## Later phases (outline)
+## Retired outline
 
-* **B Topics:** tasks B1 to B4 above.
-* **C Infrastructure basics and review:** tasks C1 to C6 above.
-* **D Install:** Reasoner spike, interface, adapter and `assess_blocker`, ladder, validation and
-  recipes, approval flow, Executor (with the `CommandRunner` adapter and its subprocess exemption in
-  `pyproject.toml`), restart handling. `doctor` gets the Reasoner CLI probe (design §3.2) with the
-  Reasoner adapter. The `assess` function given to
-  `RuleClassifier` never raises: a Reasoner failure becomes `Assessment(OTHER, "Reasoner failed: …")`,
-  which the classifier already sends to `product` with that note. `RuleClassifier` rejects two rules
-  claiming one reason; relax that to (reason, verdict) pairs when a second category shares
-  `decision_required`.
-* **E Hardening:** a recovery path for an uncertain topic creation (today start-up refuses until the PO inspects the forum by hand), drills, contract-test script, a human-run `scripts/record_telegram.py` that records real Bot API replies with the PO's own bot (token read from the token file by the script only, never by the gate) to replace the documentation-shaped fixtures, crash-point tests, security review.
+The outline of Phases B to E that stood here before the phases were written in detail is retired.
+Every Phase B to E entry in `tasks/todo.md` is checked. One conditional item from it stays open:
+`RuleClassifier` (`src/shikiri_yaku/domain/rule_classifier.py`, `_check_claims`) rejects two rules that
+claim one reason. Relax that to (reason, verdict) pairs only when a second category shares
+`decision_required`. Today only infrastructure's `HOST_TOOL_RULE`
+(`src/shikiri_yaku/extensions/infrastructure/rules.py`) claims it.

@@ -30,7 +30,7 @@ FAILED_COLOR: Final = "#e3a0a0"
 PRIMARY_TEXT_COLOR: Final = "#dce2e9"
 SECONDARY_TEXT_COLOR: Final = "#9aa5b5"
 SECTION_TITLE_COLOR: Final = "#83bddd"
-MISROUTES_NOTE: Final = "Misroutes are a manual review (design §15) and are not printed"
+MISROUTES_NOTE: Final = "Misroutes are a manual review and are not printed"
 _NONE: Final = "none"
 _COLUMN_GAP: Final = 2
 

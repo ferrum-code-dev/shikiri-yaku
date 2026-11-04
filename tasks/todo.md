@@ -1,6 +1,6 @@
 # Todo
 
-## Release documentation cleanup
+## Current work: release documentation cleanup
 
 R1 to R9 replace the T-81 parent request. Details and shared constraints are in tasks/plan.md.
 
@@ -94,7 +94,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R9
 
-- [ ] R9. Clean historical tracker references and verify documentation
+- [x] R9. Clean historical tracker references and verify documentation
 
 ## Acceptance criteria
 
@@ -106,6 +106,11 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 Details and acceptance criteria are in `tasks/plan.md`. Mark a task `[x]` only when its change is
 merged and `uv run poe check` passes.
+
+## Historical implementation records
+
+The entries below from Phase 0 (T0) to Phase E are historical records. They are not current guidance,
+and their § numbers refer to the design before the R6 and R7 rewrites.
 
 ## Phase 0: setup
 
