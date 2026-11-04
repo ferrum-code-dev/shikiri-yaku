@@ -1,4 +1,4 @@
-"""The notice extension: the category of information the PO does not decide on (design §5, §6.5)."""
+"""The notice extension: the category of information the PO does not decide on."""
 
 from __future__ import annotations
 

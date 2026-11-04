@@ -1,4 +1,4 @@
-"""Brings what the PO sent into the journal (design §7)."""
+"""Brings what the PO sent into the journal."""
 
 from __future__ import annotations
 

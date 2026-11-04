@@ -1,4 +1,4 @@
-"""The loop guard: automatic actions are limited per cause, counted from the journal (design §6)."""
+"""The loop guard: automatic actions are limited per cause, counted from the journal."""
 
 from __future__ import annotations
 

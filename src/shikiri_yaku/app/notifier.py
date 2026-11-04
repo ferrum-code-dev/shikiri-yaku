@@ -1,4 +1,4 @@
-"""The Notifier: an informational message about a signal, queued once per key (design §7)."""
+"""The Notifier: an informational message about a signal, queued once per key."""
 
 from __future__ import annotations
 

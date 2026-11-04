@@ -1,4 +1,4 @@
-"""The rule of the notice category: the information the PO gets and does not decide (design §5)."""
+"""The rule of the notice category: the information the PO gets and does not decide."""
 
 from __future__ import annotations
 
@@ -23,5 +23,5 @@ LEGACY_COPIES: Final = (
 
 
 def stands_on_failure(signal: Signal) -> bool:
-    """Keep a health message on screen with its reminders when its handler fails (§6.5)."""
+    """Keep a health message on screen with its reminders when its handler fails."""
     return signal.kind is Kind.HEALTH

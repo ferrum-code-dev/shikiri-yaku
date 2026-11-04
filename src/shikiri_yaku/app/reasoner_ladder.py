@@ -1,4 +1,4 @@
-"""The Reasoner's ladder: its rungs in order, a rung that failed skipped for a while (design §8).
+"""The Reasoner's ladder: its rungs in order, a rung that failed skipped for a while.
 
 The ladder is a wrapper behind the Reasoner port, kept in memory. At most `max_parallel` calls run
 at once, and every call that finds no usable rung raises one ReasonerError with each rung's reason.

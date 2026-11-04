@@ -2,7 +2,7 @@
 
 Only what exists is wired. A port whose adapter is not written yet is not in the composition; its
 adapter is added here when it is written. `main` gives the command line this module's composition,
-so the command line never imports this module and the concrete objects stay here (design §12).
+so the command line never imports this module and the concrete objects stay here.
 """
 
 from __future__ import annotations
@@ -436,9 +436,8 @@ def reasoner_rungs(
 ) -> list[ReasonerRung]:
     """Return one rung per ladder entry, each built by the class of its adapter.
 
-    The rungs run one after another, so each gets an equal share of `reasoner.timeout_s`: a rung
-    that hangs cannot use up the whole wait for the verdict, and the next rung still gets its turn
-    (design §5, §8).
+    The rungs run one after another, so each gets an equal share of `reasoner.timeout_s`. A rung
+    that hangs cannot use the time reserved for the next rung.
     """
     share_s = config.timeout_s / len(config.ladder)
     return [
@@ -736,7 +735,7 @@ def goal_command(
 def secret_cleanup_job(
     settings: Settings, journal: Database, channel: Channel, clock: Clock
 ) -> Job:
-    """Return the job that deletes the PO's messages which carried a secret (design §7)."""
+    """Return the job that deletes the PO's messages which carried a secret."""
     cleanup = SecretCleanup(
         JournalInbound(journal), channel, clock, interval_s=settings.operator.inbound_interval_s
     )
@@ -770,7 +769,7 @@ def copy_jobs(
 def replacement_job(
     settings: Settings, journal: Database, messages: MessageStore, channel: Channel, clock: Clock
 ) -> Job:
-    """Return the job that deletes the copies a newer copy of the same slot has replaced (§7)."""
+    """Return the job that deletes the copies a newer copy of the same slot has replaced."""
     replacer = CopyReplacer(
         JournalReplacements(journal, messages),
         channel,
@@ -815,7 +814,7 @@ def install_reconcile_job(
     outbox: Outbox,
     destinations: Destinations,
 ) -> Job:
-    """Return the recurring install recovery job (design §6.3, §10)."""
+    """Return the recurring install recovery job."""
     signals = SignalStore(journal)
     reasker = InstallReasker(
         OpStore(journal), InstallApprovalPresenter(), outbox, destinations, clock

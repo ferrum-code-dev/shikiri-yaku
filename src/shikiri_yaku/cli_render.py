@@ -1,7 +1,7 @@
 """The output of the command line: doctor, stats and one line per failure, as text or as JSON.
 
 Rich writes colour only to a terminal, so piped output is plain text. Soft wrapping keeps each
-line whole, so a long detail is never split across lines of a pipe (design §3.1).
+line whole, so a long detail is never split across lines of a pipe.
 """
 
 from __future__ import annotations

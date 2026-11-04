@@ -1,4 +1,4 @@
-"""Asks the PO again for an install whose check found the tool still missing (design §6.3).
+"""Asks the PO again for an install whose check found the tool still missing.
 
 The new approval shows the stored command of the old op, so nothing is planned again. It is queued
 before the old op is voided: a crash in between leaves the old op issued, and the next start calls

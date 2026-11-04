@@ -1,4 +1,4 @@
-"""The rule of the review category: the pull requests it sorts here (design §5)."""
+"""The rule of the review category: the pull requests it sorts here."""
 
 from __future__ import annotations
 
@@ -22,5 +22,5 @@ LEGACY_COPIES: Final = (
 
 
 def stands_on_failure(signal: Signal) -> bool:
-    """Keep a pull request open when its review message fails, until the PO answers (§6.4)."""
+    """Keep a pull request open when its review message fails, until the PO answers."""
     return signal.kind is Kind.PR_REVIEW

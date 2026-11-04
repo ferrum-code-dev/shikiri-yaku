@@ -1,4 +1,4 @@
-"""The /status report: each component's engine, its tasks and its quota blocks (design §7)."""
+"""The /status report: each component's engine, its tasks and its quota blocks."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.ports import LifecycleJournal, RungState, RungStates, ShikiruClient
 
-# keep: Shikiru's used_pct runs 0 to 100; design §6.2 counts 100 or more as exhausted
+# keep: Shikiru reports quota use from 0 to 100; 100 means the quota is exhausted
 EXHAUSTED_PCT: Final = 100.0
 _REPORTED_TASKS: Final = (TaskStatus.RUNNING, TaskStatus.QUEUED, TaskStatus.ESCALATED)
 

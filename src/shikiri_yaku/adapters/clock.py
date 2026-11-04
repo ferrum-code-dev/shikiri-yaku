@@ -1,4 +1,4 @@
-"""The system clock, the one adapter that reads time (design §12)."""
+"""The system clock, the one adapter that reads time."""
 
 from __future__ import annotations
 

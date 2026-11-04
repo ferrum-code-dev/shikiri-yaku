@@ -1,4 +1,4 @@
-"""The command line: one Typer app whose global options come before the verb (design §3.1)."""
+"""The command line: one Typer app whose global options come before the verb."""
 
 from __future__ import annotations
 

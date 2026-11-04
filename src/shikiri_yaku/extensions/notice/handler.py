@@ -1,4 +1,4 @@
-"""The notice handler: tells the PO what finished or failed, and asks nothing (design §6.5)."""
+"""The notice handler: tells the PO what finished or failed, and asks nothing."""
 
 from __future__ import annotations
 

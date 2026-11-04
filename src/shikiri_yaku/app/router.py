@@ -1,4 +1,4 @@
-"""The Router: finds the handler of a signal's category and guarantees the fallback (design §6)."""
+"""The Router: finds the handler of a signal's category and guarantees the fallback."""
 
 from __future__ import annotations
 

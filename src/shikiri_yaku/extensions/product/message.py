@@ -1,4 +1,4 @@
-"""The PO message of a forwarded signal, a template over Shikiru's structured view (§6.1, §7).
+"""The PO message of a forwarded signal, a template over Shikiru's structured view.
 
 Pure: it builds the heading, the text and the buttons and does no I/O.
 """
@@ -36,8 +36,8 @@ TITLE_INFORMATION: Final = "For information"
 class Tap:
     """The verb at the start of a button's data, the rest being numbers.
 
-    `a` selects a choice (design §7). `d` is Details, a clarification to §7 recorded in
-    tasks/plan.md under A9. A Stop reminders button carries its own verb (domain/callback.py).
+    `a` selects a displayed choice. `d` opens Details when a message is shortened. A Stop
+    reminders button carries its own verb (domain/callback.py).
     """
 
     ANSWER: Final = "a"
@@ -106,7 +106,7 @@ def information_message(
 ) -> Message:
     """Return a message about a signal without a question; only a standing one has a button.
 
-    A standing message stays true until it is fixed, so it keeps Stop reminders (design §6.1).
+    A standing message stays true until it is fixed, so it keeps Stop reminders.
     """
     heading = _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION)
     text = join_blocks(signal.text, _notes(note, suggestion))

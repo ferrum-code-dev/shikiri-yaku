@@ -1,4 +1,4 @@
-"""Queues a command reply, which has no signal, as parts that each fit one message (design §7)."""
+"""Queues a command reply, which has no signal, as parts that each fit one message."""
 
 from __future__ import annotations
 

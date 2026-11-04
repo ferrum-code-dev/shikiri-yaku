@@ -1,4 +1,4 @@
-"""The health source of one project: its MCP link, unreachable for too long (design §4)."""
+"""The health source of one project: its MCP link, unreachable for too long."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""The facts about this host that the Reasoner's prompt carries: OS, package managers, PATH (§5).
+"""The facts about this host that the Reasoner's prompt carries: OS, package managers, PATH.
 
 One script runs in the user's login shell, so PATH and the tools match the PO's terminal. A fact
 that cannot be read becomes a line that says so: collecting the facts never raises.

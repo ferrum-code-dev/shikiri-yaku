@@ -1,4 +1,4 @@
-"""The Scheduler: wakes parked signals and reminds the PO of open questions (design §6)."""
+"""The Scheduler: wakes parked signals and reminds the PO of open questions."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class Scheduler:
 
     A parked signal is claimed with a conditional state change before it is handed on, so it is
     dispatched once. A reminder occurrence is booked as an op and queued in the outbox in one step;
-    the outbox sender delivers it (design §7).
+    the outbox sender delivers it.
     """
 
     def __init__(

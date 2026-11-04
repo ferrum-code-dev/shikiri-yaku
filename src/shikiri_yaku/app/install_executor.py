@@ -1,4 +1,4 @@
-"""Runs an approved install op (design §6.3, steps 4 to 6): the stored command, then the check.
+"""Runs an approved install op: the stored command, then the check.
 
 The op is claimed under the host lock, before its command runs, so a second run for the same op
 finds nothing to claim, and an approval whose escalation was resolved elsewhere is void. Before the
@@ -6,7 +6,7 @@ command runs, the stored list must be exactly its manager's recipe for its packa
 not fails the op without a run or a check. The lock covers the claim and the command only: the check
 reads the host and needs no turn. A run the check does not confirm is forwarded to the PO with the
 tail of its output. The forward is retried in this process while the op stays issued, and only then
-does the op end `failed`; an op a restart finds issued is settled by its check (design §10), except
+does the op end `failed`; an op a restart finds issued is settled by its check, except
 a refused list, which is never checked: its reason is queued and the op fails. A passing check
 leaves its op issued until the `escalation_resolved` event confirms it.
 """
@@ -63,7 +63,7 @@ class _Run:
 
 
 async def send_answer(client: ShikiruClient, operation: InstallOp, found: str) -> Ack:
-    """Answer the escalation: the installed tool lets the task continue (design §6.3, step 6)."""
+    """Answer the escalation: the installed tool lets the task continue."""
     payload = operation.payload
     text = ANSWER.format(tool=payload.tool, manager=payload.manager, path=found)
     return await client.resolve_escalation(payload.escalation_id, ResolutionKind.ANSWER, text)
@@ -143,7 +143,7 @@ class InstallExecutor:
         Nothing runs when the claim is lost, and a claim is lost when the op is no longer approved
         or its escalation is no longer forwarded. A lost link or a protocol error leaves the op
         `issued`: the answer may have reached Shikiru, so the next start decides by the check
-        whether it is still owed (design §10.1).
+        whether it is still owed.
         """
         async with self._host.hold():
             claim = self._log.claim(op_id, self._clock.now())

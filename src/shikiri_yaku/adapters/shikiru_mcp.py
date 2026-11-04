@@ -1,4 +1,4 @@
-"""The ShikiruClient over one project's `shikiru --project <path> mcp` on stdio (design §11)."""
+"""The ShikiruClient over one project's `shikiru --project <path> mcp` on stdio."""
 
 from __future__ import annotations
 

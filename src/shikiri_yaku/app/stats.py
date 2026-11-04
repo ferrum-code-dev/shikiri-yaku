@@ -1,4 +1,4 @@
-"""The figures of `stats` (design §15): what the journal supports, before any output is chosen."""
+"""The figures of `stats`: what the journal supports, before any output is chosen."""
 
 from __future__ import annotations
 

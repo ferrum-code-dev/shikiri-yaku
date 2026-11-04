@@ -3,7 +3,7 @@
 A ladder that gives no answer, or no verdict within the deadline, becomes an `other` assessment
 whose note says the Reasoner failed, so the signal goes to the product category with that note.
 The health source hears about each call, so one signal opens while the ladder fails and closes on
-the next answer (design §5, §8).
+the next answer.
 """
 
 from __future__ import annotations

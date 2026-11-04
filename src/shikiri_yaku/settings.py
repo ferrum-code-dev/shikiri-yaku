@@ -1,6 +1,6 @@
-"""The settings of one instance, read from config.toml (design §3.2).
+"""The settings of one instance, read from config.toml.
 
-The numbers of the design are the defaults below, and the file overrides them key by key. A key
+Each numeric setting has a default below, and config.toml can override settings key by key. A key
 that nothing reads is an error, so a misspelled key cannot silently keep its default.
 """
 
@@ -214,7 +214,7 @@ def _split_rung(value: object) -> object:
 class LadderRung(_FrozenModel):
     """One rung of the Reasoner's ladder, written `adapter:model` or `adapter:model:effort`.
 
-    The effort is optional, and an adapter whose CLI has no flag for it ignores it (design §8).
+    The effort is optional; an adapter whose CLI has no flag for it ignores it.
     """
 
     adapter: Annotated[str, AfterValidator(_known_adapter)]

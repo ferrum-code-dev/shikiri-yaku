@@ -1,4 +1,4 @@
-"""The Dispatcher: hands every new signal to the Router (design §10)."""
+"""The Dispatcher: hands every new signal to the Router."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ class Dispatcher:
     """Polls the journal for signals in state `new`, oldest first, and submits each to the Router.
 
     At start it puts the signals a crash left in `handling` back to `new`, so none is lost; a
-    handler may then run twice for one signal (design §10). A signal is submitted once while its
+    handler may then run twice for one signal. A signal is submitted once while its
     task runs, because classifying can take longer than one interval.
     """
 

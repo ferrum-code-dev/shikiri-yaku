@@ -1,4 +1,4 @@
-"""The host lock of design §3.1: one host command at a time, across every instance on this host.
+"""The host lock permits one host command at a time, across every instance on this host.
 
 The lock is an exclusive flock on a file, so the kernel releases it when the holder exits, even
 after a crash. A waiter polls with the Clock, so it stays cancellable while it waits.

@@ -1,4 +1,4 @@
-"""Read-only preparation of one model-proposed host-tool install (design §6.3)."""
+"""Read-only preparation of one model-proposed host-tool install."""
 
 from __future__ import annotations
 

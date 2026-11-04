@@ -1,4 +1,4 @@
-"""The service unit that keeps one instance running under the OS service manager (design §3.1).
+"""The service unit that keeps one instance running under the OS service manager.
 
 The renderers are pure: they say where a unit belongs and what it contains. Only
 write_service_file touches the disk. A unit runs the given command line with the PATH the caller

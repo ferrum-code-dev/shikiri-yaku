@@ -1,4 +1,4 @@
-"""The rule of the infrastructure category: the escalations and kinds it sorts here (design §5)."""
+"""The rule of the infrastructure category: the escalations and kinds it sorts here."""
 
 from __future__ import annotations
 
@@ -43,11 +43,11 @@ LEGACY_COPIES: Final = (LegacyCopy(f"{FORWARD_KEY}:", KINDS),)
 
 
 def stands_on_failure(signal: Signal) -> bool:
-    """Keep the signal of a failed engine restart open, since the engine is still down (§6.2)."""
+    """Keep the signal of a failed engine restart open, since the engine is still down."""
     return signal.kind in KINDS
 
 
 HOST_TOOL_RULE: Final = Rule(
     reasons=frozenset({DECISION_REQUIRED}), verdicts=frozenset({Verdict.HOST_TOOL})
 )
-"""A decision the Reasoner judges a missing host tool is infrastructure (design §5, §6.3)."""
+"""A decision the Reasoner judges a missing host tool is infrastructure."""

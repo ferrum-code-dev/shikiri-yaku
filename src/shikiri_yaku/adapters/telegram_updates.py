@@ -1,4 +1,4 @@
-"""The PO's side of the Telegram chat: `getUpdates` over the Bot API (design §7)."""
+"""The PO's side of the Telegram chat: `getUpdates` over the Bot API."""
 
 from __future__ import annotations
 

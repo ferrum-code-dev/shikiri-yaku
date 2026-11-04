@@ -1,4 +1,4 @@
-"""The existence check of design §6.3, step 2: `command -v` in the user's login shell.
+"""Check whether a host tool is available with `command -v` in the user's login shell.
 
 The script is fixed and the tool name reaches it as an argument, never as part of the script text.
 A name that is not a valid executable name is refused before the shell starts. The script always

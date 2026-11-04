@@ -39,7 +39,7 @@ R1 to R9 replace the T-81 parent request. Details and shared constraints are in 
 
 ### R4
 
-- [ ] R4. Clean application and adapter references
+- [x] R4. Clean application and adapter references
 
 ## Acceptance criteria
 

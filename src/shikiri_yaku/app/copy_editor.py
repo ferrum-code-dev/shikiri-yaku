@@ -1,4 +1,4 @@
-"""Edits every copy of a resolved question to its final state, without buttons (design §7)."""
+"""Edits every copy of a resolved question to its final state, without buttons."""
 
 from __future__ import annotations
 

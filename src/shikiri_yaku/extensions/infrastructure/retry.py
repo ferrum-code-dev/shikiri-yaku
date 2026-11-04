@@ -1,4 +1,4 @@
-"""The Retry action: asks the loop guard, journals the retry, then returns the escalation (§6.2)."""
+"""The Retry action: asks the loop guard, journals the retry, then returns the escalation."""
 
 from __future__ import annotations
 

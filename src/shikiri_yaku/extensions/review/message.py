@@ -1,4 +1,4 @@
-"""The PO message of a pull request ready for review (design §6.4, §7).
+"""The PO message of a pull request ready for review.
 
 Pure: it builds the text and the buttons and does no I/O.
 """
@@ -30,7 +30,7 @@ def review_message(
     """Return the review message: its header, the title and commit count, and two buttons.
 
     The Open PR button is a link; Stop reminders carries the signal number as its data, and the
-    review stays open until it is fixed (design §6.1). The component name is left out of the header
+    review stays open until it is fixed. The component name is left out of the header
     where the message is already in that component's topic.
     """
     text = "\n".join(

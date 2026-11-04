@@ -1,4 +1,4 @@
-"""The product extension: the category no other rule claims (design §5, §6.1)."""
+"""The product extension: the category no other rule claims."""
 
 from __future__ import annotations
 

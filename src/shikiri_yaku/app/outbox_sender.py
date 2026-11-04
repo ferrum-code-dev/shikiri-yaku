@@ -1,4 +1,4 @@
-"""The one sender: delivers every recorded outbound message (design §7, §10)."""
+"""The one sender: delivers every recorded outbound message."""
 
 from __future__ import annotations
 

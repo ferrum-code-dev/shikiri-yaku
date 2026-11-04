@@ -1,4 +1,4 @@
-"""Settles unsettled installs by observation (design §6.3 step 7, §10).
+"""Settles unsettled installs by observation.
 
 An approved op is checked against Shikiru before it runs. An issued op is decided by its escalation,
 then by its stored list, then by its check; the host install is never repeated. A refused list is

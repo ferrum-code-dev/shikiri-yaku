@@ -1,4 +1,4 @@
-"""The infrastructure extension: the category whose actions repair a fault (design §6.2)."""
+"""The infrastructure extension: the category whose actions repair a fault."""
 
 from __future__ import annotations
 

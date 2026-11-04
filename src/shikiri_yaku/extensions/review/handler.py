@@ -1,4 +1,4 @@
-"""The review handler: tells the PO a pull request is ready for review (design §6.4)."""
+"""The review handler: tells the PO a pull request is ready for review."""
 
 from __future__ import annotations
 

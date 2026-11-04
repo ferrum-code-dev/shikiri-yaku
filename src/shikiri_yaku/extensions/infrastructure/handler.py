@@ -1,4 +1,4 @@
-"""The infrastructure handler: runs the action that claims a signal's reason or kind (§6.2)."""
+"""The infrastructure handler: runs the action that claims a signal's reason or kind."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """The CommandRunner on this host: one argument list, no shell, and the group killed on early exit.
 
 A timeout or a cancelled call kills the group and reaps the leader, so no call leaves a process
-running (design §5, §8).
+running.
 """
 
 from __future__ import annotations

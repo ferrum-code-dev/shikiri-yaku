@@ -1,4 +1,4 @@
-"""The Channel over the Telegram Bot API: send and edit a message in the PO's chat (design §7)."""
+"""The Channel over the Telegram Bot API: send and edit a message in the PO's chat."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ TOKEN_MODE: Final = 0o600
 OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
-# keep: the Bot API's parse mode for the markup a message carries (design §7)
+# keep: the Bot API's parse mode for the markup a message carries
 HTML_PARSE_MODE: Final = "HTML"
 INPUT_PLACEHOLDER: Final = "Your answer"
 DELETE_MESSAGE: Final = "deleteMessage"
@@ -271,7 +271,7 @@ class TelegramChannel:
         await self._request(DELETE_MESSAGE, _target(message_ref))
 
     async def _delete_copy(self, message_ref: str, reason: str) -> None:
-        """Delete the copy a secret was edited into, when the journal knows it (design §7).
+        """Delete the copy a secret was edited into, when the journal knows it.
 
         The attempt is journaled, and the PO's notice queued, before the platform is asked. A failed
         deletion stays journaled and is not retried; the refusal stands either way.
@@ -312,7 +312,7 @@ def _target(message_ref: str) -> dict[str, object]:
 
 
 def _refuse_secret(message: Message) -> None:
-    """Refuse a message whose texts carry a secret form; the form is the reason (design §7)."""
+    """Refuse a message whose texts carry a secret form; the form is the reason."""
     if (form := secret_form(message.texts())) is not None:
         raise ChannelRefusedError(form)
 
@@ -338,7 +338,7 @@ def _content(message: Message) -> dict[str, object]:
 def _markup(message: Message) -> dict[str, object]:
     """Return the reply box of a message that waits for text, else its keyboard.
 
-    One button per row. An empty keyboard is what removes the buttons of a final state (design §7).
+    One button per row. An empty keyboard is what removes the buttons of a final state.
     Telegram takes one markup per message, so the reply box replaces the buttons.
     """
     if message.expects_reply:

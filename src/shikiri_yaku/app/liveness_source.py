@@ -1,4 +1,4 @@
-"""The liveness source of one project: a crashed engine raises no escalation (design §4)."""
+"""The liveness source of one project: a crashed engine raises no escalation."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ _ENGINE_KINDS: Final = (Kind.ENGINE_DOWN, Kind.ENGINE_FAULT)
 
 
 class LivenessSource:
-    """Reads `status.engine_up` and applies the table of design §4.
+    """Reads `status.engine_up` and applies the engine-liveness rules.
 
     A clean stop is told from a host shutdown by time: it is respected when the engine is still
     down `stop_grace_min` after a stop that happened in this run, and a clean stop from before

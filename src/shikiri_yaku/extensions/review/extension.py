@@ -1,4 +1,4 @@
-"""The review extension: the category of a pull request ready for review (design §5, §6.4)."""
+"""The review extension: the category of a pull request ready for review."""
 
 from __future__ import annotations
 

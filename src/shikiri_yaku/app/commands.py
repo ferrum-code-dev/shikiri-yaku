@@ -1,4 +1,4 @@
-"""Answers the PO's plain text: commands get their reply, anything else the list (design §7)."""
+"""Answers the PO's plain text: commands get their reply, anything else the list."""
 
 from __future__ import annotations
 

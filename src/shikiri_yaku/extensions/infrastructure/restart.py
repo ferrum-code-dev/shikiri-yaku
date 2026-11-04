@@ -1,4 +1,4 @@
-"""The Restart action: starts a stopped or faulted engine once, then confirms it (§6.2)."""
+"""The Restart action: starts a stopped or faulted engine once, then confirms it."""
 
 from __future__ import annotations
 

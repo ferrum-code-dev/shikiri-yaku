@@ -1,4 +1,4 @@
-"""The approval stage of installing a missing host tool (design §6.3)."""
+"""The approval stage of installing a missing host tool."""
 
 from __future__ import annotations
 

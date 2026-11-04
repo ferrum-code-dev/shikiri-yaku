@@ -1,4 +1,4 @@
-"""The inbound job: polls the PO's chat and hands stored items to Replies (design §7, §10)."""
+"""The inbound job: polls the PO's chat and hands stored items to Replies."""
 
 from __future__ import annotations
 

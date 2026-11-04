@@ -1,4 +1,4 @@
-"""Settles the engine starts a previous run left unfinished, by observing the engine (§10)."""
+"""Settles the engine starts a previous run left unfinished, by observing the engine."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class StartReconciler:
     `settled` is set once every project's link is up and no such start is pending, or once
     `confirm_within` has passed since this run began, so a link that stays down cannot hold the
     other components back. Signals and sources wait for it: the links connect first, and their
-    handlers must not act on an unsettled start (design §10).
+    handlers must not act on an unsettled start.
     """
 
     def __init__(

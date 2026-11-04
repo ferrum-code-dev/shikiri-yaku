@@ -1,4 +1,4 @@
-"""The event source of one project: Shikiru's events become signals (design §4)."""
+"""The event source of one project: Shikiru's events become signals."""
 
 from __future__ import annotations
 

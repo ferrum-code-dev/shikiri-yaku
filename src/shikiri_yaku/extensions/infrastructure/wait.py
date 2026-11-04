@@ -1,4 +1,4 @@
-"""The Wait action: parks a quota escalation until the reset, then retries it (design §6.2)."""
+"""The Wait action: parks a quota escalation until the reset, then retries it."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""The instance directory of one product and the lock that keeps one instance running (design §3.1).
+"""The instance directory of one product and the lock that keeps one instance running.
 
 The lock is an flock on the file, so the kernel releases it when the holder exits, even after a
 crash.

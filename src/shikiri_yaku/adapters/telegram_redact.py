@@ -1,4 +1,4 @@
-"""Replaces the bot token and the ids of recorded Bot API replies with placeholders (design §12).
+"""Replaces the bot token and the ids of recorded Bot API replies with placeholders.
 
 The recording script saves real replies as fixtures. Nothing it writes may hold the token, or an id
 that names a chat or a user. getUpdates also returns messages from people other than the PO, so the

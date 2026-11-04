@@ -1,4 +1,4 @@
-"""Reconciles issued resolves by observation: after a restart and when Shikiru loses one (§10.1)."""
+"""Reconciles issued resolves by observation: after a restart and when Shikiru loses one."""
 
 from __future__ import annotations
 

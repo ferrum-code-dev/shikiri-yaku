@@ -1,4 +1,4 @@
-"""/open: shows open escalations and pending approvals again, with their buttons (design §7)."""
+"""/open: shows open escalations and pending approvals again, with their buttons."""
 
 from __future__ import annotations
 

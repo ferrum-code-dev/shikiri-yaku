@@ -1,4 +1,4 @@
-"""The Bot API over HTTPS: the transport the Telegram Channel is given (design §7)."""
+"""The Bot API over HTTPS: the transport the Telegram Channel is given."""
 
 from __future__ import annotations
 

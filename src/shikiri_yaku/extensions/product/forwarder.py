@@ -1,4 +1,4 @@
-"""The product fallback: puts a forwarded signal in front of the owners of the product (§6.1)."""
+"""The product fallback: puts a forwarded signal in front of the owners of the product."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Deletes the chat messages that carried a secret, after the attempt is journaled (design §7)."""
+"""Deletes the chat messages that carried a secret, after the attempt is journaled."""
 
 from __future__ import annotations
 

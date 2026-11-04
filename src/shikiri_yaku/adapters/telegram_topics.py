@@ -2,7 +2,7 @@
 
 Without a group, a signal goes to the owners' private chats. With a group, every signal of a
 component goes to its topic, and the Operator's own signals go to the forum's built-in General
-topic, which has no thread id (design §7, §13).
+topic, which has no thread id.
 """
 
 from __future__ import annotations

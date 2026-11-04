@@ -1,4 +1,4 @@
-"""The Product handler: forwards a signal only the PO can decide (design §6.1)."""
+"""The Product handler: forwards a signal only the PO can decide."""
 
 from __future__ import annotations
 

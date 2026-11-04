@@ -1,4 +1,4 @@
-"""Answers `/goal <component> <request>`: submits the goal and reports the outcome (§7, §10.1)."""
+"""Answers `/goal <component> <request>`: submits the goal and reports the outcome."""
 
 from __future__ import annotations
 
