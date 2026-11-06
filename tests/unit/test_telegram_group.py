@@ -212,9 +212,14 @@ def test_allow_other_members_still_checks_the_bot_and_the_owners(
     ("reply", "message"),
     [
         pytest.param(
+            {"ok": False, "error_code": 429, "parameters": None},
+            GROUP_MEMBER_COUNT_UNAVAILABLE,
+            id="rate-limited",
+        ),
+        pytest.param(
             {"ok": False, "error_code": 500, "parameters": None},
             GROUP_MEMBER_COUNT_UNAVAILABLE,
-            id="refused",
+            id="temporary-server-error",
         ),
         pytest.param({"ok": True, "result": "nope"}, UNEXPECTED_REPLY, id="not-a-list"),
         pytest.param(
@@ -234,3 +239,24 @@ def test_an_administrator_reply_that_is_not_usable_makes_the_check_unavailable(
 
     assert type(raised.value) is ChannelUnavailableError
     assert str(raised.value) == message
+
+
+@pytest.mark.parametrize("error_code", [400, 403], ids=["bad-request", "forbidden"])
+def test_a_definite_administrator_refusal_fails_the_membership_check(error_code: int) -> None:
+    api = _Group(
+        administrators=[],
+        count=2,
+        replies={
+            "getChatAdministrators": {
+                "ok": False,
+                "error_code": error_code,
+                "parameters": None,
+            }
+        },
+    )
+
+    with pytest.raises(ChannelError) as raised:
+        _probe(api)
+
+    assert type(raised.value) is ChannelError
+    assert str(raised.value) == GROUP_MEMBER_COUNT_UNAVAILABLE

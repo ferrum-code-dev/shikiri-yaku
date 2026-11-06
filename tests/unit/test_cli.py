@@ -237,6 +237,7 @@ class _GroupBot(FakeBotApi):
         manage_topics: bool = True,
         extra_member: bool = False,
         admin_bots: int = 0,
+        administrator_error_code: int | None = None,
     ) -> None:
         super().__init__()
         self.forum = forum
@@ -244,8 +245,11 @@ class _GroupBot(FakeBotApi):
         self.manage_topics = manage_topics
         self.extra_member = extra_member
         self.admin_bots = admin_bots
+        self.administrator_error_code = administrator_error_code
+        self.methods: list[str] = []
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
+        self.methods.append(method)
         if method == "getChat":
             reply = _telegram_fixture("forum_group.json")
             reply["result"]["is_forum"] = self.forum
@@ -259,7 +263,15 @@ class _GroupBot(FakeBotApi):
             reply["result"] += self.admin_bots
             return reply
         if method == "getChatAdministrators":
-            return {"ok": True, "result": self._administrators()}
+            return (
+                {
+                    "ok": False,
+                    "error_code": self.administrator_error_code,
+                    "description": "Refused",
+                }
+                if self.administrator_error_code is not None
+                else {"ok": True, "result": self._administrators()}
+            )
         if method == "createForumTopic":
             return _telegram_fixture("forum_topic_created.json")
         return await super().call(method, payload)
@@ -1093,3 +1105,14 @@ def test_run_in_a_shared_group_admits_administrator_bots_and_no_other_member(
         assert captured.err == ""
     else:
         assert captured.err.startswith(_FAILED_MARK)
+
+
+@pytest.mark.parametrize("error_code", [400, 403], ids=["bad-request", "forbidden"])
+def test_run_stops_when_the_administrator_check_is_definitely_refused(
+    tmp_path: Path, *, error_code: int
+) -> None:
+    _group_instance(tmp_path, shared_group=True)
+    bot = _GroupBot(extra_member=True, administrator_error_code=error_code)
+
+    assert _started(tmp_path, _fixed_bot(lambda: bot)) == 1
+    assert "getChatMemberCount" not in bot.methods

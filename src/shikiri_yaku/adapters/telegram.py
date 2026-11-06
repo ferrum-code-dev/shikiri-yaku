@@ -525,7 +525,7 @@ async def _bot_administrators(api: BotApi, group_id: int, owners: tuple[int, ...
         _CHAT_ADMINISTRATORS_REPLY,
     )
     if isinstance(reply, _Failed):
-        raise ChannelUnavailableError(GROUP_MEMBER_COUNT_UNAVAILABLE)
+        raise _probe_refusal(reply, GROUP_MEMBER_COUNT_UNAVAILABLE)
     bots: set[int] = set()
     for admin in reply.result:
         if admin.user.is_bot:
