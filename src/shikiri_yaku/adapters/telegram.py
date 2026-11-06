@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 TELEGRAM_CHANNEL: Final = "telegram"
 TOKEN_MODE: Final = 0o600
 OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
+# keep: a shared group may hold one other instance's bot; a count cannot tell a bot from a person
+SHARED_GROUP_EXTRA_MEMBERS: Final = 1
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 # keep: the Bot API's parse mode for the markup a message carries
@@ -373,6 +375,7 @@ async def probe_bot(
     owners: tuple[int, ...] = (),
     *,
     allow_other_members: bool = False,
+    shared_group: bool = False,
 ) -> None:
     """Check bot authentication and the configured group's topic and membership requirements."""
     body = await api.call(GET_ME, {})
@@ -384,7 +387,12 @@ async def probe_bot(
     await _probe_webhook(api)
     if group_id is not None:
         await _probe_group(
-            api, group_id, owners, reply.result.id, allow_other_members=allow_other_members
+            api,
+            group_id,
+            owners,
+            reply.result.id,
+            allow_other_members=allow_other_members,
+            shared_group=shared_group,
         )
 
 
@@ -399,12 +407,14 @@ class TelegramChannelCheck:
         owners: tuple[int, ...] = (),
         *,
         allow_other_members: bool = False,
+        shared_group: bool = False,
     ) -> None:
         self._api = api
         self._token_file = token_file
         self._group_id = group_id
         self._owners = owners
         self._allow_other_members = allow_other_members
+        self._shared_group = shared_group
 
     async def verify(self) -> None:
         await probe_bot(
@@ -412,6 +422,7 @@ class TelegramChannelCheck:
             self._group_id,
             self._owners,
             allow_other_members=self._allow_other_members,
+            shared_group=self._shared_group,
         )
 
     async def report(self) -> list[CheckLine]:
@@ -475,6 +486,7 @@ async def _probe_group(
     bot_id: int,
     *,
     allow_other_members: bool,
+    shared_group: bool,
 ) -> None:
     group = _validated(await api.call(GET_CHAT, {"chat_id": group_id}), _CHAT_REPLY)
     if isinstance(group, _Failed):
@@ -491,17 +503,18 @@ async def _probe_group(
             raise ChannelError(OWNER_NOT_MEMBER)
 
     if not allow_other_members:
-        await _probe_member_count(api, group_id, len(set(owners) | {bot_id}))
+        extra = SHARED_GROUP_EXTRA_MEMBERS if shared_group else 0
+        await _probe_member_count(api, group_id, len(set(owners) | {bot_id}), extra=extra)
 
 
-async def _probe_member_count(api: BotApi, group_id: int, expected: int) -> None:
+async def _probe_member_count(api: BotApi, group_id: int, expected: int, *, extra: int) -> None:
     # keep: every member of the group reads its messages, so by default it holds only the owners
     count = _validated(
         await api.call(GET_CHAT_MEMBER_COUNT, {"chat_id": group_id}), _CHAT_MEMBER_COUNT_REPLY
     )
     if isinstance(count, _Failed):
         raise ChannelUnavailableError(GROUP_MEMBER_COUNT_UNAVAILABLE)
-    if count.result != expected:
+    if not expected <= count.result <= expected + extra:
         raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
 
 

@@ -110,6 +110,10 @@ _REJECTED: list[tuple[str, tuple[str, ...]]] = [
         + _TELEGRAM,
         ("'components[0].host'", "not supported yet"),
     ),
+    (
+        _MINIMAL.replace(_TELEGRAM, _TELEGRAM + "shared_group = true\n"),
+        ("'shared_group' requires 'group_id'",),
+    ),
 ]
 
 _BAD_VALUES: list[tuple[str, str]] = [

@@ -91,7 +91,8 @@ To use a forum group instead, add `group_id` under `[channels.telegram]` with th
 forum supergroup. The bot must be an administrator with permission to manage topics, and every
 configured owner must belong to the group. By default, the group must contain only the bot and
 configured owners because other members can read its messages. Set `allow_other_members = true`
-to allow additional readers; only configured owners can act on messages.
+to allow additional readers; only configured owners can act on messages. To share the group with
+other instances, see [Several instances in one group](#several-instances-in-one-group).
 
 To enable the optional Reasoner, add a `[reasoner]` table. Its ordered ladder accepts
 `adapter:model` or `adapter:model:effort` entries; the supported adapters are `claude` and
@@ -123,7 +124,7 @@ next start.
 | --- | --- |
 | Root | `product` (required); `components` (required, one or more `[[components]]` entries) |
 | `[[components]]` | `name` (required), `path` (required); `host` is unsupported |
-| `[channels.telegram]` | `owners` (required, one or more integer IDs); `token_file = "secrets/telegram.token"`; `group_id` (optional); `allow_other_members = false` |
+| `[channels.telegram]` | `owners` (required, one or more integer IDs); `token_file = "secrets/telegram.token"`; `group_id` (optional); `allow_other_members = false`; `shared_group = false` (requires `group_id`) |
 | `[operator]` | All keys below are optional; every value is a positive integer |
 | `[handlers.infrastructure]` | All keys below are optional; every value is a positive integer |
 | `[handlers.product]` | All keys below are optional; every value is a positive integer |
@@ -255,6 +256,26 @@ The same prompt appears after a restart if the process crashed after issuing the
 before recording Shikiru's acknowledgement. Recovery marks that goal uncertain and does not send
 it again automatically. Inspect the Shikiru project before tapping **Submit again**: the first
 request may have been accepted, so a retry can create a duplicate task.
+
+### Several instances in one group
+
+Several instances can share one forum group. Each instance needs its own bot, token file, and
+components; two instances never share a bot. Give every instance the same `group_id` and set
+`shared_group = true` in each `[channels.telegram]` table. `shared_group` requires `group_id`.
+
+With `shared_group = true`:
+
+- A message in a topic that is neither General nor one of this instance's component topics gets no
+  reply from this instance.
+- `/goal <component> <request>` in General is submitted only when `<component>` is one of this
+  instance's components. For another instance's component it gets no reply.
+- `/status` and `/open` in General cover this instance's components only.
+- `/help`, free text, and a `/goal` without a component are answered by every instance's bot, so
+  the group receives one list per instance.
+
+The start-up check accepts a group that holds this instance's owners and bot, plus one other bot.
+A group with two or more other bots needs `allow_other_members = true`, which also admits other
+people as readers.
 
 ## Questions, approvals, and reminders
 

@@ -61,7 +61,7 @@ class _Client:
 class _Goal:
     """The /goal path over an in-memory journal and a fake Shikiru client."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, shared_group: bool = False) -> None:
         self.client = _Client()
         self.submits = JournalSubmits(database, OpStore(database), channel_name="telegram")
         self.outbox = JournalOutbox(database, MessageStore(database, _Reporter()))
@@ -82,6 +82,7 @@ class _Goal:
                 self.topics, owners=(1001,), group_id=GROUP, reconciler=None
             ),
             channel="telegram",
+            shared_group=shared_group,
         )
 
     def send(self, text: str, update: int = 1, chat: int = 1001, thread: int | None = None) -> None:
@@ -105,6 +106,13 @@ class _Goal:
 def goal() -> Generator[_Goal]:
     database = Database.open(":memory:")
     yield _Goal(database)
+    database.close()
+
+
+@pytest.fixture
+def shared_goal() -> Generator[_Goal]:
+    database = Database.open(":memory:")
+    yield _Goal(database, shared_group=True)
     database.close()
 
 
@@ -217,3 +225,23 @@ def test_a_goal_in_the_general_topic_without_a_component_gets_usage_and_submits_
     assert "/goal" in pending.message.text
     assert pending.destination == Destination("telegram", str(GROUP))
     assert goal.client.requests == []
+
+
+@pytest.mark.parametrize("text", ["/goal web Add the export", "/goal web"])
+def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_reply(
+    shared_goal: _Goal, text: str
+) -> None:
+    shared_goal.send(text, chat=GROUP)
+
+    assert shared_goal.outbox.pending() == []
+    assert shared_goal.client.requests == []
+
+
+def test_with_a_shared_group_a_goal_for_this_component_in_general_is_submitted(
+    shared_goal: _Goal,
+) -> None:
+    shared_goal.send(GOAL, chat=GROUP)
+
+    [pending] = shared_goal.outbox.pending()
+    assert "T-9" in pending.message.text
+    assert shared_goal.client.requests == ["Add the export"]

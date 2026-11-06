@@ -38,6 +38,9 @@ class Commands:
 
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
+
+    With `shared_group`, text in a thread that is neither General nor one of this instance's open
+    component topics belongs to another instance, so it gets no reply and is not journaled.
     """
 
     def __init__(
@@ -51,6 +54,7 @@ class Commands:
         destinations: Destinations,
         channel: str,
         name_max_chars: int,
+        shared_group: bool = False,
     ) -> None:
         self._outbox = outbox
         self._clock = clock
@@ -60,11 +64,14 @@ class Commands:
         self._destinations = destinations
         self._channel = channel
         self._name_max_chars = name_max_chars
+        self._shared_group = shared_group
 
     async def handle(self, item: Inbound) -> None:
         word = _first_word(item.text)
         name = _command_name(word)
         component = self._destinations.component_of(item.thread)
+        if self._shared_group and item.thread is not None and component is None:
+            return
         if name == _OPEN:
             await self._open.handle(item, component)
             return

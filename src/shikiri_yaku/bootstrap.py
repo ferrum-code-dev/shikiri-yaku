@@ -343,7 +343,14 @@ def compose(
     )
     channel = TelegramChannel(bot_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel))
-    goal = goal_command(journal, clients, outbox, clock, destinations)
+    goal = goal_command(
+        journal,
+        clients,
+        outbox,
+        clock,
+        destinations,
+        shared_group=settings.telegram.shared_group,
+    )
     jobs.append(
         inbound_job(
             settings,
@@ -398,6 +405,7 @@ def compose(
             settings.telegram.group_id,
             settings.telegram.owners,
             allow_other_members=settings.telegram.allow_other_members,
+            shared_group=settings.telegram.shared_group,
         ),
         rung_probes=rung_probes,
         jobs=jobs,
@@ -676,6 +684,7 @@ def inbound_job(
         destinations=destinations,
         channel=TELEGRAM_CHANNEL,
         name_max_chars=operator.command_name_max_chars,
+        shared_group=settings.telegram.shared_group,
     )
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
@@ -714,6 +723,8 @@ def goal_command(
     outbox: Outbox,
     clock: Clock,
     destinations: Destinations,
+    *,
+    shared_group: bool = False,
 ) -> GoalCommand:
     """Return the /goal command, which journals its submits and replies."""
     submitter = Submitter(
@@ -730,6 +741,7 @@ def goal_command(
         clock,
         destinations=destinations,
         channel=TELEGRAM_CHANNEL,
+        shared_group=shared_group,
     )
 
 

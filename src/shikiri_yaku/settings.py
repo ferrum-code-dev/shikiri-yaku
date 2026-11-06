@@ -137,6 +137,15 @@ class TelegramSettings(_FrozenModel):
     owners: Annotated[tuple[StrictInt, ...], _AT_LEAST_ONE]
     group_id: StrictInt | None = None
     allow_other_members: StrictBool = False
+    shared_group: StrictBool = False
+
+    @model_validator(mode="after")
+    def _shared_group_has_a_group(self) -> Self:
+        # keep: without a group there is no shared chat for another instance's bot to be in
+        if self.shared_group and self.group_id is None:
+            message = "'shared_group' requires 'group_id'"
+            raise PydanticCustomError(_RULE, message)
+        return self
 
 
 class OperatorSettings(_FrozenModel):

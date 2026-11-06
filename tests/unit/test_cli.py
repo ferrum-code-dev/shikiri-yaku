@@ -88,14 +88,18 @@ def _instance(home: Path) -> Path:
     return directory
 
 
-def _group_instance(home: Path, *, allow_other_members: bool = False) -> Path:
+def _group_instance(
+    home: Path, *, allow_other_members: bool = False, shared_group: bool = False
+) -> Path:
     directory = _instance(home)
     config = directory / "config.toml"
     allowed = "true" if allow_other_members else "false"
+    shared = "true" if shared_group else "false"
     config.write_text(
         config.read_text(encoding="utf-8").replace(
             "owners = [123456789]",
-            f"owners = [123456789]\ngroup_id = {_GROUP_ID}\nallow_other_members = {allowed}",
+            f"owners = [123456789]\ngroup_id = {_GROUP_ID}\nallow_other_members = {allowed}"
+            f"\nshared_group = {shared}",
         ),
         encoding="utf-8",
     )
@@ -226,12 +230,14 @@ class _GroupBot(FakeBotApi):
         bot_admin: bool = True,
         manage_topics: bool = True,
         extra_member: bool = False,
+        extra_members: int = 0,
     ) -> None:
         super().__init__()
         self.forum = forum
         self.bot_admin = bot_admin
         self.manage_topics = manage_topics
         self.extra_member = extra_member
+        self.extra_members = extra_members
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         if method == "getChat":
@@ -244,6 +250,7 @@ class _GroupBot(FakeBotApi):
             reply = _telegram_fixture("forum_member_count.json")
             if self.extra_member:
                 reply["result"] += 1
+            reply["result"] += self.extra_members
             return reply
         if method == "createForumTopic":
             return _telegram_fixture("forum_topic_created.json")
@@ -1043,3 +1050,29 @@ def test_each_global_option_says_its_default(flag: str) -> None:
 
     help_text = _MARKUP.sub("", str(getattr(option, "help", "")))
     assert _DEFAULT_TAIL.search(help_text) is not None
+
+
+@pytest.mark.parametrize(
+    ("extra_members", "started"),
+    [
+        pytest.param(0, True, id="own-bot-only"),
+        pytest.param(1, True, id="one-other-bot"),
+        pytest.param(2, False, id="two-extra-refused"),
+    ],
+)
+def test_run_admits_one_more_member_in_a_shared_group_and_no_more(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    extra_members: int,
+    started: bool,
+) -> None:
+    _group_instance(tmp_path, shared_group=True)
+
+    bot = _fixed_bot(lambda: _GroupBot(extra_members=extra_members))
+    assert _started(tmp_path, bot) == (0 if started else 1)
+    captured = capsys.readouterr()
+    if started:
+        assert captured.err == ""
+    else:
+        assert captured.err.startswith(_FAILED_MARK)

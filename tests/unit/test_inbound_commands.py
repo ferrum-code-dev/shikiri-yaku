@@ -87,13 +87,14 @@ class _Client:
 
 
 class Harness:
-    def __init__(self) -> None:
+    def __init__(self, *, shared_group: bool = False) -> None:
         self.database = Database.open(":memory:")
         self.signals = SignalStore(self.database)
         self.messages = MessageStore(self.database, _Reporter())
         self.outbox = JournalOutbox(self.database, self.messages)
         self.client = _Client()
         self.clients = {"api": cast("ShikiruClient", self.client)}
+        self.shared_group = shared_group
 
     def replies(self) -> Replies:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
@@ -114,7 +115,14 @@ class Harness:
             destinations=FixedDestinations([OWNER]),
             channel="telegram",
         )
-        goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
+        goal = goal_command(
+            self.database,
+            self.clients,
+            self.outbox,
+            _Clock(),
+            FixedDestinations(),
+            shared_group=self.shared_group,
+        )
         commands = Commands(
             self.outbox,
             _Clock(),
@@ -124,6 +132,7 @@ class Harness:
             destinations=FixedDestinations([OWNER], topics=TOPICS),
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
+            shared_group=self.shared_group,
         )
         return Replies(
             JournalReplies(
@@ -153,6 +162,13 @@ class Harness:
 @pytest.fixture
 def h() -> Generator[Harness]:
     harness = Harness()
+    yield harness
+    harness.database.close()
+
+
+@pytest.fixture
+def shared() -> Generator[Harness]:
+    harness = Harness(shared_group=True)
     yield harness
     harness.database.close()
 
@@ -266,3 +282,56 @@ def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> 
     [reply] = h.outbox.pending()
     assert "T-9" in reply.message.text
     assert h.client.requests == ["Add the export"] * 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["/status", "/open", "/help", "hello", "/goal api Add the export"],
+)
+def test_with_a_shared_group_text_in_another_instances_topic_gets_no_reply(
+    shared: Harness, text: str
+) -> None:
+    shared.send(text, thread=UNNAMED_TOPIC)
+
+    assert shared.outbox.pending() == []
+    assert shared.client.requests == []
+
+
+@pytest.mark.parametrize(
+    ("thread", "text"),
+    [(None, "/status"), (API_TOPIC, "/status"), (None, "/help")],
+)
+def test_with_a_shared_group_text_in_general_or_an_own_topic_is_answered(
+    shared: Harness, thread: int | None, text: str
+) -> None:
+    shared.send(text, thread=thread)
+
+    assert len(shared.outbox.pending()) == 1
+
+
+def test_with_a_shared_group_status_in_general_reports_this_instances_components(
+    shared: Harness,
+) -> None:
+    shared.send("/status")
+
+    [pending] = shared.outbox.pending()
+    assert [part.split("\n")[0] for part in pending.message.text.split("\n\n")] == ["api"]
+
+
+def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_reply(
+    shared: Harness,
+) -> None:
+    shared.send("/goal web Add the export")
+
+    assert shared.outbox.pending() == []
+    assert shared.client.requests == []
+
+
+def test_with_a_shared_group_a_goal_for_this_component_in_general_is_submitted(
+    shared: Harness,
+) -> None:
+    shared.send("/goal api Add the export")
+
+    [pending] = shared.outbox.pending()
+    assert "T-9" in pending.message.text
+    assert shared.client.requests == ["Add the export"]

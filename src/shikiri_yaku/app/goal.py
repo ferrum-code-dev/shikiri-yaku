@@ -38,6 +38,9 @@ class GoalCommand:
     The destination is stored with the goal, so the outcome and any question go where the goal was
     sent. A goal sent in a thread that names a component implies that component. An unknown outcome
     is asked about with *Submit again*; only that tap retries the goal.
+
+    With `shared_group`, a goal that names a component this instance does not have belongs to
+    another instance, so it gets no reply.
     """
 
     def __init__(
@@ -50,6 +53,7 @@ class GoalCommand:
         *,
         destinations: Destinations,
         channel: str,
+        shared_group: bool = False,
     ) -> None:
         self._submitter = submitter
         self._log = log
@@ -58,11 +62,14 @@ class GoalCommand:
         self._clock = clock
         self._destinations = destinations
         self._channel = channel
+        self._shared_group = shared_group
 
     async def handle(self, item: Inbound) -> None:
         destination = item_destination(self._channel, item)
-        parsed = self._parse(item)
-        if parsed is None or parsed[0] not in self._clients:
+        component, request = self._parse(item)
+        if self._shared_group and component is not None and component not in self._clients:
+            return
+        if component is None or request is None or component not in self._clients:
             names = ", ".join(sorted(self._clients))
             queue_command_reply(
                 self._outbox,
@@ -72,7 +79,6 @@ class GoalCommand:
                 now=self._clock.now(),
             )
             return
-        component, request = parsed
         payload = SubmitPayload(component=component, request=request, destination=destination)
         self._report(await self._submitter.submit(item.update_id, payload))
 
@@ -99,8 +105,8 @@ class GoalCommand:
         for op in self._submitter.recover():
             self._report(op)
 
-    def _parse(self, item: Inbound) -> tuple[str, str] | None:
-        """Return the component and request of a goal, or None when it has no request.
+    def _parse(self, item: Inbound) -> tuple[str | None, str | None]:
+        """Return the component and request of a goal; a part the text lacks is None.
 
         In a thread that names a component the whole text after `/goal` is the request; elsewhere
         the text is `/goal <component> <request>`.
@@ -108,12 +114,10 @@ class GoalCommand:
         implied = self._destinations.component_of(item.thread)
         if implied is not None:
             words = (item.text or "").split(maxsplit=1)
-            return None if len(words) < _IMPLIED_WORDS else (implied, words[1])
+            return implied, words[1] if len(words) == _IMPLIED_WORDS else None
         words = (item.text or "").split(maxsplit=_WORDS - 1)
-        if len(words) < _WORDS:
-            return None
-        _, component, request = words
-        return component, request
+        component = words[1] if len(words) > 1 else None
+        return component, words[_WORDS - 1] if len(words) == _WORDS else None
 
     def _report(self, op: SubmitOp) -> None:
         destinations = [op.payload.destination]
