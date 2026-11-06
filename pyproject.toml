@@ -52,7 +52,7 @@ sequence = [
 sequence = ["format-check", "lint", "comments", "literals", "imports", "types", "dead-code", "test"]
 
 [tool.poe.tasks.deploy]
-sequence = ["check", { cmd = "shikiri-yaku restart" }]
+sequence = ["check", { cmd = "uv tool install --reinstall ." }, { cmd = "shikiri-yaku restart" }]
 
 [tool.ruff]
 line-length = 100

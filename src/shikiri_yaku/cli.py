@@ -52,7 +52,13 @@ from shikiri_yaku.service import (
     service_file,
     write_service_file,
 )
-from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings, product_names
+from shikiri_yaku.settings import (
+    NAME_PATTERN,
+    RESTART_TIMEOUT_S,
+    SettingsError,
+    load_settings,
+    product_names,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
@@ -555,7 +561,9 @@ async def _restart_all(commands: CommandRunner, products: Sequence[str]) -> list
     uid = os.getuid()
     results: list[RestartResult] = []
     for product in products:
-        problem = await restart_product(commands, sys.platform, home, uid, product)
+        problem = await restart_product(
+            commands, sys.platform, home, uid, product, timeout_s=RESTART_TIMEOUT_S
+        )
         results.append(RestartResult(product, problem))
     return results
 

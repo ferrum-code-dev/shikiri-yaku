@@ -14,6 +14,7 @@ from shikiri_yaku import cli
 from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, stats_measures
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import SERVICE_PREFIX, restart_product, unit_path
+from shikiri_yaku.settings import RESTART_TIMEOUT_S
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -101,7 +102,9 @@ def test_an_installed_unit_is_restarted_by_its_platforms_service_manager(
     _unit(tmp_path, platform, _SHOP)
     commands = _ServiceManager()
 
-    problem = asyncio.run(restart_product(commands, platform, tmp_path, _UID, _SHOP))
+    problem = asyncio.run(
+        restart_product(commands, platform, tmp_path, _UID, _SHOP, timeout_s=RESTART_TIMEOUT_S)
+    )
 
     assert problem is None
     assert commands.commands == [argv]
@@ -113,7 +116,9 @@ def test_a_product_without_an_installed_unit_is_not_installed_and_no_command_run
 ) -> None:
     commands = _ServiceManager()
 
-    problem = asyncio.run(restart_product(commands, platform, tmp_path, _UID, _SHOP))
+    problem = asyncio.run(
+        restart_product(commands, platform, tmp_path, _UID, _SHOP, timeout_s=RESTART_TIMEOUT_S)
+    )
 
     assert problem == "not installed"
     assert commands.commands == []
@@ -134,7 +139,9 @@ def test_a_failed_restart_gives_the_service_managers_reason(
     _unit(tmp_path, platform, _SHOP)
     commands = _ServiceManager({_SHOP: CommandResult(3, "", stderr)})
 
-    problem = asyncio.run(restart_product(commands, platform, tmp_path, _UID, _SHOP))
+    problem = asyncio.run(
+        restart_product(commands, platform, tmp_path, _UID, _SHOP, timeout_s=RESTART_TIMEOUT_S)
+    )
 
     assert problem == reason
 
@@ -144,7 +151,9 @@ def test_a_service_manager_that_cannot_run_gives_its_error(tmp_path: Path, platf
     _unit(tmp_path, platform, _SHOP)
     commands = _ServiceManager({_SHOP: CommandError("launchctl: command not found")})
 
-    problem = asyncio.run(restart_product(commands, platform, tmp_path, _UID, _SHOP))
+    problem = asyncio.run(
+        restart_product(commands, platform, tmp_path, _UID, _SHOP, timeout_s=RESTART_TIMEOUT_S)
+    )
 
     assert problem == "launchctl: command not found"
 

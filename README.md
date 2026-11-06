@@ -414,16 +414,17 @@ named by `--product`. On macOS it runs `launchctl kickstart -k`; on Linux it run
 `not installed`, and nothing runs for it. A restart the service manager refuses, such as a unit that
 was written but not loaded, is reported with the service manager's message.
 
-- After a code change, run `uv run poe deploy` from the checkout. It runs `uv run poe check` first
-  and restarts the services only if the check passes.
-- After a `config.toml` change, run `shikiri-yaku restart`.
-- Reinstall the command only when dependencies or entry points change:
-  `uv tool install --editable --reinstall .`, then restart.
+A service runs the installed copy of `shikiri-yaku` that `install-service` found on the login
+`PATH`, not the checkout. Apply a change in one of two ways:
 
-A service runs the `shikiri-yaku` that `install-service` found on the login `PATH`. A code change
-reaches it only when that command is an editable install of this checkout, made with
-`uv tool install --editable .`. After a plain `uv tool install .`, the installed copy keeps the old
-code until you install again. Run the restart on each host where a service runs.
+- After a code change, run `uv run poe deploy` from a checkout whose HEAD is the reviewed commit.
+  It runs `uv run poe check`, then `uv tool install --reinstall .` to replace the installed copy
+  with this checkout, then `shikiri-yaku restart`. A failed step stops the sequence, so a failed
+  check restarts nothing.
+- After a `config.toml` change, run `shikiri-yaku restart` alone.
+
+Run the steps on each host where a service runs. Do not install with `--editable`: the running
+service would follow unreviewed changes in the checkout, including after a crash restart.
 
 ## Diagnostics and recovery
 

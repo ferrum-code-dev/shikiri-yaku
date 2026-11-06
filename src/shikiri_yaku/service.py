@@ -23,8 +23,6 @@ if TYPE_CHECKING:
 LAUNCHD_PLATFORM: Final = "darwin"
 SYSTEMD_PLATFORM: Final = "linux"
 SERVICE_PREFIX: Final = "shikiri-yaku-"
-# keep: a limit of the service manager's own command; restart reads no instance settings
-RESTART_TIMEOUT_S: Final = 30
 
 
 class ServiceError(Exception):
@@ -83,7 +81,13 @@ def restart_argv(platform: str, product: str, uid: int) -> list[str]:
 
 
 async def restart_product(
-    commands: CommandRunner, platform: str, user_home: Path, uid: int, product: str
+    commands: CommandRunner,
+    platform: str,
+    user_home: Path,
+    uid: int,
+    product: str,
+    *,
+    timeout_s: float,
 ) -> str | None:
     """Restart the product's service; return None when it restarted, else why it did not.
 
@@ -93,7 +97,7 @@ async def restart_product(
         return "not installed"
     argv = restart_argv(platform, product, uid)
     try:
-        result = await commands.run(argv, timeout_s=RESTART_TIMEOUT_S)
+        result = await commands.run(argv, timeout_s=timeout_s)
     except CommandError as error:
         return str(error)
     if result.returncode != 0:
