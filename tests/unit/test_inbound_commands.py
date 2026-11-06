@@ -286,7 +286,7 @@ def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> 
 
 @pytest.mark.parametrize(
     "text",
-    ["/status", "/open", "/help", "/goal api Add the export"],
+    ["/status", "/open", "/help", "/goal", "/goal api Add the export"],
 )
 def test_with_a_shared_group_a_command_in_another_instances_topic_gets_no_reply(
     shared: Harness, text: str

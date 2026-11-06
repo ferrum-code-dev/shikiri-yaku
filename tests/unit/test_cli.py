@@ -222,6 +222,12 @@ def _accepting_bot(_settings: Settings) -> FakeBotApi:
     return FakeBotApi()
 
 
+def _other_bot_administrator(user_id: int) -> Any:
+    entry = _telegram_fixture("forum_bot_member.json")["result"]
+    entry["user"] = {"id": user_id, "is_bot": True, "first_name": "Other instance bot"}
+    return entry
+
+
 class _GroupBot(FakeBotApi):
     def __init__(
         self,
@@ -230,14 +236,14 @@ class _GroupBot(FakeBotApi):
         bot_admin: bool = True,
         manage_topics: bool = True,
         extra_member: bool = False,
-        extra_members: int = 0,
+        admin_bots: int = 0,
     ) -> None:
         super().__init__()
         self.forum = forum
         self.bot_admin = bot_admin
         self.manage_topics = manage_topics
         self.extra_member = extra_member
-        self.extra_members = extra_members
+        self.admin_bots = admin_bots
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         if method == "getChat":
@@ -250,11 +256,20 @@ class _GroupBot(FakeBotApi):
             reply = _telegram_fixture("forum_member_count.json")
             if self.extra_member:
                 reply["result"] += 1
-            reply["result"] += self.extra_members
+            reply["result"] += self.admin_bots
             return reply
+        if method == "getChatAdministrators":
+            return {"ok": True, "result": self._administrators()}
         if method == "createForumTopic":
             return _telegram_fixture("forum_topic_created.json")
         return await super().call(method, payload)
+
+    def _administrators(self) -> list[Any]:
+        own = [_telegram_fixture("forum_bot_member.json")["result"]] if self.bot_admin else []
+        others = [
+            _other_bot_administrator(_BOT_ID + number) for number in range(1, self.admin_bots + 1)
+        ]
+        return own + others
 
     def _member(self, user_id: object) -> object:
         if user_id != _BOT_ID:
@@ -1053,23 +1068,25 @@ def test_each_global_option_says_its_default(flag: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("extra_members", "started"),
+    ("admin_bots", "extra_member", "started"),
     [
-        pytest.param(0, True, id="own-bot-only"),
-        pytest.param(1, True, id="one-other-bot"),
-        pytest.param(2, False, id="two-extra-refused"),
+        pytest.param(0, False, True, id="own-bot-only"),
+        pytest.param(1, False, True, id="one-other-bot-administrator"),
+        pytest.param(2, False, True, id="two-other-bot-administrators"),
+        pytest.param(0, True, False, id="unidentified-extra-member-refused"),
     ],
 )
-def test_run_admits_one_more_member_in_a_shared_group_and_no_more(
+def test_run_in_a_shared_group_admits_administrator_bots_and_no_other_member(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     *,
-    extra_members: int,
+    admin_bots: int,
+    extra_member: bool,
     started: bool,
 ) -> None:
     _group_instance(tmp_path, shared_group=True)
 
-    bot = _fixed_bot(lambda: _GroupBot(extra_members=extra_members))
+    bot = _fixed_bot(lambda: _GroupBot(admin_bots=admin_bots, extra_member=extra_member))
     assert _started(tmp_path, bot) == (0 if started else 1)
     captured = capsys.readouterr()
     if started:

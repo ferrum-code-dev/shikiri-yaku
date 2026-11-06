@@ -273,9 +273,13 @@ With `shared_group = true`:
 - `/help`, free text, and a `/goal` without a component are answered by every instance's bot, so
   the group receives one list per instance.
 
-The start-up check accepts a group that holds this instance's owners and bot, plus one other bot.
-A group with two or more other bots needs `allow_other_members = true`, which also admits other
-people as readers.
+Every instance's bot must be an administrator of the group with the manage-topics right, as this
+instance's own bot must be. Telegram lists only administrators, so the start-up check reads them
+with the other bots included. It admits the group's owners, this bot, and the other administrator
+bots, and refuses any other member: a person who joins as an ordinary member or as an
+administrator, or a bot that is not an administrator. Add an instance's bot as an administrator to
+admit it. `allow_other_members = true` is not a way to admit another instance's bot: it skips the
+membership check and lets any member read the group.
 
 ## Questions, approvals, and reminders
 

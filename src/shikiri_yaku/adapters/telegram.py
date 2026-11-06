@@ -32,8 +32,6 @@ if TYPE_CHECKING:
 TELEGRAM_CHANNEL: Final = "telegram"
 TOKEN_MODE: Final = 0o600
 OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
-# keep: a shared group may hold one other instance's bot; a count cannot tell a bot from a person
-SHARED_GROUP_EXTRA_MEMBERS: Final = 1
 SEND_MESSAGE: Final = "sendMessage"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 # keep: the Bot API's parse mode for the markup a message carries
@@ -44,6 +42,7 @@ GET_ME: Final = "getMe"
 GET_CHAT: Final = "getChat"
 GET_CHAT_MEMBER: Final = "getChatMember"
 GET_CHAT_MEMBER_COUNT: Final = "getChatMemberCount"
+GET_CHAT_ADMINISTRATORS: Final = "getChatAdministrators"
 GET_WEBHOOK_INFO: Final = "getWebhookInfo"
 CREATE_FORUM_TOPIC: Final = "createForumTopic"
 CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
@@ -185,6 +184,13 @@ class _ChatMemberCountReply(BaseModel):
     result: StrictInt
 
 
+class _ChatAdministratorsReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    ok: Literal[True]
+    result: list[_ChatMember]
+
+
 class _WebhookInfo(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -206,6 +212,9 @@ _CHAT_MEMBER_REPLY: Final[TypeAdapter[_ChatMemberReply | _Failed]] = TypeAdapter
 )
 _CHAT_MEMBER_COUNT_REPLY: Final[TypeAdapter[_ChatMemberCountReply | _Failed]] = TypeAdapter(
     _ChatMemberCountReply | _Failed
+)
+_CHAT_ADMINISTRATORS_REPLY: Final[TypeAdapter[_ChatAdministratorsReply | _Failed]] = TypeAdapter(
+    _ChatAdministratorsReply | _Failed
 )
 
 
@@ -503,18 +512,37 @@ async def _probe_group(
             raise ChannelError(OWNER_NOT_MEMBER)
 
     if not allow_other_members:
-        extra = SHARED_GROUP_EXTRA_MEMBERS if shared_group else 0
-        await _probe_member_count(api, group_id, len(set(owners) | {bot_id}), extra=extra)
+        allowed = set(owners) | {bot_id}
+        if shared_group:
+            allowed |= await _bot_administrators(api, group_id, owners)
+        await _probe_member_count(api, group_id, len(allowed))
 
 
-async def _probe_member_count(api: BotApi, group_id: int, expected: int, *, extra: int) -> None:
+async def _bot_administrators(api: BotApi, group_id: int, owners: tuple[int, ...]) -> set[int]:
+    # keep: only administrator bots are listed, so a bot that is not an administrator is refused
+    reply = _validated(
+        await api.call(GET_CHAT_ADMINISTRATORS, {"chat_id": group_id, "return_bots": True}),
+        _CHAT_ADMINISTRATORS_REPLY,
+    )
+    if isinstance(reply, _Failed):
+        raise ChannelUnavailableError(GROUP_MEMBER_COUNT_UNAVAILABLE)
+    bots: set[int] = set()
+    for admin in reply.result:
+        if admin.user.is_bot:
+            bots.add(admin.user.id)
+        elif admin.user.id not in owners:
+            raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
+    return bots
+
+
+async def _probe_member_count(api: BotApi, group_id: int, expected: int) -> None:
     # keep: every member of the group reads its messages, so by default it holds only the owners
     count = _validated(
         await api.call(GET_CHAT_MEMBER_COUNT, {"chat_id": group_id}), _CHAT_MEMBER_COUNT_REPLY
     )
     if isinstance(count, _Failed):
         raise ChannelUnavailableError(GROUP_MEMBER_COUNT_UNAVAILABLE)
-    if not expected <= count.result <= expected + extra:
+    if count.result != expected:
         raise ChannelError(GROUP_HAS_OTHER_MEMBERS)
 
 
