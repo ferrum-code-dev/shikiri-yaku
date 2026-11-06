@@ -265,8 +265,8 @@ components; two instances never share a bot. Give every instance the same `group
 
 With `shared_group = true`:
 
-- A message in a topic that is neither General nor one of this instance's component topics gets no
-  reply from this instance.
+- A command (text that starts with `/`) in a topic that is neither General nor one of this
+  instance's component topics gets no reply from this instance.
 - `/goal <component> <request>` in General is submitted only when `<component>` is one of this
   instance's components. For another instance's component it gets no reply.
 - `/status` and `/open` in General cover this instance's components only.

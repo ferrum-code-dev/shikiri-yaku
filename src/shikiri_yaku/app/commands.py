@@ -39,8 +39,9 @@ class Commands:
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
 
-    With `shared_group`, text in a thread that is neither General nor one of this instance's open
-    component topics belongs to another instance, so it gets no reply and is not journaled.
+    With `shared_group`, a command (text that starts with `/`) in a thread that is neither General
+    nor one of this instance's open component topics belongs to another instance, so it gets no
+    reply and is not journaled. Free text there gets the list, as anywhere else.
     """
 
     def __init__(
@@ -70,7 +71,8 @@ class Commands:
         word = _first_word(item.text)
         name = _command_name(word)
         component = self._destinations.component_of(item.thread)
-        if self._shared_group and item.thread is not None and component is None:
+        in_other_topic = self._shared_group and item.thread is not None and component is None
+        if in_other_topic and word.startswith("/"):
             return
         if name == _OPEN:
             await self._open.handle(item, component)

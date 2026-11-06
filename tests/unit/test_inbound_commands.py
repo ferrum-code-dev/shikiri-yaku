@@ -286,15 +286,23 @@ def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> 
 
 @pytest.mark.parametrize(
     "text",
-    ["/status", "/open", "/help", "hello", "/goal api Add the export"],
+    ["/status", "/open", "/help", "/goal api Add the export"],
 )
-def test_with_a_shared_group_text_in_another_instances_topic_gets_no_reply(
+def test_with_a_shared_group_a_command_in_another_instances_topic_gets_no_reply(
     shared: Harness, text: str
 ) -> None:
     shared.send(text, thread=UNNAMED_TOPIC)
 
     assert shared.outbox.pending() == []
     assert shared.client.requests == []
+
+
+def test_with_a_shared_group_free_text_in_another_instances_topic_gets_the_list(
+    shared: Harness,
+) -> None:
+    shared.send("hello", thread=UNNAMED_TOPIC)
+
+    assert len(shared.outbox.pending()) == 1
 
 
 @pytest.mark.parametrize(
