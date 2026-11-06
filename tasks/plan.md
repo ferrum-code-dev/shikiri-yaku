@@ -1878,9 +1878,10 @@ Acceptance criteria:
 
 ### E17. `restart` verb and `poe deploy` (normal)
 
-Both tools are installed with `uv tool install --editable` from their checkouts, so new code is live
-as soon as the process restarts; no reinstall is needed. Applying a change to a running service is
-a restart only. Today that needs the service label and `launchctl`/`systemctl` typed by hand.
+Both tools are installed as snapshots (`uv tool install .`, not editable), so a half-finished change
+in the checkout never reaches a running service, including a service the manager restarts after a crash.
+Applying a change is therefore a reinstall and a restart. Today the restart needs the service label and
+`launchctl`/`systemctl` typed by hand.
 
 1. New verb `shikiri-yaku restart`, in the Typer app next to `install-service`, with the global
    `--product`. With no `--product` it restarts the service of every product under the home (the
@@ -1891,12 +1892,14 @@ a restart only. Today that needs the service label and `launchctl`/`systemctl` t
    installed or not loaded is reported (name and reason) and does not stop the others; the exit status
    is non-zero if any restart failed. Output is one line per product (`✔ ferrumcode restarted`,
    `✘ shop: not installed`) in the style of `doctor`; `--json` prints the list.
-2. New poe task `deploy` in `pyproject.toml`: `sequence = ["check", { cmd = "shikiri-yaku restart" }]`.
-   It stops at the first failing step, so code that fails the gate is not restarted.
+2. New poe task `deploy` in `pyproject.toml`:
+   `sequence = ["check", { cmd = "uv tool install --reinstall ." }, { cmd = "shikiri-yaku restart" }]`.
+   It stops at the first failing step, so code that fails the gate is neither installed nor restarted.
+   It is run from a checkout whose HEAD is the reviewed commit.
 3. README "Service operation": a short "Applying changes" part: a code change is `uv run poe deploy`
-   (or `shikiri-yaku restart` alone), a `config.toml` change is `shikiri-yaku restart`; a reinstall is
-   needed only when dependencies or the entry points change (`uv tool install --editable --reinstall .`).
-   Several hosts: run it on each.
+   (gate, snapshot reinstall, restart), a `config.toml` change is `shikiri-yaku restart` alone. Several
+   hosts: run it on each. Do not install with `--editable`: the running service would follow unreviewed
+   changes in the checkout.
 
 Acceptance criteria:
 * With a fake `CommandRunner`: on macOS and on Linux each product under the home gets exactly the documented command; `--product` restricts to one.
