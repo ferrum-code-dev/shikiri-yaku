@@ -30,6 +30,7 @@ from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import service_file
+from shikiri_yaku.settings import CliSettings
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, GET_WEBHOOK_INFO, FakeBotApi
 
@@ -58,6 +59,7 @@ _GLOBAL_OPTIONS: Final = frozenset({"--product", "--home", "--json", "--version"
 _PASSED_MARK: Final = "✔ "
 _FAILED_MARK: Final = "✘ "
 _SEPARATOR: Final = " · "
+_CLI_SETTINGS: Final = CliSettings()
 
 type _Breakage = Callable[[Path], None]
 
@@ -356,6 +358,7 @@ def _run_doctor(
         adopt_topic,
         forget_topic,
         commands=_Clis(),
+        cli_settings=_CLI_SETTINGS,
     )
 
 
@@ -603,6 +606,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            cli_settings=_CLI_SETTINGS,
         )
         == 1
     )
@@ -702,6 +706,7 @@ def _started(home: Path, bot: BotFactory) -> int:
         adopt_topic,
         forget_topic,
         commands=_Clis(),
+        cli_settings=_CLI_SETTINGS,
     )
 
 
@@ -792,7 +797,17 @@ def _exit_when_serving(argv: list[str], serving: Event) -> None:
         )
         return replace(composition, jobs=[_announced(job, serving) for job in composition.jobs])
 
-    sys.exit(cli.main(argv, composed, stats_measures, adopt_topic, forget_topic, commands=_Clis()))
+    sys.exit(
+        cli.main(
+            argv,
+            composed,
+            stats_measures,
+            adopt_topic,
+            forget_topic,
+            commands=_Clis(),
+            cli_settings=_CLI_SETTINGS,
+        )
+    )
 
 
 def _announced(job: cli.Job, serving: Event) -> cli.Job:
@@ -900,6 +915,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            cli_settings=_CLI_SETTINGS,
         )
         == 0
     )
@@ -1078,7 +1094,14 @@ def test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped(
 @pytest.mark.parametrize("flag", sorted(_GLOBAL_OPTIONS))
 def test_each_global_option_says_its_default(flag: str) -> None:
     command = get_command(
-        cli.build_app(compose, stats_measures, adopt_topic, forget_topic, commands=_Clis())
+        cli.build_app(
+            compose,
+            stats_measures,
+            adopt_topic,
+            forget_topic,
+            commands=_Clis(),
+            cli_settings=_CLI_SETTINGS,
+        )
     )
     option = next(param for param in command.params if flag in param.opts)
 

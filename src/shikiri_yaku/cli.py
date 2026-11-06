@@ -54,7 +54,7 @@ from shikiri_yaku.service import (
 )
 from shikiri_yaku.settings import (
     NAME_PATTERN,
-    RESTART_TIMEOUT_S,
+    CliSettings,
     SettingsError,
     load_settings,
     product_names,
@@ -266,6 +266,7 @@ def build_app(
     forget_topic: ForgetTopic,
     *,
     commands: CommandRunner,
+    cli_settings: CliSettings,
 ) -> typer.Typer:
     """Build the command line over the callables it is given; it builds no concrete object."""
     _configure_help_palette()
@@ -306,7 +307,7 @@ def build_app(
 
     @app.command(help="Restart the service of one product, or of every product under home.")
     def restart(ctx: typer.Context) -> None:
-        raise typer.Exit(_restart(_options(ctx), commands))
+        raise typer.Exit(_restart(_options(ctx), commands, cli_settings))
 
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
@@ -341,9 +342,17 @@ def main(
     forget_topic: ForgetTopic,
     *,
     commands: CommandRunner,
+    cli_settings: CliSettings,
 ) -> int:
     """Run one command line and return its exit code; the caller supplies what it needs."""
-    app = build_app(compose, read_measures, adopt_topic, forget_topic, commands=commands)
+    app = build_app(
+        compose,
+        read_measures,
+        adopt_topic,
+        forget_topic,
+        commands=commands,
+        cli_settings=cli_settings,
+    )
     command = get_command(app)
     try:
         command.main(args=None if argv is None else list(argv), prog_name=_PROGRAM)
@@ -532,9 +541,11 @@ def _install_service(target: _Target) -> int:
     return 0
 
 
-def _restart(options: _Global, commands: CommandRunner) -> int:
+def _restart(options: _Global, commands: CommandRunner, cli_settings: CliSettings) -> int:
     try:
-        results = asyncio.run(_restart_all(commands, _restart_products(options)))
+        results = asyncio.run(
+            _restart_all(commands, _restart_products(options), cli_settings.restart_timeout_s)
+        )
     except ServiceError as error:
         print_failure(str(error))
         return 1
@@ -556,13 +567,15 @@ def _restart_products(options: _Global) -> list[str]:
     return found
 
 
-async def _restart_all(commands: CommandRunner, products: Sequence[str]) -> list[RestartResult]:
+async def _restart_all(
+    commands: CommandRunner, products: Sequence[str], timeout_s: float
+) -> list[RestartResult]:
     home = Path.home()
     uid = os.getuid()
     results: list[RestartResult] = []
     for product in products:
         problem = await restart_product(
-            commands, sys.platform, home, uid, product, timeout_s=RESTART_TIMEOUT_S
+            commands, sys.platform, home, uid, product, timeout_s=timeout_s
         )
         results.append(RestartResult(product, problem))
     return results

@@ -14,7 +14,7 @@ from shikiri_yaku import cli
 from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, stats_measures
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import SERVICE_PREFIX, restart_product, unit_path
-from shikiri_yaku.settings import RESTART_TIMEOUT_S
+from shikiri_yaku.settings import RESTART_TIMEOUT_S, CliSettings
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -35,6 +35,7 @@ class _ServiceManager(CommandRunner):
 
     def __init__(self, outcomes: Mapping[str, CommandResult | CommandError] | None = None) -> None:
         self.commands: list[list[str]] = []
+        self.timeouts: list[float] = []
         self._outcomes = dict(outcomes or {})
 
     @override
@@ -46,8 +47,9 @@ class _ServiceManager(CommandRunner):
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
     ) -> CommandResult:
-        del timeout_s, cwd, env
+        del cwd, env
         self.commands.append(list(argv))
+        self.timeouts.append(timeout_s)
         outcome = self._outcomes.get(_product_of(argv), CommandResult(0, "", ""))
         if isinstance(outcome, CommandError):
             raise outcome
@@ -76,8 +78,18 @@ def _product(instances: Path, name: str) -> None:
     (directory / "config.toml").write_text("", encoding="utf-8")
 
 
-def _restart(argv: Sequence[str], commands: CommandRunner) -> int:
-    return cli.main(argv, compose, stats_measures, adopt_topic, forget_topic, commands=commands)
+def _restart(
+    argv: Sequence[str], commands: CommandRunner, cli_settings: CliSettings | None = None
+) -> int:
+    return cli.main(
+        argv,
+        compose,
+        stats_measures,
+        adopt_topic,
+        forget_topic,
+        commands=commands,
+        cli_settings=CliSettings() if cli_settings is None else cli_settings,
+    )
 
 
 @pytest.fixture
@@ -227,6 +239,18 @@ def test_the_product_option_restarts_only_that_product(tmp_path: Path, user_home
     assert _restart(["--home", str(instances), "--product", _SHOP, "restart"], commands) == 0
 
     assert _restarted(commands) == [_SHOP]
+
+
+@_host_only
+def test_restart_uses_the_composed_cli_timeout(user_home: Path) -> None:
+    _unit(user_home, sys.platform, _SHOP)
+    commands = _ServiceManager()
+
+    assert (
+        _restart(["--product", _SHOP, "restart"], commands, CliSettings(restart_timeout_s=73)) == 0
+    )
+
+    assert commands.timeouts == [73]
 
 
 @_host_only

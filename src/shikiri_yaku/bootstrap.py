@@ -111,7 +111,7 @@ from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import CompositionError
-from shikiri_yaku.settings import SettingsError, load_settings
+from shikiri_yaku.settings import CliSettings, SettingsError, load_settings
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -878,6 +878,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         adopt_topic,
         forget_topic,
         commands=ProcessCommandRunner(),
+        cli_settings=CliSettings(),
     )
 
 

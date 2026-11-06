@@ -1,7 +1,7 @@
-"""The settings of one instance, read from config.toml.
+"""The settings of one instance and the host-facing CLI.
 
-Each numeric setting has a default below, and config.toml can override settings key by key. A key
-that nothing reads is an error, so a misspelled key cannot silently keep its default.
+Each numeric setting has a default below. Instance settings can be overridden in config.toml, where
+a key that nothing reads is an error. CLI settings use defaults without reading instance config.
 """
 
 from __future__ import annotations
@@ -269,6 +269,12 @@ class Settings(_FrozenModel):
                 message = "'components[{index}].name' repeats the component name '{name}'"
                 raise PydanticCustomError(_RULE, message, {"index": index, "name": name})
         return self
+
+
+class CliSettings(_FrozenModel):
+    """Default-only settings for host-facing CLI operations."""
+
+    restart_timeout_s: PositiveInt = RESTART_TIMEOUT_S
 
 
 def product_names(home: Path) -> list[str]:
