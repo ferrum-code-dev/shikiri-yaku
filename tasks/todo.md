@@ -211,3 +211,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
     - [x] E5e. --json for doctor and stats
   - [x] E13. Findings from the topics documentation
   - [x] E14. No channel names in the CLI checks and the journal
+  - [ ] E15. `/status` in a component topic shows only that component
