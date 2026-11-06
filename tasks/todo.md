@@ -212,3 +212,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E13. Findings from the topics documentation
   - [x] E14. No channel names in the CLI checks and the journal
   - [x] E15. `/status` and `/open` in a component topic show only that component
+  - [ ] E16. Several instances in one group (`shared_group`)
