@@ -1876,6 +1876,35 @@ Acceptance criteria:
 * No file under `app/` names a channel (the E14 test still passes).
 * The gate passes.
 
+### E17. `restart` verb and `poe deploy` (normal)
+
+Both tools are installed with `uv tool install --editable` from their checkouts, so new code is live
+as soon as the process restarts; no reinstall is needed. Applying a change to a running service is
+a restart only. Today that needs the service label and `launchctl`/`systemctl` typed by hand.
+
+1. New verb `shikiri-yaku restart`, in the Typer app next to `install-service`, with the global
+   `--product`. With no `--product` it restarts the service of every product under the home (the
+   directories with a `config.toml`, as `product_names` finds them); with it, that one product.
+   macOS: `launchctl kickstart -k gui/<uid>/shikiri-yaku-<product>`; Linux:
+   `systemctl --user restart shikiri-yaku-<product>.service`. The service name and platform switch
+   come from `service.py`; the commands run through `CommandRunner`. A product whose service is not
+   installed or not loaded is reported (name and reason) and does not stop the others; the exit status
+   is non-zero if any restart failed. Output is one line per product (`✔ ferrumcode restarted`,
+   `✘ shop: not installed`) in the style of `doctor`; `--json` prints the list.
+2. New poe task `deploy` in `pyproject.toml`: `sequence = ["check", { cmd = "shikiri-yaku restart" }]`.
+   It stops at the first failing step, so code that fails the gate is not restarted.
+3. README "Service operation": a short "Applying changes" part: a code change is `uv run poe deploy`
+   (or `shikiri-yaku restart` alone), a `config.toml` change is `shikiri-yaku restart`; a reinstall is
+   needed only when dependencies or the entry points change (`uv tool install --editable --reinstall .`).
+   Several hosts: run it on each.
+
+Acceptance criteria:
+* With a fake `CommandRunner`: on macOS and on Linux each product under the home gets exactly the documented command; `--product` restricts to one.
+* A product whose command fails is reported, the others are still restarted, and the exit status is non-zero; all restarted gives exit 0.
+* Nothing is run on the host by the tests (fakes only).
+* `--json` output lists product and result for each.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
