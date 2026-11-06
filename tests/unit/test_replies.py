@@ -61,7 +61,7 @@ from shikiri_yaku.settings import (
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
 
     from shikiri_yaku.ports import InstallReplyHandler
 
@@ -182,15 +182,16 @@ class Harness:
             channel_name="telegram",
         )
 
-    def commands(self, at: datetime) -> Commands:
+    def commands(self, at: datetime, topics: Mapping[int, str] | None = None) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources)
+        destinations = FixedDestinations([OWNER], topics=topics)
         reshower = ProductForwarder(
             MESSAGE_TITLE_MAX_CHARS,
             self.clients,
             self.outbox,
             Clock(at),
-            FixedDestinations([OWNER]),
+            destinations,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         )
         opened = OpenCommand(
@@ -199,7 +200,7 @@ class Harness:
             reshower,
             self.outbox,
             Clock(at),
-            destinations=FixedDestinations([OWNER]),
+            destinations=destinations,
             channel="telegram",
             install_approval=InstallApprovalPresenter(),
             approval_expiry_h=InfrastructureSettings().approval_expiry_h,
@@ -213,6 +214,7 @@ class Harness:
             status,
             opened,
             goal,
+            destinations=destinations,
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )

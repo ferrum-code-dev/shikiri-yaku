@@ -50,12 +50,21 @@ class Status:
         self._lifecycles = lifecycles
         self._rungs = rungs
 
-    async def components(self) -> list[ComponentStatus]:
-        return [await self._component(project, client) for project, client in self._clients.items()]
+    async def components(self, component: str | None = None) -> list[ComponentStatus]:
+        """Return each component's status, or only the named component's."""
+        return [
+            await self._component(project, client)
+            for project, client in self._clients.items()
+            if component is None or project == component
+        ]
 
-    async def report(self) -> str:
-        sections = [_render(component) for component in await self.components()]
-        if self._rungs is not None:
+    async def report(self, component: str | None = None) -> str:
+        """Report every component and the Reasoner rungs, or only the named component.
+
+        The rungs belong to the host, not to a component, so a scoped report leaves them out.
+        """
+        sections = [_render(section) for section in await self.components(component)]
+        if self._rungs is not None and component is None:
             sections.append(_render_rungs(self._rungs.rung_states()))
         return "\n\n".join(sections)
 

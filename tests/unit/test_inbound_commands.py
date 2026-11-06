@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
@@ -44,6 +44,10 @@ OWNER = Destination("telegram", "1001")
 COMMANDS = ("/status", "/open", "/goal", "/help")
 NOTHING = "Nothing is waiting for you."
 DONE = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
+API_TOPIC: Final = 77
+WEB_TOPIC: Final = 78
+UNNAMED_TOPIC: Final = 79
+TOPICS: Final = {API_TOPIC: "api", WEB_TOPIC: "web"}
 
 
 class _Clock:
@@ -117,6 +121,7 @@ class Harness:
             Status(self.clients, sources),
             opened,
             goal,
+            destinations=FixedDestinations([OWNER], topics=TOPICS),
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )
@@ -135,8 +140,8 @@ class Harness:
             goal=goal,
         )
 
-    def send(self, text: str | None, update: int = 700) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text=text)
+    def send(self, text: str | None, update: int = 700, thread: int | None = None) -> None:
+        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text=text, thread=thread)
         asyncio.run(self.replies().handle(item))
 
     def tap(self, data: str, ref: str, update: int = 800) -> None:
@@ -159,6 +164,33 @@ def test_status_is_answered_once_in_the_senders_chat_with_no_signal(h: Harness) 
     assert pending.destination == OWNER
     [stored] = h.messages.unconfirmed()
     assert (stored.signal_number, stored.purpose) == (None, Purpose.NOTICE)
+
+
+@pytest.mark.parametrize(
+    ("thread", "sections"),
+    [
+        (None, ["api", "web"]),
+        (UNNAMED_TOPIC, ["api", "web"]),
+        (API_TOPIC, ["api"]),
+        (WEB_TOPIC, ["web"]),
+    ],
+)
+def test_status_reports_the_component_of_its_topic_and_every_component_elsewhere(
+    h: Harness, thread: int | None, sections: list[str]
+) -> None:
+    h.clients["web"] = cast("ShikiruClient", _Client())
+
+    h.send("/status", thread=thread)
+
+    [pending] = h.outbox.pending()
+    assert [part.split("\n")[0] for part in pending.message.text.split("\n\n")] == sections
+
+
+def test_a_repeated_status_in_a_component_topic_queues_one_reply(h: Harness) -> None:
+    h.send("/status", update=700, thread=API_TOPIC)
+    h.send("/status", update=700, thread=API_TOPIC)
+
+    assert len(h.outbox.pending()) == 1
 
 
 @pytest.mark.parametrize("text", ["hello", "/help", None])

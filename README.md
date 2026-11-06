@@ -235,8 +235,8 @@ the command was sent.
 
 | Command | What it does |
 | --- | --- |
-| `/status` | Shows each component's engine state, running/queued/escalated task counts, quota blocks, and configured Reasoner rung health. |
-| `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component destination; if none are waiting, the bot says so in the command's chat. |
+| `/status` | Shows each component's engine state, running/queued/escalated task counts, quota blocks, and configured Reasoner rung health. In a component topic, it shows only that component, without the Reasoner rungs. |
+| `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component destination; if none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items, and says so by its name when none are waiting. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports the name and lists commands. |
 | `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or General topic. |
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from shikiri_yaku.ports import EscalationView
+
+API_TOPIC: Final = 77
+WEB_TOPIC: Final = 78
+UNNAMED_TOPIC: Final = 79
+TOPICS: Final = {API_TOPIC: "api", WEB_TOPIC: "web"}
 
 
 class _Silent(Client):
@@ -40,6 +45,19 @@ class _Raced:
         return self._detail
 
 
+class _Other(Client):
+    """The client of a second project, whose one open escalation is E-2."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        escalation = self.view.escalation.model_copy(update={"id": "E-2"})
+        self.view = self.view.model_copy(update={"escalation": escalation})
+
+    async def get_escalation(self, escalation_id: str) -> EscalationView:
+        assert escalation_id == "E-2"
+        return self.view
+
+
 def _resolved(view: EscalationView) -> EscalationView:
     record = view.escalation.model_copy(update={"status": "resolved"})
     return view.model_copy(update={"escalation": record})
@@ -53,19 +71,35 @@ def h() -> Generator[Harness]:
     harness.database.close()
 
 
-def _open(h: Harness, update: int = 700) -> None:
+def _open(h: Harness, update: int = 700, thread: int | None = None) -> None:
     replies = Replies(
         h.log(),
         h.outbox,
         Clock(NOW),
         h.clients,
         channel="telegram",
-        commands=h.commands(NOW),
+        commands=h.commands(NOW, TOPICS),
         goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW), FixedDestinations()),
     )
     asyncio.run(
-        replies.handle(Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open"))
+        replies.handle(
+            Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open", thread=thread)
+        )
     )
+
+
+def _web_question(h: Harness) -> tuple[int, _Other]:
+    """Forward a question of a second project, web, and return its signal number and client."""
+    web = h.signals.insert_if_absent(
+        NewSignal(
+            "web:escalation:E-2", "web", "escalation", "decision_required", "question", "T-2", "E-2"
+        ),
+        NOW,
+    ).row_id
+    h.signals.transition(web, SignalState.NEW, SignalState.FORWARDED, NOW)
+    other = _Other()
+    h.clients["web"] = cast("ShikiruClient", other)
+    return web, other
 
 
 def _deliver(h: Harness) -> list[str]:
@@ -240,3 +274,65 @@ def test_a_question_missing_on_its_detail_fetch_is_not_shown_and_only_the_nothin
     h.clients["api"] = cast("ShikiruClient", _Raced(h.client.view, None))
     _open(h)
     assert _stored(h) == [(None, Purpose.NOTICE)]
+
+
+@pytest.mark.parametrize(
+    ("thread", "projects"),
+    [
+        (None, {"api", "web"}),
+        (UNNAMED_TOPIC, {"api", "web"}),
+        (API_TOPIC, {"api"}),
+        (WEB_TOPIC, {"web"}),
+    ],
+)
+def test_open_in_a_component_topic_shows_only_that_components_items(
+    h: Harness, thread: int | None, projects: set[str]
+) -> None:
+    web, _ = _web_question(h)
+
+    _open(h, thread=thread)
+
+    numbers = {"api": h.number, "web": web}
+    assert {stored.signal_number for stored in h.messages.unconfirmed()} == {
+        numbers[project] for project in projects
+    }
+
+
+def test_open_in_a_component_topic_with_nothing_open_for_it_says_so_by_its_name(
+    h: Harness,
+) -> None:
+    _, other = _web_question(h)
+    other.view = _resolved(other.view)
+
+    _open(h, thread=WEB_TOPIC)
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text == "Nothing is waiting for you in web."
+
+
+def test_open_in_a_component_topic_names_that_component_when_it_does_not_answer(
+    h: Harness,
+) -> None:
+    h.clients["web"] = cast("ShikiruClient", _Silent())
+
+    _open(h, thread=WEB_TOPIC)
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text == "Shikiru did not answer for web."
+
+
+def test_open_in_another_component_topic_is_not_told_of_a_project_that_does_not_answer(
+    h: Harness,
+) -> None:
+    h.clients["web"] = cast("ShikiruClient", _Silent())
+
+    _open(h, thread=API_TOPIC)
+
+    assert all("did not answer" not in pending.message.text for pending in h.outbox.pending())
+
+
+def test_a_repeated_open_in_a_component_topic_queues_nothing_more(h: Harness) -> None:
+    _open(h, update=700, thread=API_TOPIC)
+    _open(h, update=700, thread=API_TOPIC)
+
+    assert len(h.outbox.pending()) == 1

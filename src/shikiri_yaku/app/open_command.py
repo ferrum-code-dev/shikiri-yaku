@@ -34,10 +34,15 @@ if TYPE_CHECKING:
     )
 
 _NOTHING: Final = "Nothing is waiting for you."
+_NOTHING_IN: Final = "Nothing is waiting for you in {component}."
 
 
 def _done_key(update_id: int) -> str:
     return f"open:{update_id}:done"
+
+
+def _nothing(component: str | None) -> str:
+    return _NOTHING if component is None else _NOTHING_IN.format(component=component)
 
 
 class OpenCommand:
@@ -47,6 +52,9 @@ class OpenCommand:
     from that view too, and each copy's key names the op and the update, so the Confirm of every
     copy approves the same op. Nothing is created, approved or issued here: a tap does that. When
     nothing was shown and every project answered, the sender is told that nothing is waiting.
+
+    A command sent in a thread that names a component asks only that component's Shikiru, so only
+    its items are shown and only its name is reported.
 
     An update is answered once. Its completion is journaled after every part, so a repeat of the
     update queues nothing even if Shikiru has changed since. An answer interrupted before that is
@@ -76,10 +84,10 @@ class OpenCommand:
         self._install_approval = install_approval
         self._approval_expiry_h = approval_expiry_h
 
-    async def handle(self, item: Inbound) -> None:
+    async def handle(self, item: Inbound, component: str | None) -> None:
         if self._outbox.command_reply_queued(_done_key(item.update_id)):
             return
-        listed, unreachable = await self._listed()
+        listed, unreachable = await self._listed(component)
         shown = await self._reshow_questions(item.update_id, listed)
         shown += self._queue_approvals(item.update_id, listed)
         shown += self._queue_install_approvals(item.update_id, listed)
@@ -90,7 +98,7 @@ class OpenCommand:
                 f"open:{item.update_id}:unreachable",
             )
         elif shown == 0:
-            self._reply(item, _NOTHING, f"open:{item.update_id}:nothing")
+            self._reply(item, _nothing(component), f"open:{item.update_id}:nothing")
         self._complete(item)
 
     async def _reshow_questions(
@@ -169,11 +177,19 @@ class OpenCommand:
             [], [], key=_done_key(item.update_id), now=self._clock.now()
         )
 
-    async def _listed(self) -> tuple[dict[tuple[str, str], EscalationView], list[str]]:
-        """Return the open escalations by project and id, and the projects that did not answer."""
+    async def _listed(
+        self, component: str | None
+    ) -> tuple[dict[tuple[str, str], EscalationView], list[str]]:
+        """Return the open escalations by project and id, and the projects that did not answer.
+
+        Only the scoped component's client is asked when a component is given. Questions and
+        approvals are matched against this listing by project, so they are scoped by it too.
+        """
         listed: dict[tuple[str, str], EscalationView] = {}
         unreachable: list[str] = []
         for project, client in self._clients.items():
+            if component is not None and project != component:
+                continue
             try:
                 views = await client.list_escalations()
             except ShikiruError:

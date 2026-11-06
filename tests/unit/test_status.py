@@ -145,3 +145,20 @@ def test_the_report_lists_each_rung_with_its_cooling_time_or_that_it_is_ready(
 
     assert f"claude:haiku: cooling until {NOW.isoformat(timespec='minutes')}" in report
     assert "codex:gpt-5: ready" in report
+
+
+@pytest.mark.parametrize(
+    ("component", "sections"),
+    [(None, ["api", "web", "Reasoner"]), ("web", ["web"])],
+)
+def test_a_report_for_one_component_has_only_its_section_and_no_reasoner_rungs(
+    database: Database, component: str | None, sections: list[str]
+) -> None:
+    signals = SignalStore(database)
+    sources = JournalSources(CursorStore(database, signals), signals)
+    clients = {"api": cast("ShikiruClient", _Client()), "web": cast("ShikiruClient", _Client())}
+    ready = RungState("codex:gpt-5", last_failure=None, cooling_until=None)
+
+    report = asyncio.run(Status(clients, sources, _Rungs([ready])).report(component))
+
+    assert [section.split("\n")[0] for section in report.split("\n\n")] == sections

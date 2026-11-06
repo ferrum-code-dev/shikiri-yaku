@@ -166,6 +166,7 @@ class _Stack:
             self.status,
             opened,
             goal,
+            destinations=FixedDestinations([OWNER]),
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
         )

@@ -673,6 +673,7 @@ def inbound_job(
         Status(clients, sources, ladder),
         opened,
         goal,
+        destinations=destinations,
         channel=TELEGRAM_CHANNEL,
         name_max_chars=operator.command_name_max_chars,
     )
