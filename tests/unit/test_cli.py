@@ -355,6 +355,7 @@ def _run_doctor(
         stats_measures,
         adopt_topic,
         forget_topic,
+        commands=_Clis(),
     )
 
 
@@ -601,6 +602,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
             stats_measures,
             adopt_topic,
             forget_topic,
+            commands=_Clis(),
         )
         == 1
     )
@@ -699,6 +701,7 @@ def _started(home: Path, bot: BotFactory) -> int:
         stats_measures,
         adopt_topic,
         forget_topic,
+        commands=_Clis(),
     )
 
 
@@ -789,7 +792,7 @@ def _exit_when_serving(argv: list[str], serving: Event) -> None:
         )
         return replace(composition, jobs=[_announced(job, serving) for job in composition.jobs])
 
-    sys.exit(cli.main(argv, composed, stats_measures, adopt_topic, forget_topic))
+    sys.exit(cli.main(argv, composed, stats_measures, adopt_topic, forget_topic, commands=_Clis()))
 
 
 def _announced(job: cli.Job, serving: Event) -> cli.Job:
@@ -896,6 +899,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(
             stats_measures,
             adopt_topic,
             forget_topic,
+            commands=_Clis(),
         )
         == 0
     )
@@ -1040,6 +1044,7 @@ def test_the_only_product_under_home_is_used_without_the_product_option(tmp_path
         ["run", _PRODUCT],
         ["doctor", _PRODUCT],
         ["install-service", _PRODUCT],
+        ["restart", _PRODUCT],
         ["stats", _PRODUCT],
         ["topics", "adopt", _PRODUCT, "api", "7"],
         ["topics", "forget", _PRODUCT, "api"],
@@ -1055,7 +1060,7 @@ def test_help_lists_the_verbs_and_the_telegram_group(capsys: pytest.CaptureFixtu
     assert main(["--help"]) == 0
 
     listed = capsys.readouterr().out
-    for word in ("run", "doctor", "install-service", "stats", "telegram"):
+    for word in ("run", "doctor", "install-service", "restart", "stats", "telegram"):
         assert word in listed
 
 
@@ -1072,7 +1077,9 @@ def test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped(
 
 @pytest.mark.parametrize("flag", sorted(_GLOBAL_OPTIONS))
 def test_each_global_option_says_its_default(flag: str) -> None:
-    command = get_command(cli.build_app(compose, stats_measures, adopt_topic, forget_topic))
+    command = get_command(
+        cli.build_app(compose, stats_measures, adopt_topic, forget_topic, commands=_Clis())
+    )
     option = next(param for param in command.params if flag in param.opts)
 
     help_text = _MARKUP.sub("", str(getattr(option, "help", "")))

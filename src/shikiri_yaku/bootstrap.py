@@ -871,7 +871,14 @@ def start_reconciler(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
-    return cli.main(argv, compose, stats_measures, adopt_topic, forget_topic)
+    return cli.main(
+        argv,
+        compose,
+        stats_measures,
+        adopt_topic,
+        forget_topic,
+        commands=ProcessCommandRunner(),
+    )
 
 
 def stats_measures(directory: Path) -> Measures:

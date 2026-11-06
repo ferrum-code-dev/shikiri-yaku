@@ -1,4 +1,4 @@
-"""The output of the command line: doctor, stats and one line per failure, as text or as JSON.
+"""The output of the command line: doctor, stats, restart and one line per failure, as text or JSON.
 
 Rich writes colour only to a terminal, so piped output is plain text. Soft wrapping keeps each
 line whole, so a long detail is never split across lines of a pipe.
@@ -44,6 +44,14 @@ class CheckResult:
     passed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RestartResult:
+    """One product's restart: `problem` says why it did not restart; None means it did."""
+
+    product: str
+    problem: str | None
+
+
 def print_doctor(checks: Sequence[CheckResult]) -> None:
     """Print one line per check, a blank line, then the summary of all of them."""
     console = _console()
@@ -53,8 +61,27 @@ def print_doctor(checks: Sequence[CheckResult]) -> None:
     console.print(_summary(checks))
 
 
-def print_json(document: Mapping[str, object]) -> None:
-    """Print one JSON object on one line, to standard output."""
+def print_restarts(results: Sequence[RestartResult]) -> None:
+    """Print one line per product: restarted, or the product and why it was not."""
+    console = _console()
+    for result in results:
+        console.print(_restart_line(result))
+
+
+def restart_document(results: Sequence[RestartResult]) -> list[dict[str, object]]:
+    """Build the restart report as JSON: one entry per product, with its result."""
+    return [
+        {
+            "product": result.product,
+            "passed": result.problem is None,
+            "result": "restarted" if result.problem is None else result.problem,
+        }
+        for result in results
+    ]
+
+
+def print_json(document: Mapping[str, object] | Sequence[object]) -> None:
+    """Print one JSON value on one line, to standard output."""
     sys.stdout.write(f"{json.dumps(document)}\n")
 
 
@@ -193,6 +220,16 @@ def _check_line(check: CheckResult) -> Text:
     line.append(f" {_title(check.name)}", style=f"{BOLD} {PRIMARY_TEXT_COLOR}")
     line.append(SEPARATOR, style=SECONDARY_TEXT_COLOR)
     line.append(_one_line(check.detail), style=PRIMARY_TEXT_COLOR)
+    return line
+
+
+def _restart_line(result: RestartResult) -> Text:
+    if result.problem is None:
+        line = _outcome(passed=True)
+        line.append(f" {result.product} restarted", style=PRIMARY_TEXT_COLOR)
+    else:
+        line = _outcome(passed=False)
+        line.append(f" {result.product}: {_one_line(result.problem)}", style=PRIMARY_TEXT_COLOR)
     return line
 
 

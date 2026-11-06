@@ -20,11 +20,14 @@ from typer.main import get_command
 
 from shikiri_yaku.cli_render import (
     CheckResult,
+    RestartResult,
     doctor_document,
     print_doctor,
     print_failure,
     print_json,
+    print_restarts,
     print_stats,
+    restart_document,
     stats_document,
 )
 from shikiri_yaku.instance import (
@@ -43,14 +46,19 @@ from shikiri_yaku.ports import (
     ReasonerError,
     ShikiruError,
 )
-from shikiri_yaku.service import ServiceError, service_file, write_service_file
+from shikiri_yaku.service import (
+    ServiceError,
+    restart_product,
+    service_file,
+    write_service_file,
+)
 from shikiri_yaku.settings import NAME_PATTERN, SettingsError, load_settings, product_names
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
     from shikiri_yaku.app.stats import Measures
-    from shikiri_yaku.ports import ChannelCheck
+    from shikiri_yaku.ports import ChannelCheck, CommandRunner
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
 
@@ -201,7 +209,10 @@ JSON_OPTION = Annotated[
     bool,
     typer.Option(
         "--json",
-        help=("Print doctor's and stats' output as one JSON object. [bold]Default:[/] off"),
+        help=(
+            "Print doctor's and stats' output as one JSON object, and restart's as a JSON list. "
+            "[bold]Default:[/] off"
+        ),
     ),
 ]
 COMPONENT_ARGUMENT = Annotated[
@@ -247,6 +258,8 @@ def build_app(
     read_measures: ReadMeasures,
     adopt_topic: AdoptTopic,
     forget_topic: ForgetTopic,
+    *,
+    commands: CommandRunner,
 ) -> typer.Typer:
     """Build the command line over the callables it is given; it builds no concrete object."""
     _configure_help_palette()
@@ -285,6 +298,10 @@ def build_app(
     def install_service(ctx: typer.Context) -> None:
         raise typer.Exit(_install_service(_target(ctx)))
 
+    @app.command(help="Restart the service of one product, or of every product under home.")
+    def restart(ctx: typer.Context) -> None:
+        raise typer.Exit(_restart(_options(ctx), commands))
+
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
         raise typer.Exit(
@@ -316,9 +333,12 @@ def main(
     read_measures: ReadMeasures,
     adopt_topic: AdoptTopic,
     forget_topic: ForgetTopic,
+    *,
+    commands: CommandRunner,
 ) -> int:
     """Run one command line and return its exit code; the caller supplies what it needs."""
-    command = get_command(build_app(compose, read_measures, adopt_topic, forget_topic))
+    app = build_app(compose, read_measures, adopt_topic, forget_topic, commands=commands)
+    command = get_command(app)
     try:
         command.main(args=None if argv is None else list(argv), prog_name=_PROGRAM)
     except SystemExit as exit_:
@@ -504,6 +524,40 @@ def _install_service(target: _Target) -> int:
         return 1
     sys.stdout.write(f"wrote {service.path}\nstart it with: {service.start}\n")
     return 0
+
+
+def _restart(options: _Global, commands: CommandRunner) -> int:
+    try:
+        results = asyncio.run(_restart_all(commands, _restart_products(options)))
+    except ServiceError as error:
+        print_failure(str(error))
+        return 1
+    if options.json_output:
+        print_json(restart_document(results))
+    else:
+        print_restarts(results)
+    return 0 if all(result.problem is None for result in results) else 1
+
+
+def _restart_products(options: _Global) -> list[str]:
+    if options.product is not None:
+        return [options.product]
+    home = home_dir(options.home)
+    found = product_names(home)
+    if not found:
+        message = f"no product under {home}"
+        raise typer.BadParameter(message, param_hint="'--product'")
+    return found
+
+
+async def _restart_all(commands: CommandRunner, products: Sequence[str]) -> list[RestartResult]:
+    home = Path.home()
+    uid = os.getuid()
+    results: list[RestartResult] = []
+    for product in products:
+        problem = await restart_product(commands, sys.platform, home, uid, product)
+        results.append(RestartResult(product, problem))
+    return results
 
 
 def _service(target: _Target, login_path: str) -> ServiceFile:

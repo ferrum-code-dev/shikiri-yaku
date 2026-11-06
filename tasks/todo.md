@@ -213,4 +213,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E14. No channel names in the CLI checks and the journal
   - [x] E15. `/status` and `/open` in a component topic show only that component
   - [x] E16. Several instances in one group (`shared_group`)
-  - [ ] E17. `restart` verb and `poe deploy`
+  - [x] E17. `restart` verb and `poe deploy`

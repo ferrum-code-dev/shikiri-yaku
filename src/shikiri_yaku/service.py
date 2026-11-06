@@ -1,8 +1,9 @@
 """The service unit that keeps one instance running under the OS service manager.
 
-The renderers are pure: they say where a unit belongs and what it contains. Only
-write_service_file touches the disk. A unit runs the given command line with the PATH the caller
-passes in, so shikiru and the agent CLIs are found when the service manager starts the process.
+The renderers are pure: they say where a unit belongs and what it contains. write_service_file
+touches the disk, and restart_product asks the service manager to restart a unit through the
+CommandRunner port. A unit runs the given command line with the PATH the caller passes in, so
+shikiru and the agent CLIs are found when the service manager starts the process.
 """
 
 from __future__ import annotations
@@ -11,13 +12,19 @@ import plistlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from shikiri_yaku.ports import CommandError
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from shikiri_yaku.ports import CommandResult, CommandRunner
+
 LAUNCHD_PLATFORM: Final = "darwin"
 SYSTEMD_PLATFORM: Final = "linux"
 SERVICE_PREFIX: Final = "shikiri-yaku-"
+# keep: a limit of the service manager's own command; restart reads no instance settings
+RESTART_TIMEOUT_S: Final = 30
 
 
 class ServiceError(Exception):
@@ -38,6 +45,16 @@ def service_name(product: str) -> str:
     return f"{SERVICE_PREFIX}{product}"
 
 
+def unit_path(platform: str, user_home: Path, product: str) -> Path:
+    """Return where the platform's service manager keeps the product's unit."""
+    name = service_name(product)
+    if platform == LAUNCHD_PLATFORM:
+        return user_home / "Library" / "LaunchAgents" / f"{name}.plist"
+    if platform == SYSTEMD_PLATFORM:
+        return user_home / ".config" / "systemd" / "user" / f"{name}.service"
+    raise _unsupported(platform)
+
+
 def service_file(
     platform: str,
     user_home: Path,
@@ -47,16 +64,41 @@ def service_file(
 ) -> ServiceFile:
     """Return the unit of this platform that runs `program` with `login_path` as its PATH."""
     name = service_name(product)
+    path = unit_path(platform, user_home, product)
     if platform == LAUNCHD_PLATFORM:
-        path = user_home / "Library" / "LaunchAgents" / f"{name}.plist"
         start = f"launchctl bootstrap gui/$(id -u) {path}"
         return ServiceFile(path, _launchd_plist(name, program, login_path), start)
+    start = f"systemctl --user enable --now {name}.service"
+    return ServiceFile(path, _systemd_unit(product, program, login_path).encode(), start)
+
+
+def restart_argv(platform: str, product: str, uid: int) -> list[str]:
+    """Return the service manager's command that restarts the product's running unit."""
+    name = service_name(product)
+    if platform == LAUNCHD_PLATFORM:
+        return ["launchctl", "kickstart", "-k", f"gui/{uid}/{name}"]
     if platform == SYSTEMD_PLATFORM:
-        path = user_home / ".config" / "systemd" / "user" / f"{name}.service"
-        start = f"systemctl --user enable --now {name}.service"
-        return ServiceFile(path, _systemd_unit(product, program, login_path).encode(), start)
-    message = f"install-service supports macOS (launchd) and Linux (systemd), not {platform!r}"
-    raise ServiceError(message)
+        return ["systemctl", "--user", "restart", f"{name}.service"]
+    raise _unsupported(platform)
+
+
+async def restart_product(
+    commands: CommandRunner, platform: str, user_home: Path, uid: int, product: str
+) -> str | None:
+    """Restart the product's service; return None when it restarted, else why it did not.
+
+    A product whose unit was never written is not installed, and no command runs for it.
+    """
+    if not unit_path(platform, user_home, product).is_file():
+        return "not installed"
+    argv = restart_argv(platform, product, uid)
+    try:
+        result = await commands.run(argv, timeout_s=RESTART_TIMEOUT_S)
+    except CommandError as error:
+        return str(error)
+    if result.returncode != 0:
+        return _failure_reason(result)
+    return None
 
 
 def write_service_file(service: ServiceFile) -> None:
@@ -67,6 +109,16 @@ def write_service_file(service: ServiceFile) -> None:
     except OSError as error:
         message = f"cannot write {service.path}: {error}"
         raise ServiceError(message) from error
+
+
+def _unsupported(platform: str) -> ServiceError:
+    message = f"shikiri-yaku supports macOS (launchd) and Linux (systemd), not {platform!r}"
+    return ServiceError(message)
+
+
+def _failure_reason(result: CommandResult) -> str:
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return "; ".join(lines) or f"exit status {result.returncode}"
 
 
 def _launchd_plist(name: str, program: Sequence[str], login_path: str) -> bytes:

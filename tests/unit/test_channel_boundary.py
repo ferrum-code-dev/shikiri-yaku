@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
-from shikiri_yaku.ports import ChannelCheck, CheckLine
+from shikiri_yaku.ports import ChannelCheck, CheckLine, CommandResult, CommandRunner
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping, Sequence
@@ -41,6 +41,23 @@ class _FakeChannelCheck(ChannelCheck):
     @override
     async def report(self) -> list[CheckLine]:
         return [CheckLine("fake channel", "reported by the fake channel")]
+
+
+class _NoHostCommands(CommandRunner):
+    """The runner of the restart verb. doctor and run restart nothing, so no host command runs."""
+
+    @override
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        del timeout_s, cwd, env
+        message = f"doctor or run ran a host command: {argv[0]}"
+        raise AssertionError(message)
 
 
 class _Composition:
@@ -154,7 +171,12 @@ def test_run_and_doctor_use_fake_channel_check_without_importing_telegram(
         for command in ("doctor", "run"):
             assert (
                 cli_module.main(
-                    [*arguments, command], compose, read_measures, adopt_topic, forget_topic
+                    [*arguments, command],
+                    compose,
+                    read_measures,
+                    adopt_topic,
+                    forget_topic,
+                    commands=_NoHostCommands(),
                 )
                 == 0
             )

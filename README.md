@@ -206,12 +206,16 @@ shikiri-yaku [--product NAME] [--home PATH] [--json] [--version] COMMAND
 - `doctor` checks one product's instance.
 - `stats` prints the figures of one product's journal.
 - `install-service` writes a launchd or systemd unit for running `run` at login.
+- `restart` restarts the service of one product, or of every product under `--home` when
+  `--product` is left out, in name order. Unlike the other verbs, it does not refuse several
+  products. It prints one line per product and exits 1 if any was not restarted. See
+  [Applying changes](#applying-changes).
 - `telegram adopt <component> <thread-id>` and `telegram forget <component>` repair an uncertain
   Telegram topic, or reuse one made by hand, as described below.
-- `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text.
-  The other commands ignore it. Exit codes are the same. `doctor` reports its failed checks inside
-  the object. When `stats` cannot run, it prints one `✘` line on standard error and nothing on
-  standard output.
+- `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text, and
+  `restart` print a JSON list. The other commands ignore it. Exit codes are the same. `doctor`
+  reports its failed checks inside the object. When `stats` cannot run, it prints one `✘` line on
+  standard error and nothing on standard output.
 
 The older forms, with the product after the verb (`run shop`) or `topics …`, are usage errors.
 
@@ -223,6 +227,10 @@ number of failed checks), `total` and `checks`. Each entry of `checks` has `name
 `waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and
 `install_outcomes`. The two durations are in seconds, and `share` is the waiting fraction from 0 to
 1, or `null` when it is unavailable. The last five keys each map a label to its count.
+
+`shikiri-yaku --json restart` prints a list with one entry per product, in name order. Each entry
+has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did
+not, such as `not installed`.
 
 ## Chat commands
 
@@ -396,6 +404,26 @@ that product's service so it reads the new settings. If you rerun `install-servi
 Linux unit, run
 `systemctl --user daemon-reload` and restart the service; on macOS, boot out and bootstrap the
 LaunchAgent again.
+
+### Applying changes
+
+A running service reads its code and `config.toml` when it starts, so a change takes effect after a
+restart. `shikiri-yaku restart` restarts the unit of each product under `--home`, or of the one
+named by `--product`. On macOS it runs `launchctl kickstart -k`; on Linux it runs
+`systemctl --user restart`. A product whose unit was never installed is reported as
+`not installed`, and nothing runs for it. A restart the service manager refuses, such as a unit that
+was written but not loaded, is reported with the service manager's message.
+
+- After a code change, run `uv run poe deploy` from the checkout. It runs `uv run poe check` first
+  and restarts the services only if the check passes.
+- After a `config.toml` change, run `shikiri-yaku restart`.
+- Reinstall the command only when dependencies or entry points change:
+  `uv tool install --editable --reinstall .`, then restart.
+
+A service runs the `shikiri-yaku` that `install-service` found on the login `PATH`. A code change
+reaches it only when that command is an editable install of this checkout, made with
+`uv tool install --editable .`. After a plain `uv tool install .`, the installed copy keeps the old
+code until you install again. Run the restart on each host where a service runs.
 
 ## Diagnostics and recovery
 

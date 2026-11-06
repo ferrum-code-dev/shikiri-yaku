@@ -51,6 +51,9 @@ sequence = [
 [tool.poe.tasks.check]
 sequence = ["format-check", "lint", "comments", "literals", "imports", "types", "dead-code", "test"]
 
+[tool.poe.tasks.deploy]
+sequence = ["check", { cmd = "shikiri-yaku restart" }]
+
 [tool.ruff]
 line-length = 100
 target-version = "py314"
