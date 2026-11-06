@@ -1825,10 +1825,10 @@ Acceptance criteria:
 * A resolve and a submit op recorded before the change (identity `telegram:resolve:<id>`, `telegram:submit:<id>` seeded in the journal) are still found by the same update after the change.
 * The gate passes.
 
-### E15. `/status` in a component topic shows only that component (normal)
+### E15. `/status` and `/open` in a component topic show only that component (normal)
 
-`/status` reports every component wherever it is sent. `/goal` already takes its component from the
-topic (`destinations.component_of(item.thread)`); `/status` should do the same.
+`/status` and `/open` act on every component wherever they are sent. `/goal` already takes its
+component from the topic (`destinations.component_of(item.thread)`); both should do the same.
 
 1. `Commands` passes the sender's thread to `Status`; `Status.report` takes an optional component name.
    With a name it renders only that component's section and leaves out the Reasoner rungs (they belong
@@ -1836,11 +1836,15 @@ topic (`destinations.component_of(item.thread)`); `/status` should do the same.
    component) it renders everything as today.
 2. `Commands` finds the component with the same `Destinations` lookup that `/goal` uses; it names no
    channel.
-3. `/help` and the README `/status` row say that a component topic shows its own component.
+3. `OpenCommand.handle` re-shows only the questions, approvals and install approvals of that component
+   when the command comes from a component topic; elsewhere it acts on all components as today. The
+   "nothing open" and "Shikiru did not answer for ..." replies name only the scoped component.
+4. `/help` and the README `/status` and `/open` rows say that a component topic shows its own component.
 
 Acceptance criteria:
 * `/status` sent in a component topic reports only that component and no Reasoner section.
 * `/status` sent in General, in a private chat, or in a topic that names no component reports all components and the Reasoner rungs, as today.
+* `/open` sent in a component topic re-shows only that component's open items; in General or a private chat it re-shows all, as today. With nothing open for the scoped component it says so.
 * A repeated delivery of the same update still queues one reply.
 * No file under `app/` names a channel (the E14 test still passes).
 * The gate passes.
