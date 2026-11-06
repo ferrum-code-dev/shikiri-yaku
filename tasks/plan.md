@@ -1849,6 +1849,33 @@ Acceptance criteria:
 * No file under `app/` names a channel (the E14 test still passes).
 * The gate passes.
 
+### E16. Several instances in one group (`shared_group`) (normal)
+
+Design §7 ("Shared group") now describes it: one group, one bot per instance, different components.
+Without a rule, every bot answers every command, so a bot replies "Usage ... Components: ..." to a
+`/goal` for a component of the other instance.
+
+1. New setting `channels.telegram.shared_group` (bool, default false; the config model rejects it
+   without `group_id`).
+2. With it true, the start-up group check does not fail on the member count (another bot is a member).
+   `allow_other_members` keeps its own meaning for people.
+3. With it true, an inbound text command sent in a thread that is not General and not one of this
+   instance's component topics is ignored with no reply and nothing journaled as a command reply. The
+   channel and `app/` stay free of channel names: the Telegram adapter decides what reaches `Commands`
+   or the `Inbound` carries what `Commands` needs; keep to the E14 rule.
+4. With it true, `/goal <component> ...` where the component is not configured gets no reply. A known
+   component, a missing request and every other command behave as today.
+5. README (configuration table and a short "Two hosts, one group" section: one bot per instance, same
+   group, `shared_group = true` on both; what each command does in General) and `/help` unchanged.
+
+Acceptance criteria:
+* With `shared_group` false everything behaves as today (existing tests unchanged).
+* With it true: `/status` in a topic of another instance's component queues no reply; `/goal other-component text` in General queues no reply; `/goal own-component text` in General is submitted; `/status` in General replies for this instance's components.
+* With it true the start-up check passes when the group holds one more bot; with it false the same group still refuses.
+* `shared_group = true` without `group_id` is a config error.
+* No file under `app/` names a channel (the E14 test still passes).
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
