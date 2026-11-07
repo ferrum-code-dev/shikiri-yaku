@@ -2060,6 +2060,26 @@ Acceptance criteria:
 * No file in the README still says to install from a checkout as the normal way.
 * The gate passes.
 
+### E24. Deploy verification waits for the service (normal)
+
+The first deploy of `0.1.1` rolled back with no visible reason; the identical second run passed. The
+verification (`scripts/deploy.py`, `verify`) runs `shikiri-yaku --version` and `doctor` right after
+`restart` returns, when the service and the engines may still be starting. The rollback message also
+says only `doctor fails for <product>`, not why.
+
+1. `verify` retries a failing `doctor` per product: up to `ATTEMPTS` runs with `PAUSE_S` seconds
+   between them (named constants at the top of the script; 6 attempts, 10 s). A product passes at
+   its first success. The pause goes through an injected `sleep`, so tests do not wait.
+2. When a product still fails after the last attempt, the problem text includes the last 20 lines of
+   that `doctor` run (stdout and stderr), like the other steps do.
+3. The `--version` check is not retried.
+4. README "Applying changes" says the verification waits up to a minute for each product.
+
+Acceptance criteria:
+* With fakes: a `doctor` that fails twice and then passes does not roll back and sleeps twice; one that always fails rolls back after exactly `ATTEMPTS` runs and the report contains its output tail.
+* A wrong `--version` rolls back at once without retrying `doctor`.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
