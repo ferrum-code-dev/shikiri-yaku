@@ -7,6 +7,17 @@ behavior, the configuration or the journal schema, and the entry says so when it
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-07
+
+### Fixed
+
+- `doctor` names the cause of a failed link to a component. A path that is not a Shikiru project
+  now says to run `shikiru init` there, in place of "unhandled errors in a TaskGroup".
+
+### Changed
+
+- The README installs a release, from its wheel or its tag, instead of a checkout.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added
