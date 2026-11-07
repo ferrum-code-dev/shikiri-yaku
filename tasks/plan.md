@@ -2080,6 +2080,26 @@ Acceptance criteria:
 * A wrong `--version` rolls back at once without retrying `doctor`.
 * The gate passes.
 
+### E25. The help test does not depend on the CI environment (normal)
+
+The first GitHub Actions run failed one test on both runners:
+`tests/unit/test_cli.py::test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped`
+found colour escapes in piped `--help` output. Typer forces a terminal when `GITHUB_ACTIONS`,
+`FORCE_COLOR` or `PY_COLORS` is set (it reads them once, when `typer.rich_utils` is imported), so the
+test passes locally and fails in Actions. `GITHUB_ACTIONS=true uv run pytest tests/unit/test_cli.py -k piped`
+reproduces it.
+
+1. Make the test independent of the environment it runs in. The product keeps Typer's behavior
+   (colour is wanted in a CI log); only the test changes. Prefer a fixture that removes the three
+   variables and sets Typer's forced-terminal switch for the test, or builds the app after the
+   variables are gone, over a global test-session setting.
+2. Check that no other test depends on those variables: run the whole gate once with
+   `GITHUB_ACTIONS=true FORCE_COLOR=1 PY_COLORS=1` and once without them.
+
+Acceptance criteria:
+* The test passes with and without `GITHUB_ACTIONS`, `FORCE_COLOR` and `PY_COLORS` set.
+* The whole gate passes both ways.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

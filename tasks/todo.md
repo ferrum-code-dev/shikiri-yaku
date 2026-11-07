@@ -221,3 +221,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E22. GitHub Release on a version tag
   - [x] E23. First-run messages and install from a release
   - [x] E24. Deploy verification waits for the service
+  - [ ] E25. The help test does not depend on the CI environment
