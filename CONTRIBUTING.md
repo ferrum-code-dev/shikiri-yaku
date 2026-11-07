@@ -12,6 +12,9 @@ Run the offline quality gate with:
 uv run poe check
 ```
 
+CI runs this same gate on every push to `main` and on every pull request, on Ubuntu 24.04 and
+macOS 15 with Python 3.14 (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
 It uses fakes and local fixtures, not a live Telegram bot or agent CLI. The [Telegram fixture
 guide](tests/fixtures/telegram/README.md) explains payload provenance, and the [Shikiru fixture
 guide](tests/fixtures/shikiru/README.md) explains its MCP payloads.

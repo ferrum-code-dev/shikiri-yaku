@@ -1,5 +1,7 @@
 # shikiri-yaku
 
+[![CI](https://github.com/ferrum-code-dev/shikiri-yaku/actions/workflows/ci.yml/badge.svg)](https://github.com/ferrum-code-dev/shikiri-yaku/actions/workflows/ci.yml)
+
 An autonomous Operator for product development with Shikiru.
 
 Shikiri-yaku is a small background service that sits between a Product Owner and
