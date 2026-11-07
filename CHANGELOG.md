@@ -7,6 +7,13 @@ behavior, the configuration or the journal schema, and the entry says so when it
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-07
+
+### Changed
+
+- The README has Release, License and CI badges and the Japanese name in its title.
+- The `--help` test no longer depends on the CI environment. This is a test change only.
+
 ## [0.1.2] - 2026-11-07
 
 ### Fixed

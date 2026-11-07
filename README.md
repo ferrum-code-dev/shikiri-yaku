@@ -37,7 +37,7 @@ using the steps below.
 - Shikiru installed and available as `shikiru` on `PATH`, version `0.1.0` up to but not including
   `0.2.0`. Install a release of [Shikiru](https://github.com/ferrum-code-dev/shikiru) either from
   its release wheel on its GitHub Releases page, or from its tag with
-  `uv tool install git+https://github.com/ferrum-code-dev/shikiru@v0.1.1`. `doctor` fails outside
+  `uv tool install git+https://github.com/ferrum-code-dev/shikiru@v0.1.2`. `doctor` fails outside
   that range. Each configured component must be an existing local Shikiru project directory, one
   that `shikiru init` has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
 - A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
@@ -50,16 +50,16 @@ Install the console command `shikiri-yaku` from a release of this repository, ei
 wheel:
 
 ```sh
-uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.2/shikiri_yaku-0.1.2-py3-none-any.whl
+uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.3/shikiri_yaku-0.1.3-py3-none-any.whl
 ```
 
 or from its tag:
 
 ```sh
-uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.2
+uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.3
 ```
 
-The version in these addresses is `0.1.2`. When a newer release exists, change it to that version.
+The version in these addresses is `0.1.3`. When a newer release exists, change it to that version.
 
 **From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
 release, not a checkout (see [Applying changes](#applying-changes)).
