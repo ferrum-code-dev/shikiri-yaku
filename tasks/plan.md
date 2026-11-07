@@ -2100,6 +2100,31 @@ Acceptance criteria:
 * The test passes with and without `GITHUB_ACTIONS`, `FORCE_COLOR` and `PY_COLORS` set.
 * The whole gate passes both ways.
 
+### E26. The release waits for a green CI on the tagged commit (normal)
+
+Today pushing a tag publishes at once, even when CI has not finished or has failed on that commit. A
+release that cannot be unpublished (a PyPI upload later) must only come from a commit CI has passed.
+
+1. `scripts/wait_for_ci.py` (standard library only): given the commit SHA, the repository and the CI
+   workflow file name, it polls `gh run list --workflow <file> --commit <sha> --json status,conclusion`
+   every `POLL_S` seconds (named constant, 30) and decides from the list with a pure function:
+   a completed run with conclusion `success` means pass; a completed run with any other conclusion
+   and no running or queued run means fail, with the run's conclusion in the message; no run at all
+   after `START_WAIT_S` (300) means fail with "CI did not start for this commit"; otherwise keep waiting
+   until `TOTAL_WAIT_S` (1500) and then fail. The runner is injected, so tests do not call `gh` or sleep.
+2. `.github/workflows/release.yml`: a first job `ci-green` with `permissions: contents: read, actions: read`,
+   a full-history checkout, a step that fails unless the tagged commit is an ancestor of `origin/main`
+   (`git merge-base --is-ancestor`), then the script with `GH_TOKEN: ${{ github.token }}` for that
+   step only. The existing job gets `needs: ci-green` and keeps its own narrow permissions. `timeout-minutes`
+   of `ci-green` covers `TOTAL_WAIT_S` plus a margin. Pinned actions as before.
+3. `CONTRIBUTING.md`, "Releasing": push `main`, tag, push the tag; the release waits for CI, and a failed CI is
+   fixed on `main` and re-run (re-run the failed CI, then re-run the Release workflow).
+
+Acceptance criteria:
+* Table for the decision function: success; failure with nothing running; failure while another run is queued; no run before and after `START_WAIT_S`; a run still in progress; the total wait exceeded; several runs for one commit (a success wins over an earlier failure).
+* The workflow parses as YAML, every `uses:` is pinned to a full SHA with its version in a comment, and only the CI-wait step and the release step see a token.
+* The gate passes (the workflow itself cannot run here; say so in the report).
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

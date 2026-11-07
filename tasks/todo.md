@@ -222,3 +222,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E23. First-run messages and install from a release
   - [x] E24. Deploy verification waits for the service
   - [x] E25. The help test does not depend on the CI environment
+  - [ ] E26. The release waits for a green CI on the tagged commit
