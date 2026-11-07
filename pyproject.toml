@@ -41,6 +41,8 @@ imports = "lint-imports"
 types = "basedpyright"
 dead-code = "vulture"
 test = "pytest"
+deploy = "python scripts/deploy.py"
+rollback = "python scripts/deploy.py --rollback"
 
 [tool.poe.tasks.fix]
 sequence = [
@@ -50,9 +52,6 @@ sequence = [
 
 [tool.poe.tasks.check]
 sequence = ["format-check", "lint", "comments", "literals", "imports", "types", "dead-code", "test"]
-
-[tool.poe.tasks.deploy]
-sequence = ["check", { cmd = "uv tool install --reinstall ." }, { cmd = "shikiri-yaku restart" }]
 
 [tool.ruff]
 line-length = 100
@@ -102,6 +101,7 @@ ignore = [
 "src/shikiri_yaku/adapters/commands.py" = ["TID251"]  # the CommandRunner adapter is the only place that starts processes
 "scripts/contract_check.py" = ["T201", "D", "INP001"]  # a human runs it and reads its printed report
 "scripts/record_telegram.py" = ["INP001"]  # a human runs it; scripts/ is not a package
+"scripts/deploy.py" = ["INP001", "S603", "S607", "TID251"]  # the deploy script runs the release commands and reads its SQLite journals
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
 

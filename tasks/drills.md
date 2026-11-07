@@ -230,3 +230,27 @@ one per component per hour.
 3. Mark each verdict right or wrong in a note outside this repository.
 4. Count the wrong verdicts for each week. Decide from the count whether classification from text is
    good enough (measure M4).
+
+### H8. A deploy that fails verification on purpose rolls back (release)
+
+The plan calls this H7; H7 is the misroute review, so the number is H8. Offline counterpart:
+`tests/unit/test_deploy.py::test_a_failed_verification_reinstalls_the_release_current_names` (cases
+`install`, `restart`, `version`, `doctor`), with `test_rollback_reinstalls_current_and_verifies_the_old_release`
+and `test_a_journal_copy_is_openable_and_named_by_its_schema_version`.
+
+Setup: a throwaway host where a tagged release is deployed and recorded as `current`. In a throwaway
+checkout, one local commit tagged `v<version>` that the new version rejects, for example a
+`config.toml` key that only the new version refuses (the settings use `extra = "forbid"`), or a
+temporary `doctor` check that fails. Do not push it. The store is
+`$XDG_DATA_HOME/shikiri-yaku/releases` (default `~/.local/share/shikiri-yaku/releases`).
+
+1. `shikiri-yaku --product <product> doctor`. Expect every check to pass. Note the wheel in
+   `<store>/current`.
+2. From the throwaway checkout, clean, at the failing tag: `uv run poe deploy; echo $?`. Expect the
+   gate to pass, the restart and the check to fail, a message naming `<product>`, the line
+   "rolled back to" with the old wheel, and `1`.
+3. `shikiri-yaku --version` shows the old version. `cat <store>/current` names the old wheel. `doctor`
+   passes again.
+4. `ls <home>/<product>/backups/` shows a `journal-schema<N>.db` taken by this deploy, and
+   `sqlite3 -readonly <that file> "PRAGMA integrity_check;"` prints `ok`.
+5. `uv run poe rollback; echo $?`. Expect the same release to be reinstalled, verified, and `0`.
