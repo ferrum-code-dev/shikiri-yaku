@@ -7,6 +7,13 @@ behavior, the configuration or the journal schema, and the entry says so when it
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-07
+
+### Fixed
+
+- `poe deploy` waits for a freshly restarted service: it retries `doctor` for each product for up
+  to a minute before rolling back, and a rollback report now includes `doctor`'s output.
+
 ## [0.1.1] - 2026-11-07
 
 ### Fixed
