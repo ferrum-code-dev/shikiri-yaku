@@ -26,31 +26,41 @@ Product Owner in a chat (Telegram first), where one tap applies the answer in Sh
 
 ## Install and first run
 
-This repository contains the Python implementation and command-line interface. Install it from a
-checkout using the steps below.
+This repository contains the Python implementation and command-line interface. Install a release
+using the steps below.
 
 ### Prerequisites
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/).
 - Shikiru installed and available as `shikiru` on `PATH`, version `0.1.0` up to but not including
-  `0.2.0`. `doctor` fails outside that range. Each configured component must be an existing local
-  Shikiru project directory; Shikiri-yaku connects with `shikiru --project <path> mcp`.
+  `0.2.0`. Install a release of [Shikiru](https://github.com/ferrum-code-dev/shikiru) either from
+  its release wheel on its GitHub Releases page, or from its tag with
+  `uv tool install git+https://github.com/ferrum-code-dev/shikiru@v0.1.0`. `doctor` fails outside
+  that range. Each configured component must be an existing local Shikiru project directory, one
+  that `shikiru init` has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
 - A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
   private. The bot uses long polling, so do not configure a webhook for it.
 - Optionally, the local `claude` and/or `codex` CLI for a configured Reasoner ladder.
 
-### Install from source
+### Install a release
 
-From a checkout of this repository, install the console command with uv:
+Install the console command `shikiri-yaku` from a release of this repository, either from its
+wheel:
 
 ```sh
-git clone https://github.com/ferrum-code-dev/shikiri-yaku.git
-cd shikiri-yaku
-uv tool install .
+uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.0/shikiri_yaku-0.1.0-py3-none-any.whl
 ```
 
-This installs the source checkout as the `shikiri-yaku` command; it does not use a published
-package release. If you already have a checkout, run `uv tool install .` from its root.
+or from its tag:
+
+```sh
+uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.0
+```
+
+The version in these addresses is `0.1.0`. When a newer release exists, change it to that version.
+
+**From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
+release, not a checkout (see [Applying changes](#applying-changes)).
 
 ### Create an instance
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, CommandRunner
 
 BACKOFF_FACTOR = 2
+# keep: the directory `shikiru init` creates in a project; its absence means the path is not one
+SHIKIRU_STATE_DIRECTORY = ".shikiru"
 
 
 class ToolSession(Protocol):
@@ -59,11 +61,21 @@ class _Result[T](BaseModel):
 
 
 def stdio_connector(executable: str, project: Path) -> Connector:
-    """Connect to `executable --project <project> mcp`; the executable is found on PATH."""
+    """Connect to `executable --project <project> mcp`; the executable is found on PATH.
+
+    A path without a Shikiru state directory is refused before anything starts, so the error
+    names the path rather than a failed process.
+    """
     parameters = StdioServerParameters(command=executable, args=["--project", str(project), "mcp"])
 
     @asynccontextmanager
     async def connect() -> AsyncGenerator[ToolSession]:
+        if not (project / SHIKIRU_STATE_DIRECTORY).is_dir():
+            message = (
+                f"{project} is not a Shikiru project (no {SHIKIRU_STATE_DIRECTORY} directory); "
+                "run shikiru init there"
+            )
+            raise ShikiruLinkDownError(message)
         async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
             await session.initialize()
             yield session
@@ -217,7 +229,7 @@ async def _invoke[M: BaseModel](
         message = f"{tool} returned an unreadable result: {error}"
         raise ShikiruProtocolError(message) from error
     except Exception as error:
-        raise ShikiruLinkDownError(str(error)) from error
+        raise ShikiruLinkDownError(_reason(error)) from error
     if result.isError:
         raise ShikiruRejectedError(_error_text(result))
     try:
@@ -241,8 +253,17 @@ async def probe_link(connect: Connector, timeout_s: float) -> None:
     except ShikiruError:
         raise
     except Exception as error:
-        message = f"the link did not come up: {error}"
+        message = f"the link did not come up: {_reason(error)}"
         raise ShikiruLinkDownError(message) from error
+
+
+# keep: a group's own text names only the group, not the cause, so its leaves' texts are used
+def _reason(error: BaseException) -> str:
+    if not isinstance(error, BaseExceptionGroup):
+        return str(error)
+    group = cast("BaseExceptionGroup[BaseException]", error)
+    reasons = dict.fromkeys(_reason(leaf) for leaf in group.exceptions)
+    return "; ".join(reason for reason in reasons if reason)
 
 
 def _error_text(result: CallToolResult) -> str:

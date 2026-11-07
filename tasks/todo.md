@@ -219,4 +219,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E20. Open-source files
   - [x] E21. CI
   - [x] E22. GitHub Release on a version tag
-  - [ ] E23. First-run messages and install from a release
+  - [x] E23. First-run messages and install from a release

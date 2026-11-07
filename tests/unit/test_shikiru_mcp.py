@@ -10,12 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, override
 
 import pytest
-from mcp import types
+from mcp import StdioServerParameters, types
 from mcp.server.lowlevel import Server
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import CallToolResult, TextContent
 
-from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient
+from shikiri_yaku.adapters.shikiru_mcp import (
+    SHIKIRU_STATE_DIRECTORY,
+    ShikiruMcpClient,
+    probe_link,
+    stdio_connector,
+)
 from shikiri_yaku.ports import (
     AckStatus,
     CommandError,
@@ -559,3 +564,72 @@ def test_an_ack_without_a_field_the_client_reads_is_a_protocol_error(missing: st
             await client.resolve_escalation("E-1", "retry")
 
     _run(session, scenario)
+
+
+class _RefusingLink:
+    """A link whose connection raises `error`, as a process that cannot start does."""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def __call__(self) -> Any:
+        return self
+
+    async def __aenter__(self) -> ToolSession:
+        raise self._error
+
+    async def __aexit__(self, *_ignored: object) -> None: ...
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (OSError("no such executable"), "no such executable"),
+        (ExceptionGroup("unhandled errors", [OSError("no such executable")]), "no such executable"),
+        (
+            ExceptionGroup("unhandled errors", [OSError("first"), ValueError("second")]),
+            "first; second",
+        ),
+        (ExceptionGroup("unhandled errors", [OSError("same"), OSError("same")]), "same"),
+        (
+            ExceptionGroup(
+                "unhandled errors",
+                [ExceptionGroup("nested", [OSError("deep")]), ValueError("top")],
+            ),
+            "deep; top",
+        ),
+    ],
+)
+def test_a_link_that_does_not_come_up_names_the_leaf_errors(
+    error: BaseException, reason: str
+) -> None:
+    async def scenario() -> None:
+        with pytest.raises(ShikiruLinkDownError) as raised:
+            await probe_link(_RefusingLink(error), _CALL_TIMEOUT_S)
+        assert str(raised.value) == f"the link did not come up: {reason}"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("state_directory", [None, SHIKIRU_STATE_DIRECTORY])
+def test_a_path_is_connected_only_when_it_has_a_shikiru_state_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_directory: str | None
+) -> None:
+    if state_directory is not None:
+        (tmp_path / state_directory).mkdir()
+    attempts: list[StdioServerParameters] = []
+
+    def stdio_client_stub(parameters: StdioServerParameters) -> _RefusingLink:
+        attempts.append(parameters)
+        return _RefusingLink(OSError("no process"))
+
+    monkeypatch.setattr("shikiri_yaku.adapters.shikiru_mcp.stdio_client", stdio_client_stub)
+
+    async def scenario() -> None:
+        with pytest.raises(ShikiruLinkDownError) as raised:
+            await probe_link(stdio_connector("shikiru", tmp_path), _CALL_TIMEOUT_S)
+        named = f"{tmp_path} is not a Shikiru project"
+        assert (named in str(raised.value)) is (state_directory is None)
+
+    asyncio.run(scenario())
+    assert bool(attempts) is (state_directory is not None)
