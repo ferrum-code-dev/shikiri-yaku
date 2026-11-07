@@ -2010,6 +2010,28 @@ Acceptance criteria:
 * The workflow file parses as YAML and every `uses:` line is pinned to a full commit SHA with the version in a comment, like Shikiru's.
 * The gate passes locally (the workflow itself cannot run here; say so in the report).
 
+### E22. GitHub Release on a version tag (normal)
+
+Pushing a tag `v<version>` should publish the release: the wheel, the sdist and the changelog text.
+PyPI is a later step (it needs the owner to register a trusted publisher first) and is not part of this task.
+
+1. `scripts/release_notes.py <version> [--changelog CHANGELOG.md]`: prints the body of the
+   `## [<version>]` section of the changelog (without the heading) and exits non-zero with a message
+   when the section is missing or empty. Standard library only.
+2. `.github/workflows/release.yml`: triggered by `push: tags: ["v*"]`; `permissions: contents: write`
+   for the one job only; the pinned checkout and uv actions and the uv version taken from `ci.yml`.
+   Steps: fail unless the tag equals `v` plus the `pyproject.toml` version; `uv build`; write the notes
+   with the script; `gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file <notes>`,
+   with `--prerelease` while the major version is 0. The token comes from `${{ github.token }}` and is
+   passed as `GH_TOKEN` to that one step.
+3. `CONTRIBUTING.md`, a "Releasing" part: bump the version and the changelog, commit, tag `v<version>`,
+   `uv run poe deploy` on the host, then push the tag (the push is the owner's decision).
+
+Acceptance criteria:
+* Table for `release_notes.py`: a section in the middle, the first and the last section, a missing version, an empty section, and a version that is a prefix of another (`0.1` and `0.1.0`).
+* The workflow parses as YAML; every `uses:` is pinned to a full SHA with the version in a comment; no step other than the release one sees a token.
+* The gate passes (the workflow itself cannot run here; say so in the report).
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
