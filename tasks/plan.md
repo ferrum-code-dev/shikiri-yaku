@@ -1908,6 +1908,108 @@ Acceptance criteria:
 * `--json` output lists product and result for each.
 * The gate passes.
 
+### E18. Deploy a tagged release, roll back on failure (normal)
+
+Design: [Releases and deployment](../docs/design.md#releases-and-deployment). Read it first. E17's
+`poe deploy` installs whatever the checkout holds and cannot go back. Replace it so that a service
+only ever runs a tagged release, and a failed upgrade returns to the last good one.
+
+1. New `scripts/deploy.py` (standard library only, run as `uv run python scripts/deploy.py`, with
+   `--rollback` for the rollback alone). Steps and order are those of the design section; the
+   release store is `$XDG_DATA_HOME/shikiri-yaku/releases`, keeping the last five wheels and the
+   file `current`. The logic sits in functions that take a command runner and the paths, so a test
+   can import them and pass fakes; nothing in them is a literal from the host.
+2. The journal copy uses SQLite's online backup (`sqlite3.Connection.backup`), not a file copy, and
+   goes to `<home>/<product>/backups/journal-schema<N>.db`. The products and the home are those the
+   `restart --json` output and `--home` already use. Keep the last three backups per product.
+3. `pyproject.toml`: `deploy = "python scripts/deploy.py"` and
+   `rollback = "python scripts/deploy.py --rollback"` replace the E17 `deploy` sequence.
+4. README "Applying changes": a code change is `uv run poe deploy` from a checkout at the release
+   tag; how to tag (`git tag v<version>` after the version in `pyproject.toml` is bumped and
+   committed); `uv run poe rollback`; what to do when the old version stops with a journal-too-new
+   error (restore the printed backup with the service stopped). Keep the `--editable` warning.
+5. `tasks/drills.md`: a human drill H7: deploy a release that fails its verification on purpose
+   (for example a config the new version rejects), watch the rollback restore the old version, and
+   check `doctor`.
+
+Acceptance criteria:
+* With fakes: a dirty tree, an untagged HEAD, a tag that differs from the version, and a failing gate each stop the script before anything is built or installed.
+* A successful run builds the wheel, backs up every journal, installs the wheel, restarts, verifies, and writes `current`; the commands are exactly the documented ones, in order.
+* A failing verification (wrong version or a failing `doctor` for any product) reinstalls the wheel named by `current`, restarts, and exits non-zero; with no `current` it says there is nothing to go back to and exits non-zero.
+* A journal copy is a valid, openable database whose schema version is in its name.
+* Wheels beyond the last five and backups beyond the last three are removed; `current` is never removed.
+* Nothing is installed or run on the host by the tests (fakes and temporary directories only).
+* The gate passes.
+
+### E19. `doctor` checks the Shikiru version (normal)
+
+Design: [Releases and deployment](../docs/design.md#releases-and-deployment), "Compatibility with
+Shikiru". A Shikiru upgrade the Operator does not support should show before an escalation is missed.
+
+1. Two named constants in `settings.py` or beside the Shikiru adapter (wherever the other
+   Shikiru-facing constants live): the lowest supported Shikiru version and the first unsupported
+   one. Today's range is `0.1.0` up to but not including `0.2.0`.
+2. A new `doctor` check "Shikiru version": it runs `shikiru --version` through `CommandRunner`,
+   parses the version (the `packaging` library is not a dependency; compare dotted numbers) and
+   passes inside the range. Outside the range, an unreadable output or a failing command is a failed
+   check naming the found and the supported versions.
+3. README "Prerequisites" names the supported Shikiru range.
+
+Acceptance criteria:
+* Table: below the range, at the lower bound, inside, at the upper bound, above it, an unparseable output and a failing command give the documented result.
+* The check appears in `doctor` and `doctor --json` in the style of the other checks.
+* The E14 test still passes; the gate passes.
+
+### E20. Open-source files (normal)
+
+The repository goes public, so the files a stranger needs must exist. This task adds files and
+metadata and changes no behavior.
+
+1. `LICENSE`: the MIT license, `Copyright (c) 2026 Ferrum Code`. `pyproject.toml` gets
+   `license = "MIT"`, `license-files = ["LICENSE"]`, `authors`, `keywords`, `classifiers` (Python 3.14,
+   OS independent, alpha) and `[project.urls]` (Homepage, Source, Issues, Changelog), with the GitHub
+   address `https://github.com/ferrum-code-dev/shikiri-yaku`.
+2. `CONTRIBUTING.md`: move the README section "Contributor validation" here whole (the gate, the two
+   scripts, the drills), then add: how to propose a change (open an issue first for anything over a
+   small fix), that `AGENTS.md` holds the architecture and safety rules and applies to people as well
+   as agents, the commit style (conventional commits), and that a change needs the gate green. The
+   README keeps one line under its last heading, pointing to `CONTRIBUTING.md`. `AGENTS.md` item 2
+   of "Read first" now names `CONTRIBUTING.md` for the validation steps. No link or text anywhere
+   points to the removed README section.
+3. `SECURITY.md`: how to report a vulnerability privately (GitHub private vulnerability reporting),
+   what is in scope (the approval boundary, the token file, command construction from recipes,
+   prompt text from signals reaching the Reasoner), and the supported versions (the latest release).
+   One short paragraph states the threat model from the design: the Telegram owners, the approval
+   boundary and Principle 4.
+4. `CHANGELOG.md` in Keep a Changelog style with an `Unreleased` section and a `0.1.0` entry
+   summarizing what the Operator does (from the README, not the git log).
+5. `.github/ISSUE_TEMPLATE/bug_report.yml`, `.github/ISSUE_TEMPLATE/feature_request.yml` and
+   `.github/pull_request_template.md`: short; the PR template asks for the gate result and the design
+   section touched.
+6. `tasks/plan.md`: replace each absolute path under `/Users/` by a repository-relative or
+   `<shikiru checkout>` form. Nothing else in the file changes.
+
+Acceptance criteria:
+* `uv build` produces a wheel and sdist whose metadata shows the license, URLs and classifiers (check with a temporary directory output; nothing is installed).
+* `git grep -n '/Users/'` finds nothing in tracked files.
+* The README no longer holds the contributor section; every relative link in `README.md`, `CONTRIBUTING.md` and `AGENTS.md` resolves to an existing file.
+* The gate passes.
+
+### E21. CI (normal)
+
+Shikiru runs its gate on every push and pull request on Ubuntu and macOS. The Operator has no CI.
+
+1. `.github/workflows/ci.yml` modeled on `<shikiru checkout>/.github/workflows/ci.yml`: the same
+   triggers, `permissions: contents: read`, the concurrency group, the pinned action SHAs and the
+   pinned uv version copied from it, the matrix `ubuntu-24.04` and `macos-15`, Python 3.14, and the
+   steps `uv sync --locked` and `uv run poe check`. No secrets; the gate needs none.
+2. A README badge for the workflow under the title.
+3. In `CONTRIBUTING.md`: the CI runs the same gate.
+
+Acceptance criteria:
+* The workflow file parses as YAML and every `uses:` line is pinned to a full commit SHA with the version in a comment, like Shikiru's.
+* The gate passes locally (the workflow itself cannot run here; say so in the report).
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

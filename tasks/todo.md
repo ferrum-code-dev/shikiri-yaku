@@ -214,3 +214,7 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E15. `/status` and `/open` in a component topic show only that component
   - [x] E16. Several instances in one group (`shared_group`)
   - [x] E17. `restart` verb and `poe deploy`
+  - [ ] E18. Deploy a tagged release, roll back on failure
+  - [ ] E19. `doctor` checks the Shikiru version
+  - [ ] E20. Open-source files
+  - [ ] E21. CI

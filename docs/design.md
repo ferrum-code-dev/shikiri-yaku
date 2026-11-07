@@ -287,9 +287,26 @@ The Operator uses these Shikiru capabilities, through the MCP server and the CLI
 | `resolve_escalation` with `answer`, `retry`, `accept`, `cancel`; rejection when the escalation is no longer open or the resolution is not valid for its reason; the command id in the `escalation_resolved` event | Applying answers exactly once, and confirming them |
 | `submit_task` | `/goal` |
 | `engine_stopped` carries a stop reason only on a fault stop; `pr_opened` (with `url`) and `pr_withdrawn` events; a task stays *integrating* until its PR settles | The liveness rule; the review handler |
-| CLI `shikiru --project <path> start`, `doctor --json` | Engine restart and diagnostics |
+| CLI `shikiru --project <path> start`, `doctor --json`, `--version` | Engine restart, diagnostics, and the version check of [Releases and deployment](#releases-and-deployment) |
 
 **Required: a structured escalation view.** `get_escalation` and `list_escalations` also return `question`, `agent_options` (each with `label`, `consequences`, `recommended`, `needs_input`) and `resolutions` (each with `kind`, `consequences`, `recommended`). The `packet` text stays for the *Details* button. Without this view the Operator would parse Shikiru's markdown packet format, which breaks silently when the format changes.
+
+## Releases and deployment
+
+**Versions.** The version in `pyproject.toml` follows SemVer. A release is the commit tagged `v<version>`, and the tag must equal the version at that commit. Below 1.0 any minor version may change behavior, the config or the journal schema; the changelog says so when it does.
+
+**A running service runs a release, never a checkout.** The installed copy is a wheel built from a tagged commit. `poe deploy` (`scripts/deploy.py`) does the following, and stops at the first failing step:
+
+1. Refuses unless the work tree is clean and HEAD is exactly the tag `v<version>`.
+2. Runs the gate (`poe check`) and builds the wheel into the release store, `$XDG_DATA_HOME/shikiri-yaku/releases` (default `~/.local/share/shikiri-yaku/releases`), keeping the last five. The file `current` in the store names the wheel last deployed successfully.
+3. Copies every product's journal to `<product>/backups/` with SQLite's online backup, named by the journal's schema version, so a failed upgrade can be undone by hand.
+4. Installs the wheel (`uv tool install --reinstall <wheel>`) and runs `shikiri-yaku restart --json`.
+5. Verifies: `shikiri-yaku --version` is the tag's version, and `doctor` passes for every product that `restart` reported.
+6. Success writes `current`. Any failure after step 4 is a **rollback**: reinstall the wheel `current` named, restart, report what failed, exit non-zero. With no `current` (the first deploy) there is nothing to go back to, and the script says so.
+
+`poe rollback` does the rollback by itself, on demand. A rollback restores code, not data. The journal refuses a schema newer than the code knows (`JournalTooNewError`), so after a release that migrated the journal the old version stops with that error; the script then prints the backup file and the steps to restore it. Migrations are therefore reviewed as one-way changes.
+
+**Compatibility with Shikiru.** The Operator declares the range of Shikiru versions it was built and checked against, as named constants. `doctor` reads `shikiru --version` and fails outside the range, so a Shikiru upgrade that the Operator does not support shows up before an escalation is missed. Release Shikiru first, then the Operator, and name the supported Shikiru versions in the changelog.
 
 ## Engineering constraints
 
