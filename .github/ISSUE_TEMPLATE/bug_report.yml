@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a problem with shikiri-yaku
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove tokens, chat IDs and Shikiru packet text before you paste anything. For a security
+        problem, use the private report described in SECURITY.md instead of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: shikiri-yaku version
+      description: Output of `shikiri-yaku --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Output of `shikiri-yaku --product <product> doctor`, with anything secret removed.

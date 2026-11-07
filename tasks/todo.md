@@ -216,5 +216,5 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E17. `restart` verb and `poe deploy`
   - [x] E18. Deploy a tagged release, roll back on failure
   - [x] E19. `doctor` checks the Shikiru version
-  - [ ] E20. Open-source files
+  - [x] E20. Open-source files
   - [ ] E21. CI

@@ -4,6 +4,15 @@ version = "0.1.0"
 description = "An escalation router between a Product Owner and Shikiru."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ferrum Code" }]
+keywords = ["shikiru", "escalation", "telegram", "product-owner", "coding-agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "httpx>=0.28,<0.29",
     "mcp>=1.26,<2.0",
@@ -13,6 +22,12 @@ dependencies = [
 
 [project.scripts]
 shikiri-yaku = "shikiri_yaku.bootstrap:main"
+
+[project.urls]
+Homepage = "https://github.com/ferrum-code-dev/shikiri-yaku"
+Source = "https://github.com/ferrum-code-dev/shikiri-yaku"
+Issues = "https://github.com/ferrum-code-dev/shikiri-yaku/issues"
+Changelog = "https://github.com/ferrum-code-dev/shikiri-yaku/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

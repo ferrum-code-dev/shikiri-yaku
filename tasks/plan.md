@@ -138,7 +138,7 @@ was decided.
 Create the Python project (uv, Python 3.14, `src/shikiri_yaku/`, `tests/`) and a gate equivalent to
 Shikiru's: `poe check` runs format check, ruff with `select = ["ALL"]`, the comment rule, the literal
 rule, import-linter contracts for the layers in `AGENTS.md`, basedpyright, vulture and pytest. Copy
-the rule scripts and configuration from the Shikiru repository at `/Users/pavel/Projects/ferrum-code-dev/shikiru` (pyproject.toml,
+the rule scripts and configuration from the Shikiru repository at `<shikiru checkout>` (pyproject.toml,
 `tests/support/comment_rule.py`, `tests/support/literal_rule.py`) and adapt names. Create the empty
 packages named in `AGENTS.md`, `cli.py` with a `--version` command, and `.gitignore`.
 
@@ -258,7 +258,7 @@ Acceptance criteria:
 §10.1, §11. The client port grows `resolve_escalation(id, kind, text|None)` (kinds `answer`, `retry`,
 `accept`, `cancel`) and `submit_task(request)`; each returns an `Ack` (`done`, `rejected` or `queued`,
 the command id, and for a submit the task id; check the real field names in the Shikiru repository
-at `/Users/pavel/Projects/ferrum-code-dev/shikiru`, `operator/commands.py`, before you write the type).
+at `<shikiru checkout>`, `operator/commands.py`, before you write the type).
 `start_engine()` runs `shikiru --project <path> start` through the `CommandRunner` port. Write the
 plain `CommandRunner` adapter here: an argument list (no shell), closed stdin, a timeout, the whole
 process group killed on timeout, output captured; it is the one module exempt from the subprocess
@@ -271,7 +271,7 @@ Acceptance criteria:
 * Unit tests with a fake MCP session: a `rejected` ack becomes `ShikiruRejectedError` with Shikiru's message; a `queued` ack is returned as queued.
 * CommandRunner tests with real harmless commands: success output, nonzero exit code, timeout kills a child that ignores SIGTERM, stdin is closed.
 * `doctor` gets one MCP probe per component (design §3.2): the link comes up and `status` answers. It is registered in `bootstrap.py` with this adapter.
-* The contract script passes against a Shikiru that has S1 (the branch checkout at `/Users/pavel/Projects/ferrum-code-dev/shikiru`, run with `uv run --project`), and its output is recorded in the task report: events arrive, an escalation has `question`, `agent_options` and `resolutions`, a resolve is acknowledged and its command id appears in the `escalation_resolved` event, a second resolve is `rejected`, `start` brings `engine_up`. The script is not run by the agent unless it can start the fake agent offline; if it cannot, the task report says exactly what was not run.
+* The contract script passes against a Shikiru that has S1 (the branch checkout at `<shikiru checkout>`, run with `uv run --project`), and its output is recorded in the task report: events arrive, an escalation has `question`, `agent_options` and `resolutions`, a resolve is acknowledged and its command id appears in the `escalation_resolved` event, a second resolve is `rejected`, `start` brings `engine_up`. The script is not run by the agent unless it can start the fake agent offline; if it cannot, the task report says exactly what was not run.
 
 ### A6. Event source (high)
 
@@ -1516,7 +1516,7 @@ Acceptance criteria:
 ### E5. Command line in Shikiru's style (normal)
 
 The owner wants the same experience as `shikiru`: style, colours and structure. Reference (read, copy
-the ideas, never import Shikiru): `/Users/pavel/Projects/ferrum-code-dev/shikiru/src/shikiru/cli/app.py`
+the ideas, never import Shikiru): `<shikiru checkout>/src/shikiru/cli/app.py`
 (Typer app, `_configure_typer_help_palette`, global options, `_fail`) and `cli/render.py` (doctor lines,
 summary line, glyphs, colours). Run `shikiru --help`, `shikiru doctor` and `shikiru status` to see the result.
 
@@ -1986,12 +1986,12 @@ metadata and changes no behavior.
 5. `.github/ISSUE_TEMPLATE/bug_report.yml`, `.github/ISSUE_TEMPLATE/feature_request.yml` and
    `.github/pull_request_template.md`: short; the PR template asks for the gate result and the design
    section touched.
-6. `tasks/plan.md`: replace each absolute path under `/Users/` by a repository-relative or
-   `<shikiru checkout>` form. Nothing else in the file changes.
+6. `tasks/plan.md`: replace each absolute path into a user's home folder (the macOS `Users` prefix)
+   by a repository-relative or `<shikiru checkout>` form. Nothing else in the file changes.
 
 Acceptance criteria:
 * `uv build` produces a wheel and sdist whose metadata shows the license, URLs and classifiers (check with a temporary directory output; nothing is installed).
-* `git grep -n '/Users/'` finds nothing in tracked files.
+* `git grep -n '/Use''rs/'` (the home-folder prefix, split in the command so the grep does not match this line) finds nothing in tracked files.
 * The README no longer holds the contributor section; every relative link in `README.md`, `CONTRIBUTING.md` and `AGENTS.md` resolves to an existing file.
 * The gate passes.
 

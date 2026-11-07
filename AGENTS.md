@@ -10,8 +10,9 @@ one into a category, hands it to a handler, and forwards what it cannot fix to t
    dependency boundaries, the journal and recovery, and the approval boundary. When this file and
    the design differ, the design wins; report the difference in your result instead of choosing
    silently.
-2. `README.md` is the user guide: installation, configuration, daily operation and recovery, and
-   the contributor validation section.
+2. `README.md` is the user guide: installation, configuration, daily operation and recovery.
+   `CONTRIBUTING.md` holds the validation steps for contributors: the gate, the scripts and the
+   drills.
 3. `tasks/plan.md` holds the task list with acceptance criteria, and `tasks/todo.md` is the
    checklist. `tasks/drills.md` maps each human drill to the offline test that covers it.
 

@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a change to shikiri-yaku
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the fix. Small fixes can go straight to a pull request. The
+        design in docs/design.md decides what the Operator does, so say which part it would change.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The situation, the escalation or the task that is not handled well today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: input
+    id: design
+    attributes:
+      label: Design section touched
+      description: The section of docs/design.md this would change, or "none".
