@@ -30,9 +30,9 @@ checkout using the steps below.
 ### Prerequisites
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/).
-- Shikiru installed and available as `shikiru` on `PATH`. Each configured component must be an
-  existing local Shikiru project directory; Shikiri-yaku connects with
-  `shikiru --project <path> mcp`.
+- Shikiru installed and available as `shikiru` on `PATH`, version `0.1.0` up to but not including
+  `0.2.0`. `doctor` fails outside that range. Each configured component must be an existing local
+  Shikiru project directory; Shikiri-yaku connects with `shikiru --project <path> mcp`.
 - A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
   private. The bot uses long polling, so do not configure a webhook for it.
 - Optionally, the local `claude` and/or `codex` CLI for a configured Reasoner ladder.

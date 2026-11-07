@@ -111,7 +111,7 @@ from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import CompositionError
-from shikiri_yaku.settings import CliSettings, SettingsError, load_settings
+from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings, SettingsError, load_settings
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -150,7 +150,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.settings import Component, ReasonerSettings, Settings
 
 
-SHIKIRU_EXECUTABLE: Final = "shikiru"
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
 INBOUND_HEALTH_SCOPE: Final = "telegram_inbound_batch"
 # keep: a copy without buttons that the signal ends, sent before the upgrade, still gets its edit

@@ -30,7 +30,7 @@ from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import service_file
-from shikiri_yaku.settings import CliSettings
+from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, GET_WEBHOOK_INFO, FakeBotApi
 
@@ -309,11 +309,26 @@ def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
     )
 
 
-class _Clis(CommandRunner):
-    """Runs the CLIs' version flags, and fails to start each CLI named in `missing`."""
+_SHIKIRU_SUPPORTED: Final = CommandResult(returncode=0, stdout="0.1.0\n", stderr="")
 
-    def __init__(self, missing: frozenset[str] = frozenset()) -> None:
+
+def _shikiru_says(stdout: str, returncode: int = 0) -> CommandResult:
+    return CommandResult(returncode=returncode, stdout=stdout, stderr="")
+
+
+class _Clis(CommandRunner):
+    """Runs the CLIs' version flags, and fails to start each CLI named in `missing`.
+
+    `shikiru` is what `shikiru --version` answers, or the error it raises.
+    """
+
+    def __init__(
+        self,
+        missing: frozenset[str] = frozenset(),
+        shikiru: CommandResult | CommandError = _SHIKIRU_SUPPORTED,
+    ) -> None:
         self._missing = missing
+        self._shikiru = shikiru
 
     @override
     async def run(
@@ -328,6 +343,10 @@ class _Clis(CommandRunner):
         if argv[0] in self._missing:
             message = f"{argv[0]}: command not found"
             raise CommandError(message)
+        if argv[0] == SHIKIRU_EXECUTABLE:
+            if isinstance(self._shikiru, CommandError):
+                raise self._shikiru
+            return self._shikiru
         return CommandResult(returncode=0, stdout="", stderr="")
 
 
@@ -347,6 +366,7 @@ def _run_doctor(
     product: str | None = _PRODUCT,
     *,
     json_output: bool = False,
+    shikiru: CommandResult | CommandError = _SHIKIRU_SUPPORTED,
 ) -> int:
     composed = partial(compose, link=lambda _executable, _project: link, bot=bot, commands=commands)
     product_option = [] if product is None else ["--product", product]
@@ -357,7 +377,7 @@ def _run_doctor(
         stats_measures,
         adopt_topic,
         forget_topic,
-        commands=_Clis(),
+        commands=_Clis(shikiru=shikiru),
         cli_settings=_CLI_SETTINGS,
     )
 
@@ -399,6 +419,47 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
     document = json.loads(capsys.readouterr().out)
     assert (document["passed"], document["failed"]) == (False, 1)
     assert [check["name"] for check in document["checks"] if not check["passed"]] == ["components"]
+
+
+@pytest.mark.parametrize(
+    ("shikiru", "expected"),
+    [
+        pytest.param(_shikiru_says("0.0.9\n"), 1, id="below-lowest"),
+        pytest.param(_shikiru_says("0.1.0\n"), 0, id="lowest-inclusive"),
+        pytest.param(_shikiru_says("0.1.5\n"), 0, id="inside"),
+        pytest.param(_shikiru_says("0.2.0\n"), 1, id="first-unsupported"),
+        pytest.param(_shikiru_says("0.3.0\n"), 1, id="above"),
+        pytest.param(_shikiru_says("0.10.0\n"), 1, id="above-compared-as-numbers"),
+        pytest.param(_shikiru_says("shikiru is fine\n"), 1, id="unparseable-output"),
+        pytest.param(_shikiru_says(""), 1, id="empty-output"),
+        pytest.param(_shikiru_says("0.1.0\n", returncode=1), 1, id="failing-command"),
+        pytest.param(CommandError("shikiru: command not found"), 1, id="cannot-start"),
+    ],
+)
+def test_doctor_checks_the_shikiru_version_against_the_supported_range(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    shikiru: CommandResult | CommandError,
+    expected: int,
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, shikiru=shikiru) == expected
+    assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"shikiru version"})
+
+
+def test_doctor_json_names_the_shikiru_version_it_found_and_the_range(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, json_output=True, shikiru=_shikiru_says("0.2.0\n")) == 1
+    document = json.loads(capsys.readouterr().out)
+    (check,) = [check for check in document["checks"] if check["name"] == "Shikiru version"]
+    assert check["passed"] is False
+    assert "0.2.0" in check["detail"]
+    assert "0.1.0" in check["detail"]
 
 
 @pytest.mark.parametrize(

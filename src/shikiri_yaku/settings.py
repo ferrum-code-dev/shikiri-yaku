@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 CONFIG_FILE_NAME: Final = "config.toml"
 TOKEN_FILE_DEFAULT: Final = "secrets/telegram.token"  # noqa: S105 -- a file name, not a secret
 NAME_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+SHIKIRU_EXECUTABLE: Final = "shikiru"
+# keep: the Shikiru range the Operator was checked against; doctor fails outside it.
+SHIKIRU_FIRST_SUPPORTED: Final = "0.1.0"
+SHIKIRU_FIRST_UNSUPPORTED: Final = "0.2.0"
 
 EVENT_WAIT_S: Final = 30
 LIVENESS_INTERVAL_S: Final = 60

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 from shikiri_yaku.ports import ChannelCheck, CheckLine, CommandResult, CommandRunner
-from shikiri_yaku.settings import CliSettings
+from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping, Sequence
@@ -45,7 +45,8 @@ class _FakeChannelCheck(ChannelCheck):
 
 
 class _NoHostCommands(CommandRunner):
-    """The runner of the restart verb. doctor and run restart nothing, so no host command runs."""
+    """The runner of the restart verb. doctor and run restart nothing, and the only command doctor
+    runs is the read-only `shikiru --version` probe, which answers in the supported range."""
 
     @override
     async def run(
@@ -57,6 +58,8 @@ class _NoHostCommands(CommandRunner):
         env: Mapping[str, str] | None = None,
     ) -> CommandResult:
         del timeout_s, cwd, env
+        if list(argv) == [SHIKIRU_EXECUTABLE, "--version"]:
+            return CommandResult(returncode=0, stdout="0.1.0\n", stderr="")
         message = f"doctor or run ran a host command: {argv[0]}"
         raise AssertionError(message)
 

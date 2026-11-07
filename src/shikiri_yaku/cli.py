@@ -42,6 +42,7 @@ from shikiri_yaku.ports import (
     ChannelRepairError,
     ChannelStartupError,
     ChannelUnavailableError,
+    CommandError,
     CompositionError,
     ReasonerError,
     ShikiruError,
@@ -54,6 +55,9 @@ from shikiri_yaku.service import (
 )
 from shikiri_yaku.settings import (
     NAME_PATTERN,
+    SHIKIRU_EXECUTABLE,
+    SHIKIRU_FIRST_SUPPORTED,
+    SHIKIRU_FIRST_UNSUPPORTED,
     CliSettings,
     SettingsError,
     load_settings,
@@ -78,6 +82,11 @@ _PRIMARY_TEXT: Final = "#dce2e9"
 _SECONDARY_TEXT: Final = "#9aa5b5"
 _BORDER: Final = "#3d4654"
 _ALERT: Final = "#e3a0a0"
+_SHIKIRU_CHECK: Final = "Shikiru version"
+_SHIKIRU_VERSION_FLAG: Final = "--version"
+_DOTTED_VERSION: Final = re.compile(r"\d+\.\d+\.\d+")
+_LOWEST_SUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_SUPPORTED.split("."))
+_FIRST_UNSUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_UNSUPPORTED.split("."))
 
 
 class Lifecycle(Protocol):
@@ -298,7 +307,12 @@ def build_app(
     @app.command(help="Check one product's instance.")
     def doctor(ctx: typer.Context) -> None:
         raise typer.Exit(
-            _doctor(_target(ctx).directory, compose, as_json=_options(ctx).json_output)
+            _doctor(
+                _target(ctx).directory,
+                compose,
+                commands,
+                as_json=_options(ctx).json_output,
+            )
         )
 
     @app.command("install-service", help="Write the service unit of one product.")
@@ -408,19 +422,43 @@ async def _serve(jobs: Sequence[Job]) -> None:
             raise outcome
 
 
-def _doctor(directory: Path, compose: Compose, *, as_json: bool) -> int:
+def _doctor(directory: Path, compose: Compose, commands: CommandRunner, *, as_json: bool) -> int:
     try:
         settings = load_settings(directory)
     except SettingsError as error:
         return _report([_Check("config", str(error))], as_json=as_json)
+    version = asyncio.run(_shikiru_version_check(commands, settings.operator.link_call_timeout_s))
     return _report(
         [
             _Check("components", _components_problem(settings)),
+            version,
             _lock_check(directory),
             *_composed_checks(settings, directory, compose),
         ],
         as_json=as_json,
     )
+
+
+async def _shikiru_version_check(commands: CommandRunner, timeout_s: float) -> _Check:
+    range_text = (
+        f"supported {SHIKIRU_FIRST_SUPPORTED} up to but not including {SHIKIRU_FIRST_UNSUPPORTED}"
+    )
+    try:
+        result = await commands.run(
+            [SHIKIRU_EXECUTABLE, _SHIKIRU_VERSION_FLAG], timeout_s=timeout_s
+        )
+    except CommandError as error:
+        return _Check(_SHIKIRU_CHECK, f"{error}; {range_text}")
+    if result.returncode != 0:
+        exited = f"{SHIKIRU_EXECUTABLE} {_SHIKIRU_VERSION_FLAG} exited with {result.returncode}"
+        return _Check(_SHIKIRU_CHECK, f"{exited}; {range_text}")
+    found = result.stdout.strip()
+    if re.fullmatch(_DOTTED_VERSION, found) is None:
+        return _Check(_SHIKIRU_CHECK, f"found no version in its output; {range_text}")
+    number = tuple(int(part) for part in found.split("."))
+    if _LOWEST_SUPPORTED <= number < _FIRST_UNSUPPORTED:
+        return _Check(_SHIKIRU_CHECK, status=found)
+    return _Check(_SHIKIRU_CHECK, f"found {found}; {range_text}")
 
 
 def _report(checks: Sequence[_Check], *, as_json: bool) -> int:
