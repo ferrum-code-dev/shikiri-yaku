@@ -2032,6 +2032,34 @@ Acceptance criteria:
 * The workflow parses as YAML; every `uses:` is pinned to a full SHA with the version in a comment; no step other than the release one sees a token.
 * The gate passes (the workflow itself cannot run here; say so in the report).
 
+### E23. First-run messages and install from a release (normal)
+
+A clean-machine run of the `0.1.0` wheel showed two problems for a newcomer. `doctor` reports a
+component path that is not a Shikiru project as `the link did not come up: unhandled errors in a
+TaskGroup (1 sub-exception)`, which names no cause. And the README installs from a checkout only.
+
+1. Link failures name their cause. When the MCP link to a component fails with an exception group,
+   the message uses the leaf exceptions' text (nested groups flattened, duplicates removed), not
+   the group's own text. Before opening the link, `doctor` (and the same start-up path) checks that
+   `<path>/.shikiru` exists and, if not, fails the check with
+   `<path> is not a Shikiru project (no .shikiru directory); run shikiru init there`. The `.shikiru`
+   directory name is a named constant, not a literal.
+2. README "Install and first run": replace "Install from source" with "Install a release": from the
+   release wheel
+   (`uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.0/shikiri_yaku-0.1.0-py3-none-any.whl`)
+   or from the tag (`uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.0`);
+   say that the version in the URL is the one to change when a newer release exists. Keep a short
+   "From a checkout" part that points to `CONTRIBUTING.md` and says that a service must run a
+   release (see "Applying changes"). The Shikiru prerequisite names the same two ways with its
+   address `https://github.com/ferrum-code-dev/shikiru`. The first paragraph no longer says "install
+   it from a checkout".
+
+Acceptance criteria:
+* A link whose connection raises an exception group with one or two leaf errors reports the leaf messages; a plain exception is reported as before.
+* A component path with no `.shikiru` directory fails the Link check with the message above; one with it is checked as before. The E14 test still passes.
+* No file in the README still says to install from a checkout as the normal way.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
