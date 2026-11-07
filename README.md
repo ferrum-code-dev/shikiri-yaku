@@ -1,4 +1,4 @@
-# shikiri-yaku
+# Shikiri-yaku (仕切り役)
 
 [![Release](https://img.shields.io/github/v/release/ferrum-code-dev/shikiri-yaku?include_prereleases)](https://github.com/ferrum-code-dev/shikiri-yaku/releases)
 [![License](https://img.shields.io/github/license/ferrum-code-dev/shikiri-yaku)](https://github.com/ferrum-code-dev/shikiri-yaku/blob/main/LICENSE)
