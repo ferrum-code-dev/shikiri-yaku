@@ -445,8 +445,9 @@ these ways:
   SQLite's online backup (the last three kept per product), installs the wheel, runs
   `shikiri-yaku --json restart`, and checks that `shikiri-yaku --version` shows the version and
   `doctor` passes for every product. It stops at the first failing step. A failure before the
-  install changes nothing installed and restarts nothing. Success records the wheel as `current` in
-  the release store.
+  install changes nothing installed and restarts nothing. The verification waits up to a minute for
+  each product: a failing `doctor` runs again, up to six runs in all with ten seconds between them,
+  before it counts as failed. Success records the wheel as `current` in the release store.
 - After a `config.toml` change, run `shikiri-yaku restart` alone.
 
 A failure after the install is rolled back: the script reinstalls the wheel that `current` names,

@@ -220,4 +220,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E21. CI
   - [x] E22. GitHub Release on a version tag
   - [x] E23. First-run messages and install from a release
-  - [ ] E24. Deploy verification waits for the service
+  - [x] E24. Deploy verification waits for the service

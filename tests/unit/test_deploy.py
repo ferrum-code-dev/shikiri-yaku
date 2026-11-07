@@ -32,6 +32,10 @@ def _failed() -> deploy.CommandResult:
     return deploy.CommandResult(1, "", "refused")
 
 
+def _no_wait(_seconds: float) -> None:
+    """Stand in for the pause between doctor runs, so the tests do not wait."""
+
+
 def _version_in(name: str) -> str:
     return name.split("-")[1]
 
@@ -41,11 +45,13 @@ class FakeHost:
     """Answers the commands the script runs and records them in order.
 
     A fault applies to the release being deployed, so the previous release stays healthy and a
-    rollback to it succeeds.
+    rollback to it succeeds. `doctor_refusals` makes the first that many doctor runs fail on any
+    release, to model a service that is still starting.
     """
 
     running: str = PREVIOUS
     faults: frozenset[str] = frozenset()
+    doctor_refusals: int = 0
     status: str = ""
     tags: str = f"v{RELEASE}"
     calls: list[tuple[str, ...]] = field(default_factory=list)
@@ -73,9 +79,15 @@ class FakeHost:
             shown = "0.0.0" if self._new_release_fails("version") else self.running
             return _ok(f"shikiri-yaku {shown}\n")
         if command[-1] == "doctor":
-            return _failed() if self._new_release_fails("doctor") else _ok()
+            return self._doctor()
         message = f"unexpected command: {command}"
         raise AssertionError(message)
+
+    def _doctor(self) -> deploy.CommandResult:
+        if self.doctor_refusals > 0:
+            self.doctor_refusals -= 1
+            return _failed()
+        return _failed() if self._new_release_fails("doctor") else _ok()
 
     def _new_release_fails(self, check: str) -> bool:
         return check in self.faults and self.running == RELEASE
@@ -167,7 +179,7 @@ def test_a_refused_release_stops_before_anything_is_built(
 ) -> None:
     host = FakeHost(status=status, tags=tags, faults=faults)
 
-    assert deploy.deploy(host, layout) == 1
+    assert deploy.deploy(host, _no_wait, layout) == 1
     assert host.calls == expected
     assert not layout.store.exists()
 
@@ -176,7 +188,7 @@ def test_a_successful_deploy_runs_the_documented_commands_in_order(layout: deplo
     _journal(layout.home / PRODUCT)
     host = FakeHost()
 
-    assert deploy.deploy(host, layout) == 0
+    assert deploy.deploy(host, _no_wait, layout) == 0
 
     installed = layout.store / wheel_name(RELEASE)
     assert host.calls == [
@@ -200,7 +212,7 @@ def test_a_failed_verification_reinstalls_the_release_current_names(
     _journal(layout.home / PRODUCT)
     host = FakeHost(faults=frozenset({fault}))
 
-    assert deploy.deploy(host, layout) == 1
+    assert deploy.deploy(host, _no_wait, layout) == 1
 
     new_install = deploy.install_argv(layout.store / wheel_name(RELEASE))
     rollback_install = deploy.install_argv(previous)
@@ -216,18 +228,85 @@ def test_with_no_current_a_failed_deploy_installs_only_the_new_release(
     _journal(layout.home / PRODUCT)
     host = FakeHost(faults=frozenset({"doctor"}))
 
-    assert deploy.deploy(host, layout) == 1
+    assert deploy.deploy(host, _no_wait, layout) == 1
 
     installs = [command for command in host.calls if command[:3] == ("uv", "tool", "install")]
     assert installs == [deploy.install_argv(layout.store / wheel_name(RELEASE))]
     assert deploy.read_current(layout.store) is None
 
 
+def test_a_doctor_that_fails_twice_then_passes_does_not_roll_back(layout: deploy.Layout) -> None:
+    _journal(layout.home / PRODUCT)
+    host = FakeHost(doctor_refusals=2)
+    pauses: list[float] = []
+
+    assert deploy.deploy(host, pauses.append, layout) == 0
+
+    assert pauses == [deploy.PAUSE_S, deploy.PAUSE_S]
+    assert host.calls.count(deploy.doctor_argv(PRODUCT)) == 3
+    assert host.running == RELEASE
+
+
+def test_a_doctor_that_never_passes_rolls_back_after_exactly_attempts_runs(
+    layout: deploy.Layout,
+) -> None:
+    previous = _previous_release(layout)
+    _journal(layout.home / PRODUCT)
+    host = FakeHost(faults=frozenset({"doctor"}))
+    pauses: list[float] = []
+
+    assert deploy.deploy(host, pauses.append, layout) == 1
+
+    new_install = host.calls.index(deploy.install_argv(layout.store / wheel_name(RELEASE)))
+    rollback_install = host.calls.index(deploy.install_argv(previous))
+    tried = host.calls[new_install:rollback_install]
+    assert tried.count(deploy.doctor_argv(PRODUCT)) == deploy.ATTEMPTS
+    assert len(pauses) == deploy.ATTEMPTS - 1
+    assert host.running == PREVIOUS
+
+
+def test_a_failing_doctor_is_reported_with_the_last_lines_of_its_output(
+    layout: deploy.Layout,
+) -> None:
+    output = [f"check {number}" for number in range(30)]
+    calls: list[tuple[str, ...]] = []
+
+    def run(argv: Sequence[str], _cwd: Path) -> deploy.CommandResult:
+        calls.append(tuple(argv))
+        if argv[-1] == "doctor":
+            return deploy.CommandResult(1, "\n".join(output) + "\n", "")
+        return _ok(f"{deploy.PROGRAM} {RELEASE}\n")
+
+    problems = deploy.verify(run, _no_wait, layout.checkout, RELEASE, [PRODUCT])
+
+    assert len(problems) == 1
+    assert problems[0].splitlines()[1:] == output[-deploy.TAIL_LINES :]
+    assert calls.count(deploy.doctor_argv(PRODUCT)) == deploy.ATTEMPTS
+
+
+def test_a_wrong_version_rolls_back_at_once_without_retrying_doctor(
+    layout: deploy.Layout,
+) -> None:
+    previous = _previous_release(layout)
+    _journal(layout.home / PRODUCT)
+    host = FakeHost(faults=frozenset({"version"}))
+    pauses: list[float] = []
+
+    assert deploy.deploy(host, pauses.append, layout) == 1
+
+    new_install = host.calls.index(deploy.install_argv(layout.store / wheel_name(RELEASE)))
+    rollback_install = host.calls.index(deploy.install_argv(previous))
+    tried = host.calls[new_install:rollback_install]
+    assert tried.count(deploy.doctor_argv(PRODUCT)) == 1
+    assert pauses == []
+    assert host.running == PREVIOUS
+
+
 def test_rollback_reinstalls_current_and_verifies_the_old_release(layout: deploy.Layout) -> None:
     previous = _previous_release(layout)
     host = FakeHost(running=RELEASE)
 
-    assert deploy.rollback_only(host, layout) == 0
+    assert deploy.rollback_only(host, _no_wait, layout) == 0
 
     assert host.calls == [
         deploy.install_argv(previous),

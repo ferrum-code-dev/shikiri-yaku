@@ -18,6 +18,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,8 @@ CURRENT_NAME: Final = "current"
 KEEP_WHEELS: Final = 5
 KEEP_BACKUPS: Final = 3
 TAIL_LINES: Final = 20
+ATTEMPTS: Final = 6
+PAUSE_S: Final = 10
 FAILED: Final = 1
 
 GIT_STATUS: Final = ("git", "status", "--porcelain")
@@ -56,6 +59,7 @@ class CommandResult:
 
 
 type Runner = Callable[[Sequence[str], Path], CommandResult]
+type Pause = Callable[[float], None]
 
 
 @dataclass(frozen=True)
@@ -236,14 +240,16 @@ def copy_journal(journal: Path, folder: Path) -> Path:
     return copy
 
 
-def install_and_verify(run: Runner, checkout: Path, wheel: Path, version: str) -> list[str]:
+def install_and_verify(
+    run: Runner, pause: Pause, checkout: Path, wheel: Path, version: str
+) -> list[str]:
     result = run(install_argv(wheel), checkout)
     if result.returncode != 0:
         return [f"installing {wheel.name} failed:\n{_output(result)}"]
-    return restart_and_verify(run, checkout, version)
+    return restart_and_verify(run, pause, checkout, version)
 
 
-def restart_and_verify(run: Runner, checkout: Path, version: str) -> list[str]:
+def restart_and_verify(run: Runner, pause: Pause, checkout: Path, version: str) -> list[str]:
     """Restart every product and check the installed release; return the problems found."""
     result = run(RESTART, checkout)
     try:
@@ -256,30 +262,54 @@ def restart_and_verify(run: Runner, checkout: Path, version: str) -> list[str]:
         return [f"restart printed no product list:\n{_output(result)}"]
     if failed:
         return failed
-    return verify(run, checkout, version, names)
+    return verify(run, pause, checkout, version, names)
 
 
-def verify(run: Runner, checkout: Path, version: str, names: Sequence[str]) -> list[str]:
+def verify(
+    run: Runner, pause: Pause, checkout: Path, version: str, names: Sequence[str]
+) -> list[str]:
+    """Check the installed version once, then each product's doctor, retrying a failing doctor.
+
+    A wrong version means the wrong binary runs, and waiting does not change that, so the doctor
+    runs once in that case.
+    """
     problems: list[str] = []
     shown = run(VERSION, checkout)
+    attempts = ATTEMPTS
     if shown.returncode != 0 or shown.stdout.split()[-1:] != [version]:
         problems.append(f"{PROGRAM} --version does not show {version}")
-    problems.extend(
-        f"doctor fails for {name}: run `{PROGRAM} --product {name} doctor`"
-        for name in names
-        if run(doctor_argv(name), checkout).returncode != 0
-    )
+        attempts = 1
+    for name in names:
+        result = doctor_until_it_passes(run, pause, checkout, name, attempts)
+        if result.returncode != 0:
+            problems.append(
+                f"doctor fails for {name}: run `{PROGRAM} --product {name} doctor`\n"
+                f"{_output(result)}"
+            )
     return problems
 
 
-def roll_back(run: Runner, layout: Layout) -> list[str]:
+def doctor_until_it_passes(
+    run: Runner, pause: Pause, checkout: Path, name: str, attempts: int
+) -> CommandResult:
+    """Run one product's doctor until it passes or `attempts` runs have failed; return the last."""
+    result = run(doctor_argv(name), checkout)
+    for _ in range(attempts - 1):
+        if result.returncode == 0:
+            return result
+        pause(PAUSE_S)
+        result = run(doctor_argv(name), checkout)
+    return result
+
+
+def roll_back(run: Runner, pause: Pause, layout: Layout) -> list[str]:
     name = read_current(layout.store)
     if name is None:
         return ["nothing to go back to: no release is recorded as current"]
     wheel = layout.store / name
     if not wheel.is_file():
         return [f"{name}, which current names, is missing from {layout.store}"]
-    return install_and_verify(run, layout.checkout, wheel, version_of(name))
+    return install_and_verify(run, pause, layout.checkout, wheel, version_of(name))
 
 
 def read_current(store: Path) -> str | None:
@@ -306,7 +336,7 @@ def prune(paths: Sequence[Path], keep: int, protected: frozenset[Path] = frozens
             path.unlink(missing_ok=True)
 
 
-def deploy(run: Runner, layout: Layout) -> int:
+def deploy(run: Runner, pause: Pause, layout: Layout) -> int:
     try:
         version = project_version(layout.checkout)
         check_release(run, layout.checkout, version)
@@ -315,14 +345,14 @@ def deploy(run: Runner, layout: Layout) -> int:
         backups = backup_journals(layout.home)
     except (StepError, OSError) as stop:
         return _warn(str(stop))
-    failures = install_and_verify(run, layout.checkout, wheel, version)
+    failures = install_and_verify(run, pause, layout.checkout, wheel, version)
     if not failures:
         write_current(layout.store, wheel)
         prune_releases(layout.store, wheel)
         _say(f"deployed {wheel.name}")
         return 0
     _warn("\n".join(failures))
-    problems = roll_back(run, layout)
+    problems = roll_back(run, pause, layout)
     if problems:
         _warn("rollback failed:\n" + "\n".join(problems))
         _warn("\n".join(restore_hint(backup) for backup in backups))
@@ -331,8 +361,8 @@ def deploy(run: Runner, layout: Layout) -> int:
     return FAILED
 
 
-def rollback_only(run: Runner, layout: Layout) -> int:
-    problems = roll_back(run, layout)
+def rollback_only(run: Runner, pause: Pause, layout: Layout) -> int:
+    problems = roll_back(run, pause, layout)
     if problems:
         _warn("rollback failed:\n" + "\n".join(problems))
         _warn("\n".join(restore_hint(backup) for backup in existing_backups(layout.home)))
@@ -383,8 +413,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     layout = default_layout(Path(__file__).resolve().parents[1])
     if arguments.rollback:
-        return rollback_only(run_command, layout)
-    return deploy(run_command, layout)
+        return rollback_only(run_command, time.sleep, layout)
+    return deploy(run_command, time.sleep, layout)
 
 
 if __name__ == "__main__":
