@@ -218,4 +218,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E19. `doctor` checks the Shikiru version
   - [x] E20. Open-source files
   - [x] E21. CI
-  - [ ] E22. GitHub Release on a version tag
+  - [x] E22. GitHub Release on a version tag

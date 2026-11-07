@@ -55,3 +55,17 @@ about the change as a whole.
 
 A change needs the gate green: `uv run poe check` must pass. Run `uv run poe fix` first to format
 the code.
+
+## Releasing
+
+1. Bump `version` in `pyproject.toml` (SemVer) and move the `## [Unreleased]` entries into a new
+   `## [<version>] - <date>` section of `CHANGELOG.md`. Say so in the section when the release
+   changes behavior, the configuration or the journal schema. The release workflow publishes that
+   section as the release notes, so it must not be empty.
+2. Commit both changes.
+3. Tag the release commit: `git tag v<version>`.
+4. On the host that runs the service, from this checkout at the tag, run `uv run poe deploy`.
+5. Push the tag: `git push origin v<version>`. The push is the owner's decision. It starts
+   [.github/workflows/release.yml](.github/workflows/release.yml), which checks the tag against
+   `pyproject.toml`, builds the wheel and the sdist, and creates the GitHub Release. A release with
+   a major version of 0 is marked as a pre-release.
