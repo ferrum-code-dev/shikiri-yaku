@@ -7,6 +7,8 @@ behavior, the configuration or the journal schema, and the entry says so when it
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-08
+
 ### Changed
 
 - The release workflow waits for a green CI run on the tagged commit before it publishes the GitHub
