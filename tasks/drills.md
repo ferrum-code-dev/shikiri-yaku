@@ -236,9 +236,8 @@ one per component per hour.
 The plan calls this H7; H7 is the misroute review, so the number is H8. Offline counterparts:
 `tests/unit/test_update.py::test_a_failed_verification_reinstalls_the_release_current_names` (cases
 `install`, `restart`, `version`, `doctor`), with `test_rollback_reinstalls_current_and_verifies_the_old_release`
-and `test_a_journal_copy_is_openable_and_named_by_its_schema_version`. The self-install path runs
-`tests/unit/test_update_self_install.py`, which builds the wheel and installs it into temporary
-tool directories with no network.
+and `test_a_journal_copy_is_openable_and_named_by_its_schema_version`. The self-install path (the process replacing its own files) is checked by hand when a release is
+installed with `shikiri-yaku update`.
 
 Setup: a throwaway host where a release is installed by `shikiri-yaku update --wheel` and recorded
 as `current`. A second wheel built from a throwaway checkout, one local commit whose version the

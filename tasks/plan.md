@@ -2194,9 +2194,7 @@ Acceptance criteria:
    `poe deploy` names `update`.
 
 Acceptance criteria:
-* The package and CLI are covered by the moved tests; a test shows that an installation of the built wheel
-  can run `update --wheel` on itself in an isolated `UV_TOOL_DIR` and `XDG_DATA_HOME` (skipped when `uv` is
-  missing; no network, no host change outside the temporary directories).
+* The package and CLI are covered by the moved tests. That a process can replace its own files is checked by hand when a release is installed, not by a test (tests never install packages).
 * import-linter passes with the new contract. The gate passes.
 
 ### E30. `shikiri-yaku update` downloads the newest release (normal)
