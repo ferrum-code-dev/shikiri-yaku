@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.outcome import Forward
     from shikiri_yaku.domain.recipes import InstallOpPayload, InstallPlan
+    from shikiri_yaku.domain.releases import Release
     from shikiri_yaku.domain.schedule import Awaiting, Parked
     from shikiri_yaku.domain.signal import (
         Closing,
@@ -1606,3 +1607,17 @@ class StatsLog(Protocol):
     def escalation_verdicts(self) -> Mapping[str | None, int]: ...
     def install_states(self) -> Mapping[str, int]: ...
     def install_outcomes(self) -> Mapping[str, int]: ...
+
+
+class ReleaseSourceError(Exception):
+    """The release source could not be reached, or answered in a shape the update does not read."""
+
+
+class ReleaseSource(Protocol):
+    """Where the project's releases are published: the list, and the bytes of one asset.
+
+    Both calls fail with ReleaseSourceError. Nothing is written to the host here.
+    """
+
+    def releases(self) -> list[Release]: ...
+    def download(self, url: str) -> bytes: ...

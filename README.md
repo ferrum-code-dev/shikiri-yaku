@@ -60,6 +60,8 @@ uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.4
 ```
 
 The version in these addresses is `0.1.4`. When a newer release exists, change it to that version.
+An installed Operator updates itself to the newest release with `shikiri-yaku update` (see
+[Applying changes](#applying-changes)).
 
 **From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
 release, not a checkout (see [Applying changes](#applying-changes)).
@@ -433,10 +435,20 @@ A service runs the installed copy of `shikiri-yaku` that `install-service` found
 these ways:
 
 - After a code change, release it: commit the change, bump `version` in `pyproject.toml` (SemVer)
-  and commit that too, then tag the release commit `v<version>`. Install the release on each host
-  with `shikiri-yaku update --wheel <path>`. Until the one-command download is built, get the wheel
-  and `SHA256SUMS` from the GitHub release page, check the wheel's checksum against that file, and
-  pass the wheel's path to `--wheel`.
+  and commit that too, then tag the release commit `v<version>`. Install the newest release on each
+  host with `shikiri-yaku update`.
+
+  ```sh
+  shikiri-yaku update --check
+  shikiri-yaku update
+  ```
+
+  With no option, `update` finds the newest release on GitHub (pre-releases included), downloads its
+  wheel and `SHA256SUMS`, and refuses unless the wheel's SHA-256 is the listed one. A release with no
+  wheel or no `SHA256SUMS`, or a wheel that does not match, stops the update before anything is
+  installed. When the installed version is already the newest, `update` says so and exits 0.
+  `--check` prints the installed and the newest version and changes nothing. To install a wheel you
+  downloaded yourself, pass its path with `--wheel`; nothing is downloaded then:
 
   ```sh
   shikiri-yaku update --wheel ~/Downloads/shikiri_yaku-0.2.0-py3-none-any.whl

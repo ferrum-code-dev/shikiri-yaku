@@ -226,4 +226,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E27. Release notes from commits
   - [x] E28. One-command release
   - [x] E29. `update --wheel` replaces `poe deploy`
-  - [ ] E30. `update` downloads the newest release
+  - [x] E30. `update` downloads the newest release

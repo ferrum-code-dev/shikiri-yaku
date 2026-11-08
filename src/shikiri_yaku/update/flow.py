@@ -18,10 +18,7 @@ from shikiri_yaku.update.verify import install_and_verify
 if TYPE_CHECKING:
     from pathlib import Path
 
-NO_WHEEL: Final = (
-    "shikiri-yaku update needs --wheel <path> to install a release wheel, or --rollback. "
-    "Finding and downloading the newest release is not built yet."
-)
+NO_WHEEL: Final = "shikiri-yaku update needs --wheel <path> or --rollback"
 
 
 def run_update(host: Host, wheel: Path | None, *, rollback: bool) -> int:

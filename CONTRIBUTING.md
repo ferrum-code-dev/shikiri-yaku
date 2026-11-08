@@ -64,5 +64,6 @@ it does. The release workflow publishes
 after CI passes on the tagged commit. If CI fails, fix it on `main` and re-run the failed CI run,
 then the failed Release workflow run.
 
-A host installs a release with `shikiri-yaku update --wheel <path>` and goes back with
-`shikiri-yaku update --rollback` (see the README, Applying changes).
+A host installs the newest release with `shikiri-yaku update` (`--check` only reports it, and
+`--wheel <path>` installs a wheel already downloaded) and goes back with `shikiri-yaku update
+--rollback` (see the README, Applying changes).

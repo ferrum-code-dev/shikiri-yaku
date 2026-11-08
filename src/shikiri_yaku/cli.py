@@ -115,7 +115,7 @@ type Compose = Callable[[Settings, Path], Lifecycle]
 type ReadMeasures = Callable[[Path], Measures]
 type AdoptTopic = Callable[[Path, str, int], str]
 type ForgetTopic = Callable[[Path, str], str]
-type UpdateHost = Callable[[Path | None, bool, Path], int]
+type UpdateHost = Callable[[Path | None, bool, bool, Path], int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,7 +226,7 @@ WHEEL_OPTION = Annotated[
     typer.Option(
         "--wheel",
         metavar="PATH",
-        help="Install this release wheel. Finding and downloading releases is not built yet.",
+        help="Install this release wheel, without downloading. Default: the newest release.",
     ),
 ]
 ROLLBACK_OPTION = Annotated[
@@ -234,6 +234,13 @@ ROLLBACK_OPTION = Annotated[
     typer.Option(
         "--rollback",
         help="Reinstall the release that current names, and restart. [bold]Default:[/] off",
+    ),
+]
+CHECK_OPTION = Annotated[
+    bool,
+    typer.Option(
+        "--check",
+        help="Print the installed and the newest version; install nothing. [bold]Default:[/] off",
     ),
 ]
 JSON_OPTION = Annotated[
@@ -340,12 +347,25 @@ def build_app(
     def restart(ctx: typer.Context) -> None:
         raise typer.Exit(_restart(_options(ctx), commands, cli_settings))
 
-    @app.command(help="Install a release wheel on this host, verify it, or roll it back.")
+    @app.command(
+        help="Install the newest release on this host, a given wheel, or roll back. "
+        "Check with --check."
+    )
     def update(
-        ctx: typer.Context, wheel: WHEEL_OPTION = None, *, rollback: ROLLBACK_OPTION = False
+        ctx: typer.Context,
+        wheel: WHEEL_OPTION = None,
+        *,
+        rollback: ROLLBACK_OPTION = False,
+        check: CHECK_OPTION = False,
     ) -> None:
         raise typer.Exit(
-            _update(update_host, wheel, rollback=rollback, home=home_dir(_options(ctx).home))
+            _update(
+                update_host,
+                wheel,
+                rollback=rollback,
+                check=check,
+                home=home_dir(_options(ctx).home),
+            )
         )
 
     @app.command(help="Print the figures of one product's journal.")
@@ -607,12 +627,20 @@ def _install_service(target: _Target) -> int:
 
 
 def _update(
-    update_host: UpdateHost | None, wheel: Path | None, *, rollback: bool, home: Path
+    update_host: UpdateHost | None,
+    wheel: Path | None,
+    *,
+    rollback: bool,
+    check: bool,
+    home: Path,
 ) -> int:
     if update_host is None:
         print_failure("update is not wired in this build")
         return 1
-    return update_host(wheel, rollback, home)
+    if check and (wheel is not None or rollback):
+        print_failure("--check cannot be combined with --wheel or --rollback")
+        return 1
+    return update_host(wheel, rollback, check, home)
 
 
 def _restart(options: _Global, commands: CommandRunner, cli_settings: CliSettings) -> int:
