@@ -2125,6 +2125,100 @@ Acceptance criteria:
 * The workflow parses as YAML, every `uses:` is pinned to a full SHA with its version in a comment, and only the CI-wait step and the release step see a token.
 * The gate passes (the workflow itself cannot run here; say so in the report).
 
+### E27. Release notes from commits (normal)
+
+1. `scripts/release_notes.py <tag> [--repo <owner/name>]` (standard library only) prints the notes of the
+   release `<tag>`. The previous tag is the highest `v<major>.<minor>.<patch>` tag below `<tag>`, compared by
+   number; with none, all commits up to `<tag>` count. Commits come from `git log <previous>..<tag>
+   --no-merges`, without subjects that start with `chore: release`. `--repo` defaults to
+   `GITHUB_REPOSITORY`.
+2. Sections in this order, empty ones omitted: `### Breaking changes` (a `!` after the type, or a
+   `BREAKING CHANGE:` line in the body), `### Features` (`feat`), `### Fixes` (`fix`), `### Other changes`
+   (every other type, and subjects that are not conventional, as written). Line:
+   `* [<7-char sha>](<commit url>): <subject>`. A breaking commit appears only under Breaking changes.
+3. Then `**Full Changelog**: [<previous>...<tag>](<compare url>)` when there is a previous tag, and an
+   `### Install` section with `uv tool install https://github.com/<repo>/releases/download/<tag>/shikiri_yaku-<version>-py3-none-any.whl`.
+4. `.github/workflows/release.yml`: the release job checks out the full history (`fetch-depth: 0`), calls the
+   script with the tag and `--repo "$GITHUB_REPOSITORY"`, writes `SHA256SUMS`
+   (`cd dist && sha256sum * > SHA256SUMS`) and attaches it with the wheel and the sdist. Pinned actions stay.
+5. Delete `CHANGELOG.md` and the `Changelog` URL in `pyproject.toml` (it becomes the releases page). Remove
+   every other mention of the changelog (README, CONTRIBUTING). CONTRIBUTING "Releasing" becomes two lines
+   that point to the design: run `uv run poe release <bump>`; the workflow publishes after CI; a failed CI
+   is fixed on `main` and the failed workflow runs are re-run.
+
+Acceptance criteria:
+* Table-driven tests on a temporary git repository built in the test: sections and their order, breaking by
+  `!` and by the body line, a non-conventional subject, skipped release commits, first release, previous tag
+  by number (`v0.1.10` above `v0.1.9`), the links.
+* The workflow parses as YAML, every `uses:` is pinned to a full SHA with its version in a comment, and only
+  the CI-wait step and the release step see a token. The workflow cannot run here; say so in the report.
+* The gate passes.
+
+### E28. One-command release (normal)
+
+1. `uv run poe release patch|minor|major|<x.y.z>` (`scripts/release.py`, standard library only, commands
+   through an injected runner like `scripts/deploy.py`) refuses with a message naming the reason unless the
+   branch is `main`, the work tree is clean, `git fetch` shows HEAD equal to `origin/main`, the new version is
+   greater than the current one and the tag does not exist.
+2. It rewrites `version` in `pyproject.toml`, the version of the project's own entry in `uv.lock` (only that
+   line; never run `uv lock`) and every whole-token occurrence of the old version in `README.md`. It commits
+   `chore: release <version>` (with the repository's Co-Authored-By trailer), runs `git push origin main`,
+   `git tag v<version>`, `git push origin v<version>`, and prints the address of the Release workflow run
+   list. It does not wait for the workflow.
+3. `--dry-run` runs the checks and prints every file change and command, and changes nothing.
+
+Acceptance criteria:
+* Table-driven tests: bump arithmetic (`0.1.9` patch/minor/major, explicit, lower or equal refused), each
+  refusal, the three file rewrites on sample text (the README with the version in a URL and in prose), the
+  command sequence with a fake runner.
+* `poe release` is in `pyproject.toml`; CONTRIBUTING "Releasing" mentions `--dry-run`. The gate passes.
+
+### E29. `shikiri-yaku update --wheel` replaces `poe deploy` (normal)
+
+1. A new top-level package `src/shikiri_yaku/update/` holds what `scripts/deploy.py` does after "build the
+   wheel": the release store and `current`, the journal backups, install, `restart --json`, verification with
+   the `doctor` retries (E24), rollback and pruning, with the same behavior and messages and an injected
+   runner for tests. The SQLite online backup lives in `journal/` (SQL stays there) and `update/` calls it. The
+   package is added to the import-linter contracts: only `cli.py` and `bootstrap.py` may import it, and it
+   imports `settings` and `journal` only. The clean-tree and tag check, the gate and the wheel build are not
+   part of it. The numbers (retries, pause, kept wheels) are settings.
+2. `shikiri-yaku update --wheel <path>` stores the wheel and does steps 3 to 6 of the design.
+   `shikiri-yaku update --rollback` does the rollback. Without options it prints that `--wheel` is required
+   (E30 adds the download). Exit codes: 0 success, 1 failure.
+3. After the install step the process imports no further `shikiri_yaku` modules: later steps run through the
+   new executable as a subprocess. A test checks that the module set after the install step equals the one
+   before.
+4. `scripts/deploy.py`, its tests, `poe deploy` and `poe rollback` are deleted. The tests move to the package
+   and keep every case.
+5. README "Deploy" and CONTRIBUTING are rewritten for `shikiri-yaku update`; troubleshooting that named
+   `poe deploy` names `update`.
+
+Acceptance criteria:
+* The package and CLI are covered by the moved tests; a test shows that an installation of the built wheel
+  can run `update --wheel` on itself in an isolated `UV_TOOL_DIR` and `XDG_DATA_HOME` (skipped when `uv` is
+  missing; no network, no host change outside the temporary directories).
+* import-linter passes with the new contract. The gate passes.
+
+### E30. `shikiri-yaku update` downloads the newest release (normal)
+
+1. A `ReleaseSource` port in `ports.py` with one adapter that uses `urllib` (HTTPS only, a timeout and a size
+   limit as settings, redirects allowed within `https`). Named constants hold the repository
+   (`ferrum-code-dev/shikiri-yaku`) and the API address. The adapter lists `GET /repos/<repo>/releases`.
+2. A pure function picks the newest release: tags matching `v<major>.<minor>.<patch>` only, drafts skipped,
+   pre-releases included, compared by number. A pure function reads the wheel's expected SHA-256 from
+   `SHA256SUMS` text. A wheel whose SHA-256 differs, a release without a wheel or without `SHA256SUMS` and
+   malformed lines are errors that name the cause; nothing is installed then.
+3. `shikiri-yaku update` with no options downloads the wheel and `SHA256SUMS`, checks the checksum, hands the
+   wheel to the E29 path and reports the old and new version. If the installed version is the newest it says
+   so and exits 0. `--check` prints the installed and the newest version and whether an update exists, changes
+   nothing and exits 0.
+4. README "Install a release" says that an installed Operator updates with `shikiri-yaku update`.
+
+Acceptance criteria:
+* Tests use a fake `ReleaseSource`; none touches the network. Table-driven: newest by number, drafts,
+  pre-releases, no usable release, checksum match and mismatch, missing assets, already newest, `--check`.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

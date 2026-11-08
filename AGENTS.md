@@ -81,6 +81,7 @@ comment rule. Docstrings only on public contracts. No code for a case the design
 
 * One task, one change, about 300 lines. If a task needs much more, stop and report how to split it.
 * Update `tasks/todo.md` for the task you finished. Keep the edit to your own line.
+* Commits are Conventional Commits, one coherent change each. The subject is what the release notes show, so write it for a user: `type(scope): what changed`. A change that breaks behavior, configuration, the journal schema or the supported Shikiru range marks the type with `!` or adds a `BREAKING CHANGE:` line to the body.
 * Never push, never touch another branch's work, never edit files outside this repository.
 * If a pinned dependency or the quality gate fails for a reason unrelated to your change, say so with
   the evidence instead of working around it.

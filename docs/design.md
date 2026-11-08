@@ -293,20 +293,24 @@ The Operator uses these Shikiru capabilities, through the MCP server and the CLI
 
 ## Releases and deployment
 
-**Versions.** The version in `pyproject.toml` follows SemVer. A release is the commit tagged `v<version>`, and the tag must equal the version at that commit. Below 1.0 any minor version may change behavior, the config or the journal schema; the changelog says so when it does.
+**Versions.** The version in `pyproject.toml` follows SemVer. A release is the commit tagged `v<version>`, and the tag must equal the version at that commit. Below 1.0 any minor version may change behavior, the config or the journal schema; the release notes say so when it does.
 
-**A running service runs a release, never a checkout.** The installed copy is a wheel built from a tagged commit. `poe deploy` (`scripts/deploy.py`) does the following, and stops at the first failing step:
+**Releasing is one command.** `uv run poe release patch|minor|major` (`scripts/release.py`) refuses unless the work tree is clean, the branch is `main` and HEAD equals `origin/main`. It then bumps the version in `pyproject.toml`, the project's own entry in `uv.lock` and every occurrence of the old version in `README.md`, commits `chore: release <version>`, pushes `main`, tags the commit `v<version>` and pushes the tag. `--dry-run` prints what it would do. The release workflow does the rest: it waits for CI to pass on the tagged commit (and fails when the commit is not on `main`), builds the wheel and sdist, and publishes a GitHub release with both, a `SHA256SUMS` file and the notes. Releases below 1.0 are marked pre-release.
 
-1. Refuses unless the work tree is clean and HEAD is exactly the tag `v<version>`.
-2. Runs the gate (`poe check`) and builds the wheel into the release store, `$XDG_DATA_HOME/shikiri-yaku/releases` (default `~/.local/share/shikiri-yaku/releases`), keeping the last five. The file `current` in the store names the wheel last deployed successfully.
+**Release notes come from commits; there is no changelog file.** The notes list the commits since the previous tag, without the release commits. Commit subjects follow Conventional Commits, `type(scope)!: description`. The notes group them as Breaking changes (a `!` after the type, or a `BREAKING CHANGE:` line in the body), Features (`feat`), Fixes (`fix`) and Other changes (everything else, as written). Each line links its commit. The notes end with a "Full Changelog" compare link to the previous tag and the install command. The notes are only as good as the subjects, so a commit that changes behavior, configuration, the journal schema or the supported Shikiru range says so in its subject or in a `BREAKING CHANGE:` line.
+
+**A running service runs a release, never a checkout.** The installed copy is a wheel from a release. `shikiri-yaku update` does the following, and stops at the first failing step:
+
+1. Finds the newest release of the repository on GitHub (pre-releases included), downloads its wheel and `SHA256SUMS`, and refuses unless the wheel's SHA-256 is the listed one. The checksum guards against a damaged or mismatched download; it does not defend against a compromised release. `--check` prints the installed and the newest version and changes nothing; `--wheel <path>` installs a given wheel without downloading. When the installed version is already the newest, it says so and exits 0.
+2. Puts the wheel into the release store, `$XDG_DATA_HOME/shikiri-yaku/releases` (default `~/.local/share/shikiri-yaku/releases`), keeping the last five. The file `current` in the store names the wheel last installed successfully.
 3. Copies every product's journal to `<product>/backups/` with SQLite's online backup, named by the journal's schema version, so a failed upgrade can be undone by hand.
-4. Installs the wheel (`uv tool install --reinstall <wheel>`) and runs `shikiri-yaku restart --json`.
-5. Verifies: `shikiri-yaku --version` is the tag's version, and `doctor` passes for every product that `restart` reported.
-6. Success writes `current`. Any failure after step 4 is a **rollback**: reinstall the wheel `current` named, restart, report what failed, exit non-zero. With no `current` (the first deploy) there is nothing to go back to, and the script says so.
+4. Installs the wheel (`uv tool install --reinstall <wheel>`) and runs `shikiri-yaku restart --json`. After the install the running process does not import its own package again: it replaced its own files, so every later step runs through the new `shikiri-yaku` as a subprocess.
+5. Verifies: `shikiri-yaku --version` is the wheel's version, and `doctor` passes for every product that `restart` reported.
+6. Success writes `current`. Any failure after step 4 is a **rollback**: reinstall the wheel `current` named, restart, report what failed, exit non-zero. With no `current` (the first update) there is nothing to go back to, and the command says so.
 
-`poe rollback` does the rollback by itself, on demand. A rollback restores code, not data. The journal refuses a schema newer than the code knows (`JournalTooNewError`), so after a release that migrated the journal the old version stops with that error; the script then prints the backup file and the steps to restore it. Migrations are therefore reviewed as one-way changes.
+`shikiri-yaku update --rollback` does the rollback by itself, on demand. A rollback restores code, not data. The journal refuses a schema newer than the code knows (`JournalTooNewError`), so after a release that migrated the journal the old version stops with that error; the command then prints the backup file and the steps to restore it. Migrations are therefore reviewed as one-way changes.
 
-**Compatibility with Shikiru.** The Operator declares the range of Shikiru versions it was built and checked against, as named constants. `doctor` reads `shikiru --version` and fails outside the range, so a Shikiru upgrade that the Operator does not support shows up before an escalation is missed. Release Shikiru first, then the Operator, and name the supported Shikiru versions in the changelog.
+**Compatibility with Shikiru.** The Operator declares the range of Shikiru versions it was built and checked against, as named constants. `doctor` reads `shikiru --version` and fails outside the range, so a Shikiru upgrade that the Operator does not support shows up before an escalation is missed. Release Shikiru first, then the Operator, and name the supported Shikiru versions in the commit that changes the range.
 
 ## Engineering constraints
 
