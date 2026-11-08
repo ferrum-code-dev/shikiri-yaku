@@ -27,7 +27,6 @@ shikiri-yaku = "shikiri_yaku.bootstrap:main"
 Homepage = "https://github.com/ferrum-code-dev/shikiri-yaku"
 Source = "https://github.com/ferrum-code-dev/shikiri-yaku"
 Issues = "https://github.com/ferrum-code-dev/shikiri-yaku/issues"
-Changelog = "https://github.com/ferrum-code-dev/shikiri-yaku/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
@@ -117,10 +116,11 @@ ignore = [
 "scripts/contract_check.py" = ["T201", "D", "INP001"]  # a human runs it and reads its printed report
 "scripts/record_telegram.py" = ["INP001"]  # a human runs it; scripts/ is not a package
 "scripts/deploy.py" = ["INP001", "S603", "S607", "TID251"]  # the deploy script runs the release commands and reads its SQLite journals
-"scripts/release_notes.py" = ["INP001"]  # the release workflow runs it; scripts/ is not a package
+"scripts/release_notes.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts git to read the commits and tags
 "scripts/wait_for_ci.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts gh and sleeps between polls
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
+"tests/unit/test_release_notes.py" = ["S603", "S607", "TID251"]  # builds a temporary git repository with git
 
 [tool.basedpyright]
 include = ["src", "tests"]

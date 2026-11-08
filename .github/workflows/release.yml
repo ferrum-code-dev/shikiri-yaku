@@ -55,6 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -76,10 +77,13 @@ jobs:
       - name: Build the wheel and the sdist
         run: uv build
 
-      - name: Write the release notes from the changelog
+      - name: Write SHA256SUMS for the wheel and the sdist
+        run: cd dist && sha256sum * > SHA256SUMS
+
+      - name: Write the release notes from the commits
         env:
           TAG: ${{ github.ref_name }}
-        run: uv run --no-project python scripts/release_notes.py "${TAG#v}" --changelog CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+        run: uv run --no-project python scripts/release_notes.py "$TAG" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create the GitHub release
         env:
