@@ -7,6 +7,11 @@ behavior, the configuration or the journal schema, and the entry says so when it
 
 ## [Unreleased]
 
+### Changed
+
+- The release workflow waits for a green CI run on the tagged commit before it publishes the GitHub
+  Release. A tag whose commit is not on `main` is refused.
+
 ## [0.1.3] - 2026-11-07
 
 ### Changed

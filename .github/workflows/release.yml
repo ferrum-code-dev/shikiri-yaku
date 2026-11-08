@@ -8,8 +8,45 @@ permissions:
   contents: read
 
 jobs:
+  ci-green:
+    name: Wait for a green CI on the tagged commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refuse a tag whose commit is not on main
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "The tagged commit $SHA is not on main; push main first." >&2
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          python-version: "3.14"
+          enable-cache: false
+
+      - name: Wait for the CI run on the tagged commit to pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: uv run --no-project python scripts/wait_for_ci.py "$SHA" --repo "$REPOSITORY" --workflow ci.yml
+
   release:
     name: Publish the GitHub release
+    needs: ci-green
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

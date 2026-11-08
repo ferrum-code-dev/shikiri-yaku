@@ -62,10 +62,15 @@ the code.
    `## [<version>] - <date>` section of `CHANGELOG.md`. Say so in the section when the release
    changes behavior, the configuration or the journal schema. The release workflow publishes that
    section as the release notes, so it must not be empty.
-2. Commit both changes.
+2. Commit both changes, then push `main`: `git push origin main`. CI runs on that commit, and the
+   release workflow refuses a tag whose commit is not on `main`.
 3. Tag the release commit: `git tag v<version>`.
 4. On the host that runs the service, from this checkout at the tag, run `uv run poe deploy`.
 5. Push the tag: `git push origin v<version>`. The push is the owner's decision. It starts
-   [.github/workflows/release.yml](.github/workflows/release.yml), which checks the tag against
-   `pyproject.toml`, builds the wheel and the sdist, and creates the GitHub Release. A release with
-   a major version of 0 is marked as a pre-release.
+   [.github/workflows/release.yml](.github/workflows/release.yml). Its `ci-green` job waits up to 25
+   minutes for the CI run on the tagged commit to pass; a CI run that fails, does not start or does
+   not finish in time stops the release before anything is published. Then the release job checks
+   the tag against `pyproject.toml`, builds the wheel and the sdist, and creates the GitHub Release.
+   A release with a major version of 0 is marked as a pre-release.
+6. If CI fails, fix the failure on `main` and re-run the failed CI run. When it passes, re-run the
+   failed Release workflow.
