@@ -50,16 +50,16 @@ Install the console command `shikiri-yaku` from a release of this repository, ei
 wheel:
 
 ```sh
-uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.4/shikiri_yaku-0.1.4-py3-none-any.whl
+uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.5/shikiri_yaku-0.1.5-py3-none-any.whl
 ```
 
 or from its tag:
 
 ```sh
-uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.4
+uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.5
 ```
 
-The version in these addresses is `0.1.4`. When a newer release exists, change it to that version.
+The version in these addresses is `0.1.5`. When a newer release exists, change it to that version.
 An installed Operator updates itself to the newest release with `shikiri-yaku update` (see
 [Applying changes](#applying-changes)).
 
