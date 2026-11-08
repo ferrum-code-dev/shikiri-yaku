@@ -1,8 +1,15 @@
 """The journal: SQLite access, and the only place with SQL."""
 
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.journal.backup import JournalBackupError, copy_journal
 from shikiri_yaku.journal.cursors import Cursor, CursorStore, Lifecycle
-from shikiri_yaku.journal.database import Database, Inserted, JournalError, JournalTooNewError
+from shikiri_yaku.journal.database import (
+    JOURNAL_FILE_NAME,
+    Database,
+    Inserted,
+    JournalError,
+    JournalTooNewError,
+)
 from shikiri_yaku.journal.events import JournalEvents, JournalSources
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
@@ -24,6 +31,7 @@ from shikiri_yaku.journal.starts import JournalStarts
 from shikiri_yaku.journal.waits import JournalWaits
 
 __all__ = [
+    "JOURNAL_FILE_NAME",
     "Cursor",
     "CursorStore",
     "Database",
@@ -31,6 +39,7 @@ __all__ = [
     "Direction",
     "Inserted",
     "JournalActions",
+    "JournalBackupError",
     "JournalError",
     "JournalEvents",
     "JournalFinalEdits",
@@ -57,4 +66,5 @@ __all__ = [
     "StoredMessage",
     "StoredOp",
     "StoredSignal",
+    "copy_journal",
 ]

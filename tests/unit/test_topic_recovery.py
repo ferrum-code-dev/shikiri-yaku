@@ -18,8 +18,8 @@ from shikiri_yaku.adapters.telegram_topics import (
     TopicRepair,
 )
 from shikiri_yaku.bootstrap import main
-from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
-from shikiri_yaku.journal import Database
+from shikiri_yaku.instance import instance_lock
+from shikiri_yaku.journal import JOURNAL_FILE_NAME, Database
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import ChannelRepairError, ChannelStartupError
 

@@ -12,8 +12,15 @@ from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.domain.classification import Verdict
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.instance import JOURNAL_FILE_NAME
-from shikiri_yaku.journal import Database, MessageStore, NewOp, OpState, OpStore, SignalStore
+from shikiri_yaku.journal import (
+    JOURNAL_FILE_NAME,
+    Database,
+    MessageStore,
+    NewOp,
+    OpState,
+    OpStore,
+    SignalStore,
+)
 from shikiri_yaku.journal.signals import NewSignal, SignalState
 from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.ports import Message

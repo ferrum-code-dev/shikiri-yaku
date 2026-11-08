@@ -25,8 +25,8 @@ from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
 from shikiri_yaku.adapters.telegram import OTHER_MEMBERS_NOTE
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, main, stats_measures
-from shikiri_yaku.instance import JOURNAL_FILE_NAME, instance_lock
-from shikiri_yaku.journal import Database
+from shikiri_yaku.instance import instance_lock
+from shikiri_yaku.journal import JOURNAL_FILE_NAME, Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
 from shikiri_yaku.service import service_file

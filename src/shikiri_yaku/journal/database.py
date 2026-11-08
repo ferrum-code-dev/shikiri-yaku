@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 BUSY_TIMEOUT_S: Final = 5
 LATEST_VERSION: Final = len(MIGRATIONS)
+JOURNAL_FILE_NAME: Final = "journal.db"
 
 
 class JournalError(Exception):

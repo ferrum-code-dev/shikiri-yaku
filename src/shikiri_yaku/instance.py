@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 HOME_DIRECTORY_NAME: Final = ".shikiri-yaku"
 LOCK_FILE_NAME: Final = "instance.lock"
-JOURNAL_FILE_NAME: Final = "journal.db"
 OUTPUT_DIR_NAME: Final = "output"
 HOST_LOCK_FILE_NAME: Final = "host.lock"
 

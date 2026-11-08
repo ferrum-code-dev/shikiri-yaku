@@ -54,6 +54,12 @@ The architecture is described in `docs/design.md` under Architecture. These rule
   host without the PO's approval, and what runs is the stored argument list.
 * Never run package installs, `sudo`, or anything that changes the host from code you write for
   tests. Tests use fakes or harmless commands (`sleep`, `echo`) through `CommandRunner`.
+  One explicit exception, approved by the PO: `tests/unit/test_update_self_install.py` builds the
+  wheel and runs `uv tool install` offline. It sets HOME, XDG_DATA_HOME, UV_TOOL_DIR and
+  UV_TOOL_BIN_DIR to temporary directories, sets UV_OFFLINE=1, and points UV_CACHE_DIR at the real
+  uv cache, because a temporary HOME would otherwise lose the warm cache; uv may add entries to that
+  cache. It changes nothing else outside those temporary directories, and it is skipped when `uv`
+  is missing. No other test may install a package or touch the host.
 * No live network in the gate. No real Telegram, no real agent CLI. The token file and secrets
   are never read by tests, logged, put in the journal, or committed.
 * Every effect is journaled before it happens (principle 5).
@@ -80,6 +86,8 @@ comment rule. Docstrings only on public contracts. No code for a case the design
 ## Working rules
 
 * One task, one change, about 300 lines. If a task needs much more, stop and report how to split it.
+  Exception approved by the PO: E29 (`shikiri-yaku update --wheel`) is one change above this size,
+  because it replaces the deploy script and its tests as one unit.
 * Update `tasks/todo.md` for the task you finished. Keep the edit to your own line.
 * Commits are Conventional Commits, one coherent change each. The subject is what the release notes show, so write it for a user: `type(scope): what changed`. A change that breaks behavior, configuration, the journal schema or the supported Shikiru range marks the type with `!` or adds a `BREAKING CHANGE:` line to the body.
 * Never push, never touch another branch's work, never edit files outside this repository.

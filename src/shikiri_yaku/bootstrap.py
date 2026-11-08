@@ -80,8 +80,9 @@ from shikiri_yaku.extensions.notice.handler import HEALTH_KEY
 from shikiri_yaku.extensions.product.extension import product_extension
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.review.extension import review_extension
-from shikiri_yaku.instance import HOST_LOCK_FILE_NAME, JOURNAL_FILE_NAME
+from shikiri_yaku.instance import HOST_LOCK_FILE_NAME
 from shikiri_yaku.journal import (
+    JOURNAL_FILE_NAME,
     CursorStore,
     Database,
     JournalActions,
@@ -112,6 +113,7 @@ from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings, SettingsError, load_settings
+from shikiri_yaku.update import Host, Layout, default_store, pause, run_command, run_update
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -147,7 +149,7 @@ if TYPE_CHECKING:
         StartLog,
         WaitLog,
     )
-    from shikiri_yaku.settings import Component, ReasonerSettings, Settings
+    from shikiri_yaku.settings import Component, ReasonerSettings, Settings, UpdateSettings
 
 
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
@@ -870,6 +872,7 @@ def start_reconciler(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
+    settings = CliSettings()
     return cli.main(
         argv,
         compose,
@@ -877,8 +880,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         adopt_topic,
         forget_topic,
         commands=ProcessCommandRunner(),
-        cli_settings=CliSettings(),
+        cli_settings=settings,
+        update_host=partial(update_this_host, settings.update),
     )
+
+
+def update_this_host(
+    numbers: UpdateSettings,
+    wheel: Path | None,
+    rollback: bool,  # noqa: FBT001 -- the CLI passes it by position
+    home: Path,
+) -> int:
+    """Run `shikiri-yaku update` on this host, with the user's release store and the runner."""
+    layout = Layout(default_store(), home)
+    return run_update(Host(run_command, pause, layout, numbers), wheel, rollback=rollback)
 
 
 def stats_measures(directory: Path) -> Measures:

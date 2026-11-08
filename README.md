@@ -432,32 +432,33 @@ A service runs the installed copy of `shikiri-yaku` that `install-service` found
 `PATH`, never a checkout. That copy is a wheel built from a tagged commit. Apply a change in one of
 these ways:
 
-- After a code change, release it. Commit the change, bump `version` in `pyproject.toml` (SemVer)
-  and commit that too. Then tag the release commit `v<version>` and deploy from that checkout:
+- After a code change, release it: commit the change, bump `version` in `pyproject.toml` (SemVer)
+  and commit that too, then tag the release commit `v<version>`. Install the release on each host
+  with `shikiri-yaku update --wheel <path>`. Until the one-command download is built, get the wheel
+  and `SHA256SUMS` from the GitHub release page, check the wheel's checksum against that file, and
+  pass the wheel's path to `--wheel`.
 
   ```sh
-  git tag v0.2.0
-  uv run poe deploy
+  shikiri-yaku update --wheel ~/Downloads/shikiri_yaku-0.2.0-py3-none-any.whl
   ```
 
-  The tag must equal the version at HEAD. `poe deploy` refuses a work tree that is not clean and a
-  HEAD that is not tagged `v<version>`. Then it runs `uv run poe check`, builds the wheel into
-  `$XDG_DATA_HOME/shikiri-yaku/releases` (default `~/.local/share/shikiri-yaku/releases`, the last
-  five kept), copies each product's journal to `<home>/<product>/backups/journal-schema<N>.db` with
-  SQLite's online backup (the last three kept per product), installs the wheel, runs
-  `shikiri-yaku --json restart`, and checks that `shikiri-yaku --version` shows the version and
-  `doctor` passes for every product. It stops at the first failing step. A failure before the
-  install changes nothing installed and restarts nothing. The verification waits up to a minute for
-  each product: a failing `doctor` runs again, up to six runs in all with ten seconds between them,
-  before it counts as failed. Success records the wheel as `current` in the release store.
+  `update` stores the wheel in `$XDG_DATA_HOME/shikiri-yaku/releases` (default
+  `~/.local/share/shikiri-yaku/releases`, the last five kept), copies each product's journal to
+  `<home>/<product>/backups/journal-schema<N>.db` with SQLite's online backup (the last three kept
+  per product), installs it with `uv tool install --reinstall`, runs `shikiri-yaku --json restart`,
+  and checks that `shikiri-yaku --version` shows the version and `doctor` passes for every product.
+  It stops at the first failing step. A failure before the install changes nothing installed and
+  restarts nothing. The verification waits for each product: a failing `doctor` runs again, up to
+  six runs in all with ten seconds between them, before it counts as failed. Success records the
+  wheel as `current` in the release store.
 - After a `config.toml` change, run `shikiri-yaku restart` alone.
 
-A failure after the install is rolled back: the script reinstalls the wheel that `current` names,
-restarts the products, prints what failed and exits 1. `uv run poe rollback` does that rollback on
-its own, without deploying anything. The first deploy has no `current`; the script says so and the
-failed release stays installed, so fix the problem and deploy again. A product that `restart` does
-not report as restarted, such as one with `not installed`, fails the verification and so rolls the
-deploy back; install its service with `install-service` first.
+A failure after the install is rolled back: `update` reinstalls the wheel that `current` names,
+restarts the products, prints what failed and exits 1. `shikiri-yaku update --rollback` does that
+rollback on its own, without installing anything. The first update on a host has no `current`; the
+command says so and the failed release stays installed, so fix the problem and update again. A
+product that `restart` does not report as restarted, such as one with `not installed`, fails the
+verification and so rolls the update back; install its service with `install-service` first.
 
 A rollback restores code, not data. A release that migrated a journal leaves the old version unable
 to open it: it stops with `JournalTooNewError`. Then, for that product, stop its service
@@ -465,7 +466,7 @@ to open it: it stops with `JournalTooNewError`. Then, for that product, stop its
 `launchctl bootout gui/$(id -u)/shikiri-yaku-<product>` on macOS), copy the newest
 `journal-schema<N>.db` in `<home>/<product>/backups/` over `<home>/<product>/journal.db`, delete
 `journal.db-wal` and `journal.db-shm` if they exist, and start the service again. Changes made after
-that backup are lost. When a rollback fails, the script prints the backup paths to restore.
+that backup are lost. When a rollback fails, the command prints the backup paths to restore.
 
 Run the steps on each host where a service runs. Do not install with `--editable`: the running
 service would follow unreviewed changes in the checkout, including after a crash restart.

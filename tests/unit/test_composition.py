@@ -35,8 +35,8 @@ from shikiri_yaku.extensions.infrastructure.rules import (
     DECISION_REQUIRED,
     QUOTA_EXHAUSTED,
 )
-from shikiri_yaku.instance import JOURNAL_FILE_NAME
 from shikiri_yaku.journal import (
+    JOURNAL_FILE_NAME,
     Database,
     Delivery,
     JournalActions,

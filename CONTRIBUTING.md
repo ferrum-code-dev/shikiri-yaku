@@ -63,3 +63,6 @@ change and command without making any. The [design](docs/design.md#releases-and-
 it does. The release workflow publishes
 after CI passes on the tagged commit. If CI fails, fix it on `main` and re-run the failed CI run,
 then the failed Release workflow run.
+
+A host installs a release with `shikiri-yaku update --wheel <path>` and goes back with
+`shikiri-yaku update --rollback` (see the README, Applying changes).
