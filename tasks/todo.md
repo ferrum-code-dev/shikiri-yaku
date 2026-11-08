@@ -224,6 +224,6 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E25. The help test does not depend on the CI environment
   - [x] E26. The release waits for a green CI on the tagged commit
   - [x] E27. Release notes from commits
-  - [ ] E28. One-command release
+  - [x] E28. One-command release
   - [ ] E29. `update --wheel` replaces `poe deploy`
   - [ ] E30. `update` downloads the newest release

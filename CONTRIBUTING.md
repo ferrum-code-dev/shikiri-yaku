@@ -58,7 +58,8 @@ the code.
 
 ## Releasing
 
-Run `uv run poe release patch|minor|major` on `main`. The
-[design](docs/design.md#releases-and-deployment) says what it does. The release workflow publishes
+Run `uv run poe release patch|minor|major` on `main`. Add `--dry-run` to print the checks and every
+change and command without making any. The [design](docs/design.md#releases-and-deployment) says what
+it does. The release workflow publishes
 after CI passes on the tagged commit. If CI fails, fix it on `main` and re-run the failed CI run,
 then the failed Release workflow run.
