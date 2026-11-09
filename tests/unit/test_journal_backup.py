@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from pathlib import Path
+from typing import Final, NoReturn
 
 import pytest
 
@@ -16,11 +17,9 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal import database as journal_database
+from shikiri_yaku.journal.backup import PARTIAL_SUFFIX
 from shikiri_yaku.journal.migrations import MIGRATIONS
 from shikiri_yaku.settings import JOURNAL_KEEP_BACKUPS
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 PROJECT: Final = "api"
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -127,6 +126,72 @@ def test_a_failed_backup_stops_the_migration_and_leaves_the_journal_as_it_was(
         folder.chmod(0o700)
 
     assert version == OLD
+
+
+def _fail_the_rename_to_the_final_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The copy is complete when the rename fails, as when the folder is changed under it."""
+
+    def replace(*_args: object) -> NoReturn:
+        message = "disk I/O error"
+        raise OSError(message)
+
+    monkeypatch.setattr(Path, "replace", replace)
+
+
+def _partial_files(folder: Path) -> list[str]:
+    return sorted(path.name for path in folder.glob(f"*{PARTIAL_SUFFIX}"))
+
+
+def test_a_failed_copy_leaves_neither_a_backup_nor_a_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "journal.db"
+    _old_journal(path, monkeypatch)
+    folder = tmp_path / BACKUPS
+    _fail_the_rename_to_the_final_name(monkeypatch)
+
+    with pytest.raises(JournalError, match="cannot back up"):
+        Database.open(path)
+
+    assert not (folder / f"journal-schema{OLD}.db").exists()
+    assert _partial_files(folder) == []
+
+
+def test_a_stale_partial_file_is_not_the_newest_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "journal.db"
+    _old_journal(path, monkeypatch)
+    Database.open(path).close()
+    journal = Database.open(path)
+    journal.connection.execute(f"PRAGMA user_version = {journal_database.LATEST_VERSION + 1}")
+    journal.close()
+    folder = tmp_path / BACKUPS
+    stale = folder / f"journal-schema{OLD}.db{PARTIAL_SUFFIX}"
+    stale.write_bytes(b"broken")
+    newer = datetime(2030, 1, 1, tzinfo=UTC).timestamp()
+    os.utime(stale, (newer, newer))
+
+    with pytest.raises(JournalTooNewError) as caught:
+        Database.open(path)
+
+    assert str(folder / f"journal-schema{OLD}.db") in str(caught.value)
+    assert stale.name not in str(caught.value)
+
+
+def test_the_next_successful_backup_removes_a_stale_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "journal.db"
+    _old_journal(path, monkeypatch)
+    folder = tmp_path / BACKUPS
+    folder.mkdir()
+    (folder / f"journal-schema1.db{PARTIAL_SUFFIX}").write_bytes(b"broken")
+
+    Database.open(path).close()
+
+    assert _partial_files(folder) == []
+    assert (folder / f"journal-schema{OLD}.db").exists()
 
 
 def test_a_too_new_journal_names_the_newest_backup(

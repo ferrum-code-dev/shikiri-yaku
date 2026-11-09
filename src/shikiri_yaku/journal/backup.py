@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
 BACKUP_FOLDER: Final = "backups"
 BACKUP_GLOB: Final = "journal-schema*.db"
+# keep: a copy is renamed only when complete, so a failed copy never looks like a backup
+PARTIAL_SUFFIX: Final = ".partial"
+PARTIAL_GLOB: Final = f"{BACKUP_GLOB}{PARTIAL_SUFFIX}"
 
 
 class JournalBackupError(Exception):
@@ -27,17 +30,22 @@ def copy_journal(journal: Path, folder: Path) -> Path:
     except sqlite3.Error as error:
         message = f"cannot open {journal}: {error}"
         raise JournalBackupError(message) from error
+    partial: Path | None = None
     try:
         (version,) = source.execute("PRAGMA user_version").fetchone()
         copy = folder / f"journal-schema{version}.db"
-        copy.unlink(missing_ok=True)
-        target = sqlite3.connect(copy)
+        partial = folder / f"{copy.name}{PARTIAL_SUFFIX}"
+        partial.unlink(missing_ok=True)
+        target = sqlite3.connect(partial)
         try:
             source.backup(target)
             target.execute("PRAGMA journal_mode = DELETE")
         finally:
             target.close()
+        partial.replace(copy)
     except (sqlite3.Error, OSError) as error:
+        if partial is not None:
+            partial.unlink(missing_ok=True)
         message = f"cannot back up {journal}: {error}"
         raise JournalBackupError(message) from error
     finally:
@@ -54,6 +62,8 @@ def back_up_before_migration(journal: Path, keep: int) -> Path:
         message = f"cannot back up {journal}: {error}"
         raise JournalBackupError(message) from error
     copy = copy_journal(journal.resolve(), folder)
+    for leftover in folder.glob(PARTIAL_GLOB):
+        leftover.unlink(missing_ok=True)
     for stale in sorted(folder.glob(BACKUP_GLOB), key=_modified, reverse=True)[keep:]:
         stale.unlink(missing_ok=True)
     return copy

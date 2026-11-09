@@ -231,4 +231,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E32. Remove `update`, the release scripts and the pins
   - [x] E33. The release workflow: check CI once, publish to PyPI
   - [x] E34. Back up the journal before a migration
-  - [ ] E35. A failed journal backup leaves no file that looks like a backup
+  - [x] E35. A failed journal backup leaves no file that looks like a backup
