@@ -115,7 +115,6 @@ type Compose = Callable[[Settings, Path], Lifecycle]
 type ReadMeasures = Callable[[Path], Measures]
 type AdoptTopic = Callable[[Path, str, int], str]
 type ForgetTopic = Callable[[Path, str], str]
-type UpdateHost = Callable[[Path | None, bool, bool, Path], int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,28 +220,6 @@ VERSION_OPTION = Annotated[
         help="Show the version and exit. [bold]Default:[/] off",
     ),
 ]
-WHEEL_OPTION = Annotated[
-    Path | None,
-    typer.Option(
-        "--wheel",
-        metavar="PATH",
-        help="Install this release wheel, without downloading. Default: the newest release.",
-    ),
-]
-ROLLBACK_OPTION = Annotated[
-    bool,
-    typer.Option(
-        "--rollback",
-        help="Reinstall the release that current names, and restart. [bold]Default:[/] off",
-    ),
-]
-CHECK_OPTION = Annotated[
-    bool,
-    typer.Option(
-        "--check",
-        help="Print the installed and the newest version; install nothing. [bold]Default:[/] off",
-    ),
-]
 JSON_OPTION = Annotated[
     bool,
     typer.Option(
@@ -299,7 +276,6 @@ def build_app(
     *,
     commands: CommandRunner,
     cli_settings: CliSettings,
-    update_host: UpdateHost | None = None,
 ) -> typer.Typer:
     """Build the command line over the callables it is given; it builds no concrete object."""
     _configure_help_palette()
@@ -347,27 +323,6 @@ def build_app(
     def restart(ctx: typer.Context) -> None:
         raise typer.Exit(_restart(_options(ctx), commands, cli_settings))
 
-    @app.command(
-        help="Install the newest release on this host, a given wheel, or roll back. "
-        "Check with --check."
-    )
-    def update(
-        ctx: typer.Context,
-        wheel: WHEEL_OPTION = None,
-        *,
-        rollback: ROLLBACK_OPTION = False,
-        check: CHECK_OPTION = False,
-    ) -> None:
-        raise typer.Exit(
-            _update(
-                update_host,
-                wheel,
-                rollback=rollback,
-                check=check,
-                home=home_dir(_options(ctx).home),
-            )
-        )
-
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
         raise typer.Exit(
@@ -402,7 +357,6 @@ def main(
     *,
     commands: CommandRunner,
     cli_settings: CliSettings,
-    update_host: UpdateHost | None = None,
 ) -> int:
     """Run one command line and return its exit code; the caller supplies what it needs."""
     app = build_app(
@@ -412,7 +366,6 @@ def main(
         forget_topic,
         commands=commands,
         cli_settings=cli_settings,
-        update_host=update_host,
     )
     command = get_command(app)
     try:
@@ -624,23 +577,6 @@ def _install_service(target: _Target) -> int:
         return 1
     sys.stdout.write(f"wrote {service.path}\nstart it with: {service.start}\n")
     return 0
-
-
-def _update(
-    update_host: UpdateHost | None,
-    wheel: Path | None,
-    *,
-    rollback: bool,
-    check: bool,
-    home: Path,
-) -> int:
-    if update_host is None:
-        print_failure("update is not wired in this build")
-        return 1
-    if check and (wheel is not None or rollback):
-        print_failure("--check cannot be combined with --wheel or --rollback")
-        return 1
-    return update_host(wheel, rollback, check, home)
 
 
 def _restart(options: _Global, commands: CommandRunner, cli_settings: CliSettings) -> int:

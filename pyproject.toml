@@ -63,7 +63,6 @@ imports = "lint-imports"
 types = "basedpyright"
 dead-code = "vulture"
 test = "pytest"
-release = "python scripts/release.py"
 
 [tool.poe.tasks.fix]
 sequence = [
@@ -122,14 +121,10 @@ ignore = [
 "src/shikiri_yaku/adapters/commands.py" = ["TID251"]  # the CommandRunner adapter is the only place that starts processes
 "scripts/contract_check.py" = ["T201", "D", "INP001"]  # a human runs it and reads its printed report
 "scripts/record_telegram.py" = ["INP001"]  # a human runs it; scripts/ is not a package
-"src/shikiri_yaku/update/process.py" = ["S603", "S607", "TID251"]  # the update starts uv and shikiri-yaku, and sleeps between checks
 "scripts/release_notes.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts git to read the commits and tags
-"scripts/wait_for_ci.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts gh and sleeps between polls
-"scripts/release.py" = ["INP001", "S603", "S607", "TID251"]  # a human runs it; it starts git and reads and writes the release files
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
 "tests/unit/test_release_notes.py" = ["S603", "S607", "TID251"]  # builds a temporary git repository with git
-"tests/unit/test_update_self_install.py" = ["S603", "S607", "TID251"]  # builds the wheel and installs it into temporary directories with uv
 "tests/unit/test_version_from_tag.py" = ["S603", "S607", "TID251"]  # builds a wheel from a temporary git checkout with git and uv
 
 [tool.basedpyright]
@@ -189,35 +184,6 @@ name = "Only bootstrap builds concrete objects"
 type = "forbidden"
 source_modules = ["shikiri_yaku.ports", "shikiri_yaku.cli"]
 forbidden_modules = ["shikiri_yaku.adapters", "shikiri_yaku.journal"]
-
-[[tool.importlinter.contracts]]
-name = "Only the composition root imports the update package"
-type = "forbidden"
-source_modules = [
-  "shikiri_yaku.domain",
-  "shikiri_yaku.app",
-  "shikiri_yaku.extensions",
-  "shikiri_yaku.ports",
-  "shikiri_yaku.adapters",
-  "shikiri_yaku.journal",
-  "shikiri_yaku.cli",
-]
-forbidden_modules = ["shikiri_yaku.update"]
-
-[[tool.importlinter.contracts]]
-name = "The update package imports the settings and the journal only"
-type = "forbidden"
-source_modules = ["shikiri_yaku.update"]
-forbidden_modules = [
-  "shikiri_yaku.domain",
-  "shikiri_yaku.app",
-  "shikiri_yaku.extensions",
-  "shikiri_yaku.ports",
-  "shikiri_yaku.adapters",
-  "shikiri_yaku.bootstrap",
-  "shikiri_yaku.cli",
-]
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "Nothing but the CLI imports the composition root"

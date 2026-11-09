@@ -58,12 +58,20 @@ the code.
 
 ## Releasing
 
-Run `uv run poe release patch|minor|major` on `main`. Add `--dry-run` to print the checks and every
-change and command without making any. The [design](docs/design.md#releases-and-deployment) says what
-it does. The release workflow publishes
-after CI passes on the tagged commit. If CI fails, fix it on `main` and re-run the failed CI run,
-then the failed Release workflow run.
+Releasing is pushing a tag. On a commit of `main` whose CI has passed, run:
 
-A host installs the newest release with `shikiri-yaku update` (`--check` only reports it, and
-`--wheel <path>` installs a wheel already downloaded) and goes back with `shikiri-yaku update
---rollback` (see the README, Applying changes).
+```sh
+git tag v<version> && git push origin v<version>
+```
+
+The [design](docs/design.md#releases-and-deployment) says what happens next. The release workflow
+checks that CI passed on the tagged commit, builds the wheel and the sdist, publishes them to PyPI,
+and then creates the GitHub release. If the workflow fails, fix the problem on `main` and cut a new
+tag; a tag is not moved.
+
+One-time owner setup for publishing: on pypi.org, add a pending publisher for the project
+`shikiri-yaku` with owner `ferrum-code-dev`, repository `shikiri-yaku`, workflow `release.yml` and
+environment `pypi`. On GitHub, create the environment `pypi` in the repository settings.
+
+A host upgrades to the newest release with `uv tool upgrade shikiri-yaku`, then `shikiri-yaku
+restart` (see the README, Applying changes).

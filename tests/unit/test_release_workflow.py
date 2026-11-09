@@ -11,8 +11,8 @@ RELEASE_WORKFLOW: Final = WORKFLOWS / "release.yml"
 CREDENTIAL_CONTEXT: Final = "github.token"
 TOKEN_STEPS: Final = frozenset(
     {
-        ("ci-green", "Wait for the CI run on the tagged commit to pass"),
-        ("release", "Create the GitHub release"),
+        ("check", "Check that CI passed on the tagged commit"),
+        ("github", "Create the GitHub release"),
     },
 )
 
@@ -26,10 +26,10 @@ def _mentions_token(node: object) -> bool:
     return CREDENTIAL_CONTEXT in json.dumps(node)
 
 
-def test_the_release_workflow_parses_as_yaml_with_both_jobs() -> None:
+def test_the_release_workflow_parses_as_yaml_with_all_jobs() -> None:
     workflow = _load()
 
-    assert set(cast("dict[str, object]", workflow["jobs"])) == {"ci-green", "release"}
+    assert set(cast("dict[str, object]", workflow["jobs"])) == {"check", "build", "pypi", "github"}
 
 
 def test_only_the_ci_wait_and_the_release_step_see_a_token() -> None:

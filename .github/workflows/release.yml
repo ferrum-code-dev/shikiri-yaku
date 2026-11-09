@@ -1,3 +1,4 @@
+---
 name: Release
 
 on:
@@ -8,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  ci-green:
-    name: Wait for a green CI on the tagged commit
+  check:
+    name: Check that CI passed on the tagged commit
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -31,22 +32,65 @@ jobs:
             exit 1
           fi
 
+      - name: Check that CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          conclusions=$(gh run list --workflow ci.yml --commit "$SHA" --json conclusion --jq '.[].conclusion')
+          if ! grep -qx success <<< "$conclusions"; then
+            echo "CI has not passed on this commit; wait for it and push the tag again." >&2
+            exit 1
+          fi
+
+  build:
+    name: Build the wheel and the sdist
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.5"
           python-version: "3.14"
           enable-cache: false
 
-      - name: Wait for the CI run on the tagged commit to pass
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: uv run --no-project python scripts/wait_for_ci.py "$SHA" --repo "$REPOSITORY" --workflow ci.yml
+      - name: Build the wheel and the sdist
+        run: uv build
 
-  release:
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github:
     name: Publish the GitHub release
-    needs: ci-green
+    needs: pypi
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -64,11 +108,10 @@ jobs:
           python-version: "3.14"
           enable-cache: false
 
-      - name: Build the wheel and the sdist
-        run: uv build
-
-      - name: Write SHA256SUMS for the wheel and the sdist
-        run: cd dist && sha256sum * > SHA256SUMS
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist/
 
       - name: Write the release notes from the commits
         env:

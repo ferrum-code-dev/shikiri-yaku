@@ -67,13 +67,7 @@ RESTART_TIMEOUT_S: Final = 30
 APPROVAL_EXPIRY_H: Final = 24
 HOST_LOCK_POLL_S: Final = 1
 INSTALL_OUTPUT_TAIL_LINES: Final = 20
-UPDATE_KEEP_WHEELS: Final = 5
-UPDATE_KEEP_BACKUPS: Final = 3
-UPDATE_VERIFY_ATTEMPTS: Final = 6
-UPDATE_VERIFY_PAUSE_S: Final = 10
-UPDATE_OUTPUT_TAIL_LINES: Final = 20
-RELEASE_TIMEOUT_S: Final = 30
-RELEASE_MAX_BYTES: Final = 50_000_000
+JOURNAL_KEEP_BACKUPS: Final = 3
 
 REMINDER_FIRST_H: Final = 4
 REMINDER_REPEAT_H: Final = 24
@@ -282,26 +276,10 @@ class Settings(_FrozenModel):
         return self
 
 
-class UpdateSettings(_FrozenModel):
-    """The numbers of `shikiri-yaku update`: what is kept, verification retries, and downloads.
-
-    A download has a timeout and a size limit, so a stalled or oversized response fails the update.
-    """
-
-    keep_wheels: PositiveInt = UPDATE_KEEP_WHEELS
-    keep_backups: PositiveInt = UPDATE_KEEP_BACKUPS
-    verify_attempts: PositiveInt = UPDATE_VERIFY_ATTEMPTS
-    verify_pause_s: PositiveInt = UPDATE_VERIFY_PAUSE_S
-    output_tail_lines: PositiveInt = UPDATE_OUTPUT_TAIL_LINES
-    release_timeout_s: PositiveInt = RELEASE_TIMEOUT_S
-    release_max_bytes: PositiveInt = RELEASE_MAX_BYTES
-
-
 class CliSettings(_FrozenModel):
     """Default-only settings for host-facing CLI operations."""
 
     restart_timeout_s: PositiveInt = RESTART_TIMEOUT_S
-    update: UpdateSettings = Field(default_factory=UpdateSettings)
 
 
 def product_names(home: Path) -> list[str]:

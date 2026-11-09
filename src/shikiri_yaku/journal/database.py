@@ -6,13 +6,15 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
+from shikiri_yaku.journal.backup import JournalBackupError, back_up_before_migration, newest_backup
 from shikiri_yaku.journal.migrations import MIGRATIONS
+from shikiri_yaku.settings import JOURNAL_KEEP_BACKUPS
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from pathlib import Path
 
 BUSY_TIMEOUT_S: Final = 5
 LATEST_VERSION: Final = len(MIGRATIONS)
@@ -47,6 +49,19 @@ def parse_stamp(text: str | None) -> datetime | None:
     return None if text is None else datetime.fromisoformat(text)
 
 
+def _too_new(journal: Path, error: JournalTooNewError) -> JournalTooNewError:
+    """Say where the newest backup is, so the owner can copy it back over the journal."""
+    newest = newest_backup(journal)
+    if newest is None:
+        return error
+    message = (
+        f"{error}. The newest backup is {newest}. To go back, stop the service, "
+        f"copy the backup over {journal}, delete {journal}-wal and {journal}-shm if they exist, "
+        "and start the older version. Changes made after the backup are lost."
+    )
+    return JournalTooNewError(message)
+
+
 class Database:
     """One connection. A connection belongs to one thread; another thread opens its own."""
 
@@ -55,10 +70,12 @@ class Database:
         self._in_transaction = False
 
     @classmethod
-    def open(cls, path: Path | str) -> Self:
+    def open(cls, path: Path | str, keep_backups: int = JOURNAL_KEEP_BACKUPS) -> Self:
         """Open or create the journal and bring its schema up to date.
 
-        Whatever SQLite refuses is raised as JournalError, so callers never handle sqlite3 errors.
+        A journal at an older schema is copied before it is migrated, and the newest `keep_backups`
+        copies are kept. Whatever SQLite refuses, and a failed backup, is raised as JournalError, so
+        callers never handle sqlite3 errors.
         """
         try:
             connection = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
@@ -70,11 +87,15 @@ class Database:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute("PRAGMA foreign_keys = ON")
+            database._back_up(Path(path), keep_backups)
             database._migrate()
         except sqlite3.Error as error:
             connection.close()
             message = f"cannot use {path}: {error}"
             raise JournalError(message) from error
+        except JournalTooNewError as error:
+            connection.close()
+            raise _too_new(Path(path), error) from error
         except BaseException:
             connection.close()
             raise
@@ -104,6 +125,17 @@ class Database:
             self._connection.commit()
         finally:
             self._in_transaction = False
+
+    def _back_up(self, journal: Path, keep: int) -> None:
+        # keep: a new journal has nothing to lose, and a current or newer one is not migrated
+        version: int = self._connection.execute("PRAGMA user_version").fetchone()[0]
+        if not 0 < version < LATEST_VERSION:
+            return
+        try:
+            back_up_before_migration(journal, keep)
+        except JournalBackupError as error:
+            message = str(error)
+            raise JournalError(message) from error
 
     def _migrate(self) -> None:
         with self.transaction() as connection:

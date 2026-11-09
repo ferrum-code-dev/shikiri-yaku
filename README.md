@@ -34,34 +34,25 @@ using the steps below.
 ### Prerequisites
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/).
-- Shikiru installed and available as `shikiru` on `PATH`, version `0.1.0` up to but not including
-  `0.2.0`. Install a release of [Shikiru](https://github.com/ferrum-code-dev/shikiru) either from
-  its release wheel on its GitHub Releases page, or from its tag with
-  `uv tool install git+https://github.com/ferrum-code-dev/shikiru@v0.1.3`. `doctor` fails outside
-  that range. Each configured component must be an existing local Shikiru project directory, one
-  that `shikiru init` has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
+- Shikiru installed and available as `shikiru` on `PATH`. Install
+  [Shikiru](https://github.com/ferrum-code-dev/shikiru) with `uv tool install shikiru`. `doctor`
+  fails outside the range of Shikiru versions this release supports, and names that range. Each
+  configured component must be an existing local Shikiru project directory, one that `shikiru init`
+  has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
 - A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
   private. The bot uses long polling, so do not configure a webhook for it.
 - Optionally, the local `claude` and/or `codex` CLI for a configured Reasoner ladder.
 
-### Install a release
+### Install
 
-Install the console command `shikiri-yaku` from a release of this repository, either from its
-wheel:
-
-```sh
-uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v0.1.5/shikiri_yaku-0.1.5-py3-none-any.whl
-```
-
-or from its tag:
+Install the console command `shikiri-yaku` from PyPI:
 
 ```sh
-uv tool install git+https://github.com/ferrum-code-dev/shikiri-yaku@v0.1.5
+uv tool install shikiri-yaku
 ```
 
-The version in these addresses is `0.1.5`. When a newer release exists, change it to that version.
-An installed Operator updates itself to the newest release with `shikiri-yaku update` (see
-[Applying changes](#applying-changes)).
+Until the first PyPI release, install the wheel from the latest release on the
+[Releases page](https://github.com/ferrum-code-dev/shikiri-yaku/releases) with `uv tool install <wheel>`.
 
 **From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
 release, not a checkout (see [Applying changes](#applying-changes)).
@@ -431,46 +422,27 @@ named by `--product`. On macOS it runs `launchctl kickstart -k`; on Linux it run
 was written but not loaded, is reported with the service manager's message.
 
 A service runs the installed copy of `shikiri-yaku` that `install-service` found on the login
-`PATH`, never a checkout. That copy is a wheel built from a tagged commit. Apply a change in one of
-these ways:
+`PATH`, never a checkout. That copy is a release. Apply a change in one of these ways:
 
-- After a code change, release it: commit the change, bump `version` in `pyproject.toml` (SemVer)
-  and commit that too, then tag the release commit `v<version>`. Install the newest release on each
-  host with `shikiri-yaku update`.
+- After a code change, release it: the owner pushes a version tag, as [CONTRIBUTING.md](CONTRIBUTING.md#releasing)
+  describes. Then upgrade each host and restart its services:
 
   ```sh
-  shikiri-yaku update --check
-  shikiri-yaku update
+  uv tool upgrade shikiri-yaku
+  shikiri-yaku restart
   ```
 
-  With no option, `update` finds the newest release on GitHub (pre-releases included), downloads its
-  wheel and `SHA256SUMS`, and refuses unless the wheel's SHA-256 is the listed one. A release with no
-  wheel or no `SHA256SUMS`, or a wheel that does not match, stops the update before anything is
-  installed. When the installed version is already the newest, `update` says so and exits 0.
-  `--check` prints the installed and the newest version and changes nothing. To install a wheel you
-  downloaded yourself, pass its path with `--wheel`; nothing is downloaded then:
-
-  ```sh
-  shikiri-yaku update --wheel ~/Downloads/shikiri_yaku-0.2.0-py3-none-any.whl
-  ```
-
-  `update` stores the wheel in `$XDG_DATA_HOME/shikiri-yaku/releases` (default
-  `~/.local/share/shikiri-yaku/releases`, the last five kept), copies each product's journal to
-  `<home>/<product>/backups/journal-schema<N>.db` with SQLite's online backup (the last three kept
-  per product), installs it with `uv tool install --reinstall`, runs `shikiri-yaku --json restart`,
-  and checks that `shikiri-yaku --version` shows the version and `doctor` passes for every product.
-  It stops at the first failing step. A failure before the install changes nothing installed and
-  restarts nothing. The verification waits for each product: a failing `doctor` runs again, up to
-  six runs in all with ten seconds between them, before it counts as failed. Success records the
-  wheel as `current` in the release store.
+  Before a release migrates a journal, `shikiri-yaku` copies it to
+  `<home>/<product>/backups/journal-schema<N>.db`, where `<N>` is the schema version before the
+  migration. The newest three copies are kept per product.
 - After a `config.toml` change, run `shikiri-yaku restart` alone.
 
-A failure after the install is rolled back: `update` reinstalls the wheel that `current` names,
-restarts the products, prints what failed and exits 1. `shikiri-yaku update --rollback` does that
-rollback on its own, without installing anything. The first update on a host has no `current`; the
-command says so and the failed release stays installed, so fix the problem and update again. A
-product that `restart` does not report as restarted, such as one with `not installed`, fails the
-verification and so rolls the update back; install its service with `install-service` first.
+To go back to an earlier release, install its version and restart:
+
+```sh
+uv tool install shikiri-yaku==<version>
+shikiri-yaku restart
+```
 
 A rollback restores code, not data. A release that migrated a journal leaves the old version unable
 to open it: it stops with `JournalTooNewError`. Then, for that product, stop its service
@@ -478,7 +450,7 @@ to open it: it stops with `JournalTooNewError`. Then, for that product, stop its
 `launchctl bootout gui/$(id -u)/shikiri-yaku-<product>` on macOS), copy the newest
 `journal-schema<N>.db` in `<home>/<product>/backups/` over `<home>/<product>/journal.db`, delete
 `journal.db-wal` and `journal.db-shm` if they exist, and start the service again. Changes made after
-that backup are lost. When a rollback fails, the command prints the backup paths to restore.
+that backup are lost.
 
 Run the steps on each host where a service runs. Do not install with `--editable`: the running
 service would follow unreviewed changes in the checkout, including after a crash restart.

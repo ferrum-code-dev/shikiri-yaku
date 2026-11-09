@@ -9,19 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
-from importlib.metadata import version
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
-from shikiri_yaku.adapters.github_releases import GitHubReleases
 from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import InstanceInstallFiles
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
@@ -62,7 +58,6 @@ from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.reconciler import ResolveReconciler
-from shikiri_yaku.app.release_fetch import fetch_wheel, newest
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler
@@ -72,7 +67,6 @@ from shikiri_yaku.app.stats import Measures, Stats
 from shikiri_yaku.app.status import Status
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.app.tool_check import ToolCheck
-from shikiri_yaku.domain.releases import ReleaseError, is_newer
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
 from shikiri_yaku.domain.signal import OPERATOR_SCOPE
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
@@ -118,10 +112,8 @@ from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import CompositionError, ReleaseSourceError
+from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings, SettingsError, load_settings
-from shikiri_yaku.update import Host, Layout, default_store, pause, run_command, run_update
-from shikiri_yaku.update.host import FAILED, PROGRAM
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -147,7 +139,6 @@ if TYPE_CHECKING:
         InstallToolCheck,
         Outbox,
         ReasonerRung,
-        ReleaseSource,
         Reporter,
         Reshower,
         RetryLog,
@@ -157,7 +148,7 @@ if TYPE_CHECKING:
         StartLog,
         WaitLog,
     )
-    from shikiri_yaku.settings import Component, ReasonerSettings, Settings, UpdateSettings
+    from shikiri_yaku.settings import Component, ReasonerSettings, Settings
 
 
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
@@ -889,54 +880,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         forget_topic,
         commands=ProcessCommandRunner(),
         cli_settings=settings,
-        update_host=partial(update_this_host, settings.update),
     )
-
-
-def update_this_host(
-    numbers: UpdateSettings,
-    wheel: Path | None,
-    rollback: bool,  # noqa: FBT001 -- the CLI passes it by position
-    check: bool,  # noqa: FBT001 -- the CLI passes it by position
-    home: Path,
-) -> int:
-    """Run `shikiri-yaku update` on this host, with the user's release store and the runner."""
-    host = Host(run_command, pause, Layout(default_store(), home), numbers)
-    if wheel is not None or rollback:
-        return run_update(host, wheel, rollback=rollback)
-    source = GitHubReleases(numbers.release_timeout_s, numbers.release_max_bytes)
-    return update_to_newest(host, source, version(PROGRAM), check=check)
-
-
-def update_to_newest(host: Host, source: ReleaseSource, installed: str, *, check: bool) -> int:
-    """Install the newest release, or with check only report it; return the exit code."""
-    try:
-        release = newest(source)
-    except (ReleaseError, ReleaseSourceError) as error:
-        return _warn(str(error))
-    if check:
-        status = (
-            "an update is available" if is_newer(release, installed) else "no update is available"
-        )
-        sys.stdout.write(f"installed {installed}\nnewest {release.version}\n{status}\n")
-        return 0
-    if not is_newer(release, installed):
-        sys.stdout.write(f"{installed} is the newest release; nothing to update\n")
-        return 0
-    try:
-        wheel = fetch_wheel(source, release)
-    except (ReleaseError, ReleaseSourceError) as error:
-        return _warn(str(error))
-    with TemporaryDirectory() as folder:
-        path = Path(folder) / wheel.name
-        path.write_bytes(wheel.data)
-        sys.stdout.write(f"updating {installed} to {release.version}\n")
-        return run_update(host, path, rollback=False)
-
-
-def _warn(message: str) -> int:
-    sys.stderr.write(f"{message}\n")
-    return FAILED
 
 
 def stats_measures(directory: Path) -> Measures:
