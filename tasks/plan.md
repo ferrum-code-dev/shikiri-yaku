@@ -2217,6 +2217,76 @@ Acceptance criteria:
   pre-releases, no usable release, checksum match and mismatch, missing assets, already newest, `--check`.
 * The gate passes.
 
+### E31. The version comes from the git tag (normal)
+
+1. `pyproject.toml`: `dynamic = ["version"]`, `hatch-vcs` in `[build-system].requires`,
+   `[tool.hatch.version] source = "vcs"` with a `fallback-version` of `0.0.0`, any generated version file excluded
+   from git. Run `uv lock` once and commit its result.
+2. `ci.yml` and `release.yml` checkouts use `fetch-depth: 0`. The sdist carries the version, so a wheel built from
+   the sdist (no `.git`) has the same version.
+3. Whatever reads `shikiri-yaku --version` or the Shikiru version (`doctor`'s compatibility check) accepts a
+   development version: it takes the release segment (`0.1.4.dev3+gabcdef` is `0.1.4`). Table test:
+   `0.1.4`, `0.1.4.dev3+gabc`, `1.0.0rc1`.
+4. A test clones this repository into a temporary directory (`git clone --local`), tags the clone `v9.9.9`
+   and runs `uv build --wheel` there; the wheel is named `shikiri_yaku-9.9.9-...`. It is skipped when `git` or
+   `uv` is missing and never uses the network. Nothing else reads `[project].version`.
+
+Acceptance criteria:
+* The four points above, with their tests. The gate passes.
+
+### E32. Remove `update`, the release scripts and the pins (normal)
+
+1. Delete `src/shikiri_yaku/update/` (keeping what E34 moves), the `update` command and its registration, the
+   `ReleaseSource` port and adapter, `scripts/release.py`, `scripts/wait_for_ci.py`, their tests and ruff
+   entries, and the `release` poe task. `shikiri-yaku restart` stays. The import-linter contract for `update/` goes.
+2. README: install `uv tool install shikiri-yaku`; update `uv tool upgrade shikiri-yaku`, then
+   `shikiri-yaku restart`; go back `uv tool install shikiri-yaku==<version>`. Until the first PyPI release add one
+   sentence: install the wheel from the latest release on the Releases page. No version number appears in the
+   README; the Shikiru prerequisite is `uv tool install shikiru`.
+3. CONTRIBUTING "Releasing": push the tag on a commit of `main` with green CI
+   (`git tag v<version> && git push origin v<version>`); the workflow does the rest; a failed run is fixed on
+   `main` and a new tag is cut (a tag is not moved).
+4. Remove every other mention of `update --wheel`, `poe deploy`, `poe rollback`, `SHA256SUMS`, the release store
+   and `current` outside `tasks/`. `tasks/drills.md` loses the drills of the removed commands.
+
+Acceptance criteria:
+* Nothing imports the removed code; import-linter and the gate pass.
+
+### E33. The release workflow: check CI once, publish to PyPI (normal)
+
+1. `.github/workflows/release.yml` (trigger: tag `v*`): job `check` (`contents: read`, `actions: read`) fails
+   unless the tagged commit is an ancestor of `origin/main` (full-history checkout) and
+   `gh run list --workflow ci.yml --commit "$GITHUB_SHA" --json conclusion` contains a `success` (inline shell,
+   no script, no waiting; the message says "CI has not passed on this commit; wait for it and push the tag
+   again").
+2. Job `build` (needs `check`): `uv build`, upload `dist/` as an artifact.
+3. Job `pypi` (needs `build`): environment `pypi`, `permissions: id-token: write` for this job only, publishes
+   with the pinned `pypa/gh-action-pypi-publish` (trusted publishing, no secret).
+4. Job `github` (needs `pypi`, `contents: write`): downloads the artifact, writes the notes with
+   `scripts/release_notes.py`, creates the release with the wheel and sdist (no `SHA256SUMS`), `--prerelease` below
+   1.0.
+5. CONTRIBUTING "Releasing" lists the one-time owner setup: on pypi.org a pending publisher (project
+   `shikiri-yaku`, owner `ferrum-code-dev`, repository `shikiri-yaku`, workflow `release.yml`, environment `pypi`)
+   and on GitHub the environment `pypi`.
+
+Acceptance criteria:
+* The workflow parses as YAML, every `uses:` is pinned to a full SHA with its version in a comment, tokens only
+  where listed. It cannot run here; say so in the report. The gate passes.
+
+### E34. Back up the journal before a migration (normal)
+
+1. `journal/open.py` (the place that opens and migrates a journal) copies the journal with `copy_journal`
+   (`journal/backup.py`) to `<product>/backups/journal-schema<N>.db` before it migrates an existing journal to a
+   newer schema, keeps the three newest, then migrates. A failed backup stops the migration with the cause;
+   nothing is migrated. A new journal is not backed up. The settings hold the number of kept backups.
+2. `JournalTooNewError` names the newest backup file when one exists and says to copy it back to restore.
+3. The code that did this in the deploy script (`update/backup.py`, `update/`) is deleted.
+
+Acceptance criteria:
+* Tests with real SQLite in a temporary directory: a migration creates the backup with the old contents; the
+  fourth backup removes the oldest; no backup for a fresh journal; a failing backup (read-only directory) leaves
+  the journal unmigrated; the too-new error names the backup. The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
