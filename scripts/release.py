@@ -1,9 +1,9 @@
-"""Cuts a release from this checkout: bumps the version, commits it, pushes main and tags it.
+"""Cuts a release from this checkout using the latest reachable version tag.
 
 `uv run poe release patch|minor|major|<x.y.z> [--dry-run]` refuses unless the branch is main, the
-work tree is clean, HEAD equals origin/main, the new version is newer than the current one and its
-tag does not exist. It then rewrites the version in pyproject.toml, in the project's own entry of
-uv.lock and in every whole-token occurrence of the old version in README.md, commits
+work tree is clean, HEAD equals origin/main, the new version is newer than the latest reachable
+version tag and its tag does not exist. It then rewrites whole-token occurrences of the old version
+in README.md and commits
 `chore: release <version>`, pushes main, tags `v<version>` and pushes the tag. It does not wait for
 the release workflow, which waits for CI and publishes. `--dry-run` runs the checks and prints every
 change and command, and commits, pushes and tags nothing. Commands go through an injected runner, so
@@ -17,7 +17,6 @@ import re
 import shlex
 import subprocess
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -28,10 +27,7 @@ if TYPE_CHECKING:
 REMOTE: Final = "origin"
 MAIN: Final = "main"
 TAG_PREFIX: Final = "v"
-PROJECT_FILE: Final = "pyproject.toml"
-LOCK_FILE: Final = "uv.lock"
 README_FILE: Final = "README.md"
-PROJECT_NAME: Final = "shikiri-yaku"
 REPOSITORY: Final = "ferrum-code-dev/shikiri-yaku"
 RUNS_URL: Final = f"https://github.com/{REPOSITORY}/actions/workflows/release.yml"
 RELEASE_SUBJECT: Final = "chore: release {version}"
@@ -41,6 +37,7 @@ MINOR: Final = "minor"
 MAJOR: Final = "major"
 BUMPS: Final = frozenset({PATCH, MINOR, MAJOR})
 VERSION_PATTERN: Final = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+FALLBACK_VERSION: Final = "0.0.0"
 TAIL_LINES: Final = 20
 FAILED: Final = 1
 
@@ -49,6 +46,15 @@ STATUS_ARGV: Final = ("git", "status", "--porcelain")
 FETCH_ARGV: Final = ("git", "fetch", "--tags", REMOTE)
 HEAD_ARGV: Final = ("git", "rev-parse", "HEAD")
 ORIGIN_MAIN_ARGV: Final = ("git", "rev-parse", f"{REMOTE}/{MAIN}")
+VERSION_TAGS_ARGV: Final = (
+    "git",
+    "tag",
+    "--merged",
+    "HEAD",
+    "--list",
+    f"{TAG_PREFIX}[0-9]*",
+    "--sort=-version:refname",
+)
 
 
 @dataclass(frozen=True)
@@ -101,25 +107,6 @@ def next_version(current: Version, request: str) -> Version:
     return explicit
 
 
-def _replace(text: str, pattern: str, replacement: str, filename: str, flags: int = 0) -> str:
-    new_text, count = re.subn(pattern, replacement, text, count=1, flags=flags)
-    if count == 0:
-        message = f"{filename} does not hold the current version; change it by hand"
-        raise ReleaseError(message)
-    return new_text
-
-
-def set_project_version(text: str, old: str, new: str) -> str:
-    pattern = rf'^version = "{re.escape(old)}"$'
-    return _replace(text, pattern, f'version = "{new}"', PROJECT_FILE, re.MULTILINE)
-
-
-def set_lock_version(text: str, old: str, new: str) -> str:
-    """Change the version line of the project's own package entry, and no other line."""
-    pattern = rf'(^name = "{PROJECT_NAME}"\nversion = "){re.escape(old)}(")'
-    return _replace(text, pattern, rf"\g<1>{new}\g<2>", LOCK_FILE, re.MULTILINE)
-
-
 def set_readme_versions(text: str, old: str, new: str) -> str:
     """Change each whole-token occurrence; `10.0.1.9` is another version and stays."""
     return re.sub(rf"(?<![\d.]){re.escape(old)}(?!\d|\.\d)", new, text)
@@ -162,9 +149,11 @@ def check_release_point(run: Runner, checkout: Path) -> None:
         raise ReleaseError(message)
 
 
-def current_version_text(checkout: Path) -> str:
-    project = tomllib.loads((checkout / PROJECT_FILE).read_text(encoding="utf-8"))
-    return str(project.get("project", {}).get("version", ""))
+def current_version_text(run: Runner, checkout: Path) -> str:
+    for tag in _read(run, checkout, VERSION_TAGS_ARGV).stdout.splitlines():
+        if tag.startswith(TAG_PREFIX) and parse_version(tag.removeprefix(TAG_PREFIX)) is not None:
+            return tag.removeprefix(TAG_PREFIX)
+    return FALLBACK_VERSION
 
 
 def release(run: Runner, checkout: Path, request: str, *, dry_run: bool) -> int:
@@ -182,10 +171,10 @@ def release(run: Runner, checkout: Path, request: str, *, dry_run: bool) -> int:
 
 def _release(run: Runner, checkout: Path, request: str, *, dry_run: bool) -> str:
     check_release_point(run, checkout)
-    old_text = current_version_text(checkout)
+    old_text = current_version_text(run, checkout)
     current = parse_version(old_text)
     if current is None:
-        message = f"{PROJECT_FILE} has no x.y.z version: {old_text!r}"
+        message = f"no x.y.z version tag is reachable from HEAD: {old_text!r}"
         raise ReleaseError(message)
     new_name = format_version(next_version(current, request))
     tag = f"{TAG_PREFIX}{new_name}"
@@ -194,7 +183,7 @@ def _release(run: Runner, checkout: Path, request: str, *, dry_run: bool) -> str
         raise ReleaseError(message)
     _rewrite(checkout, old_text, new_name, dry_run=dry_run)
     commands = (
-        ("git", "add", PROJECT_FILE, LOCK_FILE, README_FILE),
+        ("git", "add", README_FILE),
         ("git", "commit", "-m", RELEASE_SUBJECT.format(version=new_name), "-m", CO_AUTHOR),
         ("git", "push", REMOTE, MAIN),
         ("git", "tag", tag),
@@ -206,23 +195,17 @@ def _release(run: Runner, checkout: Path, request: str, *, dry_run: bool) -> str
 
 
 def _rewrite(checkout: Path, old: str, new: str, *, dry_run: bool) -> None:
-    """Write the three version edits, or only say which files they would change."""
-    edits = {
-        PROJECT_FILE: set_project_version,
-        LOCK_FILE: set_lock_version,
-        README_FILE: set_readme_versions,
-    }
-    for name, edit in edits.items():
-        path = checkout / name
-        original = path.read_text(encoding="utf-8")
-        updated = edit(original, old, new)
-        if updated == original:
-            continue
-        if dry_run:
-            _say(f"would change {name}: {old} -> {new}")
-        else:
-            path.write_text(updated, encoding="utf-8")
-            _say(f"changed {name}: {old} -> {new}")
+    """Write the release references, or only say which files they would change."""
+    path = checkout / README_FILE
+    original = path.read_text(encoding="utf-8")
+    updated = set_readme_versions(original, old, new)
+    if updated == original:
+        return
+    if dry_run:
+        _say(f"would change {README_FILE}: {old} -> {new}")
+    else:
+        path.write_text(updated, encoding="utf-8")
+        _say(f"changed {README_FILE}: {old} -> {new}")
 
 
 def run_command(argv: Sequence[str], cwd: Path) -> CommandResult:

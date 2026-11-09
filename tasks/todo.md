@@ -227,7 +227,7 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E28. One-command release
   - [x] E29. `update --wheel` replaces `poe deploy`
   - [x] E30. `update` downloads the newest release
-  - [ ] E31. The version comes from the git tag
+  - [x] E31. The version comes from the git tag
   - [ ] E32. Remove `update`, the release scripts and the pins
   - [ ] E33. The release workflow: check CI once, publish to PyPI
   - [ ] E34. Back up the journal before a migration

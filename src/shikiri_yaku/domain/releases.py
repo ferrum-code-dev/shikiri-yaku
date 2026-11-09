@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 SUMS_NAME: Final = "SHA256SUMS"
 # keep: the tag form the release workflow publishes; a tag that does not match is not a release
 _TAG: Final = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
-_VERSION: Final = re.compile(r"([0-9]+)\.([0-9]+)\.([0-9]+)")
+_VERSION: Final = re.compile(
+    r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:(?:a|b|rc)[0-9]+)?(?:\.dev[0-9]+)?(?:\+[0-9a-zA-Z.]+)?"
+)
 # keep: the line sha256sum writes, in text mode ("  ") or binary mode (" *")
 _SUMS_LINE: Final = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
 
@@ -64,12 +66,20 @@ def newest_release(releases: Iterable[Release]) -> Release | None:
 def is_newer(release: Release, installed: str) -> bool:
     """Whether the release is a higher version than the installed one.
 
-    An installed version that is not a plain number triple is treated as older, so an update is
-    offered rather than silently skipped.
+    The installed version counts by its release segment, so a development build of 0.1.4 is 0.1.4.
+    One with no release segment is treated as older, so an update is offered rather than skipped.
     """
     candidate = _numbers(release.tag, _TAG)
-    current = _numbers(installed, _VERSION)
+    current = release_numbers(installed)
     return candidate is not None and (current is None or candidate > current)
+
+
+def release_numbers(version: str) -> tuple[int, int, int] | None:
+    """Return the X.Y.Z release segment of a version, or None when it has none.
+
+    A pre-release, development or local suffix is ignored: 0.1.4.dev3+gabc gives (0, 1, 4).
+    """
+    return _numbers(version, _VERSION)
 
 
 def asset_named(release: Release, name: str) -> Asset:

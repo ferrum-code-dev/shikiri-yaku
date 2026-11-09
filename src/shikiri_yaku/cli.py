@@ -30,6 +30,7 @@ from shikiri_yaku.cli_render import (
     restart_document,
     stats_document,
 )
+from shikiri_yaku.domain.releases import release_numbers
 from shikiri_yaku.instance import (
     InstanceLockedError,
     InstanceLockError,
@@ -84,7 +85,6 @@ _BORDER: Final = "#3d4654"
 _ALERT: Final = "#e3a0a0"
 _SHIKIRU_CHECK: Final = "Shikiru version"
 _SHIKIRU_VERSION_FLAG: Final = "--version"
-_DOTTED_VERSION: Final = re.compile(r"\d+\.\d+\.\d+")
 _LOWEST_SUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_SUPPORTED.split("."))
 _FIRST_UNSUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_UNSUPPORTED.split("."))
 
@@ -500,9 +500,9 @@ async def _shikiru_version_check(commands: CommandRunner, timeout_s: float) -> _
         exited = f"{SHIKIRU_EXECUTABLE} {_SHIKIRU_VERSION_FLAG} exited with {result.returncode}"
         return _Check(_SHIKIRU_CHECK, f"{exited}; {range_text}")
     found = result.stdout.strip()
-    if re.fullmatch(_DOTTED_VERSION, found) is None:
+    number = release_numbers(found)
+    if number is None:
         return _Check(_SHIKIRU_CHECK, f"found no version in its output; {range_text}")
-    number = tuple(int(part) for part in found.split("."))
     if _LOWEST_SUPPORTED <= number < _FIRST_UNSUPPORTED:
         return _Check(_SHIKIRU_CHECK, status=found)
     return _Check(_SHIKIRU_CHECK, f"found {found}; {range_text}")

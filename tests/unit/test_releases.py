@@ -14,6 +14,7 @@ from shikiri_yaku.domain.releases import (
     expected_digest,
     is_newer,
     newest_release,
+    release_numbers,
 )
 from tests.support.releases import release
 
@@ -52,13 +53,31 @@ def test_the_newest_usable_release_is_picked(releases: list[Release], expected: 
         pytest.param("v0.1.10", "0.1.9", True, id="by-number"),
         pytest.param("v0.1.4", "0.1.4", False, id="already-newest"),
         pytest.param("v0.1.4", "0.1.10", False, id="installed-is-newer"),
-        pytest.param("v0.1.4", "0.1.4.dev1", True, id="unreadable-installed-is-older"),
+        pytest.param("v0.1.4", "unknown", True, id="unreadable-installed-is-older"),
+        pytest.param("v0.1.4", "0.1.4.dev3+gabc", False, id="development-build-of-the-release"),
+        pytest.param("v0.1.5", "0.1.4.dev3+gabc", True, id="development-build-is-older"),
     ],
 )
 def test_an_update_is_offered_only_for_a_higher_version(
     tag: str, installed: str, *, newer: bool
 ) -> None:
     assert is_newer(release(tag), installed) is newer
+
+
+@pytest.mark.parametrize(
+    ("version", "numbers"),
+    [
+        pytest.param("0.1.4", (0, 1, 4), id="release"),
+        pytest.param("0.1.4.dev3+gabc", (0, 1, 4), id="development-build"),
+        pytest.param("1.0.0rc1", (1, 0, 0), id="pre-release"),
+        pytest.param("0.1", None, id="not-three-numbers"),
+        pytest.param("shikiru is fine", None, id="text"),
+    ],
+)
+def test_the_release_segment_of_a_version_is_its_three_numbers(
+    version: str, numbers: tuple[int, int, int] | None
+) -> None:
+    assert release_numbers(version) == numbers
 
 
 def test_the_digest_is_read_from_the_line_for_the_wheel() -> None:

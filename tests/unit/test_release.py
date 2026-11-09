@@ -14,10 +14,12 @@ OLD: Final = "0.1.9"
 NEW: Final = "0.1.10"
 SHA: Final = "9ec6819d2f0b4c1e8a7f3b5d6e9c0a1b2c3d4e5f"
 OTHER_SHA: Final = "1111111111111111111111111111111111111111"
-PYPROJECT: Final = f'[project]\nname = "shikiri-yaku"\nversion = "{OLD}"\n\n[tool.x]\nkey = 1\n'
+PROJECT_FILE: Final = "pyproject.toml"
+LOCK_FILE: Final = "uv.lock"
+PYPROJECT: Final = '[project]\nname = "shikiri-yaku"\ndynamic = ["version"]\n'
 LOCK: Final = (
     '[[package]]\nname = "other"\nversion = "0.1.9"\n\n'
-    f'[[package]]\nname = "shikiri-yaku"\nversion = "{OLD}"\nsource = {{ editable = "." }}\n'
+    '[[package]]\nname = "shikiri-yaku"\nsource = { editable = "." }\n'
 )
 README: Final = (
     f"uv tool install https://github.com/ferrum-code-dev/shikiri-yaku/releases/download/v{OLD}/"
@@ -27,7 +29,7 @@ README: Final = (
 )
 MUTATING: Final = ("add", "commit", "push")
 RELEASE_SEQUENCE: Final = (
-    ("git", "add", "pyproject.toml", "uv.lock", "README.md"),
+    ("git", "add", "README.md"),
     ("git", "commit", "-m", "chore: release 0.1.10", "-m", release.CO_AUTHOR),
     ("git", "push", "origin", "main"),
     ("git", "tag", "v0.1.10"),
@@ -43,6 +45,7 @@ class FakeGit:
     status: str = ""
     head: str = SHA
     origin_main: str = SHA
+    version_tags: str = f"v{OLD}\n"
     tags: str = ""
     failing: tuple[str, ...] = ()
     calls: list[tuple[str, ...]] = field(default_factory=list)
@@ -55,6 +58,8 @@ class FakeGit:
         return release.CommandResult(0, self._answer(command), "")
 
     def _answer(self, command: tuple[str, ...]) -> str:
+        if command == release.VERSION_TAGS_ARGV:
+            return self.version_tags
         if command[:3] == ("git", "tag", "--list"):
             return self.tags
         answers: dict[tuple[str, ...], str] = {
@@ -74,15 +79,15 @@ class FakeGit:
 
 
 def _write_checkout(path: Path) -> None:
-    (path / release.PROJECT_FILE).write_text(PYPROJECT, encoding="utf-8")
-    (path / release.LOCK_FILE).write_text(LOCK, encoding="utf-8")
+    (path / PROJECT_FILE).write_text(PYPROJECT, encoding="utf-8")
+    (path / LOCK_FILE).write_text(LOCK, encoding="utf-8")
     (path / release.README_FILE).write_text(README, encoding="utf-8")
 
 
 def _read_checkout(path: Path) -> tuple[str, str, str]:
     return (
-        (path / release.PROJECT_FILE).read_text(encoding="utf-8"),
-        (path / release.LOCK_FILE).read_text(encoding="utf-8"),
+        (path / PROJECT_FILE).read_text(encoding="utf-8"),
+        (path / LOCK_FILE).read_text(encoding="utf-8"),
         (path / release.README_FILE).read_text(encoding="utf-8"),
     )
 
@@ -132,7 +137,7 @@ def test_a_refused_release_commits_pushes_and_tags_nothing(
     assert _read_checkout(tmp_path) == before
 
 
-def test_a_release_rewrites_the_three_files_then_commits_pushes_and_tags(tmp_path: Path) -> None:
+def test_a_release_uses_the_tag_then_updates_release_references_and_tags(tmp_path: Path) -> None:
     _write_checkout(tmp_path)
     git = FakeGit()
 
@@ -141,9 +146,8 @@ def test_a_release_rewrites_the_three_files_then_commits_pushes_and_tags(tmp_pat
     assert code == 0
     assert tuple(git.mutations()) == RELEASE_SEQUENCE
     project, lock, readme = _read_checkout(tmp_path)
-    assert f'version = "{NEW}"' in project
-    assert 'version = "0.1.9"' in lock.split('name = "shikiri-yaku"')[0]
-    assert f'version = "{NEW}"' in lock.split('name = "shikiri-yaku"')[1]
+    assert project == PYPROJECT
+    assert lock == LOCK
     assert f"v{NEW}/shikiri_yaku-{NEW}-py3" in readme
 
 
@@ -168,23 +172,6 @@ def test_a_failed_push_stops_before_the_tag(tmp_path: Path) -> None:
 
     assert code == release.FAILED
     assert tuple(git.mutations()) == RELEASE_SEQUENCE[:3]
-
-
-def test_the_project_version_changes_and_nothing_else() -> None:
-    assert release.set_project_version(PYPROJECT, OLD, NEW) == PYPROJECT.replace(OLD, NEW)
-
-
-def test_the_lock_changes_only_the_project_entry() -> None:
-    expected = LOCK.replace(
-        f'name = "shikiri-yaku"\nversion = "{OLD}"', f'name = "shikiri-yaku"\nversion = "{NEW}"'
-    )
-
-    assert release.set_lock_version(LOCK, OLD, NEW) == expected
-
-
-def test_a_lock_without_the_project_entry_is_refused() -> None:
-    with pytest.raises(release.ReleaseError):
-        release.set_lock_version('[[package]]\nname = "other"\nversion = "0.1.9"\n', OLD, NEW)
 
 
 @pytest.mark.parametrize(
