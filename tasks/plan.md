@@ -2287,6 +2287,23 @@ Acceptance criteria:
   fourth backup removes the oldest; no backup for a fresh journal; a failing backup (read-only directory) leaves
   the journal unmigrated; the too-new error names the backup. The gate passes.
 
+### E35. A failed journal backup leaves no file that looks like a backup (normal)
+
+`journal/backup.py` copies straight to `journal-schema<N>.db`. A copy that fails part way leaves a partial file
+with the final name, and the newest-backup lookup (used by the `JournalTooNewError` message and by the pruning)
+counts it, so the message can send the owner to a broken file.
+
+1. `copy_journal` writes to a temporary name in the same folder (`journal-schema<N>.db.partial`) and renames it to
+   the final name only when SQLite's backup has completed; on any error it deletes the temporary file. Stale
+   `*.partial` files from earlier crashes are ignored by the lookup and removed by the pruning.
+2. If the final name already exists, it is replaced atomically by the rename (same behavior as today).
+
+Acceptance criteria:
+* Tests with real SQLite in a temporary directory: a backup that raises part way leaves no
+  `journal-schema<N>.db` and no `.partial` file; a stale `.partial` file is not returned as the newest backup and is
+  removed by the next successful backup; a normal backup still produces the named file with the old contents.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
