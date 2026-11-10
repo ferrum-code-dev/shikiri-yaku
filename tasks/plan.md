@@ -2662,6 +2662,29 @@ Acceptance criteria:
   and that `contract` has no `if` on the event.
 * The pin test passes. The gate passes. Nothing is pushed by the task.
 
+### E49. The daily contract check runs only after a Shikiru release (normal)
+
+E48 runs the contract job every night at 01:00 UTC. It should run on a scheduled run only when Shikiru
+published a release in the last 24 hours; pushes and pull requests always run it. Change `ci.yml` and the
+docs only. No secret, no trigger from the Shikiru repository.
+
+1. New job `shikiru-release` ("Latest Shikiru release") on `ubuntu-24.04`, with a short timeout, that runs
+   on every event: `gh release view --repo ferrum-code-dev/shikiru --json tagName,publishedAt` (`GH_TOKEN`
+   from `github.token`), outputs `tag` and `fresh`; `fresh` is `true` when `publishedAt` is less than 24
+   hours ago (the window is a named value in the step). It writes the tag and its age to the job summary.
+2. `contract` gets `needs: shikiru-release` and `if: github.event_name != 'schedule' ||
+   needs.shikiru-release.outputs.fresh == 'true'`; it uses the `tag` output for its checkout of Shikiru
+   instead of looking the release up itself (remove its own lookup step).
+3. `check` and the concurrency group stay as E48 left them. A scheduled run with no fresh release is green
+   with `contract` skipped.
+4. `CONTRIBUTING.md`: the sentence added by E48 says the daily run happens only when Shikiru released in the
+   last 24 hours.
+
+Acceptance criteria:
+* Workflow tests check the new job, the `needs` and the `if` of `contract`, and that the lookup step is gone
+  from `contract`.
+* The pin test passes. The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
