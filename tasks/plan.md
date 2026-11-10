@@ -2374,6 +2374,31 @@ Acceptance criteria:
   `SETUPTOOLS_SCM_PRETEND_VERSION` and no tag yields a wheel named with that version.
 * The gate passes. Nothing is pushed or released by the task.
 
+### E39. Support every newer Shikiru, with a minimum version only (normal)
+
+`doctor` fails for a Shikiru above `SHIKIRU_FIRST_UNSUPPORTED` (now 0.3.0) although the contract with Shikiru
+(its commands and MCP tools) has not changed. The version is not the contract. See "Compatibility with
+Shikiru" in `docs/design.md`.
+
+1. Remove `SHIKIRU_FIRST_UNSUPPORTED` and the upper bound from the version check in `cli.py`. The check fails
+   only when the version is below `SHIKIRU_FIRST_SUPPORTED` (rename it `SHIKIRU_MINIMUM` if that reads better
+   everywhere it is used); its messages name the minimum, not a range. The doctor report still shows the
+   found version.
+2. Look at the Shikiru link check in `doctor`. If it already fails when a tool the Operator calls is missing
+   or its answer cannot be read, say so in the report with the code that does it. If it does not, make it
+   fail in that case with the smallest change (it already lists the tools), using the tool names the adapter
+   already declares.
+3. Update `README.md` (the sentence about the range), `CONTRIBUTING.md` if it mentions the range, and the
+   comment on the constant in `settings.py`.
+
+Acceptance criteria:
+* Table test of the version check: below the minimum fails; the minimum, a later patch, a later minor and a
+  later major pass; unreadable output and a failing command still fail as today.
+* A test with a fake Shikiru client shows the link check failing when a required tool is missing.
+* No reference to an upper bound or "up to but not including" remains in `src`, `tests`, `README.md`,
+  `CONTRIBUTING.md`.
+* The gate passes.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
