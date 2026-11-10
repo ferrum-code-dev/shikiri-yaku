@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, ListToolsResult
 
 from shikiri_yaku.bootstrap import project_jobs, shikiru_client
 from shikiri_yaku.journal import CursorStore, Database, SignalStore
@@ -60,6 +60,9 @@ class _Session:
             yield self
         finally:
             self.active = False
+
+    async def list_tools(self) -> ListToolsResult:
+        return ListToolsResult(tools=[])
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any], read_timeout_seconds: timedelta

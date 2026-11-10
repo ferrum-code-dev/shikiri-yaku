@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Sequence
     from pathlib import Path
 
-    from mcp.types import CallToolResult
+    from mcp.types import CallToolResult, ListToolsResult
 
     from shikiri_yaku.ports import Clock, CommandRunner
 
@@ -41,12 +41,29 @@ BACKOFF_FACTOR = 2
 SHIKIRU_STATE_DIRECTORY = ".shikiru"
 
 
+# keep: every tool the verbs below call; doctor fails when Shikiru stops offering one of them.
+DECLARED_TOOLS: Final = frozenset(
+    {
+        "status",
+        "wait_for_events",
+        "list_escalations",
+        "get_escalation",
+        "list_tasks",
+        "get_task",
+        "resolve_escalation",
+        "submit_task",
+    }
+)
+
+
 class ToolSession(Protocol):
-    """The one call of an initialized MCP session that the client uses."""
+    """The calls of an initialized MCP session that the client uses."""
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any], read_timeout_seconds: timedelta
     ) -> CallToolResult: ...
+
+    async def list_tools(self) -> ListToolsResult: ...
 
 
 type Connector = Callable[[], AbstractAsyncContextManager[ToolSession]]
@@ -246,15 +263,32 @@ def _accepted(ack: Ack) -> Ack:
 
 
 async def probe_link(connect: Connector, timeout_s: float) -> None:
-    """Bring the link up once and ask `status`, for `doctor`; raises a ShikiruError if it fails."""
+    """Bring the link up once and check it, for `doctor`.
+
+    It checks that Shikiru offers every declared tool and that the reads without arguments
+    answer in a shape the client reads. Raises a ShikiruError if any of it fails.
+    """
     try:
         async with asyncio.timeout(timeout_s), connect() as session:
+            await _check_offered(session)
             await _invoke(session, "status", {}, EngineStatus, timeout_s)
+            await _invoke(session, "list_escalations", {}, _Result[list[EscalationView]], timeout_s)
+            await _invoke(
+                session, "list_tasks", {"statuses": None}, _Result[list[ShikiruTask]], timeout_s
+            )
     except ShikiruError:
         raise
     except Exception as error:
         message = f"the link did not come up: {_reason(error)}"
         raise ShikiruLinkDownError(message) from error
+
+
+async def _check_offered(session: ToolSession) -> None:
+    offered = {tool.name for tool in (await session.list_tools()).tools}
+    absent = sorted(DECLARED_TOOLS - offered)
+    if absent:
+        message = f"Shikiru does not offer {', '.join(absent)}"
+        raise ShikiruProtocolError(message)
 
 
 # keep: a group's own text names only the group, not the cause, so its leaves' texts are used

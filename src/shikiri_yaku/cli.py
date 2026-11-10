@@ -57,8 +57,7 @@ from shikiri_yaku.service import (
 from shikiri_yaku.settings import (
     NAME_PATTERN,
     SHIKIRU_EXECUTABLE,
-    SHIKIRU_FIRST_SUPPORTED,
-    SHIKIRU_FIRST_UNSUPPORTED,
+    SHIKIRU_MINIMUM,
     CliSettings,
     SettingsError,
     load_settings,
@@ -85,8 +84,7 @@ _BORDER: Final = "#3d4654"
 _ALERT: Final = "#e3a0a0"
 _SHIKIRU_CHECK: Final = "Shikiru version"
 _SHIKIRU_VERSION_FLAG: Final = "--version"
-_LOWEST_SUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_SUPPORTED.split("."))
-_FIRST_UNSUPPORTED: Final = tuple(int(part) for part in SHIKIRU_FIRST_UNSUPPORTED.split("."))
+_MINIMUM: Final = tuple(int(part) for part in SHIKIRU_MINIMUM.split("."))
 
 
 class Lifecycle(Protocol):
@@ -440,25 +438,23 @@ def _doctor(directory: Path, compose: Compose, commands: CommandRunner, *, as_js
 
 
 async def _shikiru_version_check(commands: CommandRunner, timeout_s: float) -> _Check:
-    range_text = (
-        f"supported {SHIKIRU_FIRST_SUPPORTED} up to but not including {SHIKIRU_FIRST_UNSUPPORTED}"
-    )
+    needed = f"needs Shikiru {SHIKIRU_MINIMUM} or later"
     try:
         result = await commands.run(
             [SHIKIRU_EXECUTABLE, _SHIKIRU_VERSION_FLAG], timeout_s=timeout_s
         )
     except CommandError as error:
-        return _Check(_SHIKIRU_CHECK, f"{error}; {range_text}")
+        return _Check(_SHIKIRU_CHECK, f"{error}; {needed}")
     if result.returncode != 0:
         exited = f"{SHIKIRU_EXECUTABLE} {_SHIKIRU_VERSION_FLAG} exited with {result.returncode}"
-        return _Check(_SHIKIRU_CHECK, f"{exited}; {range_text}")
+        return _Check(_SHIKIRU_CHECK, f"{exited}; {needed}")
     found = result.stdout.strip()
     number = release_numbers(found)
     if number is None:
-        return _Check(_SHIKIRU_CHECK, f"found no version in its output; {range_text}")
-    if _LOWEST_SUPPORTED <= number < _FIRST_UNSUPPORTED:
+        return _Check(_SHIKIRU_CHECK, f"found no version in its output; {needed}")
+    if number >= _MINIMUM:
         return _Check(_SHIKIRU_CHECK, status=found)
-    return _Check(_SHIKIRU_CHECK, f"found {found}; {range_text}")
+    return _Check(_SHIKIRU_CHECK, f"found {found}; {needed}")
 
 
 def _report(checks: Sequence[_Check], *, as_json: bool) -> int:

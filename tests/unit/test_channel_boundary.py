@@ -46,7 +46,7 @@ class _FakeChannelCheck(ChannelCheck):
 
 class _NoHostCommands(CommandRunner):
     """The runner of the restart verb. doctor and run restart nothing, and the only command doctor
-    runs is the read-only `shikiru --version` probe, which answers in the supported range."""
+    runs is the read-only `shikiru --version` probe, which answers with a version."""
 
     @override
     async def run(

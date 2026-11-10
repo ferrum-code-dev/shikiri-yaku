@@ -16,6 +16,7 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import CallToolResult, TextContent
 
 from shikiri_yaku.adapters.shikiru_mcp import (
+    DECLARED_TOOLS,
     SHIKIRU_STATE_DIRECTORY,
     ShikiruMcpClient,
     probe_link,
@@ -62,6 +63,12 @@ class FakeSession:
         self.replies = replies or {}
         self.calls: list[tuple[str, dict[str, Any], timedelta]] = []
         self.broken = False
+        self.offered: frozenset[str] = DECLARED_TOOLS
+
+    async def list_tools(self) -> types.ListToolsResult:
+        return types.ListToolsResult(
+            tools=[types.Tool(name=name, inputSchema={"type": "object"}) for name in self.offered]
+        )
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any], read_timeout_seconds: timedelta
@@ -564,6 +571,45 @@ def test_an_ack_without_a_field_the_client_reads_is_a_protocol_error(missing: st
             await client.resolve_escalation("E-1", "retry")
 
     _run(session, scenario)
+
+
+def _probe_session() -> FakeSession:
+    return FakeSession(
+        {
+            "status": _reply(_recorded("status")),
+            "list_escalations": _reply(_recorded("list_escalations")),
+            "list_tasks": _reply(_recorded("list_tasks")),
+        }
+    )
+
+
+def test_a_link_offering_every_declared_tool_and_answering_the_reads_passes_the_probe() -> None:
+    asyncio.run(probe_link(FakeLink([_probe_session()]), _CALL_TIMEOUT_S))
+
+
+@pytest.mark.parametrize("absent", sorted(DECLARED_TOOLS))
+def test_a_link_that_does_not_offer_a_declared_tool_fails_the_probe(absent: str) -> None:
+    session = _probe_session()
+    session.offered = DECLARED_TOOLS - {absent}
+
+    async def scenario() -> None:
+        with pytest.raises(ShikiruProtocolError) as raised:
+            await probe_link(FakeLink([session]), _CALL_TIMEOUT_S)
+        assert absent in str(raised.value)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("tool", ["status", "list_escalations", "list_tasks"])
+def test_a_probe_answer_that_cannot_be_read_fails_the_probe(tool: str) -> None:
+    session = _probe_session()
+    session.replies[tool] = _reply({"unexpected": True})
+
+    async def scenario() -> None:
+        with pytest.raises(ShikiruProtocolError):
+            await probe_link(FakeLink([session]), _CALL_TIMEOUT_S)
+
+    asyncio.run(scenario())
 
 
 class _RefusingLink:

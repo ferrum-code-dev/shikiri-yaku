@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING, Any, Final, override
 
 import httpx
 import pytest
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, ListToolsResult, Tool
 from typer.main import get_command
 
 from shikiri_yaku import cli
-from shikiri_yaku.adapters.shikiru_mcp import stdio_connector
+from shikiri_yaku.adapters.shikiru_mcp import DECLARED_TOOLS, stdio_connector
 from shikiri_yaku.adapters.telegram import OTHER_MEMBERS_NOTE
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.bootstrap import adopt_topic, compose, forget_topic, main, stats_measures
@@ -188,8 +188,11 @@ def _token_path_and_lock_broken(home: Path) -> None:
 
 
 class _StatusSession:
+    async def list_tools(self) -> ListToolsResult:
+        return ListToolsResult(tools=[Tool(name=name, inputSchema={}) for name in DECLARED_TOOLS])
+
     async def call_tool(self, name: str, arguments: dict[str, Any], *_ignored: object) -> object:
-        if name in {"wait_for_events", "list_escalations"}:
+        if name in {"wait_for_events", "list_escalations", "list_tasks"}:
             await NapClock().sleep(arguments.get("timeout_s", 0))
             return CallToolResult(content=[], structuredContent={"result": []}, isError=False)
         assert name == "status"
@@ -425,20 +428,21 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
     ("shikiru", "expected"),
     [
         pytest.param(_shikiru_says("0.0.9\n"), 1, id="below-lowest"),
-        pytest.param(_shikiru_says("0.1.0\n"), 0, id="lowest-inclusive"),
-        pytest.param(_shikiru_says("0.1.5\n"), 0, id="inside"),
-        pytest.param(_shikiru_says("0.1.4.dev3+gabc\n"), 0, id="development-build-inside"),
-        pytest.param(_shikiru_says("0.2.0\n"), 0, id="next-minor-inside"),
-        pytest.param(_shikiru_says("0.3.0\n"), 1, id="first-unsupported"),
-        pytest.param(_shikiru_says("1.0.0rc1\n"), 1, id="pre-release-of-a-later-version"),
-        pytest.param(_shikiru_says("0.10.0\n"), 1, id="above-compared-as-numbers"),
+        pytest.param(_shikiru_says("0.1.0\n"), 0, id="the-minimum"),
+        pytest.param(_shikiru_says("0.1.5\n"), 0, id="later-patch"),
+        pytest.param(_shikiru_says("0.1.4.dev3+gabc\n"), 0, id="development-build-of-a-patch"),
+        pytest.param(_shikiru_says("0.2.0\n"), 0, id="later-minor"),
+        pytest.param(_shikiru_says("0.3.0\n"), 0, id="later-minor-0.3"),
+        pytest.param(_shikiru_says("1.0.0\n"), 0, id="later-major"),
+        pytest.param(_shikiru_says("1.0.0rc1\n"), 0, id="pre-release-of-a-later-major"),
+        pytest.param(_shikiru_says("0.10.0\n"), 0, id="later-minor-compared-as-numbers"),
         pytest.param(_shikiru_says("shikiru is fine\n"), 1, id="unparseable-output"),
         pytest.param(_shikiru_says(""), 1, id="empty-output"),
         pytest.param(_shikiru_says("0.1.0\n", returncode=1), 1, id="failing-command"),
         pytest.param(CommandError("shikiru: command not found"), 1, id="cannot-start"),
     ],
 )
-def test_doctor_checks_the_shikiru_version_against_the_supported_range(
+def test_doctor_checks_the_shikiru_version_against_the_minimum(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -451,16 +455,16 @@ def test_doctor_checks_the_shikiru_version_against_the_supported_range(
     assert _failed(capsys.readouterr().out) == (set() if expected == 0 else {"shikiru version"})
 
 
-def test_doctor_json_names_the_shikiru_version_it_found_and_the_range(
+def test_doctor_json_names_the_shikiru_version_it_found_and_the_minimum(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _instance(tmp_path)
 
-    assert _run_doctor(tmp_path, json_output=True, shikiru=_shikiru_says("0.3.0\n")) == 1
+    assert _run_doctor(tmp_path, json_output=True, shikiru=_shikiru_says("0.0.9\n")) == 1
     document = json.loads(capsys.readouterr().out)
     (check,) = [check for check in document["checks"] if check["name"] == "Shikiru version"]
     assert check["passed"] is False
-    assert "0.3.0" in check["detail"]
+    assert "0.0.9" in check["detail"]
     assert "0.1.0" in check["detail"]
 
 

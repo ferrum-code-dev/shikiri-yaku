@@ -1,4 +1,4 @@
-"""Reads the X.Y.Z release segment of a version, as the supported Shikiru range is compared.
+"""Reads the X.Y.Z release segment of a version, as the Shikiru minimum is compared.
 
 Pure: nothing here reads the network or the disk.
 """

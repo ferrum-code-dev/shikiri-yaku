@@ -235,4 +235,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E36. The release notes name the commit and install the exact version
   - [x] E37. Propose the next version
   - [x] E38. The Release workflow starts from a button
-  - [ ] E39. Support every newer Shikiru, with a minimum version only
+  - [x] E39. Support every newer Shikiru, with a minimum version only

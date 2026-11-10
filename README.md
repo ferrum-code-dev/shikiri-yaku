@@ -36,7 +36,7 @@ using the steps below.
 - Python 3.14 and [uv](https://docs.astral.sh/uv/).
 - Shikiru installed and available as `shikiru` on `PATH`. Install
   [Shikiru](https://github.com/ferrum-code-dev/shikiru) with `uv tool install shikiru-cli`. `doctor`
-  fails outside the range of Shikiru versions this release supports, and names that range. Each
+  fails on a Shikiru older than the minimum this release needs, and names that minimum. Each
   configured component must be an existing local Shikiru project directory, one that `shikiru init`
   has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
 - A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
