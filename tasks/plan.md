@@ -115,6 +115,47 @@ Finish tracker hygiene after all documentation changes. Keep the existing implem
 - Final diff review confirms production behavior, prompts, public interfaces, SQL/migrations, dependencies, assertions and gate enforcement are unchanged, and reports any unresolved mismatch or unavailable live verification.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+## Planned work: README readability
+
+R10 and R11 replace T-126. They keep README.md as the complete user guide while making its
+existing instructions easier to scan. They change documentation only. Preserve factual behavior,
+commands, settings, safety limits and recovery steps; use the implementation as the source when
+prose is unclear. Use the concise structure of the Shikiru README as a reference, not content to
+copy. Each task changes only its own checklist entry in tasks/todo.md and runs `uv run poe check`.
+
+### R10. Condense setup and reference guidance (normal)
+
+Restructure the introduction, installation, first-run, configuration reference, command-line and
+chat-command sections of README.md. Replace long prose with short paragraphs, lists and compact
+tables where they improve scanning. Preserve every supported prerequisite, command form, setting,
+default, Telegram requirement and Reasoner instruction. Do not alter implementation, examples'
+meaning or operational claims. Keep this change near 300 lines; leave message handling, service
+operation, recovery, limits and contributor guidance to R11.
+
+## Acceptance criteria
+
+- README.md presents the product purpose, prerequisites, installation, instance creation, configuration, command line and chat commands in concise, scannable sections without omitting supported instructions.
+- All documented TOML keys, defaults, command syntax, Telegram requirements and Reasoner ladder syntax remain consistent with the implementation.
+- The change is limited to README.md and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### R11. Condense operations, recovery and safety guidance (normal)
+
+After R10, restructure the remaining README.md sections covering questions, approvals, automatic
+actions, service operation, applying changes, diagnostics, topic recovery, local state, limits and
+contributor validation. Use concise prose, lists and tables while retaining every actionable
+instruction and safety boundary. Recheck the whole README for consistent navigation and retained
+links. Do not alter runtime behavior or perform live service, network or secret operations. Keep
+this change near 300 lines.
+
+## Acceptance criteria
+
+- README.md presents approvals, automatic actions, service operation, recovery, local state, limits and contributor validation in concise, scannable sections without omitting essential instructions.
+- Documented safety and recovery behavior remains accurate, including owner authorization, exact-command install approval, topic repair, uncertain goal handling and clean-stop behavior.
+- The complete README has valid retained local Markdown links and headings, and uses the Shikiru README only as a readability reference.
+- The change is limited to README.md and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 
 ## Historical implementation records
 
