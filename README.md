@@ -316,65 +316,80 @@ check and lets any member read the group.
 
 ## Questions, approvals, and reminders
 
-An open escalation is sent with its question and available choices. Tap a choice to apply it. A
-choice that asks for text prompts for a reply to the bot's message; reply with the answer in that
-chat and topic. **Accept** and **Cancel task** require a second **Confirm** tap before the choice is
-sent to Shikiru. `/open` can show the current question again.
+An open escalation is sent with its question and the choices Shikiru offers. Tap a choice to apply it.
 
-If a question is shortened to fit Telegram's message limit, it includes **Details**. That button
-requests the escalation packet from Shikiru and sends it in additional messages. Details can
-contain project data; if the packet matches a secret pattern, it is refused and the packet is not
-sent.
+- **Text answers.** A choice that asks for text prompts for a reply to the bot's message. Reply with
+  the answer in that chat and topic.
+- **Confirmation.** **Accept** and **Cancel task** need a second **Confirm** tap before the choice is
+  sent to Shikiru.
+- **Showing it again.** `/open` re-shows open questions.
+- **Details.** If a question is shortened to fit Telegram's message limit, it includes **Details**.
+  That button requests the escalation packet from Shikiru and sends it in additional messages.
+  Details can contain project data. If the packet matches a secret pattern, it is refused and not
+  sent.
 
-Standing notices (for example, an engine that remains down) have **Stop reminders**. Tapping it
-ends reminders and edits the notice to say **Reminders stopped**; it does not close the underlying
-signal. If the issue is later fixed, the bot edits the notice again with the final state. Open
-questions are reminded after 4 hours and then every 24 hours by default. Those intervals can be
-changed in `[handlers.product]`. After downtime, the scheduler sends only the latest due reminder,
-not a backlog of missed reminders.
+### Reminders and standing notices
+
+- Open questions are reminded after 4 hours, then every 24 hours, by default. Change these in
+  `[handlers.product]`.
+- After downtime, the scheduler sends only the latest due reminder, not a backlog of missed ones.
+- Standing notices, such as an engine that remains down, have **Stop reminders**. Tapping it ends
+  reminders and edits the notice to say **Reminders stopped**. It does not close the underlying
+  signal.
+- If the issue is later fixed, the bot edits the notice again with the final state.
 
 ### Install approval
 
 An install approval shows the tool, a model-written reason, the complete command, its package
-manager, and the possible effect. Supported command recipes are `brew install`, `uv tool install`,
-`npm install -g`, `pipx install`, and `cargo install`, each followed by the validated package name.
-The model cannot provide a command. The code builds the argument list from one of those recipes,
-stores it before asking, and checks that the stored list still exactly matches the displayed
-recipe before running it.
+manager, and the possible effect.
 
-Tap **Install** only when you approve that exact displayed command and its effect. The command
-runs on the Operator host, outside the component repositories, and only after the approval is
-recorded. It may update dependencies of the installed tool. Tap **Decline** to run nothing and
-forward the original escalation to you. An approval expires after 24 hours by default; `/open`
-shows only approvals that remain valid and open.
+The model cannot provide a command. The code builds the argument list from one of these recipes,
+stores it before asking, and checks that the stored list still exactly matches the displayed recipe
+before running it:
+
+| Recipe, followed by the validated package name | Package manager |
+| --- | --- |
+| `brew install` | Homebrew |
+| `uv tool install` | uv |
+| `npm install -g` | npm |
+| `pipx install` | pipx |
+| `cargo install` | Cargo |
+
+- **Install:** tap only when you approve that exact displayed command and its effect. The command
+  runs on the Operator host, outside the component repositories, and only after the approval is
+  recorded. It may update dependencies of the installed tool.
+- **Decline:** runs nothing and forwards the original escalation to you.
+- **Expiry:** an approval expires after 24 hours by default (`approval_expiry_h`). `/open` shows only
+  approvals that remain valid and open.
 
 ## Automatic actions and notices
 
-The Operator acts on its own only in the cases below. Anything else reaches you as a question,
-with what it tried.
+The Operator acts on its own only in the cases below. Anything else reaches you as a question, with
+what it tried.
 
 - **Agent and integration errors** (`agent_error`, `agent_stuck`, `agent_protocol`,
-  `integration_conflict`, `integration_blocked`): the escalation is given back to Shikiru's agents
-  at once. Each cause gets `retry_budget_per_day` retries a day (one by default); after that the
+  `integration_conflict`, `integration_blocked`): the escalation goes back to Shikiru's agents at
+  once. Each cause gets `retry_budget_per_day` retries a day (one by default). After that, the
   escalation is forwarded to you.
 - **Quota exhausted** (`quota_exhausted`, `ladder_exhausted`): the bot tells you when the quota
-  resets and retries the escalation after that time plus `quota_wait_margin_min`. A reset that is
-  unknown, or further away than `quota_wait_max_h`, is forwarded at once.
+  resets, then retries the escalation after that time plus `quota_wait_margin_min`. A reset that is
+  unknown, or further away than `quota_wait_max_h` (24 hours by default), is forwarded at once.
 - **Engine down or faulted** (`engine_down`, `engine_fault`): the bot asks Shikiru to start the
-  engine, waits until it is up and tells you. If the start is refused, fails or is not confirmed, it
-  forwards the failed checks from `shikiru doctor` and asks you to run `shikiru start` in that
-  project. An `engine_error` escalation gets the same restart if the engine is down, and is then
-  retried. Restarts are limited to `restart_budget_per_hour` per component (one an hour by default).
-- **Missing tool**: an install runs only after you tap **Install** (see
+  engine, waits until it is up, and tells you. If the start is refused, fails or is not confirmed,
+  the bot forwards the failed checks from `shikiru doctor` and asks you to run `shikiru start` in
+  that project. An `engine_error` escalation gets the same restart if the engine is down, and is
+  then retried. Restarts are limited to `restart_budget_per_hour` per component (one an hour by
+  default).
+- **Missing tool:** an install runs only after you tap **Install** (see
   [Install approval](#install-approval)).
-- **Pull request ready for review**: when Shikiru reports an open pull request for a task, the bot
+- **Pull request ready for review:** when Shikiru reports an open pull request for a task, the bot
   sends its title, its commit count and an **Open PR** link, with **Stop reminders**. When the pull
   request is merged, closed unmerged or withdrawn, the message is edited to a final line that says
   how it ended. The Operator never merges, comments on or reviews a pull request.
-- **Finished work**: when a task and its child tasks have all settled, the bot sends one notice per
+- **Finished work:** when a task and its child tasks have all settled, the bot sends one notice per
   task family, such as "api · Export invoices integrated (3 tasks)". It has no buttons.
-- **Health**: when every configured Reasoner rung fails, decisions are forwarded without a
-  suggestion; when a component's Shikiru link stays unreachable for `link_unreachable_min` (10
+- **Health:** when every configured Reasoner rung fails, decisions are forwarded without a
+  suggestion. When a component's Shikiru link stays unreachable for `link_unreachable_min` (10
   minutes by default), the bot says so. Either notice has **Stop reminders** and is edited to
   "Recovered" when the problem clears.
 
@@ -383,14 +398,18 @@ button, which silences their reminders without closing the underlying signal.
 
 ## Service operation
 
-Run `shikiri-yaku --product shop install-service` after installing the command and creating a
-valid instance. This writes a per-product service unit under your home directory and prints its
-path and activation command. **Writing the unit does not activate it.** The generated unit carries
-the `PATH` from the shell where `install-service` ran, so `shikiru` and configured Reasoner CLIs
-can be found when the service starts.
+Run `shikiri-yaku --product shop install-service` after installing the command and creating a valid
+instance. It writes a per-product service unit under your home directory and prints the unit's path
+and activation command.
 
-On macOS, the unit is a LaunchAgent at
-`~/Library/LaunchAgents/shikiri-yaku-shop.plist`. Activate it with the printed command:
+**Writing the unit does not activate it.** The unit carries the `PATH` of the shell where
+`install-service` ran, so `shikiru` and configured Reasoner CLIs can be found when the service
+starts.
+
+### macOS
+
+The unit is a LaunchAgent at `~/Library/LaunchAgents/shikiri-yaku-shop.plist`. Activate it with the
+printed command:
 
 ```sh
 launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
@@ -403,15 +422,17 @@ Stop and unload it with:
 launchctl bootout gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
 ```
 
-To keep it from loading at a later login, disable the label with
-`launchctl disable gui/$(id -u)/shikiri-yaku-shop`; use `launchctl enable` with that same target
-before bootstrapping it again. The generated plist does not set stdout/stderr log files. Use
-`launchctl print` to inspect job state; to see application output while troubleshooting, stop the
-service and run `shikiri-yaku --product shop run` in a terminal.
+- **Stop it at a later login:** disable the label with
+  `launchctl disable gui/$(id -u)/shikiri-yaku-shop`. Use `launchctl enable` with that same target
+  before bootstrapping it again.
+- **Logs:** the generated plist sets no stdout or stderr log files. Use `launchctl print` to inspect
+  job state. To see application output while troubleshooting, stop the service and run
+  `shikiri-yaku --product shop run` in a terminal.
 
-On Linux, the unit is a user service at
-`~/.config/systemd/user/shikiri-yaku-shop.service`. The printed command enables it at login and
-starts it now:
+### Linux
+
+The unit is a user service at `~/.config/systemd/user/shikiri-yaku-shop.service`. The printed command
+enables it at login and starts it now:
 
 ```sh
 systemctl --user enable --now shikiri-yaku-shop.service
@@ -419,42 +440,53 @@ systemctl --user status shikiri-yaku-shop.service
 journalctl --user -u shikiri-yaku-shop.service -f
 ```
 
-Stop it for now with `systemctl --user stop shikiri-yaku-shop.service`. To stop and disable it at
-login, use `systemctl --user disable --now shikiri-yaku-shop.service`.
+- Stop it for now: `systemctl --user stop shikiri-yaku-shop.service`.
+- Stop it and disable it at login: `systemctl --user disable --now shikiri-yaku-shop.service`.
 
-`run` handles SIGINT and SIGTERM as clean stops and exits successfully. The generated macOS and
-Linux units restart after an unsuccessful exit; a stop requested through the service manager is
-not restarted. Only one process can hold an instance's lock. After changing `config.toml`, restart
-that product's service so it reads the new settings. If you rerun `install-service` to rewrite a
-Linux unit, run
-`systemctl --user daemon-reload` and restart the service; on macOS, boot out and bootstrap the
-LaunchAgent again.
+### Clean stops, restarts and rewritten units
 
-### Applying changes
+- `run` handles SIGINT and SIGTERM as clean stops and exits successfully.
+- The generated macOS and Linux units restart after an unsuccessful exit. A stop requested through the
+  service manager is not restarted.
+- Only one process can hold an instance's lock.
+- After changing `config.toml`, restart that product's service so it reads the new settings.
+- After rewriting a unit with `install-service`, reload it. On Linux, run
+  `systemctl --user daemon-reload` and restart the service. On macOS, boot out and bootstrap the
+  LaunchAgent again.
+
+## Applying changes
 
 A running service reads its code and `config.toml` when it starts, so a change takes effect after a
-restart. `shikiri-yaku restart` restarts the unit of each product under `--home`, or of the one
-named by `--product`. On macOS it runs `launchctl kickstart -k`; on Linux it runs
-`systemctl --user restart`. A product whose unit was never installed is reported as
-`not installed`, and nothing runs for it. A restart the service manager refuses, such as a unit that
-was written but not loaded, is reported with the service manager's message.
+restart. `shikiri-yaku restart` restarts the unit of each product under `--home`, or of the one named
+by `--product`. On macOS it runs `launchctl kickstart -k`; on Linux it runs `systemctl --user
+restart`. A product whose unit was never installed is reported as `not installed`, and nothing runs
+for it. A restart the service manager refuses, such as a unit that was written but not loaded, is
+reported with the service manager's message.
 
-A service runs the installed copy of `shikiri-yaku` that `install-service` found on the login
-`PATH`, never a checkout. That copy is a release. Apply a change in one of these ways:
+A service runs the installed copy of `shikiri-yaku` that `install-service` found on the login `PATH`,
+never a checkout. That copy is a release. Do not install with `--editable`: the running service would
+follow unreviewed changes in the checkout, including after a crash restart.
 
-- After a code change, release it: the owner runs the Release workflow, as
-  [CONTRIBUTING.md](CONTRIBUTING.md#releasing) describes. Then upgrade each host and restart its
-  services:
+### After a code change
 
-  ```sh
-  uv tool upgrade shikiri-yaku
-  shikiri-yaku restart
-  ```
+1. The owner releases it: runs the Release workflow, as
+   [CONTRIBUTING.md](CONTRIBUTING.md#releasing) describes.
+2. On each host, upgrade the installed copy and restart its services:
 
-  Before a release migrates a journal, `shikiri-yaku` copies it to
-  `<home>/<product>/backups/journal-schema<N>.db`, where `<N>` is the schema version before the
-  migration. The newest three copies are kept per product.
-- After a `config.toml` change, run `shikiri-yaku restart` alone.
+   ```sh
+   uv tool upgrade shikiri-yaku
+   shikiri-yaku restart
+   ```
+
+Before a release migrates a journal, `shikiri-yaku` copies it to
+`<home>/<product>/backups/journal-schema<N>.db`, where `<N>` is the schema version before the
+migration. The newest three copies are kept per product.
+
+### After a `config.toml` change
+
+Run `shikiri-yaku restart` alone.
+
+### Rolling back
 
 To go back to an earlier release, install its version and restart:
 
@@ -464,108 +496,147 @@ shikiri-yaku restart
 ```
 
 A rollback restores code, not data. A release that migrated a journal leaves the old version unable
-to open it: it stops with `JournalTooNewError`. Then, for that product, stop its service
-(`systemctl --user stop shikiri-yaku-<product>.service` on Linux,
-`launchctl bootout gui/$(id -u)/shikiri-yaku-<product>` on macOS), copy the newest
-`journal-schema<N>.db` in `<home>/<product>/backups/` over `<home>/<product>/journal.db`, delete
-`journal.db-wal` and `journal.db-shm` if they exist, and start the service again. Changes made after
-that backup are lost.
+to open it: it stops with `JournalTooNewError`. To restore the data, repeat these steps for that
+product on each host where its service runs:
 
-Run the steps on each host where a service runs. Do not install with `--editable`: the running
-service would follow unreviewed changes in the checkout, including after a crash restart.
+1. Stop its service: `systemctl --user stop shikiri-yaku-<product>.service` on Linux, or
+   `launchctl bootout gui/$(id -u)/shikiri-yaku-<product>` on macOS.
+2. Copy the newest `journal-schema<N>.db` in `<home>/<product>/backups/` over
+   `<home>/<product>/journal.db`.
+3. Delete `journal.db-wal` and `journal.db-shm` if they exist.
+4. Start the service again, as in [Service operation](#service-operation).
+
+Changes made after that backup are lost.
 
 ## Diagnostics and recovery
 
-Run `shikiri-yaku --product shop doctor` after setup or a configuration change. It checks the
-configuration and component paths, instance lock, journal, Telegram readiness, each Shikiru MCP
-link, and each configured Reasoner CLI. It may contact Telegram and Shikiru. A failed check gives
-exit code 1; use `--json` before `doctor` for machine-readable details. `stats` reads the local
-journal and summarizes completed/queued work, waits, reasons, verdicts, and install outcomes; it
-does not contact Shikiru.
+### Doctor and stats
 
-For a foreground diagnostic session, stop the service first, then run:
+- `shikiri-yaku --product shop doctor` checks the configuration and component paths, instance lock,
+  journal, Telegram readiness, each Shikiru MCP link, and each configured Reasoner CLI. Run it after
+  setup or a configuration change. It may contact Telegram and Shikiru. A failed check gives exit
+  code 1.
+- Put `--json` before the command (`shikiri-yaku --json --product shop doctor`) for machine-readable
+  output; see [JSON output](#json-output).
+- `stats` reads the local journal and summarizes completed and queued work, waits, reasons, verdicts
+  and install outcomes. It does not contact Shikiru.
 
-```sh
-shikiri-yaku --product shop run
-```
+### Foreground diagnostics
 
-The service and foreground command use the same instance lock, so a second `run` is refused. The
-Operator keeps its journal across restarts and reconciles interrupted work from what Shikiru and
-the host report. An issued resolve may have reached Shikiru; after restart, it checks whether the
-escalation is still open and either confirms the result or shows the question again.
+For a foreground diagnostic session, stop the service first, then run
+`shikiri-yaku --product shop run`. The service and the foreground command use the same instance
+lock, so a second `run` is refused.
 
-An install that was approved but not yet issued resumes automatically after restart if its
-escalation is still open; the already-approved stored command is run. An issued install is never
-run a second time: recovery checks whether the tool exists. If found, Shikiru is answered; if
-missing, the bot asks for a fresh approval. Telegram may show one duplicate message if the process
-stopped after Telegram accepted a send but before the journal recorded its acknowledgement.
+### Restart recovery
 
-Unexpected engine-down signals can trigger one automatic restart per component per hour by
-default. If a start fails or the budget is exhausted, the bot forwards the reason and the failed checks
-from `shikiru doctor`, and tells you to start it with `shikiru start` in that component's project. A clean Shikiru engine stop observed
-while the Operator is running is treated as intentional after `stop_grace_min` (2 minutes by
-default). If the Operator restarts before recording that grace period, an unrespected stop may be
-treated as an engine-down signal on the next run. A stop already marked respected remains so
-across Operator restarts; during a first sync, a clean stop found in Shikiru's history is also
-treated as respected. Use `/status` to see the current engine state.
+The Operator keeps its journal across restarts and reconciles interrupted work from what Shikiru and
+the host report.
 
-### Telegram topic recovery
+- **Resolve.** An issued resolve may have reached Shikiru. After restart, the Operator checks whether
+  the escalation is still open, then either confirms the result or shows the question again.
+- **Install approved, not issued.** It resumes automatically after restart if its escalation is still
+  open; the already-approved stored command is run.
+- **Install issued.** It is never run a second time. Recovery checks whether the tool exists: if it
+  is found, Shikiru is answered; if it is missing, the bot asks for a fresh approval.
+- **Duplicate messages.** Telegram may show one duplicate message if the process stopped after
+  Telegram accepted a send but before the journal recorded its acknowledgement.
 
-With a forum configured, start-up creates a topic for each configured component. It closes topics
+### Engine-down signals and clean stops
+
+- An unexpected engine-down signal can trigger one automatic restart per component per hour by
+  default.
+- If a start fails or the budget is used up, the bot forwards the reason and the failed checks from
+  `shikiru doctor`, and tells you to run `shikiru start` in that component's project.
+- A clean Shikiru engine stop observed while the Operator is running is treated as intentional after
+  `stop_grace_min` (2 minutes by default).
+- If the Operator restarts before recording that grace period, a stop that is not yet recorded as
+  respected may be treated as an engine-down signal on the next run.
+- A stop already recorded as respected stays so across Operator restarts. During a first sync, a
+  clean stop found in Shikiru's history is also treated as respected.
+- Use `/status` to see the current engine state.
+
+## Telegram topic recovery
+
+With a forum configured, start-up creates a topic for each configured component and closes topics
 for components removed from the configuration. The built-in General topic is used for Operator
-messages and is neither created nor adopted. Topic changes are recorded in the instance journal;
-the Bot API does not let the Operator list existing forum topics.
+messages and is neither created nor adopted. Topic changes are recorded in the instance journal; the
+Bot API does not let the Operator list existing forum topics.
 
-If start-up reports an uncertain topic creation, inspect the forum yourself. If the topic exists,
-adopt its positive numeric thread ID (the number at the end of the topic link):
+If start-up reports an uncertain topic creation, inspect the forum yourself, then choose one case:
 
-```sh
-shikiri-yaku --product shop telegram adopt api 123
-```
+1. **The topic exists:** adopt its positive numeric thread ID, the number at the end of the topic
+   link.
 
-Adoption records the thread; it does not verify that the ID belongs to a real topic. If no topic
-was created, forget the uncertain journal row:
+   ```sh
+   shikiri-yaku --product shop telegram adopt api 123
+   ```
 
-```sh
-shikiri-yaku --product shop telegram forget api
-```
+   Adoption records the thread; it does not verify that the ID belongs to a real topic.
 
-`forget` only applies to an uncertain creation row, removes that row, and does not delete a
-possibly created forum topic. Start the service again to create a topic. Telegram permits duplicate
-topic names, so forgetting an uncertain row can leave an orphan topic and create another one. A
-fresh `--home` or deleted journal also loses the topic mapping; do not point a new instance at the
-same group without adopting its existing topics.
+2. **No topic was created:** forget the uncertain journal row, then start the service again to
+   create a topic.
+
+   ```sh
+   shikiri-yaku --product shop telegram forget api
+   ```
+
+`forget` applies only to an uncertain creation row, removes that row, and does not delete a possibly
+created forum topic. Telegram permits duplicate topic names, so forgetting an uncertain row can leave
+an orphan topic and create another one. A fresh `--home` or a deleted journal also loses the topic
+mapping, so do not point a new instance at the same group without adopting its existing topics.
 
 ## Local state and practical limits
+
+### Local state
 
 Each product's state is under `<home>/<product>` (`~/.shikiri-yaku/<product>` by default):
 
 - `config.toml` and the configured token file;
 - `journal.db`, which records signals, outbound message bodies, goal text, pending operations, and
-  restart/recovery state;
+  restart and recovery state;
 - `instance.lock` while that product is running; the shared `<home>/host.lock` is held while any
   instance runs a host command;
 - `install-scratch/` for approved install commands, outside all component repositories;
-- `output/install-<op-id>.log` for install output. The output directory is mode `0700` and each
-  output file is mode `0600`; package-manager output can contain sensitive paths or tokens.
+- `output/install-<op-id>.log` for install output. The output directory is mode `0700` and each file
+  is mode `0600`, because package-manager output can contain sensitive paths or tokens;
+- `reasoner-scratch/` for the temporary directories of Reasoner runs;
+- `backups/journal-schema<N>.db` for the journal copies made before migrations (see
+  [Applying changes](#applying-changes)).
 
 Keep the instance directory private and back it up only as carefully as other operational data.
-The bot sends Shikiru's question or headline, offered choices and consequences, relevant task and
-component names, and handler notes to Telegram. **Details** sends more of the Shikiru packet when
-requested. Telegram group members can read posted messages, including non-owners when
-`allow_other_members = true`; only configured owners can act.
 
-Components must be local Shikiru project directories. Telegram is the only chat channel. The
-Reasoner is optional and uses configured local Claude or Codex CLIs. When enabled, it receives the
-escalation details and host facts needed for its assessment; the CLI/provider handles those inputs.
-A Claude rung gets no file-reading tool, only the web and package lookups its adapter lists. A Codex
-rung's read-only sandbox stops writes but not reads, so its model can read any file your user
-account can read. Without a Reasoner, escalations that need a model assessment go to the Product Owner. If all
-configured Reasoner rungs fail, the escalation still goes to the Product Owner with a note and a
-Reasoner health signal. Automatic quota waits are limited to 24 hours by default, retries to one
-per day, and engine restarts to one per component per hour. These operational values can be
-changed in configuration.
+### Data that leaves the machine
+
+- The bot sends Shikiru's question or headline, offered choices and consequences, relevant task and
+  component names, and handler notes to Telegram. **Details** sends more of the Shikiru packet when
+  requested.
+- Telegram group members can read posted messages, including non-owners when
+  `allow_other_members = true`. Only configured owners can act.
+- When the Reasoner is enabled, it receives the escalation details and host facts it needs for its
+  assessment; the CLI or provider handles those inputs.
+
+### Limits
+
+- Components must be local Shikiru project directories. Telegram is the only chat channel.
+- The Reasoner is optional and uses configured local Claude or Codex CLIs. Without one, escalations
+  that need a model assessment go to the Product Owner.
+- If every configured Reasoner rung fails, the escalation still goes to the Product Owner, with a
+  note and a Reasoner health signal.
+- A Claude rung gets no file-reading tool, only the web and package lookups its adapter lists. A
+  Codex rung's read-only sandbox stops writes but not reads, so its model can read any file your user
+  account can read.
+- Automatic quota waits are limited to 24 hours by default (`quota_wait_max_h`), retries to one per
+  day (`retry_budget_per_day`), and engine restarts to one per component per hour
+  (`restart_budget_per_hour`). These operational values can be changed in configuration.
 
 ## Contributor validation
 
-To check a change, propose one, or run the quality gate, see [CONTRIBUTING.md](CONTRIBUTING.md).
+A change needs the offline quality gate to pass:
+
+```sh
+uv run poe check
+```
+
+Run `uv run poe fix` first to format the code. The gate uses fakes and local fixtures, not a live
+Telegram bot or agent CLI. [CONTRIBUTING.md](CONTRIBUTING.md) covers how to propose a change, the
+architecture and safety rules, and the release process.
