@@ -19,15 +19,11 @@ It uses fakes and local fixtures, not a live Telegram bot or agent CLI. The [Tel
 guide](tests/fixtures/telegram/README.md) explains payload provenance, and the [Shikiru fixture
 guide](tests/fixtures/shikiru/README.md) explains its MCP payloads.
 
-Two scripts are run by a human, outside the gate:
+One script is run by a human, outside the gate:
 
 - `scripts/contract_check.py --shikiru-checkout <path>` checks the Shikiru behavior the Operator
   relies on, against a real engine and its fake agent in a temporary project. It needs git, tmux
   and a Shikiru checkout.
-- `scripts/record_telegram.py` records real Bot API replies from a test bot into
-  `tests/fixtures/telegram/recorded/`, with the token and ids replaced, and prints how each differs
-  from the fixture of the same name. Use a bot made for this, never the production bot, and stop the
-  Operator first.
 
 Human checks that need a real host or Telegram test bot are listed in
 [tasks/drills.md](tasks/drills.md) and are outside the offline gate. Run them on a throwaway host,

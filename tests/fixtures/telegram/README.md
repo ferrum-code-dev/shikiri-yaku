@@ -30,6 +30,6 @@ Elsewhere a refusal carries the Channel's own reason, and platform text is never
 `get_updates_ok.json` was written from the documented Update, Message and CallbackQuery shapes
 without reading the page in this change; the reply-to chat and message fields follow the same Message type.
 
-To replace these with real replies, a human runs `scripts/record_telegram.py` with the PO's test bot.
-It saves the replies under `recorded/`, with the token and the ids replaced by placeholders, and
-prints how each one differs from the fixture here. Tests never read the token file or run the script.
+To replace these with real replies, a human does it by hand with the PO's test bot; no script does it.
+Each real reply is redacted of the token and the ids before it is committed. Tests never read the
+token file.

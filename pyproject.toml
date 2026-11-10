@@ -120,7 +120,6 @@ ignore = [
 "src/shikiri_yaku/adapters/clock.py" = ["TID251"]  # the Clock adapter is the only place that reads time
 "src/shikiri_yaku/adapters/commands.py" = ["TID251"]  # the CommandRunner adapter is the only place that starts processes
 "scripts/contract_check.py" = ["T201", "D", "INP001"]  # a human runs it and reads its printed report
-"scripts/record_telegram.py" = ["INP001"]  # a human runs it; scripts/ is not a package
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
 "tests/unit/test_version_from_tag.py" = ["S603", "S607", "TID251"]  # builds a wheel from a temporary git checkout with git and uv
