@@ -1,0 +1,64 @@
+name: Shikiru contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Check the contract against the latest Shikiru release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          python-version: "3.14"
+          enable-cache: false
+
+      - name: Sync locked environment
+        run: uv sync --locked
+
+      - name: Find the latest Shikiru release
+        id: shikiru
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo ferrum-code-dev/shikiru --json tagName --jq .tagName)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Checking the contract against Shikiru $tag." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ferrum-code-dev/shikiru
+          ref: ${{ steps.shikiru.outputs.tag }}
+          path: shikiru-src
+          persist-credentials: false
+
+      - name: Install tmux
+        # The check starts the engine in tmux, and the runner image does not ship it.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tmux
+
+      - name: Sync Shikiru's locked environment
+        run: uv sync --locked --project shikiru-src
+
+      - name: Run the contract check
+        run: uv run python scripts/contract_check.py --shikiru-checkout shikiru-src
