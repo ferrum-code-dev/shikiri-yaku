@@ -6,42 +6,47 @@
 
 An autonomous Operator for product development with Shikiru.
 
-Shikiri-yaku is a small background service that sits between a Product Owner and
+Shikiri-yaku is a small background service between a Product Owner and
 [Shikiru](https://github.com/ferrum-code-dev/shikiru), the coordinator that runs coding agents.
 Shikiru stops and waits for a person when it raises an escalation. Shikiri-yaku takes that seat:
-it watches the escalations of every Shikiru project of a product, sorts each into a category and
-hands it to a handler. A handler either resolves it (retry, wait for a quota reset, restart an
-engine, install a missing tool after the owner approves the exact command) or forwards it to the
-Product Owner in a chat (Telegram first), where one tap applies the answer in Shikiru.
+
+1. It watches the escalations of every Shikiru project of a product.
+2. It sorts each escalation into a category and hands it to a handler.
+3. The handler either resolves it or forwards it to the Product Owner in a chat (Telegram first).
+
+Resolving means a retry, a wait for a quota reset, an engine restart, or an install of a missing
+tool after the owner approves the exact command. When forwarded, one tap applies the answer in
+Shikiru.
 
 - **Small fixed core, growth by extension.** Categories, handlers, actions, reasoning jobs and
-  channels are registered extensions. The current chat commands are documented below.
-- **Every route ends at the owner.** Anything unknown, unsure or failed is forwarded, so nothing
-  is dropped and nothing works worse than plain forwarding.
-- **Agents propose, code acts.** The Operator's reasoning agent may look things up but cannot change
-  anything, and only names what is missing; plain code builds the command, and runs it only after
-  the owner approved it.
-- **Shikiru stays the source of truth,** read and commanded through MCP. Nothing of the Operator
-  is stored in the managed repositories.
+  channels are registered extensions. The current chat commands are listed in
+  [Chat commands](#chat-commands).
+- **Every route ends at the owner.** Anything unknown, unsure or failed is forwarded, so nothing is
+  dropped and nothing works worse than plain forwarding.
+- **Agents propose, code acts.** The reasoning agent may look things up but cannot change anything,
+  and only names what is missing. Plain code builds each command and runs it only after the owner
+  approved it.
+- **Shikiru stays the source of truth,** read and commanded through MCP. Nothing of the Operator is
+  stored in the managed repositories.
 - **One instance per product,** with its own chat bot. Each component is a Shikiru project.
 - **Small by design:** one Python process, SQLite, one TOML file and the OS service manager.
 
 ## Install and first run
 
-This repository contains the Python implementation and command-line interface. Install a release
-using the steps below.
+This repository contains the Python implementation and command-line interface. For development,
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Prerequisites
 
 - Python 3.14 and [uv](https://docs.astral.sh/uv/).
-- Shikiru installed and available as `shikiru` on `PATH`. Install
-  [Shikiru](https://github.com/ferrum-code-dev/shikiru) with `uv tool install shikiru-cli`. `doctor`
-  fails on a Shikiru older than the minimum this release needs, and names that minimum. Each
-  configured component must be an existing local Shikiru project directory, one that `shikiru init`
-  has set up; Shikiri-yaku connects with `shikiru --project <path> mcp`.
-- A Telegram bot token. Create a bot with [BotFather](https://t.me/BotFather) and keep its token
-  private. The bot uses long polling, so do not configure a webhook for it.
-- Optionally, the local `claude` and/or `codex` CLI for a configured Reasoner ladder.
+- [Shikiru](https://github.com/ferrum-code-dev/shikiru) installed and available as `shikiru` on
+  `PATH`, for example with `uv tool install shikiru-cli`.
+  - Each configured component must be an existing local Shikiru project directory, one that
+    `shikiru init` has set up. Shikiri-yaku connects with `shikiru --project <path> mcp`.
+  - `doctor` fails on a Shikiru older than this release's minimum, and names that minimum.
+- A Telegram bot token from [BotFather](https://t.me/BotFather). Keep it private. The bot uses long
+  polling, so do not configure a webhook for it.
+- Optional: the local `claude` and/or `codex` CLI, for a configured Reasoner ladder.
 
 ### Install
 
@@ -51,59 +56,59 @@ Install the console command `shikiri-yaku` from PyPI:
 uv tool install shikiri-yaku
 ```
 
-**From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
-release, not a checkout (see [Applying changes](#applying-changes)).
+A service must run a release, not a checkout (see [Applying changes](#applying-changes)).
 
 ### Create an instance
 
-By default, one product's instance lives at `~/.shikiri-yaku/<product>/`. For a product named
-`shop`, create the directory and its config file:
+By default, a product's instance lives at `~/.shikiri-yaku/<product>/`. For a product named `shop`:
 
-```sh
-mkdir -p "$HOME/.shikiri-yaku/shop/secrets"
-```
+1. Create the instance and its secrets directory:
 
-Save the TOML below as `$HOME/.shikiri-yaku/shop/config.toml`. Replace the component path with
-the absolute path or `~` path of an existing Shikiru project, and replace the example owner ID
-with your numeric Telegram account ID.
+   ```sh
+   mkdir -p "$HOME/.shikiri-yaku/shop/secrets"
+   ```
 
-```toml
-product = "shop"
+2. Save the TOML below as `$HOME/.shikiri-yaku/shop/config.toml`. Replace the component path with
+   the absolute or `~` path of an existing Shikiru project, and the owner ID with your numeric
+   Telegram account ID.
 
-[[components]]
-name = "api"
-path = "~/src/shop-api"
+   ```toml
+   product = "shop"
 
-[channels.telegram]
-token_file = "secrets/telegram.token"
-owners = [123456789]
-```
+   [[components]]
+   name = "api"
+   path = "~/src/shop-api"
 
-Create the token file at `$HOME/.shikiri-yaku/shop/secrets/telegram.token` and put only the bot
-token in it. Keep it out of source control. The token file must be a regular file with mode
-`0600`; set that exact mode with:
+   [channels.telegram]
+   token_file = "secrets/telegram.token"
+   owners = [123456789]
+   ```
 
-```sh
-chmod 600 "$HOME/.shikiri-yaku/shop/secrets/telegram.token"
-```
+3. Put only the bot token in `$HOME/.shikiri-yaku/shop/secrets/telegram.token`, and keep the file out
+   of source control. It must be a regular file with mode `0600`:
 
-The `owners` list contains numeric Telegram user IDs that may act on messages. For private-chat
-delivery, each owner must open the bot and press **Start** before it can message them. You can
-include several owner IDs.
+   ```sh
+   chmod 600 "$HOME/.shikiri-yaku/shop/secrets/telegram.token"
+   ```
 
-To use a forum group instead, add `group_id` under `[channels.telegram]` with the numeric ID of a
-forum supergroup. The bot must be an administrator with permission to manage topics, and every
-configured owner must belong to the group. By default, the group must contain only the bot and
-configured owners because other members can read its messages. Set `allow_other_members = true`
-to allow additional readers; only configured owners can act on messages. To share the group with
-other instances, see [Several instances in one group](#several-instances-in-one-group).
+### Telegram destinations
 
-To enable the optional Reasoner, add a `[reasoner]` table. Its ordered ladder accepts
-`adapter:model` or `adapter:model:effort` entries; the supported adapters are `claude` and
-`codex`. Replace the model placeholders with model names accepted by the installed CLI. The
-optional effort is passed to Claude; Codex ignores it.
+- **Owners.** `owners` lists the numeric Telegram user IDs that may act on messages; several are
+  allowed. For private-chat delivery, each owner must open the bot and press **Start** first.
+- **Forum group (optional).** Add `group_id` under `[channels.telegram]`, set to the numeric ID of a
+  forum supergroup.
+  - The bot must be an administrator with permission to manage topics.
+  - Every configured owner must belong to the group.
+  - By default, the group must contain only the bot and configured owners, because other members can
+    read its messages.
+  - `allow_other_members = true` allows additional readers. Only configured owners can still act on
+    messages.
+  - To share the group with other instances, see
+    [Several instances in one group](#several-instances-in-one-group).
 
-Once the config and protected token file are in place, check the instance and start it in the
+### First run
+
+Once the config and protected token file are in place, check the instance, then start it in the
 foreground:
 
 ```sh
@@ -111,18 +116,37 @@ shikiri-yaku --product shop doctor
 shikiri-yaku --product shop run
 ```
 
-`doctor` checks the local config and token-file mode, Telegram readiness, each Shikiru project
-link, and any configured Reasoner CLIs. It contacts Telegram and Shikiru; `run` stays attached
-until stopped.
+- `doctor` checks the local config and token-file mode, Telegram readiness, each Shikiru project
+  link, and any configured Reasoner CLIs. It contacts Telegram and Shikiru.
+- `run` stays attached until stopped.
 
-### Configuration reference
+### Optional Reasoner
 
-Only the sections and keys listed here are accepted. Misspelled or unknown keys are errors.
-Product and component names must start with an ASCII letter or digit and may then contain letters,
-digits, `_` or `-`. Component names must be unique. At least one component is required. Components
-run on this machine: `path` must be an absolute path or begin with `~`; remote `host` components
-are not supported. A component removed from the file has its open signals closed with a note at the
-next start.
+To enable the Reasoner, add a `[reasoner]` table with an ordered `ladder`:
+
+```toml
+[reasoner]
+ladder = ["claude:<model>:<effort>", "codex:<model>"]
+```
+
+Replace the placeholders with model names, and effort values, that the installed CLI accepts. The
+full rules are in [`[reasoner]`](#reasoner) below.
+
+## Configuration reference
+
+`config.toml` accepts only the sections and keys listed here. A misspelled or unknown key is an
+error.
+
+- **Names.** Product and component names start with an ASCII letter or digit, then may contain
+  letters, digits, `_` or `-`. Component names must be unique. At least one component is required.
+- **Components run on this machine.** `path` must be an absolute path or begin with `~`. Remote
+  `host` components are not supported.
+- **Removed components.** A component removed from the file has its open signals closed, with a
+  note, at the next start.
+- **`token_file`** defaults to `secrets/telegram.token`, relative to the instance directory. It may
+  be another relative path there, or an absolute path.
+- **`[channels.telegram]`** is required even when using defaults. `owners` has no default. If
+  `group_id` is set, it must identify a Telegram forum supergroup.
 
 | Section | Keys and defaults |
 | --- | --- |
@@ -134,13 +158,9 @@ next start.
 | `[handlers.product]` | All keys below are optional; every value is a positive integer |
 | `[reasoner]` | Optional; `ladder` is required when this section is present |
 
-`token_file` defaults to a path relative to the instance directory. It may be set to another
-relative path there or an absolute path. The Telegram table is required even when using defaults,
-and `owners` has no default. If `group_id` is set, it must identify a Telegram forum supergroup.
+### `[operator]`
 
-#### `[operator]` defaults
-
-`telegram_call_timeout_s` must be greater than `telegram_poll_wait_s`.
+All keys are optional. `telegram_call_timeout_s` must be greater than `telegram_poll_wait_s`.
 
 | Setting | Default | Setting | Default |
 | --- | ---: | --- | ---: |
@@ -154,7 +174,9 @@ and `owners` has no default. If `group_id` is set, it must identify a Telegram f
 | `telegram_call_timeout_s` | 30 | `telegram_poll_wait_s` | 20 |
 | `inbound_interval_s` | 1 | `command_name_max_chars` | 32 |
 
-#### `[handlers.infrastructure]` defaults
+### `[handlers.infrastructure]`
+
+All keys are optional.
 
 | Setting | Default | Setting | Default |
 | --- | ---: | --- | ---: |
@@ -164,19 +186,26 @@ and `owners` has no default. If `group_id` is set, it must identify a Telegram f
 | `restart_poll_s` | 5 | `approval_expiry_h` | 24 |
 | `host_lock_poll_s` | 1 | `install_output_tail_lines` | 20 |
 
-#### `[handlers.product]` defaults
+### `[handlers.product]`
+
+All keys are optional.
 
 | Setting | Default | Setting | Default |
 | --- | ---: | --- | ---: |
 | `reminder_first_h` | 4 | `reminder_repeat_h` | 24 |
 | `message_title_max_chars` | 80 | `button_label_max_chars` | 30 |
 
-#### Optional `[reasoner]`
+### `[reasoner]`
 
-Omitting this section disables the Reasoner. When present, `ladder` must contain one or more
-rungs in fallback order. Each adapter must be `claude` or `codex`; model and effort must be
-non-empty strings. The local CLI for every rung must be installed and runnable. The optional
-numeric settings below are positive integers.
+Optional. Omitting the section disables the Reasoner. Without it, escalations that need a model
+assessment are forwarded to the Product Owner.
+
+- `ladder` lists one or more rungs in fallback order. Each rung is `adapter:model` or
+  `adapter:model:effort`.
+- The adapter must be `claude` or `codex`. Model and effort must be non-empty strings. The effort is
+  optional; it is passed to Claude, and Codex ignores it.
+- The local CLI for every rung must be installed and runnable.
+- The numeric settings below are optional positive integers.
 
 | Setting | Default |
 | --- | ---: |
@@ -185,93 +214,85 @@ numeric settings below are positive integers.
 | `max_parallel` | 2 |
 | `input_max_chars` | 4000 |
 
-For example, add this section to `config.toml` and replace its placeholders with CLI-supported
-values:
-
-```toml
-[reasoner]
-ladder = ["claude:<model>:<effort>", "codex:<model>"]
-```
-
-The Reasoner is optional; without it, escalations that need a model assessment are forwarded to
-the Product Owner.
-
 ## Command line
-
-Global options come before the command. `--product` names the product. When `--home` (default
-`~/.shikiri-yaku`) holds exactly one product directory, `--product` may be left out; with none or
-several, the command refuses and names what it found.
 
 ```
 shikiri-yaku [--product NAME] [--home PATH] [--json] [--version] COMMAND
 ```
 
-- `run` serves one product until SIGTERM.
-- `doctor` checks one product's instance.
-- `stats` prints the figures of one product's journal.
-- `install-service` writes a launchd or systemd unit for running `run` at login.
-- `restart` restarts the service of one product, or of every product under `--home` when
-  `--product` is left out, in name order. Unlike the other verbs, it does not refuse several
-  products. It prints one line per product and exits 1 if any was not restarted. See
-  [Applying changes](#applying-changes).
-- `telegram adopt <component> <thread-id>` and `telegram forget <component>` repair an uncertain
-  Telegram topic, or reuse one made by hand, as described below.
-- `--json` makes `doctor` and `stats` print one JSON object on standard output instead of text, and
-  `restart` print a JSON list. The other commands ignore it. Exit codes are the same. `doctor`
-  reports its failed checks inside the object. When `stats` cannot run, it prints one `✘` line on
-  standard error and nothing on standard output.
+Global options come before the command.
+
+| Option | Meaning |
+| --- | --- |
+| `--product NAME` | The product to work on. It may be left out when `--home` holds exactly one product directory. With none or several, the command refuses and names what it found. |
+| `--home PATH` | The directory that holds the product directories. Default: `~/.shikiri-yaku`. |
+| `--json` | Prints `doctor`'s and `stats`' output as one JSON object on standard output instead of text, and `restart`'s as a JSON list. Other commands ignore it. Exit codes are the same. |
+| `--version` | Shows the version and exits. |
+
+| Command | Purpose |
+| --- | --- |
+| `run` | Serves one product until SIGTERM. |
+| `doctor` | Checks one product's instance. |
+| `stats` | Prints the figures of one product's journal. |
+| `install-service` | Writes a launchd or systemd unit that runs `run` at login. |
+| `restart` | Restarts the service of one product, or, when `--product` is left out, of every product under `--home` in name order. Unlike the other verbs, it does not refuse several products. It prints one line per product and exits 1 if any was not restarted. See [Applying changes](#applying-changes). |
+| `telegram adopt <component> <thread-id>` | Repairs an uncertain Telegram topic, or reuses one made by hand. See [Telegram topic recovery](#telegram-topic-recovery). |
+| `telegram forget <component>` | Deletes an uncertain topic's row, so start-up creates a topic. See [Telegram topic recovery](#telegram-topic-recovery). |
 
 The older forms, with the product after the verb (`run shop`) or `topics …`, are usage errors.
 
-`shikiri-yaku --json doctor` has the keys `passed` (true when every check passed), `failed` (the
-number of failed checks), `total` and `checks`. Each entry of `checks` has `name`, `passed` and
-`detail`.
+`doctor` reports its failed checks inside the JSON object. When `stats` cannot run, it prints one `✘`
+line on standard error and nothing on standard output.
 
-`shikiri-yaku --json stats` has the keys `completed`, `queued`, `lifetime_seconds`,
-`waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and
-`install_outcomes`. The two durations are in seconds, and `share` is the waiting fraction from 0 to
-1, or `null` when it is unavailable. The last five keys each map a label to its count.
+### JSON output
 
-`shikiri-yaku --json restart` prints a list with one entry per product, in name order. Each entry
-has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did
-not, such as `not installed`.
+| Command | Keys |
+| --- | --- |
+| `doctor` | `passed` (true when every check passed), `failed` (the number of failed checks), `total`, and `checks`. Each entry of `checks` has `name`, `passed` and `detail`. |
+| `stats` | `completed`, `queued`, `lifetime_seconds`, `waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and `install_outcomes`. The two durations are in seconds. `share` is the waiting fraction from 0 to 1, or `null` when unavailable. The last five keys each map a label to its count. |
+| `restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did not, such as `not installed`. |
 
 ## Chat commands
 
 Only Telegram user IDs listed in `channels.telegram.owners` can issue commands or act on buttons.
-In a private chat, each configured owner must first open the bot and press **Start**. In a forum
-group, non-owners' messages and button taps are ignored; if `allow_other_members = true`, those
-members can still read everything the bot posts.
 
-Commands work in private chats and in forum topics. Replies go back to the chat and topic where
-the command was sent.
+- **Private chat:** each configured owner must first open the bot and press **Start**.
+- **Forum group:** non-owners' messages and button taps are ignored. If `allow_other_members = true`,
+  those members can still read everything the bot posts.
+
+Commands work in private chats and in forum topics. Replies go back to the chat and topic where the
+command was sent.
 
 | Command | What it does |
 | --- | --- |
 | `/status` | Shows each component's engine state, running/queued/escalated task counts, quota blocks, and configured Reasoner rung health. In a component topic, it shows only that component, without the Reasoner rungs. |
 | `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component destination; if none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items, and says so by its name when none are waiting. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports the name and lists commands. |
-| `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or General topic. |
+| `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
 
-In a component topic, the topic supplies the component, so write `/goal <request>` there. The
-request is sent to Shikiru as written; it is not split across components or rewritten into a plan.
-For example:
+### `/goal`
+
+The request is sent to Shikiru as written. It is not split across components or rewritten into a
+plan. In a component topic, the topic supplies the component, so write `/goal <request>` there:
 
 ```text
 /goal api Add CSV export to the reports page
 ```
 
-If Shikiru confirms the submission, the bot replies with its task ID. If Shikiru rejects it, the
-bot says it was not submitted. If the connection fails after submission may have reached Shikiru,
-the bot says the result is uncertain and offers **Submit again**. It does not retry automatically.
-The same prompt appears after a restart if the process crashed after issuing the submission but
-before recording Shikiru's acknowledgement. Recovery marks that goal uncertain and does not send
-it again automatically. Inspect the Shikiru project before tapping **Submit again**: the first
-request may have been accepted, so a retry can create a duplicate task.
+The outcome depends on what Shikiru reports:
+
+- **Confirmed:** the bot replies with its task ID.
+- **Rejected:** the bot says it was not submitted.
+- **Connection failed after submission may have reached Shikiru:** the bot says the result is
+  uncertain and offers **Submit again**. It does not retry automatically.
+- **Crash after submission, before the acknowledgement was recorded:** after a restart, the same
+  uncertain prompt with **Submit again** appears. Recovery marks the goal uncertain and does not send
+  it again automatically. Inspect the Shikiru project before tapping **Submit again**: the first
+  request may have been accepted, so a retry can create a duplicate task.
 
 ### Several instances in one group
 
-Several instances can share one forum group. Each instance needs its own bot, token file, and
+Several instances can share one forum group. Each instance needs its own bot, token file and
 components; two instances never share a bot. Give every instance the same `group_id` and set
 `shared_group = true` in each `[channels.telegram]` table. `shared_group` requires `group_id`.
 
@@ -280,18 +301,18 @@ With `shared_group = true`:
 - A command (text that starts with `/`) in a topic that is neither General nor one of this
   instance's component topics gets no reply from this instance.
 - `/goal <component> <request>` in General is submitted only when `<component>` is one of this
-  instance's components. For another instance's component it gets no reply.
+  instance's components. For another instance's component, it gets no reply.
 - `/status` and `/open` in General cover this instance's components only.
-- `/help`, free text, and a `/goal` without a component are answered by every instance's bot, so
-  the group receives one list per instance.
+- `/help`, free text, and a `/goal` without a component are answered by every instance's bot, so the
+  group receives one list per instance.
 
 Every instance's bot must be an administrator of the group with the manage-topics right, as this
-instance's own bot must be. Telegram lists only administrators, so the start-up check reads them
-with the other bots included. It admits the group's owners, this bot, and the other administrator
-bots, and refuses any other member: a person who joins as an ordinary member or as an
-administrator, or a bot that is not an administrator. Add an instance's bot as an administrator to
-admit it. `allow_other_members = true` is not a way to admit another instance's bot: it skips the
-membership check and lets any member read the group.
+instance's own bot must be. Telegram lists only administrators, so the start-up check reads them with
+the other bots included. It admits the group's owners, this bot, and the other administrator bots,
+and refuses any other member: a person who joins as an ordinary member or as an administrator, or a
+bot that is not an administrator. Add an instance's bot as an administrator to admit it.
+`allow_other_members = true` is not a way to admit another instance's bot: it skips the membership
+check and lets any member read the group.
 
 ## Questions, approvals, and reminders
 
