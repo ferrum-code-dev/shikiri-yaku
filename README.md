@@ -51,9 +51,6 @@ Install the console command `shikiri-yaku` from PyPI:
 uv tool install shikiri-yaku
 ```
 
-Until the first PyPI release, install the wheel from the latest release on the
-[Releases page](https://github.com/ferrum-code-dev/shikiri-yaku/releases) with `uv tool install <wheel>`.
-
 **From a checkout:** for development, see [CONTRIBUTING.md](CONTRIBUTING.md). A service must run a
 release, not a checkout (see [Applying changes](#applying-changes)).
 
@@ -424,8 +421,9 @@ was written but not loaded, is reported with the service manager's message.
 A service runs the installed copy of `shikiri-yaku` that `install-service` found on the login
 `PATH`, never a checkout. That copy is a release. Apply a change in one of these ways:
 
-- After a code change, release it: the owner pushes a version tag, as [CONTRIBUTING.md](CONTRIBUTING.md#releasing)
-  describes. Then upgrade each host and restart its services:
+- After a code change, release it: the owner runs the Release workflow, as
+  [CONTRIBUTING.md](CONTRIBUTING.md#releasing) describes. Then upgrade each host and restart its
+  services:
 
   ```sh
   uv tool upgrade shikiri-yaku

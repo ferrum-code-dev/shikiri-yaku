@@ -2,20 +2,30 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release as <major>.<minor>.<patch>; empty proposes the next one"
+        required: false
+        type: string
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  check:
-    name: Check that CI passed on the tagged commit
+  prepare:
+    name: Choose the commit and the version
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
       actions: read
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,36 +33,77 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Refuse a tag whose commit is not on main
+      - name: Refuse to release from a branch other than main
         env:
-          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
         run: |
-          if ! git merge-base --is-ancestor "$SHA" origin/main; then
-            echo "The tagged commit $SHA is not on main; push main first." >&2
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "The Release workflow runs on main, not on $REF." >&2
             exit 1
           fi
 
-      - name: Check that CI passed on the tagged commit
+      - name: Find the newest commit of main that passed CI
+        id: commit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
         run: |
-          conclusions=$(gh run list --workflow ci.yml --commit "$SHA" --json conclusion --jq '.[].conclusion')
-          if ! grep -qx success <<< "$conclusions"; then
-            echo "CI has not passed on this commit; wait for it and push the tag again." >&2
+          sha=$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 \
+            --json headSha --jq '.[0].headSha // empty')
+          if [ -z "$sha" ]; then
+            echo "No successful CI run on a push to main was found." >&2
             exit 1
           fi
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "The commit $sha that passed CI is not on origin/main." >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Propose the version or check the one given
+        id: version
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          args=(--commit "$SHA")
+          if [ -n "$REQUESTED" ]; then
+            args+=(--version "$REQUESTED")
+          fi
+          version=$(python3 scripts/next_version.py "${args[@]}")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Release v$version from commit $SHA." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refuse a version that PyPI already has
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            "https://pypi.org/pypi/shikiri-yaku/$VERSION/json")
+          case "$status" in
+            404) ;;
+            200)
+              echo "v$VERSION is already on PyPI; rerun the failed jobs from the original Release workflow run." >&2
+              exit 1
+              ;;
+            *)
+              echo "PyPI answered $status for v$VERSION, so the run cannot tell whether it exists." >&2
+              exit 1
+              ;;
+          esac
 
   build:
     name: Build the wheel and the sdist
-    needs: check
+    needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -62,8 +113,20 @@ jobs:
           python-version: "3.14"
           enable-cache: false
 
-      - name: Build the wheel and the sdist
+      - name: Build the wheel and the sdist with the release version
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.prepare.outputs.version }}
         run: uv build
+
+      - name: Check that the wheel is named for the release version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          wheel="dist/shikiri_yaku-${VERSION}-py3-none-any.whl"
+          if [ ! -f "$wheel" ]; then
+            echo "$wheel is missing; the build did not use the release version." >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -90,7 +153,7 @@ jobs:
 
   github:
     name: Publish the GitHub release
-    needs: pypi
+    needs: [prepare, pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -99,6 +162,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -115,15 +179,18 @@ jobs:
 
       - name: Write the release notes from the commits
         env:
-          TAG: ${{ github.ref_name }}
-        run: uv run --no-project python scripts/release_notes.py "$TAG" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/release-notes.md"
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: uv run --no-project python scripts/release_notes.py "v$VERSION" --commit "$SHA" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           prerelease=()
-          case "$TAG" in v0.*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" dist/* --verify-tag --title "$TAG" \
+          case "$VERSION" in 0.*) prerelease=(--prerelease) ;; esac
+          gh release create "v$VERSION" dist/* --target "$SHA" --title "v$VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md" "${prerelease[@]}"

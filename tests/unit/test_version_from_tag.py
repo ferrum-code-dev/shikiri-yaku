@@ -1,7 +1,8 @@
-"""A wheel built from a version tag is named for the tag: the build backend reads git."""
+"""A wheel is named for the version it is built with: the tag, or the release's proposed version."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,8 @@ import pytest
 
 REPO: Final = Path(__file__).resolve().parents[2]
 TAG: Final = "v9.9.9"
+PROPOSED: Final = "8.8.8"
+PRETEND: Final = "SETUPTOOLS_SCM_PRETEND_VERSION"
 IDENTITY: Final = (
     "-c",
     "user.name=Test",
@@ -50,9 +53,7 @@ def _copy_working_tree(target: Path) -> None:
             shutil.copy2(source, target / name)
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
-@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
-def test_a_wheel_built_from_a_version_tag_carries_the_tag_version(tmp_path: Path) -> None:
+def _snapshot(tmp_path: Path) -> Path:
     checkout = tmp_path / "checkout"
     cloned = subprocess.run(
         ["git", "clone", "--local", str(REPO), str(checkout)],
@@ -72,52 +73,51 @@ def test_a_wheel_built_from_a_version_tag_carries_the_tag_version(tmp_path: Path
     ).stdout
     if status:
         _git(checkout, "commit", "-q", "-m", "snapshot")
+    return checkout
+
+
+def _build(cwd: Path, command: str, out: Path, pretend: str | None = None) -> None:
+    # keep: the build must not inherit a version from the environment that runs the gate
+    env = {key: value for key, value in os.environ.items() if key != PRETEND}
+    if pretend is not None:
+        env[PRETEND] = pretend
+    done = subprocess.run(
+        [
+            "uv",
+            "--offline",
+            "build",
+            command,
+            "--no-build-isolation",
+            "--python",
+            sys.executable,
+            "--out-dir",
+            str(out),
+        ],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
+def test_a_wheel_built_from_a_version_tag_carries_the_tag_version(tmp_path: Path) -> None:
+    checkout = _snapshot(tmp_path)
     _git(checkout, "tag", TAG)
     wheel_dist = tmp_path / "wheel-dist"
 
     # keep: no network, and the test's own hatchling and hatch-vcs build the wheel
-    wheel_build = subprocess.run(
-        [
-            "uv",
-            "--offline",
-            "build",
-            "--wheel",
-            "--no-build-isolation",
-            "--python",
-            sys.executable,
-            "--out-dir",
-            str(wheel_dist),
-        ],
-        cwd=checkout,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    _build(checkout, "--wheel", wheel_dist)
 
-    assert wheel_build.returncode == 0, wheel_build.stderr
     (wheel,) = wheel_dist.glob("shikiri_yaku-*.whl")
     assert wheel.name.startswith("shikiri_yaku-9.9.9-")
 
     sdist_dist = tmp_path / "sdist-dist"
-    sdist_build = subprocess.run(
-        [
-            "uv",
-            "--offline",
-            "build",
-            "--sdist",
-            "--no-build-isolation",
-            "--python",
-            sys.executable,
-            "--out-dir",
-            str(sdist_dist),
-        ],
-        cwd=checkout,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    _build(checkout, "--sdist", sdist_dist)
 
-    assert sdist_build.returncode == 0, sdist_build.stderr
     (sdist,) = sdist_dist.glob("shikiri_yaku-*.tar.gz")
     extracted = tmp_path / "sdist-source"
     extracted.mkdir()
@@ -127,24 +127,19 @@ def test_a_wheel_built_from_a_version_tag_carries_the_tag_version(tmp_path: Path
     assert not (sdist_checkout / ".git").exists()
 
     sdist_wheel_dist = tmp_path / "sdist-wheel-dist"
-    sdist_wheel_build = subprocess.run(
-        [
-            "uv",
-            "--offline",
-            "build",
-            "--wheel",
-            "--no-build-isolation",
-            "--python",
-            sys.executable,
-            "--out-dir",
-            str(sdist_wheel_dist),
-        ],
-        cwd=sdist_checkout,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    _build(sdist_checkout, "--wheel", sdist_wheel_dist)
 
-    assert sdist_wheel_build.returncode == 0, sdist_wheel_build.stderr
     (sdist_wheel,) = sdist_wheel_dist.glob("shikiri_yaku-*.whl")
     assert sdist_wheel.name.startswith("shikiri_yaku-9.9.9-")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
+def test_a_wheel_built_before_the_tag_exists_carries_the_proposed_version(tmp_path: Path) -> None:
+    checkout = _snapshot(tmp_path)
+    wheel_dist = tmp_path / "wheel-dist"
+
+    _build(checkout, "--wheel", wheel_dist, pretend=PROPOSED)
+
+    (wheel,) = wheel_dist.glob("shikiri_yaku-*.whl")
+    assert wheel.name == f"shikiri_yaku-{PROPOSED}-py3-none-any.whl"

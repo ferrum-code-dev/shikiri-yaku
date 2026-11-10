@@ -58,16 +58,19 @@ the code.
 
 ## Releasing
 
-Releasing is pushing a tag. On a commit of `main` whose CI has passed, run:
-
-```sh
-git tag v<version> && git push origin v<version>
-```
+Releasing is pressing a button. On GitHub, open Actions, choose the Release workflow and choose Run
+workflow on `main`. Leave `version` empty to release the proposed version, or enter
+`<major>.<minor>.<patch>` to release that one. The run releases the newest commit of `main` on which
+CI passed, and it waits for your approval of the `pypi` environment before it publishes to PyPI.
 
 The [design](docs/design.md#releases-and-deployment) says what happens next. The release workflow
-checks that CI passed on the tagged commit, builds the wheel and the sdist, publishes them to PyPI,
-and then creates the GitHub release. If the workflow fails, fix the problem on `main` and cut a new
-tag; a tag is not moved.
+builds the wheel and the sdist with the release version, publishes them to PyPI, and then creates
+the GitHub release, which creates the tag. A run that fails before PyPI accepts the version leaves no
+tag, so rerun that workflow after fixing the cause. If PyPI accepted the version but the GitHub
+release job failed, open that run in Actions and choose **Re-run failed jobs**. This retries GitHub
+release creation with the existing build artifacts and leaves the successful PyPI job alone. A new
+Release run refuses a version already on PyPI; rerun the original failed job so the same version can
+finish without another upload.
 
 One-time owner setup for publishing: on pypi.org, add a pending publisher for the project
 `shikiri-yaku` with owner `ferrum-code-dev`, repository `shikiri-yaku`, workflow `release.yml` and
