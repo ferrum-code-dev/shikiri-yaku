@@ -2594,6 +2594,25 @@ Acceptance criteria:
   history.
 * The gate passes. Nothing is pushed by the task.
 
+### E46. The contract job runs with a tmux that Shikiru supports (normal)
+
+CI run 42851887323: the `Shikiru contract` job failed at the first tmux call of Shikiru's engine with
+`invalid option: allow-set-title`. The Ubuntu 24.04 runner installs tmux 3.4 from apt; Shikiru requires
+tmux 3.5 or newer (its README) and its own CI builds 3.5a from source on Linux and uses `brew install tmux`
+on macOS. Nothing is wrong with the contract; the job's tool is too old.
+
+1. In `ci.yml`, the `contract` job runs on `macos-15` (same timeout) and installs tmux with `brew install
+   tmux` in place of the apt steps. A step after it runs `tmux -V` so the version is in the log.
+2. The job keeps everything else (latest Shikiru release tag, checkout at that tag, both locked environments,
+   the script). If `brew` leaves tmux older than 3.5, the step fails with a message that says so.
+3. `.github/scripts/contract_check.py` prints `tmux -V` at the start of its report.
+4. `CONTRIBUTING.md` says the contract check needs tmux 3.5 or newer.
+5. Workflow tests describe the job on macOS; the pin test passes.
+
+Acceptance criteria:
+* No Linux build of tmux and no `sudo` in the workflow.
+* The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
