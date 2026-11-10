@@ -124,6 +124,7 @@ ignore = [
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
 "tests/unit/test_version_from_tag.py" = ["S603", "S607", "TID251"]  # builds a wheel from a temporary git checkout with git and uv
+"tests/unit/test_release_workflow.py" = ["S603", "S607", "TID251"]  # runs the release step's script with bash and git in a temporary repository
 
 [tool.basedpyright]
 include = ["src", "tests"]

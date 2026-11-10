@@ -64,14 +64,18 @@ needs one, the run ends green and releases nothing. To release on demand, open A
 Release workflow and choose Run workflow on `main`. Leave `version` empty to release the proposed
 version, or enter `<major>.<minor>.<patch>` to release that one.
 
+Commits of type `docs`, `test`, `chore`, `ci`, `build`, `style` and `refactor` are left out of the
+notes and do not cause a release by themselves, unless they are breaking (`!` or a `BREAKING CHANGE:`
+line).
+
 The [design](docs/design.md#releases-and-deployment) says what happens next. The release workflow
-builds the wheel and the sdist with the release version, publishes them to PyPI, and then creates
-the GitHub release, which creates the tag and is marked Latest. If a run fails before PyPI accepts
-the version, it leaves no tag: fix the cause on `main`, and the next daily run or a manual run starts
-clean. If PyPI accepted the version but the GitHub release job failed, open that run in Actions and
-choose **Re-run failed jobs**. This retries GitHub release creation with the existing build artifacts
-and leaves the successful PyPI job alone. A new Release run refuses a version already on PyPI, so
-rerun the original failed job rather than starting a new run.
+builds the wheel and the sdist with the release version, checks that the installed wheel reports
+that version, publishes the files to PyPI, and then creates the GitHub release, which creates the
+tag and is marked Latest. The release has no attached files; the package is on PyPI. If a run fails
+before PyPI accepts the version, it leaves no tag: fix the cause on `main`, and the next daily run or
+a manual run starts clean. If PyPI accepted the files but the GitHub release job failed, the next
+daily run or a manual run finishes the release: the upload skips the files PyPI already has, and the
+GitHub release is created.
 
 One-time owner setup for publishing: on pypi.org, add a pending publisher for the project
 `shikiri-yaku` with owner `ferrum-code-dev`, repository `shikiri-yaku`, workflow `release.yml` and
