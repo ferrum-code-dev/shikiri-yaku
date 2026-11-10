@@ -2638,6 +2638,30 @@ Acceptance criteria:
 * The commit subject is `fix(commands): ...` written for a user.
 * The gate passes. Nothing is pushed by the task.
 
+### E48. Check the Shikiru contract every day at 01:00 UTC (normal)
+
+Shikiru releases at 00:00 UTC. The contract job should run an hour later even when the Operator has no new
+commit, so a Shikiru release that breaks the Operator shows up the same night. Change `ci.yml` and the docs
+only.
+
+1. `ci.yml` gets `schedule` with `cron: "0 1 * * *"` next to `push` and `pull_request`.
+2. The `check` matrix job (ubuntu and macOS) gets `if: github.event_name != 'schedule'`, so a scheduled run
+   runs only the `contract` job.
+3. The concurrency group of a scheduled run is its own, so it never cancels or is cancelled by a CI run of
+   a push: for example `group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' ||
+   github.ref }}`. `cancel-in-progress` stays true.
+4. The release workflow is not touched: it reads only runs of `ci.yml` with event `push`, so a scheduled run,
+   green or red, never blocks or enables a release. A test in the release workflow tests says so (the
+   run lookup keeps `--event push`).
+5. `CONTRIBUTING.md` and the contract paragraph of `docs/design.md` are not edited by the task (the owner
+   updates the design); in `CONTRIBUTING.md` add one sentence: the contract job also runs every day at 01:00
+   UTC against the latest Shikiru release.
+
+Acceptance criteria:
+* Workflow tests check the schedule, the `if` on `check`, the separate concurrency group for scheduled runs
+  and that `contract` has no `if` on the event.
+* The pin test passes. The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

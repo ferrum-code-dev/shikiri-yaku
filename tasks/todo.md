@@ -244,3 +244,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E45. The contract check is a job of CI; scripts live in .github/
   - [x] E46. The contract job runs with a tmux that Shikiru supports
   - [x] E47. A command no longer fails on macOS when its process group has just exited
+  - [ ] E48. Check the Shikiru contract every day at 01:00 UTC
