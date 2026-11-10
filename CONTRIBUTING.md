@@ -22,7 +22,8 @@ guide](tests/fixtures/shikiru/README.md) explains its MCP payloads.
 Outside the gate, `.github/scripts/contract_check.py` checks the Shikiru behavior the Operator relies
 on, against a real engine and its fake agent in a temporary project. The `contract` job of CI runs it
 on macOS 15, on every push to `main` and every pull request, against the latest Shikiru release. Like
-any CI job, a failure turns the run red, and no release takes that commit. To run it by hand, use
+any CI job, a failure turns the run red, and no release takes that commit. The job also runs every day
+at 01:00 UTC against the latest Shikiru release. To run it by hand, use
 `uv run python .github/scripts/contract_check.py --shikiru-checkout <path>` with a Shikiru checkout;
 it needs git and tmux 3.5 or newer.
 

@@ -30,14 +30,44 @@ def _uses(job: dict[str, object], action: str) -> list[dict[str, object]]:
     return [step for step in _steps(job) if str(step.get("uses", "")).startswith(action)]
 
 
-def test_the_contract_is_a_job_of_ci_on_every_push_to_main_and_every_pull_request() -> None:
-    document = cast("dict[object, object]", yaml.safe_load(CI.read_text(encoding="utf-8")))
-    # keep: PyYAML reads the key `on` as the boolean True
-    trigger = cast("dict[str, object]", document[True])
+def _ci_document() -> dict[object, object]:
+    return cast("dict[object, object]", yaml.safe_load(CI.read_text(encoding="utf-8")))
 
-    assert set(trigger) == {"push", "pull_request"}
+
+def _trigger() -> dict[str, object]:
+    # keep: PyYAML reads the key `on` as the boolean True
+    return cast("dict[str, object]", _ci_document()[True])
+
+
+def test_the_contract_is_a_job_of_ci_on_every_push_to_main_and_every_pull_request() -> None:
+    trigger = _trigger()
+
+    assert set(trigger) == {"push", "pull_request", "schedule"}
     assert trigger["push"] == {"branches": ["main"]}
     assert _jobs(CI)["contract"]["name"] == "Shikiru contract"
+
+
+def test_the_contract_also_runs_every_day_at_0100_utc() -> None:
+    assert _trigger()["schedule"] == [{"cron": "0 1 * * *"}]
+
+
+def test_a_scheduled_run_runs_the_contract_job_alone() -> None:
+    jobs = _jobs(CI)
+
+    assert jobs["check"]["if"] == "github.event_name != 'schedule'"
+    assert "if" not in jobs["contract"]
+
+
+def test_a_scheduled_run_has_a_concurrency_group_of_its_own() -> None:
+    concurrency = cast("dict[str, object]", _ci_document()["concurrency"])
+
+    assert concurrency == {
+        "group": (
+            "${{ github.workflow }}-"
+            "${{ github.event_name == 'schedule' && 'schedule' || github.ref }}"
+        ),
+        "cancel-in-progress": True,
+    }
 
 
 def test_the_release_takes_its_commit_from_ci_alone() -> None:

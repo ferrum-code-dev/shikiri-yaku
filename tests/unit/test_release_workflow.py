@@ -97,6 +97,15 @@ def test_the_release_runs_daily_and_on_the_button_with_an_optional_version() -> 
     assert inputs["version"]["required"] is False
 
 
+def test_a_scheduled_ci_run_never_decides_the_release() -> None:
+    # keep: the daily 01:00 UTC run of ci.yml is a schedule, and only a push may choose the release
+    lookup = str(
+        _step_named(_jobs()["prepare"], "Find the newest commit of main that passed CI")["run"]
+    )
+
+    assert "--workflow ci.yml --branch main --event push" in lookup
+
+
 def test_the_build_pypi_and_github_jobs_run_only_when_prepare_finds_a_release() -> None:
     jobs = _jobs()
 

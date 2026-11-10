@@ -4,17 +4,22 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # An hour after Shikiru's daily release at 00:00 UTC
+    - cron: "0 1 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A scheduled run never cancels, or is cancelled by, a run for a push or a pull request
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
   cancel-in-progress: true
 
 jobs:
   check:
     name: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
