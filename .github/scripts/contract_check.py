@@ -1,9 +1,10 @@
 """Checks the Shikiru assumptions the Operator relies on against a real engine and its fake agent.
 
-CI runs it against the latest Shikiru release (the contract workflow); the quality gate does not. A
-human can run it by hand against any checkout. Needs git and tmux on PATH and a Shikiru checkout:
+CI runs it against the latest Shikiru release (the contract job of ci.yml); the quality gate does
+not. A human can run it by hand against any checkout. Needs git and tmux on PATH and a Shikiru
+checkout:
 
-    uv run python scripts/contract_check.py --shikiru-checkout /path/to/shikiru
+    uv run python .github/scripts/contract_check.py --shikiru-checkout /path/to/shikiru
 
 It builds a temporary project from the checkout's sample project, starts the engine through the
 adapter, lets the fake agent escalate, resolves the escalation twice and prints one line per

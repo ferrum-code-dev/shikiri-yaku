@@ -19,16 +19,12 @@ It uses fakes and local fixtures, not a live Telegram bot or agent CLI. The [Tel
 guide](tests/fixtures/telegram/README.md) explains payload provenance, and the [Shikiru fixture
 guide](tests/fixtures/shikiru/README.md) explains its MCP payloads.
 
-Outside the gate, `scripts/contract_check.py` checks the Shikiru behavior the Operator relies on,
-against a real engine and its fake agent in a temporary project. The Shikiru contract workflow
-([.github/workflows/contract.yml](.github/workflows/contract.yml)) runs it on every change, every
-day and on demand, against the latest Shikiru release. That workflow does not gate releases. To run
-it by hand, use `uv run python scripts/contract_check.py --shikiru-checkout <path>` with a Shikiru
-checkout; it needs git and tmux.
-
-Human checks that need a real host or Telegram test bot are listed in
-[tasks/drills.md](tasks/drills.md) and are outside the offline gate. Run them on a throwaway host,
-with the test bot and a test chat.
+Outside the gate, `.github/scripts/contract_check.py` checks the Shikiru behavior the Operator relies
+on, against a real engine and its fake agent in a temporary project. The `contract` job of CI runs it
+on every push to `main` and every pull request, against the latest Shikiru release. Like any CI job,
+a failure turns the run red, and no release takes that commit. To run it by hand, use
+`uv run python .github/scripts/contract_check.py --shikiru-checkout <path>` with a Shikiru checkout;
+it needs git and tmux.
 
 ## Proposing a change
 

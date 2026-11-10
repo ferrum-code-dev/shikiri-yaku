@@ -241,4 +241,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E42. A resilient daily release
   - [x] E43. Delete record_telegram.py
   - [x] E44. The contract check runs in CI
-  - [ ] E45. The contract check is a job of CI; scripts live in .github/
+  - [x] E45. The contract check is a job of CI; scripts live in .github/
