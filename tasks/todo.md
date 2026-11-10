@@ -119,7 +119,7 @@ R10 and R11 replace T-126. Details and shared constraints are in `tasks/plan.md`
 
 - README.md presents the product purpose, prerequisites, installation, instance creation, configuration, command line and chat commands in concise, scannable sections without omitting supported instructions.
 - All documented TOML keys, defaults, command syntax, Telegram requirements and Reasoner ladder syntax remain consistent with the implementation.
-- The change is limited to README.md and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
+- The change is limited to README.md, docs/reference.md (where T-129 moved the full reference detail) and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 ### R11
@@ -131,7 +131,7 @@ R10 and R11 replace T-126. Details and shared constraints are in `tasks/plan.md`
 - README.md presents approvals, automatic actions, service operation, recovery, local state, limits and contributor validation in concise, scannable sections without omitting essential instructions.
 - Documented safety and recovery behavior remains accurate, including owner authorization, exact-command install approval, topic repair, uncertain goal handling and clean-stop behavior.
 - The complete README has valid retained local Markdown links and headings, and uses the Shikiru README only as a readability reference.
-- The change is limited to README.md and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
+- The change is limited to README.md, docs/reference.md (where T-129 moved the full reference detail) and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 ## Historical implementation records
