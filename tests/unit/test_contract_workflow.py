@@ -54,6 +54,15 @@ def test_the_contract_job_sets_uv_up_exactly_as_the_check_job_does() -> None:
     assert contract_setup == check_setup
 
 
+def test_the_contract_job_runs_on_macos_and_takes_tmux_from_homebrew_without_sudo() -> None:
+    contract = _jobs(CI)["contract"]
+    runs = [str(step["run"]) for step in _steps(contract) if "run" in step]
+
+    assert contract["runs-on"] == "macos-15"
+    assert any(run == "brew install tmux" for run in runs)
+    assert not any("sudo" in run or "apt" in run for run in runs)
+
+
 def test_the_contract_check_runs_against_the_shikiru_checkout_it_made() -> None:
     contract = _jobs(CI)["contract"]
     (shikiru,) = [

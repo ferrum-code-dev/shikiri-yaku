@@ -1,8 +1,8 @@
 """Checks the Shikiru assumptions the Operator relies on against a real engine and its fake agent.
 
 CI runs it against the latest Shikiru release (the contract job of ci.yml); the quality gate does
-not. A human can run it by hand against any checkout. Needs git and tmux on PATH and a Shikiru
-checkout:
+not. A human can run it by hand against any checkout. Needs git and tmux 3.5 or newer on PATH and a
+Shikiru checkout:
 
     uv run python .github/scripts/contract_check.py --shikiru-checkout /path/to/shikiru
 
@@ -115,6 +115,15 @@ async def _prepare(project: Path, checkout: Path, wrapper: Path) -> None:
             raise CheckFailedError(message)
 
 
+async def _tmux_version() -> str:
+    real_tmux = shutil.which("tmux")
+    if real_tmux is None:
+        message = "tmux is not on PATH"
+        raise CheckFailedError(message)
+    result = await ProcessCommandRunner().run([real_tmux, "-V"], timeout_s=COMMAND_TIMEOUT_S)
+    return result.stdout.strip()
+
+
 async def _until(clock: SystemClock, condition, what: str) -> None:  # noqa: ANN001
     for _ in range(TIMEOUT_S // POLL_S):
         if await condition():
@@ -211,9 +220,10 @@ async def _scenario(client: ShikiruMcpClient, clock: SystemClock) -> None:
 async def _main(checkout: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="contract-check-") as name:
         directory = Path(name)
-        wrapper = _wrapper(directory, checkout)
         project = directory / "project"
         try:
+            sys.stdout.write(f"{await _tmux_version()}\n")
+            wrapper = _wrapper(directory, checkout)
             await _prepare(project, checkout, wrapper)
             await _check(wrapper, project)
         except CheckFailedError as error:

@@ -42,7 +42,7 @@ jobs:
 
   contract:
     name: Shikiru contract
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:
@@ -76,10 +76,20 @@ jobs:
           persist-credentials: false
 
       - name: Install tmux
-        # The check starts the engine in tmux, and the runner image does not ship it.
+        # The check starts the engine in tmux. Shikiru needs tmux 3.5 or newer, which the Ubuntu
+        # apt archive does not offer, so the job runs on macOS and takes tmux from Homebrew.
+        run: brew install tmux
+
+      - name: Check the tmux version
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tmux
+          version=$(tmux -V)
+          echo "$version"
+          if [[ "$version" =~ ([0-9]+)\.([0-9]+) ]] &&
+            (( BASH_REMATCH[1] > 3 || (BASH_REMATCH[1] == 3 && BASH_REMATCH[2] >= 5) )); then
+            exit 0
+          fi
+          echo "::error::$version is older than 3.5, which Shikiru requires."
+          exit 1
 
       - name: Sync Shikiru's locked environment
         run: uv sync --locked --project shikiru-src

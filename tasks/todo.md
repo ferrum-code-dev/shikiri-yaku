@@ -242,4 +242,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E43. Delete record_telegram.py
   - [x] E44. The contract check runs in CI
   - [x] E45. The contract check is a job of CI; scripts live in .github/
-  - [ ] E46. The contract job runs with a tmux that Shikiru supports
+  - [x] E46. The contract job runs with a tmux that Shikiru supports
