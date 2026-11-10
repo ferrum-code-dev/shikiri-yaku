@@ -66,7 +66,8 @@ class ProcessCommandRunner:
 
 async def _kill_group(process: asyncio.subprocess.Process) -> None:
     # keep: a child that ignores SIGTERM, and the children it started, die with the group
-    with contextlib.suppress(ProcessLookupError):
+    # keep: on macOS a group of exited, unreaped processes answers EPERM, as in _group_exists
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(process.pid, signal.SIGKILL)
     await process.wait()
     await _wait_for_group_exit(process.pid)
@@ -84,9 +85,10 @@ async def _wait_for_group_exit(group_id: int) -> None:
 
 
 def _group_exists(group_id: int) -> bool:
+    # keep: macOS answers EPERM for a group of exited, unreaped processes; the group is ours
     try:
         os.killpg(group_id, 0)
-    except ProcessLookupError:
+    except ProcessLookupError, PermissionError:
         return False
     return True
 

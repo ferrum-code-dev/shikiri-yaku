@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import signal
 import sys
@@ -150,3 +151,24 @@ def test_cancelling_a_command_kills_and_reaps_its_process(tmp_path: Path) -> Non
     asyncio.run(_cancel_once_started(pid_file))
 
     assert not _alive(int(pid_file.read_text(encoding="utf-8")))
+
+
+def _macos_probe_of_exited_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_killpg = os.killpg
+
+    def killpg(group_id: int, sig: int) -> None:
+        if sig == 0:
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+        real_killpg(group_id, sig)
+
+    monkeypatch.setattr(os, "killpg", killpg)
+
+
+def test_a_command_whose_group_reports_not_permitted_returns_its_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _macos_probe_of_exited_group(monkeypatch)
+
+    result = _run(["echo", "hello"])
+
+    assert (result.returncode, result.stdout) == (0, "hello\n")
