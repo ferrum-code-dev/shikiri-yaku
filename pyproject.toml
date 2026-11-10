@@ -121,12 +121,8 @@ ignore = [
 "src/shikiri_yaku/adapters/commands.py" = ["TID251"]  # the CommandRunner adapter is the only place that starts processes
 "scripts/contract_check.py" = ["T201", "D", "INP001"]  # a human runs it and reads its printed report
 "scripts/record_telegram.py" = ["INP001"]  # a human runs it; scripts/ is not a package
-"scripts/release_notes.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts git to read the commits and tags
-"scripts/next_version.py" = ["INP001", "S603", "S607", "TID251"]  # the release workflow runs it; it starts git to read the tags and commits
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]
 "tests/unit/test_import_contracts.py" = ["S603", "TID251"]  # runs lint-imports on a copied tree
-"tests/unit/test_release_notes.py" = ["S603", "S607", "TID251"]  # builds a temporary git repository with git
-"tests/unit/test_next_version.py" = ["S603", "S607", "TID251"]  # builds a temporary git repository and runs the script with git
 "tests/unit/test_version_from_tag.py" = ["S603", "S607", "TID251"]  # builds a wheel from a temporary git checkout with git and uv
 
 [tool.basedpyright]
@@ -202,7 +198,7 @@ forbidden_modules = ["shikiri_yaku.bootstrap", "shikiri_yaku.cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "scripts"]  # the scripts import release_notes as a sibling module
+pythonpath = ["."]
 filterwarnings = ["error"]
 timeout = 60
 

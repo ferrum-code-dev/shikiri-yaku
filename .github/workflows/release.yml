@@ -60,37 +60,43 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Propose the version or check the one given
+      - name: Check out the commit that passed CI
+        env:
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: git checkout --detach "$SHA"
+
+      - name: Propose the next version with git-cliff
+        id: proposal
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        with:
+          version: v2.14.2
+          args: --bumped-version
+
+      - name: Choose the version
         id: version
         env:
           SHA: ${{ steps.commit.outputs.sha }}
           REQUESTED: ${{ inputs.version }}
+          PROPOSED: ${{ steps.proposal.outputs.content }}
         run: |
-          args=(--commit "$SHA")
           if [ -n "$REQUESTED" ]; then
-            args+=(--version "$REQUESTED")
+            version="$REQUESTED"
+          else
+            # With nothing to release, git-cliff prints a note and then the last tag.
+            proposed=$(printf '%s\n' "$PROPOSED" | tail -n 1 | tr -d '[:space:]')
+            version="${proposed#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "git-cliff proposed '$proposed', which is not a version." >&2
+              exit 1
+            fi
+            last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)
+            if [ "$proposed" = "$last" ]; then
+              echo "No commit since $last needs a release." >&2
+              exit 1
+            fi
           fi
-          version=$(python3 scripts/next_version.py "${args[@]}")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Release v$version from commit $SHA." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Refuse a version that PyPI already has
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            "https://pypi.org/pypi/shikiri-yaku/$VERSION/json")
-          case "$status" in
-            404) ;;
-            200)
-              echo "v$VERSION is already on PyPI; rerun the failed jobs from the original Release workflow run." >&2
-              exit 1
-              ;;
-            *)
-              echo "PyPI answered $status for v$VERSION, so the run cannot tell whether it exists." >&2
-              exit 1
-              ;;
-          esac
 
   build:
     name: Build the wheel and the sdist
@@ -166,22 +172,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          version: "0.12.5"
-          python-version: "3.14"
-          enable-cache: false
-
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: dist
           path: dist/
 
       - name: Write the release notes from the commits
+        id: notes
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        with:
+          version: v2.14.2
+          args: --unreleased --tag v${{ needs.prepare.outputs.version }} --strip all
+
+      - name: Save the release notes
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          SHA: ${{ needs.prepare.outputs.sha }}
-        run: uv run --no-project python scripts/release_notes.py "v$VERSION" --commit "$SHA" --repo "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/release-notes.md"
+          NOTES: ${{ steps.notes.outputs.content }}
+        run: printf '%s\n' "$NOTES" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Create the GitHub release
         env:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Final, cast
 
@@ -9,6 +10,10 @@ import yaml
 WORKFLOWS: Final = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 RELEASE_WORKFLOW: Final = WORKFLOWS / "release.yml"
 CREDENTIAL_CONTEXT: Final = "github.token"
+GIT_CLIFF_ACTION: Final = "orhun/git-cliff-action@"
+GIT_CLIFF_VERSION: Final = "v2.14.2"
+NEEDS_OUTPUT: Final = re.compile(r"needs\.(\w+)\.outputs\.(\w+)")
+STEP_OUTPUT: Final = re.compile(r"steps\.([\w-]+)\.outputs\.(\w+)")
 JOB_ORDER: Final = ("prepare", "build", "pypi", "github")
 NEEDS: Final = {
     "prepare": [],
@@ -22,7 +27,6 @@ PERMISSIONS: Final = {
     "pypi": {"id-token": "write"},
     "github": {"contents": "write"},
 }
-PYPI_VERSION_API: Final = "https://pypi.org/pypi/shikiri-yaku/"
 TOKEN_STEPS: Final = frozenset(
     {
         ("prepare", "Find the newest commit of main that passed CI"),
@@ -47,8 +51,16 @@ def _needs(job: dict[str, object]) -> list[str]:
     return cast("list[str]", value)
 
 
+def _steps(job: dict[str, object]) -> list[dict[str, object]]:
+    return cast("list[dict[str, object]]", job["steps"])
+
+
 def _mentions_token(node: object) -> bool:
     return CREDENTIAL_CONTEXT in json.dumps(node)
+
+
+def _git_cliff_uses(job: dict[str, object]) -> list[dict[str, object]]:
+    return [step for step in _steps(job) if str(step.get("uses", "")).startswith(GIT_CLIFF_ACTION)]
 
 
 def test_the_release_starts_only_from_the_button_with_an_optional_version() -> None:
@@ -78,10 +90,42 @@ def test_the_jobs_run_as_prepare_build_pypi_github() -> None:
     assert {name: job.get("permissions") for name, job in jobs.items()} == PERMISSIONS
 
 
-def test_prepare_refuses_a_version_pypi_already_has() -> None:
-    steps = cast("list[dict[str, object]]", _jobs()["prepare"]["steps"])
+def test_git_cliff_proposes_the_version_in_prepare_and_writes_the_notes_in_github() -> None:
+    jobs = _jobs()
 
-    assert any(PYPI_VERSION_API in str(step.get("run", "")) for step in steps)
+    proposal = [step["with"] for step in _git_cliff_uses(jobs["prepare"])]
+    notes = [step["with"] for step in _git_cliff_uses(jobs["github"])]
+
+    assert proposal == [{"version": GIT_CLIFF_VERSION, "args": "--bumped-version"}]
+    assert notes == [
+        {
+            "version": GIT_CLIFF_VERSION,
+            "args": "--unreleased --tag v${{ needs.prepare.outputs.version }} --strip all",
+        },
+    ]
+    assert all(not _git_cliff_uses(jobs[name]) for name in ("build", "pypi"))
+
+
+def test_no_release_step_runs_a_script_from_the_repository() -> None:
+    for job in _jobs().values():
+        for step in _steps(job):
+            assert "scripts/" not in str(step.get("run", "")), step.get("name")
+
+
+def test_the_outputs_a_job_reads_exist() -> None:
+    jobs = _jobs()
+    for name, job in jobs.items():
+        text = json.dumps(job)
+        step_ids = {str(step["id"]) for step in _steps(job) if "id" in step}
+        for upstream, output in NEEDS_OUTPUT.findall(text):
+            assert upstream in _needs(job), (name, upstream)
+            assert output in cast("dict[str, object]", jobs[upstream].get("outputs", {})), (
+                name,
+                upstream,
+                output,
+            )
+        for step_id, _ in STEP_OUTPUT.findall(text):
+            assert step_id in step_ids, (name, step_id)
 
 
 def test_publishing_still_waits_for_the_pypi_environment() -> None:
