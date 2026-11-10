@@ -122,17 +122,6 @@ def test_sections_come_in_order_and_empty_ones_are_omitted(
     assert found == [*headings, "### Install"]
 
 
-def test_release_commits_are_left_out(repo: Path) -> None:
-    _commit(repo, "fix: keep the topic")
-    _commit(repo, "chore: release 0.1.1")
-    _git(repo, "tag", "v0.1.1")
-
-    text = release_notes.notes("v0.1.1", REPO)
-
-    assert "keep the topic" in text
-    assert "chore: release" not in text
-
-
 def test_the_first_release_lists_every_commit_up_to_its_tag(repo: Path) -> None:
     first = _commit(repo, "feat: the first feature")
     _git(repo, "tag", "v0.1.0")
@@ -161,7 +150,7 @@ def test_notes_start_after_the_previous_tag_by_number(repo: Path) -> None:
     assert f"[v0.1.10...v0.1.11](https://github.com/{REPO}/compare/v0.1.10...v0.1.11)" in text
 
 
-def test_the_links_name_the_compare_view_and_the_wheel(repo: Path) -> None:
+def test_the_links_name_the_compare_view_and_the_pinned_install(repo: Path) -> None:
     _commit(repo, "fix: the old one")
     _git(repo, "tag", "v0.1.0")
     new = _commit(repo, "fix: the new one")
@@ -173,10 +162,26 @@ def test_the_links_name_the_compare_view_and_the_wheel(repo: Path) -> None:
     assert (
         f"**Full Changelog**: [v0.1.0...v0.1.1](https://github.com/{REPO}/compare/v0.1.0...v0.1.1)"
     ) in text
-    assert (
-        f"uv tool install https://github.com/{REPO}/releases/download/v0.1.1/"
-        "shikiri_yaku-0.1.1-py3-none-any.whl"
-    ) in text
+    assert "### Install\n\n```sh\nuv tool install shikiri-yaku==0.1.1\n```" in text
+
+
+def test_the_commit_option_lists_up_to_that_commit_before_the_tag_exists(
+    repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _commit(repo, "fix: the old one")
+    _git(repo, "tag", "v0.1.0")
+    new = _commit(repo, "feat: the new one")
+    _commit(repo, "fix: after the new one")
+
+    assert release_notes.main(["v0.1.1", "--commit", new, "--repo", REPO]) == 0
+
+    text = capsys.readouterr().out
+    assert _commit_line(new, "feat: the new one") in text
+    assert "after the new one" not in text
+    assert "the old one" not in text
+    assert "uv tool install shikiri-yaku==0.1.1" in text
+    assert "v0.1.1" not in _git(repo, "tag", "--list")
 
 
 def test_main_reads_the_repository_from_the_environment(

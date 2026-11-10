@@ -232,6 +232,6 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E33. The release workflow: check CI once, publish to PyPI
   - [x] E34. Back up the journal before a migration
   - [x] E35. A failed journal backup leaves no file that looks like a backup
-  - [ ] E36. The release notes name the commit and install the exact version
+  - [x] E36. The release notes name the commit and install the exact version
   - [ ] E37. Propose the next version
   - [ ] E38. The Release workflow starts from a button
