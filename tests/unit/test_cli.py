@@ -428,9 +428,9 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
         pytest.param(_shikiru_says("0.1.0\n"), 0, id="lowest-inclusive"),
         pytest.param(_shikiru_says("0.1.5\n"), 0, id="inside"),
         pytest.param(_shikiru_says("0.1.4.dev3+gabc\n"), 0, id="development-build-inside"),
-        pytest.param(_shikiru_says("0.2.0\n"), 1, id="first-unsupported"),
+        pytest.param(_shikiru_says("0.2.0\n"), 0, id="next-minor-inside"),
+        pytest.param(_shikiru_says("0.3.0\n"), 1, id="first-unsupported"),
         pytest.param(_shikiru_says("1.0.0rc1\n"), 1, id="pre-release-of-a-later-version"),
-        pytest.param(_shikiru_says("0.3.0\n"), 1, id="above"),
         pytest.param(_shikiru_says("0.10.0\n"), 1, id="above-compared-as-numbers"),
         pytest.param(_shikiru_says("shikiru is fine\n"), 1, id="unparseable-output"),
         pytest.param(_shikiru_says(""), 1, id="empty-output"),
@@ -456,11 +456,11 @@ def test_doctor_json_names_the_shikiru_version_it_found_and_the_range(
 ) -> None:
     _instance(tmp_path)
 
-    assert _run_doctor(tmp_path, json_output=True, shikiru=_shikiru_says("0.2.0\n")) == 1
+    assert _run_doctor(tmp_path, json_output=True, shikiru=_shikiru_says("0.3.0\n")) == 1
     document = json.loads(capsys.readouterr().out)
     (check,) = [check for check in document["checks"] if check["name"] == "Shikiru version"]
     assert check["passed"] is False
-    assert "0.2.0" in check["detail"]
+    assert "0.3.0" in check["detail"]
     assert "0.1.0" in check["detail"]
 
 
