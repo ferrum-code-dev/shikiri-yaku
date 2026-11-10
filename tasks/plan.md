@@ -2613,6 +2613,31 @@ Acceptance criteria:
 * No Linux build of tmux and no `sudo` in the workflow.
 * The gate passes. Nothing is pushed by the task.
 
+### E47. A command no longer fails on macOS when its process group has just exited (normal)
+
+This is a bug in `src/shikiri_yaku/adapters/commands.py`, not only a flaky test. CI run 42854345693 (macOS):
+`test_a_child_outliving_its_leader_is_killed_at_the_timeout` failed with `PermissionError: [Errno 1]
+Operation not permitted` raised by `os.killpg(group_id, 0)` in `_group_exists`. The same test failed the same
+way in run 42829345466's predecessor on `1abcf83`. macOS answers `EPERM`, not `ESRCH`, when a process group
+holds only processes that have just exited and not yet been reaped; the host of the Operator is macOS, so a
+real command can hit this while the runner waits for its group to end. The group is ours (we started its
+leader), so a permission error can only mean the group is gone.
+
+1. `_group_exists` returns `False` for `PermissionError` as well as `ProcessLookupError`, with a comment that
+   says why (macOS reports `EPERM` for a group of exited, unreaped processes; the group is ours).
+2. `_kill_group` already suppresses `ProcessLookupError` around `os.killpg(..., SIGKILL)`; suppress
+   `PermissionError` there for the same reason.
+3. A unit test makes `os.killpg` raise `PermissionError` for the signal 0 probe (monkeypatch of the stdlib
+   function, not of an internal class) and shows `_wait_for_group_exit` returns instead of raising, and that a
+   command whose group reports `EPERM` after its leader exited returns its result.
+
+Acceptance criteria:
+* The test in 3 fails without the change and passes with it.
+* `test_a_child_outliving_its_leader_is_killed_at_the_timeout` passes 20 consecutive runs locally
+  (`for i in $(seq 20); do uv run pytest tests/unit/test_commands.py -q || break; done`); report the result.
+* The commit subject is `fix(commands): ...` written for a user.
+* The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
