@@ -2524,6 +2524,50 @@ Acceptance criteria:
 * No custom script is added. Nothing is pushed or released by the task.
 * The gate passes.
 
+### E43. Delete `record_telegram.py` (normal)
+
+The script records real Bot API replies into `tests/fixtures/telegram/recorded/`. That folder has never
+existed; the fixtures are curated by hand, and the script handles a bot token for no recorded gain. Git
+history keeps it.
+
+1. Delete `scripts/record_telegram.py` and its entry in `pyproject.toml`.
+2. `CONTRIBUTING.md`: remove its bullet; `tests/fixtures/telegram/README.md`: rewrite the sentence that points
+   to it (replacing fixtures with real replies is a manual, by-hand task done with a test bot; say no script
+   does it). Keep the rule that real replies are redacted of tokens and ids before they are committed.
+3. `grep` finds no other reference to `record_telegram` outside git history and `tasks/plan.md`.
+
+Acceptance criteria:
+* The gate passes. Nothing is pushed by the task.
+
+### E44. The contract check runs in CI (normal)
+
+`scripts/contract_check.py` is the only guard against a Shikiru release that breaks the Operator, and nothing
+runs it. See "Compatibility with Shikiru" in `docs/design.md`.
+
+1. New `.github/workflows/contract.yml` named "Shikiru contract": triggers `push` to `main`, `pull_request`,
+   `schedule` (`0 1 * * *`) and `workflow_dispatch`; `permissions: contents read`; a `concurrency` group per
+   ref that cancels older runs.
+2. One job on `ubuntu-24.04` (timeout 20 minutes): check out the Operator; set up uv exactly as `ci.yml` does
+   (same pinned actions and versions); `uv sync --locked`; find the latest Shikiru release tag with
+   `gh release view --repo ferrum-code-dev/shikiru --json tagName --jq .tagName` (`GH_TOKEN` from
+   `github.token`); check out `ferrum-code-dev/shikiru` at that tag into `shikiru-src` with
+   `actions/checkout` (pinned like the others, `persist-credentials: false`); `uv sync --locked --project
+   shikiru-src`; run `uv run python scripts/contract_check.py --shikiru-checkout shikiru-src`. Print the tag in
+   the job summary.
+3. `release.yml` is not touched: it looks only at runs of `ci.yml`, so a red contract run never blocks or
+   triggers a release. A test says so (the release workflow names `ci.yml` and not `contract.yml`).
+4. Update the `contract_check.py` docstring (CI runs it; the manual form stays valid) and `CONTRIBUTING.md`
+   (what the workflow does, how to run it by hand: `scripts/contract_check.py --shikiru-checkout <path>`,
+   needs git and tmux).
+5. If `contract_check.py` fails on a fresh Ubuntu runner for a reason of the runner (for example a missing
+   tool), fix the script or the workflow; do not skip the check. If the script cannot run unattended for a
+   reason you cannot fix within the task, stop and report.
+
+Acceptance criteria:
+* The existing pin test covers the new workflow and passes; a test checks the triggers and that
+  `release.yml` does not mention `contract.yml`.
+* The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.

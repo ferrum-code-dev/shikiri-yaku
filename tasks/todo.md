@@ -239,3 +239,5 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E40. git-cliff writes the notes and the version
   - [x] E41. A daily release marked Latest
   - [x] E42. A resilient daily release
+  - [ ] E43. Delete record_telegram.py
+  - [ ] E44. The contract check runs in CI
