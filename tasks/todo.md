@@ -238,3 +238,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E39. Support every newer Shikiru, with a minimum version only
   - [x] E40. git-cliff writes the notes and the version
   - [x] E41. A daily release marked Latest
+  - [ ] E42. A resilient daily release
