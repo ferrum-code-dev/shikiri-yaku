@@ -52,10 +52,41 @@ def test_the_contract_also_runs_every_day_at_0100_utc() -> None:
 
 
 def test_a_scheduled_run_runs_the_contract_job_alone() -> None:
-    jobs = _jobs(CI)
+    assert _jobs(CI)["check"]["if"] == "github.event_name != 'schedule'"
 
-    assert jobs["check"]["if"] == "github.event_name != 'schedule'"
-    assert "if" not in jobs["contract"]
+
+def test_a_scheduled_run_runs_the_contract_only_after_a_fresh_shikiru_release() -> None:
+    contract = _jobs(CI)["contract"]
+
+    assert contract["needs"] == "shikiru-release"
+    assert (
+        contract["if"]
+        == "github.event_name != 'schedule' || needs.shikiru-release.outputs.fresh == 'true'"
+    )
+
+
+def test_the_latest_shikiru_release_is_looked_up_by_a_job_that_runs_on_every_event() -> None:
+    release = _jobs(CI)["shikiru-release"]
+
+    assert release["name"] == "Latest Shikiru release"
+    assert release["runs-on"] == "ubuntu-24.04"
+    assert "if" not in release
+    assert set(cast("dict[str, str]", release["outputs"])) == {"tag", "fresh"}
+
+
+def test_the_contract_checks_out_the_release_found_by_the_lookup_job() -> None:
+    contract = _jobs(CI)["contract"]
+    runs = [str(step["run"]) for step in _steps(contract) if "run" in step]
+    (shikiru,) = [
+        step
+        for step in _uses(contract, CHECKOUT)
+        if cast("dict[str, object]", step.get("with", {})).get("path") == "shikiru-src"
+    ]
+
+    assert not any("gh release" in run for run in runs)
+    assert cast("dict[str, object]", shikiru["with"])["ref"] == (
+        "${{ needs.shikiru-release.outputs.tag }}"
+    )
 
 
 def test_a_scheduled_run_has_a_concurrency_group_of_its_own() -> None:

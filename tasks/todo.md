@@ -245,4 +245,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E46. The contract job runs with a tmux that Shikiru supports
   - [x] E47. A command no longer fails on macOS when its process group has just exited
   - [x] E48. Check the Shikiru contract every day at 01:00 UTC
-  - [ ] E49. The daily contract check runs only after a Shikiru release
+  - [x] E49. The daily contract check runs only after a Shikiru release
