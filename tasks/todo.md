@@ -237,4 +237,4 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E38. The Release workflow starts from a button
   - [x] E39. Support every newer Shikiru, with a minimum version only
   - [x] E40. git-cliff writes the notes and the version
-  - [ ] E41. A daily release marked Latest
+  - [x] E41. A daily release marked Latest

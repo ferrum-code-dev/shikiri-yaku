@@ -18,7 +18,7 @@ JOB_ORDER: Final = ("prepare", "build", "pypi", "github")
 NEEDS: Final = {
     "prepare": [],
     "build": ["prepare"],
-    "pypi": ["build"],
+    "pypi": ["prepare", "build"],
     "github": ["prepare", "pypi"],
 }
 PERMISSIONS: Final = {
@@ -63,16 +63,34 @@ def _git_cliff_uses(job: dict[str, object]) -> list[dict[str, object]]:
     return [step for step in _steps(job) if str(step.get("uses", "")).startswith(GIT_CLIFF_ACTION)]
 
 
-def test_the_release_starts_only_from_the_button_with_an_optional_version() -> None:
+def test_the_release_runs_daily_and_on_the_button_with_an_optional_version() -> None:
     # keep: PyYAML reads the key `on` as the boolean True
     trigger = cast("dict[str, object]", _load()[True])
     dispatch = cast("dict[str, object]", trigger["workflow_dispatch"])
     inputs = cast("dict[str, dict[str, object]]", dispatch["inputs"])
+    schedule = cast("list[dict[str, str]]", trigger["schedule"])
 
-    assert set(trigger) == {"workflow_dispatch"}
+    assert set(trigger) == {"schedule", "workflow_dispatch"}
+    assert schedule == [{"cron": "0 0 * * *"}]
     assert set(inputs) == {"version"}
     assert inputs["version"]["type"] == "string"
     assert inputs["version"]["required"] is False
+
+
+def test_the_build_pypi_and_github_jobs_run_only_when_prepare_finds_a_release() -> None:
+    jobs = _jobs()
+
+    assert "release" in cast("dict[str, object]", jobs["prepare"]["outputs"])
+    for name in ("build", "pypi", "github"):
+        assert jobs[name]["if"] == "needs.prepare.outputs.release == 'true'", name
+    assert "if" not in jobs["prepare"]
+
+
+def test_the_github_release_is_marked_latest_and_never_a_pre_release() -> None:
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "--latest" in text
+    assert "--prerelease" not in text
 
 
 def test_the_workflow_grants_no_permissions_and_one_release_at_a_time() -> None:

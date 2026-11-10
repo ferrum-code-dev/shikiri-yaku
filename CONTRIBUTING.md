@@ -58,23 +58,26 @@ the code.
 
 ## Releasing
 
-Releasing is pressing a button. On GitHub, open Actions, choose the Release workflow and choose Run
-workflow on `main`. Leave `version` empty to release the proposed version, or enter
-`<major>.<minor>.<patch>` to release that one. The run releases the newest commit of `main` on which
-CI passed, and it waits for your approval of the `pypi` environment before it publishes to PyPI.
+Releases are automatic. The Release workflow runs every day at 00:00 UTC without approval, and it
+releases the newest commit of `main` on which CI passed. When no commit since the last release
+needs one, the run ends green and releases nothing. To release on demand, open Actions, choose the
+Release workflow and choose Run workflow on `main`. Leave `version` empty to release the proposed
+version, or enter `<major>.<minor>.<patch>` to release that one.
 
 The [design](docs/design.md#releases-and-deployment) says what happens next. The release workflow
 builds the wheel and the sdist with the release version, publishes them to PyPI, and then creates
-the GitHub release, which creates the tag. A run that fails before PyPI accepts the version leaves no
-tag, so rerun that workflow after fixing the cause. If PyPI accepted the version but the GitHub
-release job failed, open that run in Actions and choose **Re-run failed jobs**. This retries GitHub
-release creation with the existing build artifacts and leaves the successful PyPI job alone. A new
-Release run refuses a version already on PyPI; rerun the original failed job so the same version can
-finish without another upload.
+the GitHub release, which creates the tag and is marked Latest. If a run fails before PyPI accepts
+the version, it leaves no tag: fix the cause on `main`, and the next daily run or a manual run starts
+clean. If PyPI accepted the version but the GitHub release job failed, open that run in Actions and
+choose **Re-run failed jobs**. This retries GitHub release creation with the existing build artifacts
+and leaves the successful PyPI job alone. A new Release run refuses a version already on PyPI, so
+rerun the original failed job rather than starting a new run.
 
 One-time owner setup for publishing: on pypi.org, add a pending publisher for the project
 `shikiri-yaku` with owner `ferrum-code-dev`, repository `shikiri-yaku`, workflow `release.yml` and
-environment `pypi`. On GitHub, create the environment `pypi` in the repository settings.
+environment `pypi`. On GitHub, create the environment `pypi` in the repository settings, with no
+required reviewer and a deployment branch rule that allows only `main`. The workflow code does not
+set these; the owner does.
 
 A host upgrades to the newest release with `uv tool upgrade shikiri-yaku`, then `shikiri-yaku
 restart` (see the README, Applying changes).
