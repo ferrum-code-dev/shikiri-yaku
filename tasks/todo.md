@@ -233,5 +233,5 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E34. Back up the journal before a migration
   - [x] E35. A failed journal backup leaves no file that looks like a backup
   - [x] E36. The release notes name the commit and install the exact version
-  - [ ] E37. Propose the next version
+  - [x] E37. Propose the next version
   - [ ] E38. The Release workflow starts from a button
