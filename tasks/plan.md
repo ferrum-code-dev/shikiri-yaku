@@ -2568,6 +2568,32 @@ Acceptance criteria:
   `release.yml` does not mention `contract.yml`.
 * The gate passes. Nothing is pushed by the task.
 
+### E45. The contract check is a job of CI; scripts live in `.github/` (normal)
+
+E44 added the contract check as a workflow of its own. It belongs to `ci.yml`, the script belongs under
+`.github/`, and `tasks/drills.md` goes. See "Compatibility with Shikiru" and "Verification" in
+`docs/design.md`.
+
+1. `git mv scripts/contract_check.py .github/scripts/contract_check.py`; the `scripts/` folder disappears.
+   Update its docstring, the `pyproject.toml` per-file lint entry and every reference to the old path.
+2. `ci.yml`: add a second job `contract` (name "Shikiru contract", `ubuntu-24.04`, no matrix, 20-minute
+   timeout) next to `check`, with the steps of `.github/workflows/contract.yml` (latest Shikiru release tag
+   in the job summary, Shikiru checked out at that tag into `shikiru-src`, tmux installed, both locked
+   environments synced, the script run from its new path). Delete `.github/workflows/contract.yml`. No
+   schedule: `ci.yml` runs on push and pull request only. The job is part of the CI run, so a failure turns
+   the run red and, as for any CI failure, no release takes that commit.
+3. Delete `tasks/drills.md`. `CONTRIBUTING.md`: remove the paragraph that points to it and update the
+   contract-check paragraph (a CI job; the manual form is `uv run python
+   .github/scripts/contract_check.py --shikiru-checkout <path>`, needing git and tmux). Do not edit
+   `tasks/plan.md` or `tasks/todo.md` history for it, except ticking your own line.
+4. Tests: the workflow tests describe the new layout (a `contract` job in `ci.yml`, no `contract.yml`; the
+   release workflow still names only `ci.yml`); the pin test passes.
+
+Acceptance criteria:
+* `grep -r "scripts/contract_check\|drills.md\|contract.yml"` finds nothing outside `tasks/` and git
+  history.
+* The gate passes. Nothing is pushed by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
