@@ -2304,6 +2304,76 @@ Acceptance criteria:
   removed by the next successful backup; a normal backup still produces the named file with the old contents.
 * The gate passes.
 
+### E36. The release notes name the commit and install the exact version (normal)
+
+`scripts/release_notes.py` needs the tag to exist and prints a wheel-URL install command. The release
+workflow is about to publish before it creates the tag (E38).
+
+1. A new option `--commit <sha>` (default: the tag itself, so existing use keeps working). The commits listed
+   are `previous..<commit>`; the compare link still reads `previous...tag`.
+2. The Install section is `uv tool install shikiri-yaku==<version>` (a named constant for the distribution
+   name; no download URL, no wheel name).
+3. The `chore: release` filter and its constant are removed (no such commits exist any more).
+
+Acceptance criteria:
+* Existing tests updated; new tests for `--commit` on a temporary git repository and for the install line.
+  Previous-tag selection still ignores anything that is not `v<major>.<minor>.<patch>`.
+* The gate passes.
+
+### E37. Propose the next version (normal)
+
+`scripts/next_version.py` (stdlib only; it reuses the parsing in `release_notes.py`: the scripts run from the
+`scripts/` folder, so `import release_notes` works).
+
+1. `python3 scripts/next_version.py --commit <sha> [--version <x.y.z>]` prints the version (no `v`) and exits
+   0. The last release is the highest `v<major>.<minor>.<patch>` tag that is an ancestor of `<sha>`; with no
+   tag the base is `0.0.0`.
+2. Releasable commits are those since the last release, without merges, whose subject is `feat`, `fix` or
+   `perf`, or that are breaking (`!` or a `BREAKING CHANGE:` line, as `release_notes.py` already parses).
+   With none, print `nothing to release` to stderr and exit 2.
+3. Below 1.0, breaking raises the minor version (patch reset) and anything else raises the patch version;
+   from 1.0, breaking raises the major, `feat` the minor, `fix` or `perf` the patch; the highest bump wins.
+4. `--version` replaces the proposal. It must be `<major>.<minor>.<patch>`, higher than the last release, and
+   no tag of that name may exist; otherwise print the reason to stderr and exit 1. With `--version` the
+   releasable-commit check is skipped (the owner decided).
+
+Acceptance criteria:
+* A table-driven test of the rule (no tag, only docs/test commits, breaking below and from 1.0) and one test
+  on a temporary git repository for the CLI and its exit codes.
+* Lint and type exceptions for standalone scripts cover the new file as they cover `release_notes.py`.
+* The gate passes.
+
+### E38. The Release workflow starts from a button (normal)
+
+Replace the tag trigger of `.github/workflows/release.yml`; update the docs. The file name and the `pypi`
+environment stay (PyPI trusted publishing is bound to them).
+
+1. `on: workflow_dispatch` only, with an optional string input `version`; `concurrency: release` with
+   `cancel-in-progress: false`; top-level `permissions: {}`.
+2. Job `prepare` (`contents: read`, `actions: read`): fails unless the run is on `main`; finds the newest
+   successful `ci.yml` run on `main` with event `push` and takes its head SHA (`gh run list --workflow ci.yml
+   --branch main --event push --status success --limit 1`); fails if there is none or the SHA is not an
+   ancestor of `origin/main`; runs `scripts/next_version.py --commit <sha> [--version <input>]`; writes the
+   version and the SHA to the job summary and to the job outputs. Checkouts use `fetch-depth: 0`.
+3. Job `build` (needs `prepare`): checks out the SHA, runs `uv build` with `SETUPTOOLS_SCM_PRETEND_VERSION`
+   set to the version, checks the wheel is `dist/shikiri_yaku-<version>-py3-none-any.whl`, uploads `dist`.
+4. Job `pypi`: unchanged (environment `pypi`, `id-token: write`, pinned publish action).
+5. Job `github` (`contents: write`; needs `prepare` and `pypi`): writes the notes with `scripts/release_notes.py
+   v<version> --commit <sha>` and runs `gh release create v<version> dist/* --target <sha> --title
+   v<version> --notes-file ...`, with `--prerelease` below 1.0. The tag is created by this command, so there
+   is no `--verify-tag`.
+6. `CONTRIBUTING.md` "Releasing" describes the button (Actions, Release, Run workflow, optional version,
+   approve `pypi`), that a failed run leaves no tag, and keeps the one-time setup paragraph. In `README.md`
+   remove "Until the first PyPI release, install the wheel ..." and change "the owner pushes a version tag"
+   (Applying changes) to say the owner runs the Release workflow.
+
+Acceptance criteria:
+* Third-party actions stay pinned to commit SHAs; the existing workflow and pin tests are updated, and the
+  workflow test checks the trigger, the permissions and the job order prepare, build, pypi, github.
+* An offline test in a temporary clone (as the version-from-tag test) shows `uv build --wheel` with
+  `SETUPTOOLS_SCM_PRETEND_VERSION` and no tag yields a wheel named with that version.
+* The gate passes. Nothing is pushed or released by the task.
+
 ## Retired outline
 
 The outline of Phases B to E that stood here before the phases were written in detail is retired.
