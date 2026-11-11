@@ -31,14 +31,22 @@ class ProcessCommandRunner:
         timeout_s: float,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+        stdin: str | None = None,
     ) -> CommandResult:
         merged = None if env is None else {**os.environ, **env}
         # keep: files, not pipes: after a kill, a pipe may keep unread output or block forever
-        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        with (
+            tempfile.TemporaryFile() as stdout,
+            tempfile.TemporaryFile() as stderr,
+            tempfile.TemporaryFile() as input_file,
+        ):
+            if stdin is not None:
+                input_file.write(stdin.encode())
+                input_file.seek(0)
             try:
                 process = await asyncio.create_subprocess_exec(
                     *argv,
-                    stdin=asyncio.subprocess.DEVNULL,
+                    stdin=asyncio.subprocess.DEVNULL if stdin is None else input_file,
                     stdout=stdout,
                     stderr=stderr,
                     start_new_session=True,

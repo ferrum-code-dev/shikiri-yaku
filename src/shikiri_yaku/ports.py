@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.domain.classification import Assessment, Classification, InstallProposal
+    from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
     from shikiri_yaku.domain.inbound import Batch, Inbound
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
@@ -1052,6 +1053,29 @@ class Reporter(Protocol):
     def report(self, line: str) -> None: ...
 
 
+class Expert(Protocol):
+    """Runs one turn, raising ExpertError when no rung answers."""
+
+    async def turn(self, request: ExpertRequest) -> ExpertResult: ...
+
+
+class ExpertRung(Protocol):
+    """One provider and model in the Expert ladder."""
+
+    name: str
+    provider: str
+
+    async def turn(
+        self, request: ExpertRequest, *, session_id: str | None, handoff: str | None
+    ) -> ExpertResult: ...
+
+    async def probe(self) -> None: ...
+
+
+class ExpertError(Exception):
+    """An Expert rung could not produce a usable answer."""
+
+
 class Reasoner(Protocol):
     """The Reasoner's one job, `assess_blocker`. Its ladder sits behind this interface.
 
@@ -1137,6 +1161,20 @@ class CommandRunner(Protocol):
         timeout_s: float,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+    ) -> CommandResult: ...
+
+
+class ExpertCommandRunner(Protocol):
+    """Runs a fixed agent command with its prompt on standard input."""
+
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        stdin: str | None = None,
     ) -> CommandResult: ...
 
 

@@ -45,6 +45,7 @@ from shikiri_yaku.ports import (
     ChannelUnavailableError,
     CommandError,
     CompositionError,
+    ExpertError,
     ReasonerError,
     ShikiruError,
 )
@@ -568,11 +569,15 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
             _Check(f"reasoner {name}", _probe_problem(probe))
             for name, probe in composition.rung_probes.items()
         ]
+        experts = [
+            _Check(f"expert {name}", _probe_problem(probe))
+            for name, probe in getattr(composition, "expert_probes", {}).items()
+        ]
         channel = _Check("channel", _probe_problem(composition.channel_check.verify))
     finally:
         composition.close()
     reported = [_Check(line.name, line.detail, line.status) for line in channel_lines]
-    return [*reported, *links, *rungs, channel, _Check("journal")]
+    return [*reported, *links, *rungs, *experts, channel, _Check("journal")]
 
 
 def _verify_channel(channel_check: ChannelCheck) -> None:
@@ -586,7 +591,7 @@ def _verify_channel(channel_check: ChannelCheck) -> None:
 def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
     try:
         asyncio.run(probe())
-    except (ShikiruError, ChannelError, ReasonerError) as error:
+    except (ShikiruError, ChannelError, ReasonerError, ExpertError) as error:
         return str(error) or type(error).__name__
     return None
 

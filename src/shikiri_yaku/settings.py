@@ -79,6 +79,11 @@ REASONER_TIMEOUT_S: Final = 120
 REASONER_COOLDOWN_MIN: Final = 5
 REASONER_MAX_PARALLEL: Final = 2
 REASONER_INPUT_MAX_CHARS: Final = 4000
+EXPERT_TIMEOUT_S: Final = 120
+EXPERT_COOLDOWN_MIN: Final = 5
+EXPERT_MAX_PARALLEL: Final = 2
+EXPERT_HANDOFF_TURNS: Final = 5
+EXPERT_RETENTION_DAYS: Final = 14
 REASONER_ADAPTERS: Final = frozenset({"claude", "codex"})
 _RUNG_PARTS: Final = ("adapter", "model", "effort")
 _MIN_RUNG_PARTS: Final = 2
@@ -249,6 +254,15 @@ class ReasonerSettings(_FrozenModel):
     input_max_chars: PositiveInt = REASONER_INPUT_MAX_CHARS
 
 
+class ExpertSettings(_FrozenModel):
+    ladder: Annotated[tuple[_Rung, ...], _AT_LEAST_ONE]
+    timeout_s: PositiveInt = EXPERT_TIMEOUT_S
+    cooldown_min: PositiveInt = EXPERT_COOLDOWN_MIN
+    max_parallel: PositiveInt = EXPERT_MAX_PARALLEL
+    handoff_turns: PositiveInt = EXPERT_HANDOFF_TURNS
+    retention_days: PositiveInt = EXPERT_RETENTION_DAYS
+
+
 class ChannelsSettings(_FrozenModel):
     telegram: TelegramSettings
 
@@ -262,6 +276,7 @@ class Settings(_FrozenModel):
     operator: OperatorSettings = Field(default_factory=OperatorSettings)
     handlers: HandlersSettings = Field(default_factory=HandlersSettings)
     reasoner: ReasonerSettings | None = None
+    expert: ExpertSettings | None = None
 
     @property
     def telegram(self) -> TelegramSettings:

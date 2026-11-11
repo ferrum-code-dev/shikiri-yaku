@@ -590,6 +590,29 @@ def test_doctor_passes_a_reasoner_rung_whose_cli_runs(
     assert _failed(capsys.readouterr().out) == set()
 
 
+def test_doctor_probes_a_configured_expert_rung(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = _instance(tmp_path) / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + '\n[expert]\nladder = ["claude:haiku"]\n',
+        encoding="utf-8",
+    )
+
+    assert _run_doctor(tmp_path, commands=_Clis(frozenset({"claude"}))) == 1
+    assert _failed(capsys.readouterr().out) == {"expert claude:haiku"}
+
+
+def test_doctor_has_no_expert_probe_without_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, commands=_Clis(frozenset({"claude", "codex"}))) == 0
+    checks, _summary = _doctor_lines(capsys.readouterr().out)
+    assert not any("expert" in check for check in checks)
+
+
 def test_doctor_names_a_telegram_bot_that_refuses_the_token(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

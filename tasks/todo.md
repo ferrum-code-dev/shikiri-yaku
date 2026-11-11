@@ -176,7 +176,7 @@ constraints are in tasks/plan.md.
 
 ### X2
 
-- [ ] X2. Expert agents and ladder
+- [x] X2. Expert agents and ladder
 
 ## Acceptance criteria
 

@@ -81,6 +81,24 @@ Replace the placeholders with model and effort values that the installed CLI acc
 | `timeout_s` | 120 | `max_parallel` | 2 |
 | `cooldown_min` | 5 | `input_max_chars` | 4000 |
 
+### `[expert]`
+
+The optional Expert ladder accepts the same `adapter:model[:effort]` entries as the Reasoner.
+`doctor` probes each configured Expert CLI with its version flag. The conversation interface is
+not available yet. The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`,
+`max_parallel = 2`, `handoff_turns = 5`, and `retention_days = 14`.
+
+```toml
+[expert]
+ladder = ["claude:sonnet", "codex:gpt-5"]
+```
+
+Claude is restricted to file reads in the scoped directories. Codex runs read-only with web search
+and apps disabled, but its file scope is an instruction rather than a filesystem boundary. Both
+Expert adapters pass the configured effort; a conversation effort overrides the rung effort.
+Supported Codex effort levels depend on the model. No live agent or group verification is included
+in the local test suite.
+
 ## Command line
 
 ```

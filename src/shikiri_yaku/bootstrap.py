@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
+from shikiri_yaku.adapters.expert_cli import ExpertCli
 from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import InstanceInstallFiles
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
@@ -42,6 +43,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
+from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
@@ -130,6 +132,7 @@ if TYPE_CHECKING:
         Clock,
         CommandRunner,
         Destinations,
+        ExpertCommandRunner,
         Forwarder,
         Guard,
         InstallLog,
@@ -175,6 +178,8 @@ class Composition:
     link_probes: Mapping[str, Callable[[], Awaitable[None]]]
     channel_check: ChannelCheck
     rung_probes: Mapping[str, Callable[[], Awaitable[None]]]
+    expert_probes: Mapping[str, Callable[[], Awaitable[None]]]
+    expert: LadderExpert | None
     jobs: Sequence[Job]
     recover: Callable[[], None]
 
@@ -224,6 +229,7 @@ def compose(
     clock = SystemClock() if clock is None else clock
     commands = ProcessCommandRunner() if commands is None else commands
     reasoning = build_reasoner(settings, directory, journal, clock, commands)
+    expert, expert_rungs = build_expert(settings, clock, commands)
     reporter = StderrReporter()
     clients = {
         component.name: shikiru_client(settings, component, clock, link)
@@ -408,9 +414,44 @@ def compose(
             shared_group=settings.telegram.shared_group,
         ),
         rung_probes=rung_probes,
+        expert_probes={rung.name: rung.probe for rung in expert_rungs},
+        expert=expert,
         jobs=jobs,
         recover=recover,
     )
+
+
+def build_expert(
+    settings: Settings, clock: Clock, commands: CommandRunner
+) -> tuple[LadderExpert | None, list[ExpertCli]]:
+    """Build the optional Expert and its probes."""
+    expert_rungs = (
+        []
+        if settings.expert is None
+        else [
+            ExpertCli(
+                rung.adapter,
+                rung.model,
+                cast("ExpertCommandRunner", commands),
+                effort=rung.effort,
+                timeout_s=settings.expert.timeout_s,
+            )
+            for rung in settings.expert.ladder
+        ]
+    )
+    expert = (
+        None
+        if settings.expert is None
+        else LadderExpert(
+            expert_rungs,
+            clock,
+            cooldown=timedelta(minutes=settings.expert.cooldown_min),
+            max_parallel=settings.expert.max_parallel,
+            handoff_turns=settings.expert.handoff_turns,
+            timeout_s=settings.expert.timeout_s,
+        )
+    )
+    return expert, expert_rungs
 
 
 def build_reasoner(

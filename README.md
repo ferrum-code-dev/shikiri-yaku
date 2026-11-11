@@ -105,6 +105,9 @@ see [Service](#service).
 
 To enable the Reasoner, add a `[reasoner]` table. See [Reasoner settings](docs/reference.md#reasoner).
 
+The optional `[expert]` table configures read-only Expert agents and their ladder. See
+[Expert settings](docs/reference.md#expert). Conversation commands are not available yet.
+
 Every key and default is in the [reference](docs/reference.md#configuration).
 
 ## Telegram

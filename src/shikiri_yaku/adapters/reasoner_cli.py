@@ -93,7 +93,7 @@ def _call_of(envelope: _ClaudeEnvelope) -> CallRecord:
     )
 
 
-def _codex_call(result: CommandResult) -> CallRecord | None:
+def codex_call(result: CommandResult) -> CallRecord | None:
     counts = _CODEX_TOKENS.findall(f"{result.stderr}\n{result.stdout}")
     if not counts:
         return None
@@ -301,4 +301,4 @@ class CodexRung(_CliRung):
             text = (scratch / _ANSWER_FILE).read_text(encoding="utf-8")
         except OSError, UnicodeDecodeError:
             self._fail("it wrote no answer file")
-        return BlockerAnswer.model_validate_json(text), _codex_call(result)
+        return BlockerAnswer.model_validate_json(text), codex_call(result)
