@@ -157,8 +157,8 @@ links. Do not alter runtime behavior or perform live service, network or secret 
 
 ## Planned work: service command group
 
-S1 to S4 move the service commands into a `service` command group, in order. S1 renames, S2 adds
-start and stop, S3 makes install start the service, S4 adds status. A change has no size limit; each task is one
+S1 to S5 move the service commands into a `service` command group, in order. S1 renames, S2 adds
+start and stop, S3 makes install start the service, S4 adds status, S5 adds uninstall. A change has no size limit; each task is one
 coherent change with its own commit.
 
 Shared constraints:
@@ -284,6 +284,38 @@ reading the log, and the note that the macOS unit sets no log files.
 - The exit status is 0 only when every selected product's service runs.
 - No document tells the user to run `launchctl print` or `systemctl --user status` to check the
   service.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### S5. Add `service uninstall` (normal)
+
+After S4. Add `service uninstall`, the reverse of `service install`. It has the same scope and
+output form as `service restart`: every product under `--home`, or the one named by `--product`;
+one line per product; `--json` prints a list with `product`, `passed` and `result`. The `result`
+value is `uninstalled`, `not installed` or the reason it failed. A product whose unit was never
+written is `not installed`; that counts as passed, so repeating the command is safe. Exit 1 if any
+product failed.
+
+Steps for one product. Stop the service and keep it from starting at login, delete the unit file
+that install wrote, and on Linux reload the user manager. Linux: `systemctl --user disable --now`
+on the unit, then delete the file, then `systemctl --user daemon-reload`. macOS:
+`launchctl bootout gui/<uid>/<label>`, then delete the plist. A manager answer that only says the
+unit is not loaded, not enabled or not running is not a failure. Any other refusal is reported and
+the unit file is kept. A failure to delete the file is reported with its path. A process the user
+started with `run` in a terminal is not touched. Instance data stays: `config.toml`, the token
+file, the journal and its backups.
+
+Docs. In README.md and docs/reference.md replace the manual instructions to disable the service at
+login or to unload it for removal with `service uninstall`, and say what it keeps.
+
+## Acceptance criteria
+
+- Uninstall issues exactly the commands above in that order on each platform, tested with a fake
+  CommandRunner as a table, including a first uninstall, a repeated uninstall, a unit that is not
+  loaded, a refused disable or bootout (the file stays) and a file that cannot be deleted.
+- A product that was never installed is `not installed` and passed, and no service-manager command
+  runs for it.
+- Nothing outside the unit file is deleted.
+- No document tells the user to disable the service at login or remove its unit by hand.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 ## Historical implementation records

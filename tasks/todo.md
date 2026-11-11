@@ -136,7 +136,7 @@ R10 and R11 replace T-126. Details and shared constraints are in `tasks/plan.md`
 
 ## Planned work: service command group
 
-S1 to S4 move the service commands into a `service` command group. Details and shared constraints
+S1 to S5 move the service commands into a `service` command group. Details and shared constraints
 are in tasks/plan.md.
 
 ### S1
@@ -154,6 +154,10 @@ are in tasks/plan.md.
 ### S4
 
 - [ ] S4. Add `service status`
+
+### S5
+
+- [ ] S5. Add `service uninstall`
 
 ## Historical implementation records
 
