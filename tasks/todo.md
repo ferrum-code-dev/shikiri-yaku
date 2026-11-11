@@ -188,7 +188,7 @@ constraints are in tasks/plan.md.
 
 ### X3
 
-- [ ] X3. `/ask` opens a conversation and answers
+- [x] X3. `/ask` opens a conversation and answers
 
 ## Acceptance criteria
 

@@ -64,6 +64,7 @@ from shikiri_yaku.ports import (
 )
 from shikiri_yaku.settings import load_settings
 from tests.support.clock import NapClock
+from tests.support.expert_migration import remove_expert_schema
 from tests.support.telegram_bot import FIRST_MESSAGE_ID, FakeBotApi
 from tests.unit.test_replies import Reporter
 
@@ -634,6 +635,7 @@ def _as_before_slots(directory: Path) -> None:
     """Make the journal one written before slots: no slot, final_line or standing, schema 19."""
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
+        remove_expert_schema(database.connection)
         database.connection.execute("ALTER TABLE messages DROP COLUMN slot")
         database.connection.execute("ALTER TABLE messages DROP COLUMN final_line")
         database.connection.execute("ALTER TABLE messages DROP COLUMN standing")
@@ -647,6 +649,7 @@ def _as_before_standing(directory: Path) -> None:
     """Make the journal one written at schema 22: no standing flag and no repair record."""
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
+        remove_expert_schema(database.connection)
         database.connection.execute("ALTER TABLE messages DROP COLUMN standing")
         database.connection.execute("DROP TABLE repairs")
         database.connection.execute(f"PRAGMA user_version = {_SCHEMA_BEFORE_STANDING}")

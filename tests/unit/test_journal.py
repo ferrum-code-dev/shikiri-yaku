@@ -28,6 +28,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.journal.migrations import MIGRATIONS
 from shikiri_yaku.ports import Message
+from tests.support.expert_migration import remove_expert_schema
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -269,6 +270,7 @@ def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
 
 def test_upgrade_from_schema_one_keeps_existing_messages(memory: Database) -> None:
     connection = memory.connection
+    remove_expert_schema(connection)
     for table in (
         "command_replies",
         "topics",
@@ -338,6 +340,7 @@ def test_a_copy_sent_before_slots_is_given_the_slot_its_kind_has_now(
     Input prompts, goal replies and notices keep no slot, so they never replace another copy.
     """
     connection = memory.connection
+    remove_expert_schema(connection)
     # keep: a schema 19 journal has neither column; the replay below adds both, as an upgrade does
     connection.execute("ALTER TABLE messages DROP COLUMN slot")
     connection.execute("ALTER TABLE messages DROP COLUMN final_line")

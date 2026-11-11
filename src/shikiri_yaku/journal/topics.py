@@ -22,7 +22,9 @@ class TopicStore:
 
     def get(self, component: str | None) -> TopicRecord | None:
         row = self._database.connection.execute(
-            "SELECT component, thread_id, state FROM topics WHERE component IS ?", (component,)
+            "SELECT component, thread_id, state FROM topics "
+            "WHERE conversation_id IS NULL AND component IS ?",
+            (component,),
         ).fetchone()
         if row is None:
             return None
@@ -32,7 +34,8 @@ class TopicStore:
         self._database.connection.execute(
             """
             INSERT INTO topics (component, thread_id, state) VALUES (?, ?, ?)
-            ON CONFLICT (COALESCE(component, '')) DO UPDATE SET thread_id = excluded.thread_id,
+            ON CONFLICT (COALESCE(component, '')) WHERE conversation_id IS NULL
+            DO UPDATE SET thread_id = excluded.thread_id,
                 state = excluded.state
             """,
             (component, thread_id, state),
@@ -42,28 +45,32 @@ class TopicStore:
         self, component: str | None, expected_state: str, thread_id: int, state: str
     ) -> bool:
         cursor = self._database.connection.execute(
-            "UPDATE topics SET thread_id = ?, state = ? WHERE component IS ? AND state = ?",
+            "UPDATE topics SET thread_id = ?, state = ? "
+            "WHERE conversation_id IS NULL AND component IS ? AND state = ?",
             (thread_id, state, component, expected_state),
         )
         return cursor.rowcount > 0
 
     def delete_if(self, component: str | None, expected_state: str) -> bool:
         cursor = self._database.connection.execute(
-            "DELETE FROM topics WHERE component IS ? AND state = ?",
+            "DELETE FROM topics WHERE conversation_id IS NULL AND component IS ? AND state = ?",
             (component, expected_state),
         )
         return cursor.rowcount > 0
 
     def all(self) -> list[TopicRecord]:
         rows = self._database.connection.execute(
-            "SELECT component, thread_id, state FROM topics ORDER BY component"
+            "SELECT component, thread_id, state FROM topics "
+            "WHERE conversation_id IS NULL ORDER BY component"
         )
         return [TopicRecord(row["component"], row["thread_id"], row["state"]) for row in rows]
 
     def by_thread(self, thread_id: int) -> TopicRecord | None:
         # keep: a closed topic keeps its thread, so the caller reads the state to tell if it is live
         row = self._database.connection.execute(
-            "SELECT component, thread_id, state FROM topics WHERE thread_id = ?", (thread_id,)
+            "SELECT component, thread_id, state FROM topics "
+            "WHERE conversation_id IS NULL AND thread_id = ?",
+            (thread_id,),
         ).fetchone()
         if row is None:
             return None

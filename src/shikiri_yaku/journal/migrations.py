@@ -204,4 +204,28 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ("ALTER TABLE messages ADD COLUMN final_line TEXT",),
     ("ALTER TABLE messages ADD COLUMN standing INTEGER NOT NULL DEFAULT 0",),
     ("CREATE TABLE repairs (name TEXT PRIMARY KEY)",),
+    (
+        "ALTER TABLE topics ADD COLUMN conversation_id INTEGER REFERENCES conversations (id)",
+        "ALTER TABLE messages ADD COLUMN conversation_id INTEGER REFERENCES conversations (id)",
+        "DROP INDEX topics_component",
+        (
+            "CREATE UNIQUE INDEX topics_component ON topics (COALESCE(component, '')) "
+            "WHERE conversation_id IS NULL"
+        ),
+        (
+            "CREATE UNIQUE INDEX topics_conversation ON topics (conversation_id) "
+            "WHERE conversation_id IS NOT NULL"
+        ),
+        """CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, update_id INTEGER NOT NULL UNIQUE,
+            chat INTEGER NOT NULL, origin_thread INTEGER, scope TEXT NOT NULL,
+            state TEXT NOT NULL, thread_id INTEGER, session TEXT, last_activity TEXT NOT NULL
+        )""",
+        """CREATE TABLE turns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+            update_id INTEGER NOT NULL UNIQUE, text TEXT NOT NULL, state TEXT NOT NULL,
+            answer TEXT, call TEXT
+        )""",
+    ),
 )

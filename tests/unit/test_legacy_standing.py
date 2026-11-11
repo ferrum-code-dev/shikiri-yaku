@@ -35,6 +35,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.migrations import MIGRATIONS
 from shikiri_yaku.journal.replies import SILENCE
 from shikiri_yaku.ports import Button, Message
+from tests.support.expert_migration import remove_expert_schema
 from tests.unit.test_replies import OWNER, Harness, Reporter
 
 if TYPE_CHECKING:
@@ -115,6 +116,7 @@ def _stop_data(h: Harness, ref: str) -> str:
 def _open_from_22(h: Harness) -> None:
     """Reopen the journal as one written at schema 22: no standing flag and no repair record."""
     with h.database.transaction() as connection:
+        remove_expert_schema(connection)
         connection.execute("ALTER TABLE messages DROP COLUMN standing")
         connection.execute("DROP TABLE repairs")
         connection.execute(f"PRAGMA user_version = {BEFORE_STANDING}")

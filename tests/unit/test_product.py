@@ -148,8 +148,9 @@ class _Outbox:
         now: datetime,
         slot: str | None = None,
         standing: bool = False,
+        conversation_id: int | None = None,
     ) -> None:
-        del number, now, slot, standing
+        del number, now, slot, standing, conversation_id
         self.queued.append((purpose, tuple(destinations), message, key))
 
     def command_reply_queued(self, key: str) -> bool:

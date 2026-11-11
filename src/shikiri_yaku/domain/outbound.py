@@ -17,6 +17,7 @@ class Purpose(StrEnum):
     QUESTION = "question"
     APPROVAL = "approval"
     NOTICE = "notice"
+    EXPERT = "expert"
 
 
 def message_label(number: int | None) -> str:

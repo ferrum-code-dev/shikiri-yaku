@@ -19,7 +19,7 @@ from shikiri_yaku.adapters.telegram_topics import (
 )
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import ChannelError, ChannelStartupError
+from shikiri_yaku.ports import ChannelError, ChannelRefusedError, ChannelStartupError
 from tests.support.telegram_bot import FIXTURES
 
 if TYPE_CHECKING:
@@ -171,3 +171,24 @@ def test_restart_surfaces_uncertain_topic_creation_without_retrying() -> None:
         assert [method for method, _payload in api.calls].count("createForumTopic") == 1
     finally:
         database.close()
+
+
+@pytest.mark.parametrize(
+    ("code", "error"),
+    [
+        (400, ChannelRefusedError),
+        (403, ChannelRefusedError),
+        (429, ChannelError),
+        (500, ChannelError),
+    ],
+)
+def test_expert_topic_rename_distinguishes_permanent_refusal(
+    code: int, error: type[Exception]
+) -> None:
+    class RefusingApi:
+        async def call(self, method: str, payload: Mapping[str, object]) -> object:  # noqa: ARG002
+            return {"ok": False, "error_code": code}
+
+    forum = TelegramForumTopics(RefusingApi(), GROUP_ID)
+    with pytest.raises(error):
+        asyncio.run(forum.rename(73, "title"))

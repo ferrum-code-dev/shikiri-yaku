@@ -45,6 +45,10 @@ GET_CHAT_MEMBER_COUNT: Final = "getChatMemberCount"
 GET_CHAT_ADMINISTRATORS: Final = "getChatAdministrators"
 GET_WEBHOOK_INFO: Final = "getWebhookInfo"
 CREATE_FORUM_TOPIC: Final = "createForumTopic"
+EDIT_FORUM_TOPIC: Final = "editForumTopic"
+EXPERT_TOPIC_COLOR: Final = 7322096
+TOPIC_NAME_LIMIT: Final = 128
+TELEGRAM_SUPERGROUP_PREFIX: Final = "-100"
 CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
 REF_SEPARATOR: Final = "/"
 SUPERGROUP: Final = "supergroup"
@@ -136,6 +140,7 @@ class _User(BaseModel):
 
     id: StrictInt
     is_bot: bool
+    username: str | None = None
 
 
 class _Accepted(BaseModel):
@@ -477,6 +482,48 @@ class TelegramForumTopics:
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
         return reply.result.message_thread_id
+
+    async def create_expert(self, name: str) -> int:
+        body = await self._api.call(
+            CREATE_FORUM_TOPIC,
+            {
+                "chat_id": self._group_id,
+                "name": name[:TOPIC_NAME_LIMIT],
+                "icon_color": EXPERT_TOPIC_COLOR,
+            },
+        )
+        reply = _validated(body, _CREATE_TOPIC_REPLY)
+        if isinstance(reply, _Failed):
+            raise ChannelError(NOT_ACCEPTED)
+        return reply.result.message_thread_id
+
+    async def rename(self, thread_id: int, name: str) -> None:
+        body = await self._api.call(
+            EDIT_FORUM_TOPIC,
+            {
+                "chat_id": self._group_id,
+                "message_thread_id": thread_id,
+                "name": name[:TOPIC_NAME_LIMIT],
+            },
+        )
+        reply = _validated(body, _CLOSE_TOPIC_REPLY)
+        if isinstance(reply, _Failed):
+            if reply.error_code in DEFINITE_REFUSAL_CODES:
+                raise ChannelRefusedError(PLATFORM_REFUSED)
+            raise ChannelError(NOT_ACCEPTED)
+
+    async def addressed(self, word: str) -> bool:
+        _, _, address = word.partition("@")
+        if not address:
+            return False
+        reply = _validated(await self._api.call(GET_ME, {}), _PROBE_REPLY)
+        if isinstance(reply, _Failed) or not reply.result.username:
+            raise ChannelUnavailableError(BOT_NOT_IDENTIFIED)
+        return address.casefold() == reply.result.username.casefold()
+
+    def link(self, thread_id: int) -> str:
+        group = str(self._group_id).removeprefix(TELEGRAM_SUPERGROUP_PREFIX)
+        return f"https://t.me/c/{group}/{thread_id}"
 
     async def close(self, thread_id: int) -> None:
         body = await self._api.call(

@@ -31,6 +31,20 @@ class ExpertAnswer(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationRecord:
+    id: int
+    update_id: int
+    chat: int
+    origin_thread: int | None
+    thread_id: int | None
+    scope: list[str]
+    text: str
+    state: str
+    turn_state: str
+    answer: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ExpertTurn:
     message: str
     reply: str
@@ -49,6 +63,7 @@ class ExpertRequest:
     directory: Path
     scope: dict[str, Path]
     message: str
+    context: str = ""
     effort: str | None = None
     session: ExpertSession | None = None
     turns: tuple[ExpertTurn, ...] = ()

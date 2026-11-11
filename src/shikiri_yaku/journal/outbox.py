@@ -44,6 +44,7 @@ class JournalOutbox:
         now: datetime,
         slot: str | None = None,
         standing: bool = False,
+        conversation_id: int | None = None,
     ) -> None:
         # keep: one transaction, so an interruption leaves every destination or none
         with self._database.transaction():
@@ -59,6 +60,7 @@ class JournalOutbox:
                     now=now,
                     slot=slot,
                     standing=standing,
+                    conversation_id=conversation_id,
                 )
 
     def command_reply_queued(self, key: str) -> bool:

@@ -43,6 +43,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
+from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
@@ -106,6 +107,7 @@ from shikiri_yaku.journal import (
     Repairs,
     SignalStore,
 )
+from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.install_reconcile import JournalInstallReconcile
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.open import JournalOpen
@@ -201,7 +203,7 @@ def http_bot(settings: Settings) -> BotApi:
     return HttpBotApi(settings.telegram.token_file, settings.operator.telegram_call_timeout_s)
 
 
-def compose(
+def compose(  # noqa: PLR0915 -- composition wires each job
     settings: Settings,
     directory: Path,
     *,
@@ -357,6 +359,18 @@ def compose(
         destinations,
         shared_group=settings.telegram.shared_group,
     )
+    ask = Ask(
+        Conversations(journal),
+        outbox,
+        clock,
+        expert=expert,
+        topics=None if group_id is None else TelegramForumTopics(bot_api, group_id),
+        clients=clients,
+        scope={component.name: component.path for component in settings.components},
+        directory=directory,
+        channel=TELEGRAM_CHANNEL,
+        group_id=group_id,
+    )
     jobs.append(
         inbound_job(
             settings,
@@ -371,6 +385,7 @@ def compose(
             destinations=destinations,
             ladder=None if reasoning is None else reasoning.ladder,
             install_runner=install_executor,
+            ask=ask,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -397,6 +412,7 @@ def compose(
         # keep: operator health signals belong to no component; a restart must not close them
         SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
+        ask.recover()
         asyncio.run(destinations.prepare())
 
     rung_probes = {} if reasoning is None else {rung.name: rung.probe for rung in reasoning.rungs}
@@ -691,6 +707,7 @@ def inbound_job(
     destinations: Destinations,
     ladder: RungStates | None,
     install_runner: InstallRunner,
+    ask: Ask | None = None,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -726,6 +743,7 @@ def inbound_job(
         channel=TELEGRAM_CHANNEL,
         name_max_chars=operator.command_name_max_chars,
         shared_group=settings.telegram.shared_group,
+        ask=ask,
     )
     replies = Replies(
         JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL),

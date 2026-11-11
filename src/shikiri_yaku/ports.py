@@ -911,6 +911,7 @@ class Outbox(Protocol):
         now: datetime,
         slot: str | None = None,
         standing: bool = False,
+        conversation_id: int | None = None,
     ) -> None:
         """Record the message once per key and destination; a key seen before records nothing.
 

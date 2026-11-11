@@ -84,8 +84,11 @@ Replace the placeholders with model and effort values that the installed CLI acc
 ### `[expert]`
 
 The optional Expert ladder accepts the same `adapter:model[:effort]` entries as the Reasoner.
-`doctor` probes each configured Expert CLI with its version flag. The conversation interface is
-not available yet. The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`,
+`doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
+forum group and opens a topic, scoped to the component topic or all components in General. In a
+shared group, address General requests as `/ask@bot <question>`. An uncertain topic creation is
+not retried; ask again. An interrupted turn is reported and is not repeated. Follow-up turns and
+conversation cleanup are not yet available. The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`,
 `max_parallel = 2`, `handoff_turns = 5`, and `retention_days = 14`.
 
 ```toml

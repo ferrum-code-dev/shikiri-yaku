@@ -8,6 +8,7 @@ from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.domain.outbound import fit
 
 if TYPE_CHECKING:
+    from shikiri_yaku.app.expert import Ask
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
@@ -17,11 +18,13 @@ if TYPE_CHECKING:
 _STATUS: Final = "/status"
 _OPEN: Final = "/open"
 _GOAL: Final = "/goal"
+_ASK: Final = "/ask"
 _HELP_NAME: Final = "/help"
 _HELP: Final = (
     f"{_STATUS} · each component's engine, tasks and quota blocks; in a component topic, its own\n"
     f"{_OPEN} · open escalations and approvals, shown again; in a component topic, its own\n"
     f"{_GOAL} <component> <request> · submit a goal to a component's Shikiru\n"
+    "/ask <question> · open an Expert conversation\n"
     f"{_HELP_NAME} · this list"
 )
 _UNKNOWN: Final = "Unknown command {name}.\n{help}"
@@ -56,6 +59,7 @@ class Commands:
         channel: str,
         name_max_chars: int,
         shared_group: bool = False,
+        ask: Ask | None = None,
     ) -> None:
         self._outbox = outbox
         self._clock = clock
@@ -66,6 +70,7 @@ class Commands:
         self._channel = channel
         self._name_max_chars = name_max_chars
         self._shared_group = shared_group
+        self._ask = ask
 
     async def handle(self, item: Inbound) -> None:
         word = _first_word(item.text)
@@ -73,6 +78,11 @@ class Commands:
         component = self._destinations.component_of(item.thread)
         in_other_topic = self._shared_group and item.thread is not None and component is None
         if in_other_topic and word.startswith("/"):
+            return
+        if name == _ASK and self._ask is not None:
+            if self._shared_group and item.thread is None and not await self._ask.addressed(word):
+                return
+            await self._ask.handle(item, component)
             return
         if name == _OPEN:
             await self._open.handle(item, component)
