@@ -12,5 +12,5 @@
 
 ## Checklist
 
-- [ ] One change of about 300 lines or fewer.
+- [ ] One change.
 - [ ] No token, chat ID or Shikiru packet text is in the diff.

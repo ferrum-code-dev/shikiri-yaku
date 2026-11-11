@@ -11,14 +11,13 @@ general restriction. This plan does not authorize runtime changes or implementin
 README is the user guide; docs/design.md describes purpose and architecture.
 Shared acceptance: uv run poe check passes before completion; unrelated pinned-dependency or gate failures are reported with evidence rather than worked around. Each task ticks only its own R-line in tasks/todo.md except the explicit historical-reference cleanup assigned to R8/R9. No production behavior changes, host package installs, real secrets, live Telegram/agent calls or host/service mutation. Read and write only this worktree; the external Shikiru comparison checkout remains out of scope.
 
-The two design passes and three code-reference passes keep changes near 300 lines each.
-If a task needs much more, report a further split before implementing it. Preserve useful existing
+Preserve useful existing
 text instead of expanding scope. No documented commit-message convention was found; use
 Conventional Commits. The implementation is the factual source when old prose differs.
 
 ### R1. Document installation and instance configuration (normal)
 
-Expand README.md with prerequisites, a source-based installation path, first-run setup, a minimal valid config.toml, and a concise reference for supported configuration sections and settings. Cover Telegram bot/token/owner setup, optional forum groups and Reasoner ladders. Read settings.py, pyproject.toml, bootstrap.py, adapter contracts and tests; do not assume the old design is current. Replace the obsolete design-stage status. Keep this change around 300 lines; leave daily operation to R2.
+Expand README.md with prerequisites, a source-based installation path, first-run setup, a minimal valid config.toml, and a concise reference for supported configuration sections and settings. Cover Telegram bot/token/owner setup, optional forum groups and Reasoner ladders. Read settings.py, pyproject.toml, bootstrap.py, adapter contracts and tests; do not assume the old design is current. Replace the obsolete design-stage status. Leave daily operation to R2.
 
 ## Acceptance criteria
 
@@ -29,7 +28,7 @@ Expand README.md with prerequisites, a source-based installation path, first-run
 
 ### R2. Document daily operation and recovery (normal)
 
-Complete README.md as the user guide. Preserve and correct existing CLI/JSON and topic guidance; add chat commands, answering and approvals, reminders, service activation/stopping/log inspection, diagnostics, restart behavior, state/output locations, practical limits, and a short contributor validation section. Base examples on cli.py, service.py, app commands and tests, not on historical plans. Link to retained fixture/drill guidance for contributor-only details. Keep this change around 300 lines.
+Complete README.md as the user guide. Preserve and correct existing CLI/JSON and topic guidance; add chat commands, answering and approvals, reminders, service activation/stopping/log inspection, diagnostics, restart behavior, state/output locations, practical limits, and a short contributor validation section. Base examples on cli.py, service.py, app commands and tests, not on historical plans. Link to retained fixture/drill guidance for contributor-only details.
 
 ## Acceptance criteria
 
@@ -40,7 +39,7 @@ Complete README.md as the user guide. Preserve and correct existing CLI/JSON and
 
 ### R3. Clean core contract and journal references (normal)
 
-Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/domain/, ports.py and journal/. Retain useful explanations of invariants, recovery, identities and approval safety as self-contained contract documentation. In particular remove claims that Informed/Notified are absent from the design. Limit the diff to comments and docstrings, around 300 lines; journal SQL and migration definitions must stay byte-for-byte unchanged.
+Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/domain/, ports.py and journal/. Retain useful explanations of invariants, recovery, identities and approval safety as self-contained contract documentation. In particular remove claims that Informed/Notified are absent from the design. Limit the diff to comments and docstrings; journal SQL and migration definitions must stay byte-for-byte unchanged.
 
 ## Acceptance criteria
 
@@ -51,7 +50,7 @@ Remove obsolete numbered design and historical-task citations from src/shikiri_y
 
 ### R4. Clean application and adapter references (normal)
 
-Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/app/, extensions/, adapters/ and top-level package modules other than ports.py. Preserve useful behavior and trust-boundary explanations as self-contained comments/docstrings. This is documentation-only cleanup, including Reasoner and install constraints, not an opportunity to change implementation. Keep the change around 300 lines.
+Remove obsolete numbered design and historical-task citations from src/shikiri_yaku/app/, extensions/, adapters/ and top-level package modules other than ports.py. Preserve useful behavior and trust-boundary explanations as self-contained comments/docstrings. This is documentation-only cleanup, including Reasoner and install constraints, not an opportunity to change implementation.
 
 ## Acceptance criteria
 
@@ -62,7 +61,7 @@ Remove obsolete numbered design and historical-task citations from src/shikiri_y
 
 ### R5. Clean test script and gate references (normal)
 
-Clean stale design/phase citations in tests/, scripts/ and pyproject.toml. Preserve behavior-focused test descriptions, script usage/provenance and all assertions/fixtures. Gate diagnostic descriptions and import-contract display names may lose old section citations, but their enforcement must not change. Do not change the contract script's submitted task text merely because it mentions a tracker: that is executable behavior. Keep the change around 300 lines.
+Clean stale design/phase citations in tests/, scripts/ and pyproject.toml. Preserve behavior-focused test descriptions, script usage/provenance and all assertions/fixtures. Gate diagnostic descriptions and import-contract display names may lose old section citations, but their enforcement must not change. Do not change the contract script's submitted task text merely because it mentions a tracker: that is executable behavior.
 
 ## Acceptance criteria
 
@@ -73,7 +72,7 @@ Clean stale design/phase citations in tests/, scripts/ and pyproject.toml. Prese
 
 ### R6. Remove migrated operational detail from the design (normal)
 
-After README guides and reference cleanup land, prune the old design in a bounded first pass. Remove the user configuration/instance instructions and detailed operational specifications now documented in README, principally the old numbered sections covering those topics. Keep a short architectural description of signals, classification, outcomes and channel ports where needed; remove or repair internal links affected by this pass. Preserve the architecture diagram and safety principles for the final pass. Target roughly 300 changed lines.
+After README guides and reference cleanup land, prune the old design in a bounded first pass. Remove the user configuration/instance instructions and detailed operational specifications now documented in README, principally the old numbered sections covering those topics. Keep a short architectural description of signals, classification, outcomes and channel ports where needed; remove or repair internal links affected by this pass. Preserve the architecture diagram and safety principles for the final pass.
 
 ## Acceptance criteria
 
@@ -84,7 +83,7 @@ After README guides and reference cleanup land, prune the old design in a bounde
 
 ### R7. Finish the concise purpose and architecture document (normal)
 
-Finish simplifying docs/design.md after the operational pruning. Keep the purpose, current processing flow/diagram, module and dependency boundaries, composition/extension registration, journal-before-effect and observation-based recovery, model trust boundary and owner approval. Remove speculative extension/candidate lists, scenarios, estimates/build staging, stale status claims and duplicated user guides. Retain useful engineering constraints, preferably by reusing concise existing passages and linking to AGENTS.md/README rather than stylistic rewrites, to keep this change around 300 lines. Use stable descriptive headings.
+Finish simplifying docs/design.md after the operational pruning. Keep the purpose, current processing flow/diagram, module and dependency boundaries, composition/extension registration, journal-before-effect and observation-based recovery, model trust boundary and owner approval. Remove speculative extension/candidate lists, scenarios, estimates/build staging, stale status claims and duplicated user guides. Retain useful engineering constraints, preferably by reusing concise existing passages and linking to AGENTS.md/README rather than stylistic rewrites. Use stable descriptive headings.
 
 ## Acceptance criteria
 
@@ -95,7 +94,7 @@ Finish simplifying docs/design.md after the operational pruning. Keep the purpos
 
 ### R8. Retire obsolete planning artifacts and contributor citations (normal)
 
-Delete docs/plan.md and the one-off tasks/reasoner-spike.md after moving any still-useful operational constraints into README or existing self-contained adapter comments. Update AGENTS.md to remove obsolete status, old section citations and the deleted effort-plan pointer while preserving architecture, safety, gate and task-sizing rules. Keep tasks/drills.md as a contributor validation map; remove obsolete section/NEW/build-phase framing, retain human drills and fixture provenance. Update only the obsolete spike link on its historical todo line, with that out-of-task-line adjustment recorded in the report. Keep the change around 300 lines.
+Delete docs/plan.md and the one-off tasks/reasoner-spike.md after moving any still-useful operational constraints into README or existing self-contained adapter comments. Update AGENTS.md to remove obsolete status, old section citations and the deleted effort-plan pointer while preserving architecture, safety, gate and task-sizing rules. Keep tasks/drills.md as a contributor validation map; remove obsolete section/NEW/build-phase framing, retain human drills and fixture provenance. Update only the obsolete spike link on its historical todo line, with that out-of-task-line adjustment recorded in the report.
 
 ## Acceptance criteria
 
@@ -106,7 +105,7 @@ Delete docs/plan.md and the one-off tasks/reasoner-spike.md after moving any sti
 
 ### R9. Clean historical tracker references and verify documentation (normal)
 
-Finish tracker hygiene after all documentation changes. Keep the existing implementation records and their completion states, but mark them historical, remove obsolete docs/plan.md/Reasoner-spike pointers and numbered-design dependencies, and trim the stale future-phase outline. Do not complete unrelated unchecked tasks or delete active release entries. This is a bounded reference edit to existing records, not a rewrite of the 1700-line history. Audit all retained Markdown local links/anchors, stale design citations, source AST differences and gate configuration differences for the full release cleanup; repair documentation references within scope. Keep this task around 300 lines and report anything requiring a further split.
+Finish tracker hygiene after all documentation changes. Keep the existing implementation records and their completion states, but mark them historical, remove obsolete docs/plan.md/Reasoner-spike pointers and numbered-design dependencies, and trim the stale future-phase outline. Do not complete unrelated unchecked tasks or delete active release entries. This is a bounded reference edit to existing records, not a rewrite of the 1700-line history. Audit all retained Markdown local links/anchors, stale design citations, source AST differences and gate configuration differences for the full release cleanup; repair documentation references within scope.
 
 ## Acceptance criteria
 
@@ -129,7 +128,7 @@ Restructure the introduction, installation, first-run, configuration reference, 
 chat-command sections of README.md. Replace long prose with short paragraphs, lists and compact
 tables where they improve scanning. Preserve every supported prerequisite, command form, setting,
 default, Telegram requirement and Reasoner instruction. Do not alter implementation, examples'
-meaning or operational claims. Keep this change near 300 lines; leave message handling, service
+meaning or operational claims. Leave message handling, service
 operation, recovery, limits and contributor guidance to R11.
 
 ## Acceptance criteria
@@ -145,8 +144,7 @@ After R10, restructure the remaining README.md sections covering questions, appr
 actions, service operation, applying changes, diagnostics, topic recovery, local state, limits and
 contributor validation. Use concise prose, lists and tables while retaining every actionable
 instruction and safety boundary. Recheck the whole README for consistent navigation and retained
-links. Do not alter runtime behavior or perform live service, network or secret operations. Keep
-this change near 300 lines.
+links. Do not alter runtime behavior or perform live service, network or secret operations.
 
 ## Acceptance criteria
 
@@ -554,7 +552,6 @@ Acceptance criteria:
 * Duplicate delivery stores one item; non-owner content is excluded while its offset advances.
 * Rollback preserves both rows and offset; pending items survive a restart until handled.
 * Secret text is never persisted. In-memory SQLite tests cover these guarantees.
-* Keep this change about 300 lines; stop and propose a further split if it exceeds that scope.
 
 ### A11b. Replies (high)
 
@@ -642,8 +639,8 @@ Size: A13a (43a975b) is 459 changed lines including tests (443 added, 16 deleted
 target. Consultation 04 accepted it as a one-time size exception; the commit is not rewritten. A13b
 (7ffef86) is 481 changed lines including trackers (455 added, 26 deleted), about 463 excluding tracker
 edits, against an estimate of 330 to 360 and the ~300 target. It is the second size exception, recorded
-by consultation 06; the commit is not rewritten. The ~300-line limit still applies to later changes.
-The follow-up that corrects 7ffef86 is a separate commit and is under that limit.
+by consultation 06; the commit is not rewritten.
+The follow-up that corrects 7ffef86 is a separate commit.
 A13c (141a9d0) is 487 changed lines including trackers (472 added, 15 deleted): 464 are code and tests,
 23 are tracker edits. The pre-edit estimate of 330 was too low, and the change is about 60% over the
 ~300 limit of consultation 08. Consultation 10-consult-i1 accepted it as a third, explicit size
@@ -1800,8 +1797,7 @@ Acceptance criteria:
 ### E13. Findings from the topics documentation (normal)
 
 Found while rewriting design §7 (the design text for 1 and 2 is already changed, committed). E12
-(adopt a topic made by hand) is a separate task. If this needs much more than 300 lines, split it
-(one part per item) and record the split here.
+(adopt a topic made by hand) is a separate task.
 
 1. **The group check runs at start-up.** The Telegram probe (forum supergroup, bot is an administrator
    with the manage-topics right, owners are members, no other members unless `allow_other_members`, no
