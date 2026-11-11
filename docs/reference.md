@@ -101,7 +101,7 @@ Global options go before the command.
 | `run` | Serves one product until SIGTERM. |
 | `doctor` | Checks one product's instance. |
 | `stats` | Prints the figures of one product's journal. |
-| `service install` | Writes a launchd or systemd unit that runs `run` at login. |
+| `service install` | Writes and starts a launchd or systemd unit that runs `run` at login. |
 | `service start` | Starts one product's service. Without `--product`, it starts every product under `--home`, in name order. Starting a running service leaves it running. |
 | `service stop` | Stops one product's service and waits until it has stopped. Without `--product`, it stops every product under `--home`, in name order. A service still running 30 seconds after the stop is a failure. |
 | `service restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. |
@@ -248,9 +248,9 @@ Standing messages (the pull-request message and the health notices) keep their *
 
 ## Service
 
-Run `shikiri-yaku --product shop service install` after you install the command and create a valid instance. It writes a per-product service unit under your home directory, and prints the unit's path and activation command.
+Run `shikiri-yaku --product shop service install` after you install the command and create a valid instance. It writes a per-product service unit under your home directory, prints the unit's path and starts the service. Reinstalling replaces the running service with the new unit.
 
-**Writing the unit does not activate it.** The unit carries the `PATH` of the shell where `service install` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts.
+Stop any other process holding the instance lock, such as a foreground `run`, first. Otherwise the service cannot acquire the lock and exits. The unit carries the `PATH` of the shell where `service install` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts.
 
 ### macOS
 
@@ -294,7 +294,7 @@ journalctl --user -u shikiri-yaku-shop.service -f
 - The generated units restart after an unsuccessful exit. A stop requested through the service manager is not restarted.
 - Only one process can hold an instance's lock.
 - After you change `config.toml`, restart the product's service so it reads the new settings.
-- After `service install` rewrites a unit, shikiri-yaku does not reload it yet. Until it does, `service start`, `service stop` and `service restart` keep using the unit the service manager loaded before.
+- `service install` reloads a rewritten unit and replaces the running service.
 
 ## Applying changes
 

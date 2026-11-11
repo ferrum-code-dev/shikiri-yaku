@@ -149,7 +149,7 @@ are in tasks/plan.md.
 
 ### S3
 
-- [ ] S3. `service install` starts the service
+- [x] S3. `service install` starts the service
 
 ### S4
 

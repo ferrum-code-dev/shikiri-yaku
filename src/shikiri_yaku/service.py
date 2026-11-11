@@ -35,11 +35,10 @@ class ServiceError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ServiceFile:
-    """A unit's place on disk, its content, and the command that starts it."""
+    """A unit's place on disk and its content."""
 
     path: Path
     content: bytes
-    start: str
 
 
 def service_name(product: str) -> str:
@@ -68,10 +67,8 @@ def service_file(
     name = service_name(product)
     path = unit_path(platform, user_home, product)
     if platform == LAUNCHD_PLATFORM:
-        start = f"launchctl bootstrap gui/$(id -u) {path}"
-        return ServiceFile(path, _launchd_plist(name, program, login_path), start)
-    start = f"systemctl --user enable --now {name}.service"
-    return ServiceFile(path, _systemd_unit(product, program, login_path).encode(), start)
+        return ServiceFile(path, _launchd_plist(name, program, login_path))
+    return ServiceFile(path, _systemd_unit(product, program, login_path).encode())
 
 
 def start_argv(platform: str, product: str, uid: int) -> list[str]:
@@ -131,6 +128,39 @@ class ServiceManager:
         self._command_timeout_s = command_timeout_s
         self._stop_timeout_s = stop_timeout_s
         self._stop_poll_s = stop_poll_s
+
+    async def install(self, product: str) -> str | None:
+        name = service_name(product)
+        if self._platform == LAUNCHD_PLATFORM:
+            target = f"gui/{self._uid}/{name}"
+            argv = ["launchctl", "print", target]
+            try:
+                result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
+            except CommandError as error:
+                return str(error)
+            if result.returncode == 0:
+                problem = await self._run(product, ["launchctl", "bootout", target])
+                if problem is not None:
+                    return problem
+            actions = [
+                [
+                    "launchctl",
+                    "bootstrap",
+                    f"gui/{self._uid}",
+                    str(unit_path(self._platform, self._user_home, product)),
+                ]
+            ]
+        else:
+            actions = [
+                ["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "enable", f"{name}.service"],
+                ["systemctl", "--user", "restart", f"{name}.service"],
+            ]
+        for argv in actions:
+            problem = await self._run(product, argv)
+            if problem is not None:
+                return problem
+        return None
 
     async def start(self, product: str) -> str | None:
         return await self._run(product, start_argv(self._platform, product, self._uid))

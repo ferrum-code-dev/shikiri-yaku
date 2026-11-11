@@ -29,7 +29,7 @@ from shikiri_yaku.instance import instance_lock
 from shikiri_yaku.journal import JOURNAL_FILE_NAME, Database
 from shikiri_yaku.journal.database import LATEST_VERSION
 from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner
-from shikiri_yaku.service import service_file
+from shikiri_yaku.service import service_file, unit_path
 from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings
 from tests.support.clock import NapClock
 from tests.support.telegram_bot import FIXTURES, GET_WEBHOOK_INFO, FakeBotApi
@@ -1019,7 +1019,19 @@ def test_service_install_writes_the_unit_of_the_run_command_under_home(
     instances = tmp_path / "instances"
     _instance(instances)
 
-    assert main(["--product", _PRODUCT, "--home", str(instances), "service", "install"]) == 0
+    assert (
+        cli.main(
+            ["--product", _PRODUCT, "--home", str(instances), "service", "install"],
+            compose,
+            stats_measures,
+            adopt_topic,
+            forget_topic,
+            commands=_Clis(),
+            clock=NapClock(),
+            cli_settings=_CLI_SETTINGS,
+        )
+        == 0
+    )
 
     program = [
         str(user_environment.executable),
@@ -1053,7 +1065,19 @@ def test_service_install_writes_an_absolute_executable_for_a_relative_path_entry
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "local-bin")
 
-    assert main(["--product", _PRODUCT, "--home", str(instances), "service", "install"]) == 0
+    assert (
+        cli.main(
+            ["--product", _PRODUCT, "--home", str(instances), "service", "install"],
+            compose,
+            stats_measures,
+            adopt_topic,
+            forget_topic,
+            commands=_Clis(),
+            clock=NapClock(),
+            cli_settings=_CLI_SETTINGS,
+        )
+        == 0
+    )
 
     program = [str(executable), "--product", _PRODUCT, "--home", str(instances), "run"]
     expected = service_file(sys.platform, user_environment.home, _PRODUCT, program, "local-bin")
@@ -1227,3 +1251,78 @@ def test_run_stops_when_the_administrator_check_is_definitely_refused(
 
     assert _started(tmp_path, _fixed_bot(lambda: bot)) == 1
     assert "getChatMemberCount" not in bot.methods
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.parametrize("loaded", [False, True])
+@pytest.mark.parametrize("refused", [False, True])
+def test_service_install_activates_the_written_unit(
+    *,
+    tmp_path: Path,
+    user_environment: _UserEnvironment,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+    loaded: bool,
+    refused: bool,
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(os, "getuid", lambda: 501)
+    instances = tmp_path / "instances"
+    _instance(instances)
+    unit = unit_path(platform, user_environment.home, _PRODUCT)
+    calls: list[list[str]] = []
+
+    class ManagerCommands(CommandRunner):
+        @override
+        async def run(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout_s: float,
+            cwd: Path | None = None,
+            env: Mapping[str, str] | None = None,
+        ) -> CommandResult:
+            del timeout_s, cwd, env
+            assert unit.is_file()
+            calls.append(list(argv))
+            if argv[1] == "print":
+                return CommandResult(0 if loaded else 1, "", "")
+            if refused:
+                return CommandResult(1, "", "manager refused")
+            return CommandResult(0, "", "")
+
+    result = cli.main(
+        ["--product", _PRODUCT, "--home", str(instances), "service", "install"],
+        compose,
+        stats_measures,
+        adopt_topic,
+        forget_topic,
+        commands=ManagerCommands(),
+        clock=NapClock(),
+        cli_settings=_CLI_SETTINGS,
+    )
+    name = f"shikiri-yaku-{_PRODUCT}"
+    if platform == "darwin":
+        target = f"gui/501/{name}"
+        expected = [["launchctl", "print", target]]
+        if loaded:
+            expected.append(["launchctl", "bootout", target])
+        expected.append(["launchctl", "bootstrap", "gui/501", str(unit)])
+        if refused:
+            expected = expected[:2]
+    else:
+        expected = [
+            ["systemctl", "--user", "daemon-reload"],
+            ["systemctl", "--user", "enable", f"{name}.service"],
+            ["systemctl", "--user", "restart", f"{name}.service"],
+        ]
+        if refused:
+            expected = expected[:1]
+    assert calls == expected
+    assert result == int(refused)
+    output = capsys.readouterr()
+    assert (
+        "manager refused" in output.out + output.err if refused else "service started" in output.out
+    )
+    assert unit.is_file()

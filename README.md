@@ -172,9 +172,9 @@ After you install the command and create a valid instance, run:
 shikiri-yaku --product shop service install
 ```
 
-This writes a per-product service unit and prints its activation command. Writing the unit does not
-start it. The unit uses the `PATH` of the shell that ran the command, so `shikiru` and the Reasoner
-CLIs are found.
+This writes a per-product service unit and starts it, replacing the running service on repeat installs.
+Stop any other process holding the instance lock, such as a foreground `run`, first. The unit uses
+the `PATH` of the shell that ran the command, so `shikiru` and the Reasoner CLIs are found.
 
 On macOS the unit is a LaunchAgent; on Linux it is a user service. Start and stop it with:
 

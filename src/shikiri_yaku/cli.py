@@ -276,9 +276,9 @@ def _add_service_commands(
 ) -> None:
     run_service = partial(_service, commands=commands, clock=clock, cli_settings=cli_settings)
 
-    @service.command("install", help="Write the service unit of one product.")
+    @service.command("install", help="Write and start the service unit of one product.")
     def service_install(ctx: typer.Context) -> None:
-        raise typer.Exit(_service_install(_target(ctx)))
+        raise typer.Exit(_service_install(_target(ctx), commands, clock, cli_settings))
 
     @service.command(
         "start", help="Start the service of one product, or of every product under home."
@@ -598,7 +598,9 @@ def _changed(directory: Path, change: Callable[[], str]) -> int:
     return 0
 
 
-def _service_install(target: _Target) -> int:
+def _service_install(
+    target: _Target, commands: CommandRunner, clock: Clock, cli_settings: CliSettings
+) -> int:
     login_path = os.environ.get("PATH", "")
     try:
         load_settings(target.directory)
@@ -607,7 +609,21 @@ def _service_install(target: _Target) -> int:
     except (SettingsError, ServiceError) as error:
         print_failure(str(error))
         return 1
-    sys.stdout.write(f"wrote {service.path}\nstart it with: {service.start}\n")
+    manager = ServiceManager(
+        commands,
+        clock,
+        sys.platform,
+        Path.home(),
+        os.getuid(),
+        command_timeout_s=cli_settings.service_timeout_s,
+        stop_timeout_s=cli_settings.stop_timeout_s,
+        stop_poll_s=cli_settings.stop_poll_s,
+    )
+    problem = asyncio.run(manager.install(target.product))
+    if problem is not None:
+        print_failure(problem)
+        return 1
+    sys.stdout.write(f"wrote {service.path}\nservice started\n")
     return 0
 
 
