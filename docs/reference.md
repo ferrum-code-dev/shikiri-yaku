@@ -261,14 +261,14 @@ shikiri-yaku --product shop service start
 shikiri-yaku --product shop service stop
 ```
 
-`service stop` sends SIGTERM and returns once the job no longer runs. The job stays loaded, so `service start` works again without another setup step. To inspect the job state:
+`service stop` sends SIGTERM and returns once the job no longer runs. The job stays loaded, so `service start` works again without another setup step. To check whether it runs:
 
 ```sh
-launchctl print gui/$(id -u)/shikiri-yaku-shop
+shikiri-yaku --product shop service status
 ```
 
 - To keep it from starting at a later login, run `launchctl disable gui/$(id -u)/shikiri-yaku-shop`. If you disabled it, run `launchctl enable` with the same target before you start it again.
-- The generated plist sets no stdout or stderr log files. Use `launchctl print` to inspect the job state. To see application output while you troubleshoot, stop the service and run `shikiri-yaku --product shop run` in a terminal.
+- The generated plist sets no stdout or stderr log files. Use `service status` to inspect the job state. To see application output while you troubleshoot, stop the service and run `shikiri-yaku --product shop run` in a terminal.
 
 ### Linux
 
@@ -279,10 +279,10 @@ shikiri-yaku --product shop service start
 shikiri-yaku --product shop service stop
 ```
 
-To inspect it:
+To check whether it runs, and to read its log:
 
 ```sh
-systemctl --user status shikiri-yaku-shop.service
+shikiri-yaku --product shop service status
 journalctl --user -u shikiri-yaku-shop.service -f
 ```
 
@@ -300,7 +300,7 @@ journalctl --user -u shikiri-yaku-shop.service -f
 
 A running service reads its code and `config.toml` only when it starts. A change takes effect after a restart.
 
-`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. `service start` and `service stop` act the same way, with their own commands: start does not replace a running job, and stop waits on macOS until the job has stopped. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
+`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. `service start`, `service stop` and `service status` act the same way, with their own commands: start does not replace a running job, stop waits on macOS until the job has stopped, and status reports `running`, `stopped`, `failed` or `not loaded`, and exits 1 unless the service runs. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
 
 The service runs the installed copy of `shikiri-yaku` that `service install` found on the login `PATH`. It never runs a checkout. That copy is a release. Do not install with `--editable`. The running service would follow unreviewed checkout changes, including after a crash restart.
 

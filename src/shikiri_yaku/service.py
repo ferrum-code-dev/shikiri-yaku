@@ -1,9 +1,9 @@
 """The service unit that keeps one instance running under the OS service manager.
 
 The renderers are pure: they say where a unit belongs and what it contains. write_service_file
-touches the disk, and ServiceManager asks the service manager to start, stop or restart a unit
-through the CommandRunner port. A unit runs the given command line with the PATH the caller passes
-in, so shikiru and the agent CLIs are found when the service manager starts the process.
+touches the disk, and ServiceManager asks the service manager to start, stop, restart or report a
+unit through the CommandRunner port. A unit runs the given command line with the PATH the caller
+passes in, so shikiru and the agent CLIs are found when the service manager starts the process.
 """
 
 from __future__ import annotations
@@ -25,8 +25,13 @@ LAUNCHD_PLATFORM: Final = "darwin"
 SYSTEMD_PLATFORM: Final = "linux"
 SERVICE_PREFIX: Final = "shikiri-yaku-"
 NOT_INSTALLED: Final = "not installed"
+NOT_LOADED: Final = "not loaded"
+RUNNING: Final = "running"
+STOPPED: Final = "stopped"
 # keep: launchctl print gives a loaded job's state on its own line; only that line says it runs
 _LAUNCHD_RUNNING_LINE: Final = "state = running"
+_SYSTEMD_ACTIVE: Final = "active"
+_SYSTEMD_INACTIVE: Final = "inactive"
 
 
 class ServiceError(Exception):
@@ -102,10 +107,11 @@ def restart_argv(platform: str, product: str, uid: int) -> list[str]:
 
 
 class ServiceManager:
-    """Starts, stops and restarts products' services through the platform's service manager.
+    """Starts, stops, restarts and reports products' services through the service manager.
 
-    Each method returns None when the action finished, else why it did not. A product whose unit
-    was never written is not installed, and no command runs for it.
+    Each action returns None when it finished, else why it did not. status returns None when the
+    service runs, else the state it is in or why its state is unknown. A product whose unit was
+    never written is not installed, and no command runs for it.
     """
 
     def __init__(
@@ -175,8 +181,22 @@ class ServiceManager:
             return problem
         return await self._wait_until_stopped(product)
 
+    async def status(self, product: str) -> str | None:
+        if not self._is_installed(product):
+            return NOT_INSTALLED
+        if self._platform == LAUNCHD_PLATFORM:
+            try:
+                state = await self._launchd_state(product)
+            except CommandError as error:
+                return str(error)
+            return None if state == RUNNING else state
+        return await self._systemd_status(product)
+
+    def _is_installed(self, product: str) -> bool:
+        return unit_path(self._platform, self._user_home, product).is_file()
+
     async def _run(self, product: str, argv: list[str]) -> str | None:
-        if not unit_path(self._platform, self._user_home, product).is_file():
+        if not self._is_installed(product):
             return NOT_INSTALLED
         try:
             result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
@@ -186,16 +206,37 @@ class ServiceManager:
             return _failure_reason(result)
         return None
 
+    async def _systemd_status(self, product: str) -> str | None:
+        # keep: is-active exits non-zero unless the unit is active, so its stdout is the answer
+        argv = ["systemctl", "--user", "is-active", f"{service_name(product)}.service"]
+        try:
+            result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
+        except CommandError as error:
+            return str(error)
+        answer = result.stdout.strip()
+        if answer == _SYSTEMD_ACTIVE:
+            return None
+        if answer == _SYSTEMD_INACTIVE:
+            return STOPPED
+        return answer or _failure_reason(result)
+
+    async def _launchd_state(self, product: str) -> str:
+        """Return the job's state from launchctl print; not loaded if the manager lacks the job."""
+        argv = ["launchctl", "print", f"gui/{self._uid}/{service_name(product)}"]
+        result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
+        if result.returncode != 0:
+            return NOT_LOADED
+        return RUNNING if _is_running(result.stdout) else STOPPED
+
     async def _wait_until_stopped(self, product: str) -> str | None:
         # keep: launchd keeps a stopped job loaded, so the job's state decides, not its presence
-        argv = ["launchctl", "print", f"gui/{self._uid}/{service_name(product)}"]
         deadline = self._clock.now() + timedelta(seconds=self._stop_timeout_s)
         while True:
             try:
-                result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
+                state = await self._launchd_state(product)
             except CommandError as error:
                 return str(error)
-            if result.returncode != 0 or not _is_running(result.stdout):
+            if state != RUNNING:
                 return None
             remaining = deadline - self._clock.now()
             if remaining <= timedelta():

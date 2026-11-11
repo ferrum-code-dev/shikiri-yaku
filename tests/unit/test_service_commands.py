@@ -1,4 +1,4 @@
-"""The service commands: start, stop and restart each product's service through CommandRunner."""
+"""The service commands: start, stop, restart and status of each product, via CommandRunner."""
 
 from __future__ import annotations
 
@@ -27,10 +27,13 @@ _USAGE_ERROR: Final = 2
 _PASSED: Final = "✔ "
 _FAILED: Final = "✘ "
 _VERBS: Final = ("start", "stop", "restart")
+_EVERY_VERB: Final = (*_VERBS, "status")
 _CLOCK_START: Final = datetime(2026, 1, 1, tzinfo=UTC)
 _OK: Final = CommandResult(0, "", "")
 _RUNNING: Final = CommandResult(0, "\tstate = running\n", "")
 _NOT_RUNNING: Final = CommandResult(0, "\tstate = not running\n", "")
+_ACTIVE: Final = CommandResult(0, "active\n", "")
+_INACTIVE: Final = CommandResult(3, "inactive\n", "")
 
 
 class _Clock:
@@ -76,11 +79,11 @@ class _Launchctl(CommandRunner):
         del cwd, env
         self.commands.append(list(argv))
         self.timeouts.append(timeout_s)
-        if argv[1] == "print":
-            return self._printed.pop(0) if len(self._printed) > 1 else self._printed[0]
         outcome = self._outcomes.get(_product_of(argv), _OK)
         if isinstance(outcome, CommandError):
             raise outcome
+        if argv[1] == "print":
+            return self._printed.pop(0) if len(self._printed) > 1 else self._printed[0]
         return outcome
 
 
@@ -97,12 +100,14 @@ def _documented(platform: str, verb: str, product: str) -> list[list[str]]:
     """Return the commands one verb runs for one product, as the documented recipes give them."""
     name = f"{SERVICE_PREFIX}{product}"
     if platform == "linux":
-        return [["systemctl", "--user", verb, f"{name}.service"]]
+        action = "is-active" if verb == "status" else verb
+        return [["systemctl", "--user", action, f"{name}.service"]]
     target = f"gui/{_UID}/{name}"
     recipes = {
         "start": [["launchctl", "kickstart", target]],
         "restart": [["launchctl", "kickstart", "-k", target]],
         "stop": [["launchctl", "kill", "SIGTERM", target], _print(product)],
+        "status": [_print(product)],
     }
     return recipes[verb]
 
@@ -286,19 +291,22 @@ def test_a_failed_action_gives_the_service_managers_reason(
 
 
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.parametrize("verb", ["start", "status"])
 def test_a_service_manager_that_cannot_run_gives_its_error(
+    *,
     tmp_path: Path,
     user_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     platform: str,
+    verb: str,
 ) -> None:
     _pretend(monkeypatch, platform)
     _products(tmp_path, _SHOP)
     _install(user_home, platform, _SHOP)
     commands = _Launchctl({_SHOP: CommandError("launchctl: command not found")})
 
-    argv = ["--json", "--home", str(tmp_path / "instances"), "service", "start"]
+    argv = ["--json", "--home", str(tmp_path / "instances"), "service", verb]
     assert _service(argv, commands, _Clock()) == 1
 
     assert json.loads(capsys.readouterr().out) == [
@@ -306,8 +314,64 @@ def test_a_service_manager_that_cannot_run_gives_its_error(
     ]
 
 
+@pytest.mark.parametrize(
+    ("platform", "answer", "result"),
+    [
+        ("darwin", _RUNNING, "running"),
+        ("darwin", _NOT_RUNNING, "stopped"),
+        ("darwin", CommandResult(113, "", "Could not find service\n"), "not loaded"),
+        ("linux", _ACTIVE, "running"),
+        ("linux", _INACTIVE, "stopped"),
+        ("linux", CommandResult(3, "failed\n", ""), "failed"),
+        ("linux", CommandResult(1, "", "Failed to connect to bus\n"), "Failed to connect to bus"),
+    ],
+)
+def test_status_maps_the_service_managers_answer_to_a_result(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+    answer: CommandResult,
+    result: str,
+) -> None:
+    _pretend(monkeypatch, platform)
+    _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    commands = _Launchctl({_SHOP: answer}, printed=[answer])
+
+    argv = ["--json", "--home", str(tmp_path / "instances"), "service", "status"]
+    assert _service(argv, commands, _Clock()) == (0 if result == "running" else 1)
+
+    assert commands.commands == _documented(platform, "status", _SHOP)
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": result == "running", "result": result}
+    ]
+
+
+def test_status_exits_one_when_any_product_is_not_running(
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _pretend(monkeypatch, "linux")
+    _products(tmp_path, _SHOP, _FERRUMCODE)
+    _install(user_home, "linux", _SHOP, _FERRUMCODE)
+    commands = _Launchctl({_SHOP: _INACTIVE, _FERRUMCODE: _ACTIVE})
+
+    argv = ["--home", str(tmp_path / "instances"), "service", "status"]
+    assert _service(argv, commands, _Clock()) == 1
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"{_PASSED}ferrumcode running",
+        f"{_FAILED}shop: stopped",
+    ]
+
+
 @pytest.mark.parametrize("platform", ["darwin", "linux"])
-@pytest.mark.parametrize("verb", _VERBS)
+@pytest.mark.parametrize("verb", _EVERY_VERB)
 @pytest.mark.usefixtures("user_home")
 def test_a_product_without_an_installed_unit_is_not_installed_and_no_command_runs(
     tmp_path: Path,
@@ -400,7 +464,7 @@ def test_every_verb_uses_the_composed_command_timeout(
     assert set(commands.timeouts) == {73}
 
 
-@pytest.mark.parametrize("verb", _VERBS)
+@pytest.mark.parametrize("verb", _EVERY_VERB)
 def test_an_unsupported_platform_fails_and_no_command_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verb: str
 ) -> None:
@@ -413,7 +477,7 @@ def test_an_unsupported_platform_fails_and_no_command_runs(
     assert commands.commands == []
 
 
-@pytest.mark.parametrize("verb", _VERBS)
+@pytest.mark.parametrize("verb", _EVERY_VERB)
 def test_no_product_under_home_is_a_usage_error_and_no_command_runs(
     tmp_path: Path, verb: str
 ) -> None:

@@ -153,7 +153,7 @@ are in tasks/plan.md.
 
 ### S4
 
-- [ ] S4. Add `service status`
+- [x] S4. Add `service status`
 
 ### S5
 

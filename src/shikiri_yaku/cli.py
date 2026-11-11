@@ -299,6 +299,13 @@ def _add_service_commands(
     def service_restart(ctx: typer.Context) -> None:
         raise typer.Exit(run_service(_options(ctx), ServiceManager.restart, "restarted"))
 
+    @service.command(
+        "status",
+        help="Show whether the service of one product, or of every product under home, runs.",
+    )
+    def service_status(ctx: typer.Context) -> None:
+        raise typer.Exit(run_service(_options(ctx), ServiceManager.status, "running"))
+
 
 def build_app(
     compose: Compose,
@@ -323,7 +330,7 @@ def build_app(
     app.add_typer(
         service,
         name="service",
-        help="Install, start, stop and restart the service of a product.",
+        help="Install, start, stop, restart and check the service of a product.",
     )
     _add_service_commands(service, commands=commands, clock=clock, cli_settings=cli_settings)
     telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
