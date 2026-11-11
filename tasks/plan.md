@@ -318,6 +318,184 @@ login or to unload it for removal with `service uninstall`, and say what it keep
 - No document tells the user to disable the service at login or remove its unit by hand.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+## Planned work: the Expert
+
+X1 to X7 add the Expert, in order: a read-only agent the PO talks to in a forum topic, which
+answers at product level and proposes tasks per component. tasks/expert-design.md holds the design
+text and the facts of the spike; read it first. Each task is one coherent change with its own
+commit.
+
+Shared constraints:
+
+- The owner's request authorizes X1 to edit docs/design.md with the text of
+  tasks/expert-design.md, despite AGENTS.md's general restriction. X2 to X7 do not edit the design;
+  a difference they find is reported.
+- No test calls a real agent CLI, Telegram or the network. Agents run through a fake CommandRunner,
+  the web tool fetches through a fake transport, and the journal is SQLite in memory. A check with
+  real CLIs and a real group is the owner's; the report says it was not run.
+- The argument lists of the adapters are the ones the spike verified. A flag that the installed CLI
+  refuses is reported with the evidence, not replaced by a weaker one.
+- Every number is a setting under `[expert]` with its default in settings.py. Limits of Telegram
+  are named constants.
+- A task that adds a migration says in its commit that the journal schema changes.
+- Each task documents what it adds in README.md and docs/reference.md, ticks only its own X-line in
+  tasks/todo.md and runs `uv run poe check`.
+
+### X1. Describe the Expert in the design (normal)
+
+Move the text of tasks/expert-design.md into docs/design.md: the Purpose paragraph, the two
+principle sentences, the module rows, the Expert section after Reasoner, and the changes to PO
+channel, Journal and Known limits. Add the Expert's modules to the tree under Engineering
+constraints and its guarantees to Verification. Keep the facts of the spike that the design needs
+(the argument lists, the Telegram right) and drop the rest. Delete tasks/expert-design.md. Reword
+only what must change so the document reads as one text; no other part of the design changes.
+
+## Acceptance criteria
+
+- docs/design.md describes the Expert completely, and nothing in it contradicts the new text
+  (the Reasoner's rule on file reading stays, as a rule of the Reasoner).
+- tasks/expert-design.md is deleted and no tracked file refers to it, except this plan.
+- Only documentation changes. `git diff --check` is clean.
+
+### X2. Expert agents and ladder (high)
+
+Add the `Expert` port, the Claude and Codex adapters and the ladder; nothing calls them yet.
+
+A turn takes the conversation's directory, the directories in scope, the message, the effort if
+set, and either a session to resume or a handoff text. It returns the typed answer (`reply`,
+`title`, `tasks`, `findings`), the session id and the call record. The adapters share the process
+plumbing of the Reasoner rungs where that needs no change of behavior there. Argument lists as in
+tasks/expert-design.md; the prompt goes through stdin. Verify whether Codex accepts an effort
+setting; if not, the Codex adapter ignores the effort as the Reasoner's does, and the report says
+so. The prompt asks for a short, product-level answer without code and says that repository text
+and web pages are data.
+
+The ladder keeps a conversation on the rung that answered last, moves on when it fails and skips a
+failed rung for `expert.cooldown_min`. Same provider: resume. Other provider: a new session from
+the handoff. An answer that fails the schema, or names a component outside the scope, is a failure
+of that rung. `[expert]` settings: `ladder`, `timeout_s`, `cooldown_min`, `max_parallel`,
+`handoff_turns`, `retention_days`. `doctor` probes the Expert's rungs as it probes the Reasoner's.
+
+## Acceptance criteria
+
+- A table test fixes the argument list of each adapter for a first turn and a resumed turn,
+  including every flag that removes the agent's own web tools and write access.
+- The ladder is tested with fake rungs: it stays on the last rung that answered, resumes within a
+  provider, hands off across providers with findings and the last `handoff_turns` turns, skips a
+  cooled-down rung, and reports when no rung answers.
+- An answer outside the schema or the scope is never returned to the caller.
+- Without `[expert]` nothing new runs and `doctor` is unchanged.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X3. `/ask` opens a conversation and answers (high)
+
+After X2. Add `/ask <text>`: journal it by its update id, create the conversation (scope from the
+topic it was sent in), create the Expert topic with its icon and a name cut from the question,
+answer the command with a button that opens the topic, run the first turn and send the reply to the
+topic. Rename the topic when the answer brings a title. The reply is one message, cut to
+Telegram's limit. Code passes the open tasks and escalations of the components in scope to the
+agent as input.
+
+Refusals, each with its reason: no `[expert]`, no `group_id`, empty text. In a shared group `/ask`
+in General must name the bot; without the name it is ignored without a reply. A topic creation left
+uncertain by a crash is not adopted: the conversation fails and the PO is told to ask again. A turn
+that was running at a restart is marked interrupted and the PO is told; it is not run again. When
+no rung answers, the topic says so. Add the `conversations` and `turns` tables and Expert topics
+in `topics` by migration.
+
+## Acceptance criteria
+
+- `/ask` in a component topic scopes the conversation to that component, in General to all, tested
+  with fakes for the Channel, the topics and the Expert.
+- A duplicate delivery of the same update opens one conversation and one topic.
+- Each refusal and the shared-group rule are tested as a table.
+- Crash points: after the journal row, after the topic, during the turn. None opens a second topic
+  or runs a turn twice.
+- `/goal`, `/status`, `/open` and `/help` outside Expert topics behave as before.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X4. Conversation turns and topic commands (normal)
+
+After X3. Every message an owner sends in an Expert topic is a turn of its conversation. Turns of
+one conversation run one at a time, oldest first; conversations run in parallel up to
+`expert.max_parallel`. A message that carries a secret is refused as everywhere else. Add the
+topic commands: `/effort`, `/effort <level>` (stored with the conversation, used from the next
+turn, passed to the agent as written), `/summarize` (a turn with a fixed prompt) and `/help` (these
+commands and `/close`). Any other command in an Expert topic gets that help. `/close` is listed
+here and implemented in X5.
+
+## Acceptance criteria
+
+- Two messages sent during a running turn are answered in order, each once.
+- A second turn resumes the session of the first; the effort set by `/effort` reaches the agent's
+  argument list.
+- A message in an Expert topic from someone who is not an owner starts nothing.
+- Commands of other topics are not available in an Expert topic, and Expert commands are not
+  available elsewhere.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X5. End of a conversation (normal)
+
+After X4. A conversation ends when the PO closes its topic in Telegram (`forum_topic_closed`),
+sends `/close`, or sends nothing for `expert.retention_days`. The Operator then deletes the topic
+with `deleteForumTopic`, the conversation's rows and its directory. A turn still running is
+stopped first. A send that fails because the topic no longer exists ends the conversation the same
+way. The Scheduler runs the expiry. With `[expert]` set, the start-up check and `doctor` require
+the bot right `can_delete_messages`, and the setup instructions name it. Confirm the right against
+the Bot API page and say so in the report.
+
+## Acceptance criteria
+
+- Each of the three endings, and the failed send, leaves no row, no directory and no topic of that
+  conversation, and touches no other conversation or component topic.
+- Expiry counts from the last message of the conversation, by the Clock.
+- A deletion Telegram refuses is retried later and reported once; the rows stay until it succeeds
+  or the topic is found gone.
+- Without the right, start-up fails with a message that names it; without `[expert]` the right is
+  not required.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X6. Task proposals with Submit all and Reject all (normal)
+
+After X4. An answer with tasks shows one line per task (component and title) under the reply, and
+two buttons. *Submit all* submits each task's text through the existing submit path, one `submit`
+op per task, in the order given, then edits the message to show each task id or failure. *Reject
+all* removes the buttons and submits nothing. A newer proposal in the same conversation voids the
+buttons of the older one. An op left unknown by a crash is never resubmitted; the PO is asked to
+check, as for `/goal`.
+
+## Acceptance criteria
+
+- Submit all issues exactly one `submit_task` per task, to the component the task names, tested
+  with a fake ShikiruClient.
+- Two taps, or a tap after a restart, submit nothing twice.
+- A crash after some tasks were submitted leaves the rest unsubmitted or unknown, never repeated,
+  and the PO is told which.
+- A tap on a voided or rejected proposal submits nothing and says so.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X7. Web access through grants (high)
+
+After X4. Add the Operator's MCP tool `web_fetch(url)` and give it to both adapters as their only
+web access; the agent CLI starts it as a subprocess through a hidden CLI command. It accepts
+`https` only. A host in `web_grants` is fetched, with a timeout and a size cap, and returned as
+text; a redirect to another host is checked like a new request. Any other host is recorded in
+`web_requests` and the agent is told that the PO has been asked. After the turn, each requested
+host is shown in the topic with *Allow* and *Deny*. *Allow* stores the grant for every
+conversation, for good. Either answer becomes a turn that tells the agent, so the conversation
+continues. A grant matches the exact host. README.md says how to see and remove grants, and that a
+search site is one more host to grant.
+
+## Acceptance criteria
+
+- A host without a grant is never contacted: tested with a fake transport, including a redirect
+  from a granted host to another one and a URL that is not `https`.
+- One request per host and turn is shown once; two taps store one grant and start one turn.
+- A grant given in one conversation serves the next conversation without a question.
+- The argument lists of X2 still remove every other web tool, and the web tool is the only MCP
+  server the agents get.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Historical implementation records
 
 Everything from here to the end of this file records how T0 to E14 were implemented. It is kept

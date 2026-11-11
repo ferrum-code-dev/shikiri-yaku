@@ -159,6 +159,39 @@ are in tasks/plan.md.
 
 - [x] S5. Add `service uninstall`
 
+## Planned work: the Expert
+
+X1 to X7 add the Expert, a read-only agent the PO talks to in a forum topic. Details and shared
+constraints are in tasks/plan.md.
+
+### X1
+
+- [ ] X1. Describe the Expert in the design
+
+### X2
+
+- [ ] X2. Expert agents and ladder
+
+### X3
+
+- [ ] X3. `/ask` opens a conversation and answers
+
+### X4
+
+- [ ] X4. Conversation turns and topic commands
+
+### X5
+
+- [ ] X5. End of a conversation
+
+### X6
+
+- [ ] X6. Task proposals with Submit all and Reject all
+
+### X7
+
+- [ ] X7. Web access through grants
+
 ## Historical implementation records
 
 The entries below from Phase 0 (T0) to Phase E are historical records. They are not current guidance,
