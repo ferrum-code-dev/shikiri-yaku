@@ -31,7 +31,7 @@ it needs git and tmux 3.5 or newer.
 ## Proposing a change
 
 Open an issue first for anything larger than a small fix, so the design can be agreed before the
-code is written. A pull request should be one change of about 300 lines or fewer, and its
+code is written. A pull request should be one change, and its
 description should give the gate result and the section of `docs/design.md` it touches. The
 templates in `.github/` ask for both.
 
