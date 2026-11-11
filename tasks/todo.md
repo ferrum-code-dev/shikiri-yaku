@@ -141,7 +141,7 @@ are in tasks/plan.md.
 
 ### S1
 
-- [ ] S1. Group the service commands under `service`
+- [x] S1. Group the service commands under `service`
 
 ### S2
 
@@ -166,7 +166,7 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
 - [x] A2. Journal
 - [x] A3. Signals, classification and extensions
 - [x] A4. Ports, composition root and CLI (ports, Clock, bootstrap entry point, run and doctor in; lint-imports green)
-- [x] A4b. Install service (install-service writes the launchd plist or systemd unit; doctor shows a held lock as running)
+- [x] A4b. Install service (`service install` writes the launchd plist or systemd unit; doctor shows a held lock as running)
 - [x] A5a. Shikiru MCP link and read verbs
 - [x] A5b. Shikiru commands, `start` and the contract check
 - [x] A6. Event source
@@ -257,7 +257,7 @@ and their § numbers refer to the design before the R6 and R7 rewrites.
   - [x] E14. No channel names in the CLI checks and the journal
   - [x] E15. `/status` and `/open` in a component topic show only that component
   - [x] E16. Several instances in one group (`shared_group`)
-  - [x] E17. `restart` verb and `poe deploy`
+  - [x] E17. `service restart` command and `poe deploy`
   - [x] E18. Deploy a tagged release, roll back on failure
   - [x] E19. `doctor` checks the Shikiru version
   - [x] E20. Open-source files

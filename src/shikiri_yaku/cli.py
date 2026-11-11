@@ -223,7 +223,8 @@ JSON_OPTION = Annotated[
     typer.Option(
         "--json",
         help=(
-            "Print doctor's and stats' output as one JSON object, and restart's as a JSON list. "
+            "Print doctor's and stats' output as one JSON object, and service restart's as a "
+            "JSON list. "
             "[bold]Default:[/] off"
         ),
     ),
@@ -284,6 +285,8 @@ def build_app(
         add_completion=False,
         rich_markup_mode="rich",
     )
+    service = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
+    app.add_typer(service, name="service", help="Install and restart the service of a product.")
     telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
     app.add_typer(telegram, name="telegram", help="Repair the Telegram topic of a component.")
 
@@ -313,12 +316,14 @@ def build_app(
             )
         )
 
-    @app.command("install-service", help="Write the service unit of one product.")
-    def install_service(ctx: typer.Context) -> None:
-        raise typer.Exit(_install_service(_target(ctx)))
+    @service.command("install", help="Write the service unit of one product.")
+    def service_install(ctx: typer.Context) -> None:
+        raise typer.Exit(_service_install(_target(ctx)))
 
-    @app.command(help="Restart the service of one product, or of every product under home.")
-    def restart(ctx: typer.Context) -> None:
+    @service.command(
+        "restart", help="Restart the service of one product, or of every product under home."
+    )
+    def service_restart(ctx: typer.Context) -> None:
         raise typer.Exit(_restart(_options(ctx), commands, cli_settings))
 
     @app.command(help="Print the figures of one product's journal.")
@@ -562,7 +567,7 @@ def _changed(directory: Path, change: Callable[[], str]) -> int:
     return 0
 
 
-def _install_service(target: _Target) -> int:
+def _service_install(target: _Target) -> int:
     login_path = os.environ.get("PATH", "")
     try:
         load_settings(target.directory)

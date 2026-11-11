@@ -299,7 +299,7 @@ The Operator uses these Shikiru capabilities, through the MCP server and the CLI
 
 **Release notes come from commits; there is no changelog file.** git-cliff, configured in `cliff.toml`, writes the notes and proposes the version; no script of ours does. The notes list the commits since the previous tag. Commit subjects follow Conventional Commits, `type(scope)!: description`. The notes group them as Breaking changes (a `!` after the type, or a `BREAKING CHANGE:` line in the body), Features (`feat`), Fixes (`fix`) and Other changes (every other type, as written, such as `perf`). Commits of type `docs`, `test`, `chore`, `ci`, `build`, `style` and `refactor` are left out unless they are breaking, and a release needs at least one commit that is not left out. Each line links its commit. The notes end with a "Full Changelog" compare link to the previous tag and the install command pinned to the version, `uv tool install <distribution>==<version>`. The notes are only as good as the subjects, so a commit that changes behavior, configuration, the database schema, the supported Shikiru range says so in its subject or in a `BREAKING CHANGE:` line.
 
-**Installing and updating use the package manager.** The Operator is installed and updated like any Python tool: `uv tool install shikiri-yaku`, `uv tool upgrade shikiri-yaku`, and `uv tool install shikiri-yaku==<version>` to go back. It has no update command of its own. The running service keeps the code it started with, so after an upgrade `shikiri-yaku restart` moves it to the new code, and `doctor` shows whether the service is healthy.
+**Installing and updating use the package manager.** The Operator is installed and updated like any Python tool: `uv tool install shikiri-yaku`, `uv tool upgrade shikiri-yaku`, and `uv tool install shikiri-yaku==<version>` to go back. It has no update command of its own. The running service keeps the code it started with, so after an upgrade `shikiri-yaku service restart` moves it to the new code, and `doctor` shows whether the service is healthy.
 
 **One-way schema, with a backup.** Before the Operator migrates a product's journal to a newer schema, it copies the journal with SQLite's online backup to `<product>/backups/journal-schema<N>.db`, where N is the schema being left, and keeps the last three. The journal refuses a schema newer than the code knows (`JournalTooNewError`), naming both versions and the newest backup, so after a release that migrated the journal an older version stops with that error instead of corrupting state; restoring the backup is the owner's decision. Migrations are therefore reviewed as one-way changes.
 
@@ -320,7 +320,7 @@ shikiri-yaku/
     adapters/     Shikiru MCP link, Telegram, Reasoner CLIs, process runner, host lock, clock
     journal/      SQLite access; the only place with SQL
     bootstrap.py  the composition root: the only place that builds concrete objects
-    cli.py        run, doctor, stats, install-service, telegram adopt and forget
+    cli.py        run, doctor, stats, service install and restart, telegram adopt and forget
   tests/
 ```
 

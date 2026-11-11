@@ -1008,13 +1008,13 @@ def user_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _UserEn
     return _UserEnvironment(home, executable)
 
 
-def test_install_service_writes_the_unit_of_the_run_command_under_home(
+def test_service_install_writes_the_unit_of_the_run_command_under_home(
     tmp_path: Path, user_environment: _UserEnvironment
 ) -> None:
     instances = tmp_path / "instances"
     _instance(instances)
 
-    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 0
+    assert main(["--product", _PRODUCT, "--home", str(instances), "service", "install"]) == 0
 
     program = [
         str(user_environment.executable),
@@ -1035,7 +1035,7 @@ def test_install_service_writes_the_unit_of_the_run_command_under_home(
     assert expected.path.read_bytes() == expected.content
 
 
-def test_install_service_writes_an_absolute_executable_for_a_relative_path_entry(
+def test_service_install_writes_an_absolute_executable_for_a_relative_path_entry(
     tmp_path: Path, user_environment: _UserEnvironment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     instances = tmp_path / "instances"
@@ -1048,21 +1048,21 @@ def test_install_service_writes_an_absolute_executable_for_a_relative_path_entry
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", "local-bin")
 
-    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 0
+    assert main(["--product", _PRODUCT, "--home", str(instances), "service", "install"]) == 0
 
     program = [str(executable), "--product", _PRODUCT, "--home", str(instances), "run"]
     expected = service_file(sys.platform, user_environment.home, _PRODUCT, program, "local-bin")
     assert expected.path.read_bytes() == expected.content
 
 
-def test_install_service_refuses_an_instance_that_cannot_run(
+def test_service_install_refuses_an_instance_that_cannot_run(
     tmp_path: Path, user_environment: _UserEnvironment
 ) -> None:
-    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "install-service"]) == 1
+    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "service", "install"]) == 1
     assert list(user_environment.home.iterdir()) == []
 
 
-def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
+def test_service_install_refuses_when_the_login_path_has_no_shikiri_yaku(
     tmp_path: Path,
     user_environment: _UserEnvironment,
     monkeypatch: pytest.MonkeyPatch,
@@ -1071,7 +1071,7 @@ def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
     _instance(instances)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
 
-    assert main(["--product", _PRODUCT, "--home", str(instances), "install-service"]) == 1
+    assert main(["--product", _PRODUCT, "--home", str(instances), "service", "install"]) == 1
     assert list(user_environment.home.iterdir()) == []
 
 
@@ -1079,7 +1079,7 @@ def test_install_service_refuses_when_the_login_path_has_no_shikiri_yaku(
 def test_a_product_name_that_is_not_a_plain_name_is_refused_before_anything_is_written(
     tmp_path: Path, user_environment: _UserEnvironment, name: str
 ) -> None:
-    assert main(["--product", name, "--home", str(tmp_path), "install-service"]) == _USAGE_ERROR
+    assert main(["--product", name, "--home", str(tmp_path), "service", "install"]) == _USAGE_ERROR
 
     assert list(user_environment.home.iterdir()) == []
 
@@ -1126,8 +1126,8 @@ def test_the_only_product_under_home_is_used_without_the_product_option(tmp_path
     [
         ["run", _PRODUCT],
         ["doctor", _PRODUCT],
-        ["install-service", _PRODUCT],
-        ["restart", _PRODUCT],
+        ["service", "install", _PRODUCT],
+        ["service", "restart", _PRODUCT],
         ["stats", _PRODUCT],
         ["topics", "adopt", _PRODUCT, "api", "7"],
         ["topics", "forget", _PRODUCT, "api"],
@@ -1139,12 +1139,18 @@ def test_the_positional_product_and_the_topics_group_are_usage_errors(
     assert main(["--home", str(tmp_path), *argv]) == _USAGE_ERROR
 
 
-def test_help_lists_the_verbs_and_the_telegram_group(capsys: pytest.CaptureFixture[str]) -> None:
+def test_help_lists_the_verbs_and_the_groups(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--help"]) == 0
 
     listed = capsys.readouterr().out
-    for word in ("run", "doctor", "install-service", "restart", "stats", "telegram"):
+    for word in ("run", "doctor", "service", "stats", "telegram"):
         assert word in listed
+
+    assert main(["service", "--help"]) == 0
+
+    service_listed = capsys.readouterr().out
+    for word in ("install", "restart"):
+        assert word in service_listed
 
 
 def test_help_shows_usage_then_options_then_commands_as_plain_text_when_piped(

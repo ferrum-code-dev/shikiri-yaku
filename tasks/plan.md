@@ -348,7 +348,7 @@ clock); no placeholder adapters are added.
 CLI: `run <product>` (starts the asyncio loop, takes the instance lock, stops cleanly on SIGTERM) and
 `doctor <product>` (validates config, paths, token file mode `0600`, lock, journal opens).
 
-Split (decided): `install-service` is task A4b. A4 stays unchecked until A4b is done; the acceptance
+Split (decided): `service install` is task A4b. A4 stays unchecked until A4b is done; the acceptance
 below covers the part that lands first.
 
 Acceptance criteria:
@@ -362,7 +362,7 @@ Acceptance criteria:
 
 ### A4b. Install service (normal)
 
-§3.1, §12. `install-service <product>` writes a launchd plist (macOS) or systemd user unit (Linux)
+§3.1, §12. `service install <product>` writes a launchd plist (macOS) or systemd user unit (Linux)
 named `shikiri-yaku-<product>`, with the PATH of the user's login shell and the exact `run` command.
 
 Also: `doctor` shows a held instance lock as "running", not as a failure, because a service that is
@@ -1668,7 +1668,7 @@ summary line, glyphs, colours). Run `shikiru --help`, `shikiru doctor` and `shik
    `--product <name>`, `--home <path>`, `--json`, `--version`. Each help text ends with "Default: …".
    The product defaults to the only product directory under the home; none or several is a usage error
    that lists what was found. `--home` is no longer repeated on each command.
-3. Flat verbs: `run`, `doctor`, `stats`, `install-service`. The channel repair moves under its channel:
+3. Flat verbs: `run`, `doctor`, `stats`, and the service install command. The channel repair moves under its channel:
    `telegram adopt <component|general> <thread-id>` and `telegram forget <component|general>`; `topics`
    is removed. The old positional form (`run shop`) is a usage error, with no compatibility layer.
 4. Output like Shikiru: `doctor` prints one line per check as `✔ Name · detail` or `✘ Name · detail`, a blank
@@ -1676,12 +1676,12 @@ summary line, glyphs, colours). Run `shikiru --help`, `shikiru doctor` and `shik
    titled sections as rich tables; errors are one `✘` line with the reason, as Shikiru's `_fail`. Colour only
    on a terminal; piped output is plain text (no escape codes). Exit codes stay as they are.
 5. `--json` for `doctor` and `stats` prints one JSON object with fixed keys.
-6. `install-service` writes the unit with the new command form (`shikiri-yaku --product X --home H run`
+6. `service install` writes the unit with the new command form (`shikiri-yaku --product X --home H run`
    with absolute paths); update README and every help text that names the old form.
 
 Split into commits, each keeping the gate green (the task is larger than one 300-line change):
 * E5a: the Typer app, global options, product resolution, flat verbs, the `telegram` group, the
-  `install-service` command form, the migrated tests, README and drills.
+  `service install` command form, the migrated tests, README and drills.
 * E5b: Shikiru's help palette and help layout.
 * E5c: doctor lines with `✔`/`✘` and the summary, `✘` error lines, colour on a terminal only, in
   `cli_render.py`.
@@ -2016,14 +2016,14 @@ Acceptance criteria:
 * No file under `app/` names a channel (the E14 test still passes).
 * The gate passes.
 
-### E17. `restart` verb and `poe deploy` (normal)
+### E17. `service restart` command and `poe deploy` (normal)
 
 Both tools are installed as snapshots (`uv tool install .`, not editable), so a half-finished change
 in the checkout never reaches a running service, including a service the manager restarts after a crash.
 Applying a change is therefore a reinstall and a restart. Today the restart needs the service label and
 `launchctl`/`systemctl` typed by hand.
 
-1. New verb `shikiri-yaku restart`, in the Typer app next to `install-service`, with the global
+1. New command `shikiri-yaku service restart`, in the Typer app next to `service install`, with the global
    `--product`. With no `--product` it restarts the service of every product under the home (the
    directories with a `config.toml`, as `product_names` finds them); with it, that one product.
    macOS: `launchctl kickstart -k gui/<uid>/shikiri-yaku-<product>`; Linux:
@@ -2033,11 +2033,11 @@ Applying a change is therefore a reinstall and a restart. Today the restart need
    is non-zero if any restart failed. Output is one line per product (`✔ ferrumcode restarted`,
    `✘ shop: not installed`) in the style of `doctor`; `--json` prints the list.
 2. New poe task `deploy` in `pyproject.toml`:
-   `sequence = ["check", { cmd = "uv tool install --reinstall ." }, { cmd = "shikiri-yaku restart" }]`.
+   `sequence = ["check", { cmd = "uv tool install --reinstall ." }, { cmd = "shikiri-yaku service restart" }]`.
    It stops at the first failing step, so code that fails the gate is neither installed nor restarted.
    It is run from a checkout whose HEAD is the reviewed commit.
 3. README "Service operation": a short "Applying changes" part: a code change is `uv run poe deploy`
-   (gate, snapshot reinstall, restart), a `config.toml` change is `shikiri-yaku restart` alone. Several
+   (gate, snapshot reinstall, restart), a `config.toml` change is `shikiri-yaku service restart` alone. Several
    hosts: run it on each. Do not install with `--editable`: the running service would follow unreviewed
    changes in the checkout.
 
@@ -2061,7 +2061,7 @@ only ever runs a tagged release, and a failed upgrade returns to the last good o
    can import them and pass fakes; nothing in them is a literal from the host.
 2. The journal copy uses SQLite's online backup (`sqlite3.Connection.backup`), not a file copy, and
    goes to `<home>/<product>/backups/journal-schema<N>.db`. The products and the home are those the
-   `restart --json` output and `--home` already use. Keep the last three backups per product.
+   `service restart --json` output and `--home` already use. Keep the last three backups per product.
 3. `pyproject.toml`: `deploy = "python scripts/deploy.py"` and
    `rollback = "python scripts/deploy.py --rollback"` replace the E17 `deploy` sequence.
 4. README "Applying changes": a code change is `uv run poe deploy` from a checkout at the release
@@ -2204,7 +2204,7 @@ Acceptance criteria:
 
 The first deploy of `0.1.1` rolled back with no visible reason; the identical second run passed. The
 verification (`scripts/deploy.py`, `verify`) runs `shikiri-yaku --version` and `doctor` right after
-`restart` returns, when the service and the engines may still be starting. The rollback message also
+`service restart` returns, when the service and the engines may still be starting. The rollback message also
 says only `doctor fails for <product>`, not why.
 
 1. `verify` retries a failing `doctor` per product: up to `ATTEMPTS` runs with `PAUSE_S` seconds
@@ -2316,7 +2316,7 @@ Acceptance criteria:
 ### E29. `shikiri-yaku update --wheel` replaces `poe deploy` (normal)
 
 1. A new top-level package `src/shikiri_yaku/update/` holds what `scripts/deploy.py` does after "build the
-   wheel": the release store and `current`, the journal backups, install, `restart --json`, verification with
+   wheel": the release store and `current`, the journal backups, install, `service restart --json`, verification with
    the `doctor` retries (E24), rollback and pruning, with the same behavior and messages and an injected
    runner for tests. The SQLite online backup lives in `journal/` (SQL stays there) and `update/` calls it. The
    package is added to the import-linter contracts: only `cli.py` and `bootstrap.py` may import it, and it
@@ -2378,9 +2378,9 @@ Acceptance criteria:
 
 1. Delete `src/shikiri_yaku/update/` (keeping what E34 moves), the `update` command and its registration, the
    `ReleaseSource` port and adapter, `scripts/release.py`, `scripts/wait_for_ci.py`, their tests and ruff
-   entries, and the `release` poe task. `shikiri-yaku restart` stays. The import-linter contract for `update/` goes.
+   entries, and the `release` poe task. `shikiri-yaku service restart` stays. The import-linter contract for `update/` goes.
 2. README: install `uv tool install shikiri-yaku`; update `uv tool upgrade shikiri-yaku`, then
-   `shikiri-yaku restart`; go back `uv tool install shikiri-yaku==<version>`. Until the first PyPI release add one
+   `shikiri-yaku service restart`; go back `uv tool install shikiri-yaku==<version>`. Until the first PyPI release add one
    sentence: install the wheel from the latest release on the Releases page. No version number appears in the
    README; the Shikiru prerequisite is `uv tool install shikiru`.
 3. CONTRIBUTING "Releasing": push the tag on a commit of `main` with green CI

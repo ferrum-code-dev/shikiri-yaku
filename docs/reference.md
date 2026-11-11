@@ -93,7 +93,7 @@ Global options go before the command.
 | --- | --- |
 | `--product NAME` | The product to work on. You may leave it out when `--home` holds exactly one product directory. With none or several, the command refuses and names what it found. |
 | `--home PATH` | The directory that holds the product directories. Default: `~/.shikiri-yaku`. |
-| `--json` | Prints `doctor` and `stats` as one JSON object, and `restart` as a JSON list. Other commands ignore it. Exit codes stay the same. |
+| `--json` | Prints `doctor` and `stats` as one JSON object, and `service restart` as a JSON list. Other commands ignore it. Exit codes stay the same. |
 | `--version` | Shows the version and exits. |
 
 | Command | Purpose |
@@ -101,8 +101,8 @@ Global options go before the command.
 | `run` | Serves one product until SIGTERM. |
 | `doctor` | Checks one product's instance. |
 | `stats` | Prints the figures of one product's journal. |
-| `install-service` | Writes a launchd or systemd unit that runs `run` at login. |
-| `restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. Unlike the other verbs, it does not refuse several products. It prints one line per product and exits 1 if any product was not restarted. |
+| `service install` | Writes a launchd or systemd unit that runs `run` at login. |
+| `service restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. Unlike the other verbs, it does not refuse several products. It prints one line per product and exits 1 if any product was not restarted. |
 | `telegram adopt <component> <thread-id>` | Repairs an uncertain topic. See [Topic recovery](#topic-recovery). |
 | `telegram forget <component>` | Deletes an uncertain topic's row. See [Topic recovery](#topic-recovery). |
 
@@ -116,7 +116,7 @@ When `stats` cannot run, it prints one `✘` line on standard error and nothing 
 | --- | --- |
 | `doctor` | `passed` (true when every check passed), `failed` (the number of failed checks), `total`, and `checks`. Each entry of `checks` has `name`, `passed` and `detail`. |
 | `stats` | `completed`, `queued`, `lifetime_seconds`, `waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and `install_outcomes`. The durations are in seconds. `share` is the waiting fraction from 0 to 1, or `null` when unavailable. The last five keys each map a label to its count. |
-| `restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did not, such as `not installed`. |
+| `service restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did not, such as `not installed`. |
 
 ## Telegram
 
@@ -244,9 +244,9 @@ Standing messages (the pull-request message and the health notices) keep their *
 
 ## Service
 
-Run `shikiri-yaku --product shop install-service` after you install the command and create a valid instance. It writes a per-product service unit under your home directory, and prints the unit's path and activation command.
+Run `shikiri-yaku --product shop service install` after you install the command and create a valid instance. It writes a per-product service unit under your home directory, and prints the unit's path and activation command.
 
-**Writing the unit does not activate it.** The unit carries the `PATH` of the shell where `install-service` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts.
+**Writing the unit does not activate it.** The unit carries the `PATH` of the shell where `service install` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts.
 
 ### macOS
 
@@ -285,15 +285,15 @@ journalctl --user -u shikiri-yaku-shop.service -f
 - The generated units restart after an unsuccessful exit. A stop requested through the service manager is not restarted.
 - Only one process can hold an instance's lock.
 - After you change `config.toml`, restart the product's service so it reads the new settings.
-- After `install-service` rewrites a unit, reload it. On Linux, run `systemctl --user daemon-reload`, then restart the service. On macOS, boot out and bootstrap the LaunchAgent again.
+- After `service install` rewrites a unit, reload it. On Linux, run `systemctl --user daemon-reload`, then restart the service. On macOS, boot out and bootstrap the LaunchAgent again.
 
 ## Applying changes
 
 A running service reads its code and `config.toml` only when it starts. A change takes effect after a restart.
 
-`shikiri-yaku restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. A restart that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
+`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. A restart that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
 
-The service runs the installed copy of `shikiri-yaku` that `install-service` found on the login `PATH`. It never runs a checkout. That copy is a release. Do not install with `--editable`. The running service would follow unreviewed checkout changes, including after a crash restart.
+The service runs the installed copy of `shikiri-yaku` that `service install` found on the login `PATH`. It never runs a checkout. That copy is a release. Do not install with `--editable`. The running service would follow unreviewed checkout changes, including after a crash restart.
 
 ### After a code change
 
@@ -302,14 +302,14 @@ The service runs the installed copy of `shikiri-yaku` that `install-service` fou
 
    ```sh
    uv tool upgrade shikiri-yaku
-   shikiri-yaku restart
+   shikiri-yaku service restart
    ```
 
 Before a release migrates a journal, `shikiri-yaku` copies it to `<home>/<product>/backups/journal-schema<N>.db`. `<N>` is the schema version before the migration. The newest three copies are kept per product.
 
 ### After a `config.toml` change
 
-Run `shikiri-yaku restart` alone.
+Run `shikiri-yaku service restart` alone.
 
 ### Rolling back
 
@@ -317,7 +317,7 @@ To go back to an earlier release, install its version and restart:
 
 ```sh
 uv tool install shikiri-yaku==<version>
-shikiri-yaku restart
+shikiri-yaku service restart
 ```
 
 A rollback restores code, not data. A release that migrated a journal leaves the old version unable to open it. It stops with `JournalTooNewError`. To restore the data, repeat these steps for that product on each host where its service runs:

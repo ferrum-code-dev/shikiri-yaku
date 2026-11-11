@@ -169,7 +169,7 @@ Full rules are in [Automatic actions](docs/reference.md#automatic-actions).
 After you install the command and create a valid instance, run:
 
 ```sh
-shikiri-yaku --product shop install-service
+shikiri-yaku --product shop service install
 ```
 
 This writes a per-product service unit and prints its activation command. Writing the unit does not
@@ -196,13 +196,13 @@ Logs, status and rewritten units are covered in [Service](docs/reference.md#serv
 
 A running service reads its code and `config.toml` only when it starts.
 
-- **After a config change:** run `shikiri-yaku restart`.
+- **After a config change:** run `shikiri-yaku service restart`.
 - **After a code change:** the owner runs the Release workflow, as
   [CONTRIBUTING.md](CONTRIBUTING.md#releasing) describes. Then, on each host:
 
   ```sh
   uv tool upgrade shikiri-yaku
-  shikiri-yaku restart
+  shikiri-yaku service restart
   ```
 
 - **Never use `--editable`.** The service would follow unreviewed checkout changes.

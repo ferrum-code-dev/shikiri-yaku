@@ -1,4 +1,4 @@
-"""The restart verb: each product's service is restarted through the CommandRunner port."""
+"""The service restart command: each product's service is restarted through CommandRunner."""
 
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ def test_restart_restarts_every_product_under_home_in_name_order(
         _unit(user_home, sys.platform, name)
     commands = _ServiceManager()
 
-    assert _restart(["--home", str(instances), "restart"], commands) == 0
+    assert _restart(["--home", str(instances), "service", "restart"], commands) == 0
 
     assert _restarted(commands) == [_FERRUMCODE, _SHOP]
     assert capsys.readouterr().out.splitlines() == [
@@ -223,7 +223,7 @@ def test_each_product_under_home_gets_the_documented_command_of_its_platform(
         _unit(user_home, platform, name)
     commands = _ServiceManager()
 
-    assert _restart(["--home", str(instances), "restart"], commands) == 0
+    assert _restart(["--home", str(instances), "service", "restart"], commands) == 0
 
     assert commands.commands == expected
 
@@ -236,7 +236,10 @@ def test_the_product_option_restarts_only_that_product(tmp_path: Path, user_home
         _unit(user_home, sys.platform, name)
     commands = _ServiceManager()
 
-    assert _restart(["--home", str(instances), "--product", _SHOP, "restart"], commands) == 0
+    assert (
+        _restart(["--home", str(instances), "--product", _SHOP, "service", "restart"], commands)
+        == 0
+    )
 
     assert _restarted(commands) == [_SHOP]
 
@@ -247,7 +250,10 @@ def test_restart_uses_the_composed_cli_timeout(user_home: Path) -> None:
     commands = _ServiceManager()
 
     assert (
-        _restart(["--product", _SHOP, "restart"], commands, CliSettings(restart_timeout_s=73)) == 0
+        _restart(
+            ["--product", _SHOP, "service", "restart"], commands, CliSettings(restart_timeout_s=73)
+        )
+        == 0
     )
 
     assert commands.timeouts == [73]
@@ -263,7 +269,7 @@ def test_a_failed_restart_is_reported_and_the_other_products_still_restart(
         _unit(user_home, sys.platform, name)
     commands = _ServiceManager({_SHOP: CommandResult(3, "", "Could not find service\n")})
 
-    assert _restart(["--home", str(instances), "restart"], commands) == 1
+    assert _restart(["--home", str(instances), "service", "restart"], commands) == 1
 
     assert _restarted(commands) == [_FERRUMCODE, _SHOP]
     assert capsys.readouterr().out.splitlines() == [
@@ -282,7 +288,7 @@ def test_a_product_without_an_installed_unit_is_reported_as_not_installed(
     _unit(user_home, sys.platform, _SHOP)
     commands = _ServiceManager()
 
-    assert _restart(["--home", str(instances), "restart"], commands) == 1
+    assert _restart(["--home", str(instances), "service", "restart"], commands) == 1
 
     assert _restarted(commands) == [_SHOP]
     assert capsys.readouterr().out.splitlines() == [
@@ -300,7 +306,9 @@ def test_json_gives_a_list_with_each_products_result(
         _product(instances, name)
     _unit(user_home, sys.platform, _SHOP)
 
-    assert _restart(["--home", str(instances), "--json", "restart"], _ServiceManager()) == 1
+    assert (
+        _restart(["--home", str(instances), "--json", "service", "restart"], _ServiceManager()) == 1
+    )
 
     assert json.loads(capsys.readouterr().out) == [
         {"product": _FERRUMCODE, "passed": False, "result": "not installed"},
@@ -314,5 +322,5 @@ def test_no_product_under_home_is_a_usage_error_and_no_command_runs(tmp_path: Pa
     instances.mkdir()
     commands = _ServiceManager()
 
-    assert _restart(["--home", str(instances), "restart"], commands) == _USAGE_ERROR
+    assert _restart(["--home", str(instances), "service", "restart"], commands) == _USAGE_ERROR
     assert commands.commands == []

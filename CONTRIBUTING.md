@@ -43,7 +43,7 @@ style rules. They apply to people as well as to agents.
 ## Commit style
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), for example
-`feat: add a restart verb` or `docs: explain the approval boundary`. Keep the subject short and
+`feat: add a service restart` or `docs: explain the approval boundary`. Keep the subject short and
 about the change as a whole.
 
 ## Before you open a pull request
@@ -78,5 +78,5 @@ environment `pypi`. On GitHub, create the environment `pypi` in the repository s
 required reviewer and a deployment branch rule that allows only `main`. The workflow code does not
 set these; the owner does.
 
-A host upgrades to the newest release with `uv tool upgrade shikiri-yaku`, then `shikiri-yaku
-restart` (see the README, Applying changes).
+A host upgrades to the newest release with `uv tool upgrade shikiri-yaku`, then
+`shikiri-yaku service restart` (see the README, Applying changes).
