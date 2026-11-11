@@ -1,4 +1,4 @@
-"""The inbound job: polls the PO's chat and hands stored items to Replies."""
+"""The inbound job: polls the PO's chat and hands stored items to Replies or the Expert."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError, ShikiruError
 
 if TYPE_CHECKING:
+    from shikiri_yaku.app.expert_turns import ExpertTurns
     from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.app.inbound_poller import InboundPoller
     from shikiri_yaku.app.replies import Replies
@@ -25,8 +26,9 @@ class InboundService:
 
     A transport failure is tried again on the next tick. A batch that cannot be read opens one
     `health` signal, which the next readable batch closes. An item whose Shikiru call fails stays
-    pending, and ordinary items after it wait. Independent `/ask` requests run concurrently and
-    remain pending until their work finishes.
+    pending, and ordinary items after it wait. Independent `/ask` requests and messages in Expert
+    topics run concurrently and remain pending until their work finishes; the Expert orders the
+    turns of each conversation itself.
     """
 
     def __init__(
@@ -39,6 +41,7 @@ class InboundService:
         *,
         interval_s: float,
         health_scope: str = INBOUND_BATCH,
+        expert: ExpertTurns | None = None,
     ) -> None:
         self._poller = poller
         self._log = log
@@ -47,7 +50,8 @@ class InboundService:
         self._clock = clock
         self._interval_s = interval_s
         self._health_scope = health_scope
-        self._asks: dict[int, asyncio.Task[None]] = {}
+        self._expert = expert
+        self._tasks: dict[int, asyncio.Task[None]] = {}
 
     async def run(self) -> None:
         try:
@@ -55,20 +59,20 @@ class InboundService:
                 await self.tick()
                 await self._clock.sleep(self._interval_s)
         finally:
-            for task in self._asks.values():
+            for task in self._tasks.values():
                 task.cancel()
-            await asyncio.gather(*self._asks.values(), return_exceptions=True)
+            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
     async def tick(self) -> None:
-        for update_id, task in tuple(self._asks.items()):
+        for update_id, task in tuple(self._tasks.items()):
             if task.done():
-                del self._asks[update_id]
+                del self._tasks[update_id]
                 task.result()
         await self._poll()
         for item in self._log.pending():
-            if _is_ask(item):
-                if item.update_id not in self._asks:
-                    self._asks[item.update_id] = asyncio.create_task(self._handle_ask(item))
+            if self._background(item):
+                if item.update_id not in self._tasks:
+                    self._tasks[item.update_id] = asyncio.create_task(self._run_background(item))
                 continue
             try:
                 await self._replies.handle(item)
@@ -76,9 +80,15 @@ class InboundService:
                 return
             self._log.mark_handled(item.update_id)
 
-    async def _handle_ask(self, item: Inbound) -> None:
+    def _background(self, item: Inbound) -> bool:
+        return _is_ask(item) or (self._expert is not None and self._expert.owns(item))
+
+    async def _run_background(self, item: Inbound) -> None:
         try:
-            await self._replies.handle(item)
+            if self._expert is not None and self._expert.owns(item):
+                await self._expert.handle(item)
+            else:
+                await self._replies.handle(item)
         except ShikiruError, ChannelError:
             return
         self._log.mark_handled(item.update_id)

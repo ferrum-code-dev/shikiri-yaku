@@ -11,6 +11,7 @@ import pytest
 
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
@@ -143,17 +144,27 @@ class Harness:
         self.outbox = JournalOutbox(self.database, MessageStore(self.database, Reporter()))
         self.topics = Topics()
         self.expert = expert if expert is not None else Expert()
-        self.ask = Ask(
+        self.turns = ExpertTurns(
             self.log,
             self.outbox,
             Clock(),
-            expert=self.expert if enabled else None,
-            topics=self.topics if group else None,
+            expert=self.expert,
+            topics=self.topics,
             clients=clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")},
             scope={name: path / name for name in ("api", "web")},
             directory=path,
             channel="telegram",
-            group_id=-100123 if group else None,
+            group_id=-100123,
+        )
+        self.ask = Ask(
+            self.log,
+            self.outbox,
+            Clock(),
+            configured=enabled,
+            topics=self.topics if group else None,
+            turns=self.turns,
+            scope={name: path / name for name in ("api", "web")},
+            channel="telegram",
         )
         self.commands = Commands(
             self.outbox,
@@ -226,7 +237,7 @@ def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
 def test_crash_before_topic_is_uncertain(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.log.create(1, chat=-100123, thread=None, text="hello", scope=["api"], now=NOW)
-    h.ask.recover()
+    h.turns.recover()
     h.send()
     assert not h.topics.created
     assert not h.expert.requests
@@ -237,7 +248,7 @@ def test_crash_after_topic_resumes_once(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.log.create(1, chat=-100123, thread=None, text="hello", scope=["api"], now=NOW)
     h.log.opened(1, 22)
-    h.ask.recover()
+    h.turns.recover()
     h.send()
     h.send()
     assert not h.topics.created
@@ -249,7 +260,7 @@ def test_crash_during_turn_is_not_repeated(tmp_path: Path) -> None:
     h.expert.crash = True
     with pytest.raises(KeyboardInterrupt):
         h.send()
-    h.ask.recover()
+    h.turns.recover()
     h.expert.crash = False
     h.send()
     assert len(h.topics.created) == len(h.expert.requests) == 1
@@ -379,7 +390,7 @@ def test_private_origin_interrupted_turn_is_reported_in_the_group_topic(tmp_path
     h.log.create(1, chat=5, thread=None, text="hello", scope=["api"], now=NOW)
     h.log.opened(1, 22)
     assert h.log.start(1)
-    h.ask.recover()
+    h.turns.recover()
 
     [pending] = h.outbox.pending()
     assert pending.destination.chat == "-100123"

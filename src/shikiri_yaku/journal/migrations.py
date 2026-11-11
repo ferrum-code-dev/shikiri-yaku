@@ -28,6 +28,8 @@ Migration 20 keeps the slot of an outbound message, so a newer copy in the same 
 Migration 21 gives each copy sent before slots the slot its kind has now, read from its notice key,
 so an upgraded journal replaces the approval it already holds.
 Migration 24 keeps the name of each one-time repair that ran, so an upgraded journal repairs once.
+Migration 26 keeps the effort a conversation was given with `/effort`, which its next turn passes
+to the agent.
 """
 
 from __future__ import annotations
@@ -228,4 +230,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             answer TEXT, call TEXT
         )""",
     ),
+    ("ALTER TABLE conversations ADD COLUMN effort TEXT",),
 )

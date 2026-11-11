@@ -31,6 +31,14 @@ class ExpertAnswer(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ExpertSession:
+    rung: int
+    provider: str
+    session_id: str
+    findings: str
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationRecord:
     id: int
     update_id: int
@@ -38,9 +46,18 @@ class ConversationRecord:
     origin_thread: int | None
     thread_id: int | None
     scope: list[str]
+    state: str
+    effort: str | None
+    session: ExpertSession | None
+
+
+@dataclass(frozen=True, slots=True)
+class TurnRecord:
+    update_id: int
+    conversation_id: int
+    thread_id: int | None
     text: str
     state: str
-    turn_state: str
     answer: str | None
 
 
@@ -48,14 +65,6 @@ class ConversationRecord:
 class ExpertTurn:
     message: str
     reply: str
-
-
-@dataclass(frozen=True, slots=True)
-class ExpertSession:
-    rung: int
-    provider: str
-    session_id: str
-    findings: str
 
 
 @dataclass(frozen=True, slots=True)

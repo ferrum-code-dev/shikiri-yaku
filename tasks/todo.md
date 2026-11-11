@@ -201,7 +201,7 @@ constraints are in tasks/plan.md.
 
 ### X4
 
-- [ ] X4. Conversation turns and topic commands
+- [x] X4. Conversation turns and topic commands
 
 ## Acceptance criteria
 

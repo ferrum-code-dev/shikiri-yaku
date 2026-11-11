@@ -87,9 +87,18 @@ The optional Expert ladder accepts the same `adapter:model[:effort]` entries as 
 `doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
 shared group, address General requests as `/ask@bot <question>`. An uncertain topic creation is
-not retried; ask again. An interrupted turn is reported and is not repeated. Follow-up turns and
-conversation cleanup are not yet available. The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`,
-`max_parallel = 2`, `handoff_turns = 5`, and `retention_days = 14`.
+not retried; ask again. An interrupted turn is reported and is not repeated.
+
+Each message in an Expert topic is a follow-up turn of that conversation. The turns of one
+conversation run one at a time, oldest first, and each later turn resumes the agent session of
+the earlier ones. Topic commands: `/effort [level]` shows the conversation's effort or sets it
+from the next turn;
+`/summarize` asks for a short summary; `/help` lists the commands. Other commands do not work in
+an Expert topic, and the Expert commands do not work elsewhere. Closing a conversation with
+`/close` is not yet available.
+
+The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`, `max_parallel = 2`,
+`handoff_turns = 5`, and `retention_days = 14`.
 
 ```toml
 [expert]
@@ -98,7 +107,8 @@ ladder = ["claude:sonnet", "codex:gpt-5"]
 
 Claude is restricted to file reads in the scoped directories. Codex runs read-only with web search
 and apps disabled, but its file scope is an instruction rather than a filesystem boundary. Both
-Expert adapters pass the configured effort; a conversation effort overrides the rung effort.
+Expert adapters pass the configured effort; the effort set with `/effort` in a conversation's topic
+overrides the rung effort.
 Supported Codex effort levels depend on the model. No live agent or group verification is included
 in the local test suite.
 

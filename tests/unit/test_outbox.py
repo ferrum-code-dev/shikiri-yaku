@@ -23,6 +23,7 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
+from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
@@ -74,6 +75,20 @@ class _Channel:
 
     async def delete(self, message_ref: str) -> None:
         raise NotImplementedError
+
+
+class _FailOnceChannel(_Channel):
+    def __init__(self, failed_text: str) -> None:
+        super().__init__()
+        self.failed_text = failed_text
+        self.attempted: list[str] = []
+
+    async def send(self, destination: Destination, message: Message) -> str:
+        self.attempted.append(message.text)
+        if message.text == self.failed_text:
+            self.failed_text = ""
+            raise ChannelError
+        return await super().send(destination, message)
 
 
 class _WaitingChannel(_Channel):
@@ -170,6 +185,69 @@ def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_co
 
     assert channel.sent == [(topic, QUESTION)]
     assert _outbox(memory).pending() == []
+
+
+def test_a_failed_expert_answer_blocks_later_answers_in_its_conversation_only(
+    memory: Database,
+) -> None:
+    topic = Destination("telegram", "-1009", 73)
+    unrelated_topic = Destination("telegram", "-1009", 74)
+    outbox = _outbox(memory)
+    conversations = Conversations(memory)
+    conversations.create(1, chat=-1009, thread=None, text="first", scope=[], now=START)
+    conversations.create(2, chat=-1009, thread=None, text="unrelated", scope=[], now=START)
+    first_conversation = conversations.get(1)
+    unrelated_conversation = conversations.get(2)
+    assert first_conversation is not None
+    assert unrelated_conversation is not None
+    outbox.queue(
+        None,
+        Purpose.EXPERT,
+        [topic],
+        Message("first answer"),
+        key="ask:answer:1",
+        now=START,
+        conversation_id=first_conversation.id,
+    )
+    outbox.queue(
+        None,
+        Purpose.EXPERT,
+        [unrelated_topic],
+        Message("unrelated answer"),
+        key="ask:answer:3",
+        now=START,
+        conversation_id=unrelated_conversation.id,
+    )
+    outbox.queue(
+        None,
+        Purpose.EXPERT,
+        [topic],
+        Message("second answer"),
+        key="ask:answer:2",
+        now=START,
+        conversation_id=first_conversation.id,
+    )
+    channel = _FailOnceChannel("first answer")
+    sender = _sender(memory, channel)
+
+    asyncio.run(sender.tick())
+
+    assert channel.attempted == ["first answer", "unrelated answer"]
+    assert [message.text for _, message in channel.sent] == ["unrelated answer"]
+
+    asyncio.run(sender.tick())
+
+    assert channel.attempted == [
+        "first answer",
+        "unrelated answer",
+        "first answer",
+        "second answer",
+    ]
+    assert [message.text for _, message in channel.sent] == [
+        "unrelated answer",
+        "first answer",
+        "second answer",
+    ]
 
 
 def test_a_crash_between_sending_and_confirming_resends_once_with_the_signal_reference(

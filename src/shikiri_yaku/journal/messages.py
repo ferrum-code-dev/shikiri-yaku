@@ -55,6 +55,7 @@ class StoredMessage:
     delivery: Delivery
     body: Message | None
     refusal: str | None
+    conversation_id: int | None
 
 
 def _message(row: sqlite3.Row) -> StoredMessage:
@@ -69,6 +70,7 @@ def _message(row: sqlite3.Row) -> StoredMessage:
         delivery=Delivery(row["delivery"]),
         body=None if row["body"] is None else _BODY.validate_json(row["body"]),
         refusal=row["refusal"],
+        conversation_id=row["conversation_id"],
     )
 
 

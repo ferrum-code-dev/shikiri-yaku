@@ -33,7 +33,10 @@ class OutboxSender:
             await self._clock.sleep(self._interval_s)
 
     async def tick(self) -> None:
+        conversations_with_failed_sends: set[int] = set()
         for candidate in self._outbox.pending():
+            if candidate.conversation_id in conversations_with_failed_sends:
+                continue
             pending = self._outbox.pending_message(candidate.message_id)
             if pending is None:
                 continue
@@ -43,5 +46,7 @@ class OutboxSender:
                 self._outbox.refuse(pending.message_id, str(error), now=self._clock.now())
                 continue
             except ChannelError:
+                if pending.conversation_id is not None:
+                    conversations_with_failed_sends.add(pending.conversation_id)
                 continue
             self._outbox.confirm(pending.message_id, ref)

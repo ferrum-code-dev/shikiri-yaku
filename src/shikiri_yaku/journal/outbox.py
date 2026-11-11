@@ -104,6 +104,7 @@ class JournalOutbox:
                 stored.id,
                 Destination(stored.channel, stored.chat, stored.thread),
                 stored.body,
+                stored.conversation_id,
             )
             for stored in self._messages.unconfirmed()
             if stored.body is not None
@@ -118,6 +119,7 @@ class JournalOutbox:
             stored.id,
             Destination(stored.channel, stored.chat, stored.thread),
             stored.body,
+            stored.conversation_id,
         )
 
     def confirm(self, message_id: int, message_ref: str) -> None:

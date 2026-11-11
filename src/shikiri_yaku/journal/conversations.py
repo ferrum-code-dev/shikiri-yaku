@@ -1,13 +1,13 @@
-"""Durable creation and first turns of Expert conversations."""
+"""Durable Expert conversations and their turns."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.expert import ConversationRecord
+from shikiri_yaku.domain.expert import ConversationRecord, ExpertSession, TurnRecord
 from shikiri_yaku.journal.database import stamp
 
 if TYPE_CHECKING:
@@ -17,9 +17,14 @@ if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
 
 _SCOPE = TypeAdapter(list[str])
+_TURN_SELECT: Final = """
+    SELECT t.update_id, t.conversation_id, c.thread_id, t.text, t.state, t.answer
+    FROM turns t JOIN conversations c ON c.id = t.conversation_id
+"""
 
 
 def _record(row: sqlite3.Row) -> ConversationRecord:
+    session = row["session"]
     return ConversationRecord(
         id=row["id"],
         update_id=row["update_id"],
@@ -27,15 +32,25 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
         origin_thread=row["origin_thread"],
         thread_id=row["thread_id"],
         scope=_SCOPE.validate_json(row["scope"]),
+        state=row["state"],
+        effort=row["effort"],
+        session=None if session is None else ExpertSession(**json.loads(session)),
+    )
+
+
+def _turn(row: sqlite3.Row) -> TurnRecord:
+    return TurnRecord(
+        update_id=row["update_id"],
+        conversation_id=row["conversation_id"],
+        thread_id=row["thread_id"],
         text=row["text"],
         state=row["state"],
-        turn_state=row["turn_state"],
         answer=row["answer"],
     )
 
 
 class Conversations:
-    """Store each request before its topic or turn can be started."""
+    """Store each request and each turn before its topic or agent work can start."""
 
     def __init__(self, database: Database) -> None:
         self._database = database
@@ -70,15 +85,73 @@ class Conversations:
             )
             return True
 
+    def add_turn(self, conversation_id: int, update_id: int, text: str, now: datetime) -> bool:
+        with self._database.transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO turns (conversation_id, update_id, text, state)
+                VALUES (?, ?, ?, 'pending') ON CONFLICT(update_id) DO NOTHING
+                """,
+                (conversation_id, update_id, text),
+            )
+            connection.execute(
+                "UPDATE conversations SET last_activity = ? WHERE id = ?",
+                (stamp(now), conversation_id),
+            )
+            return cursor.rowcount == 1
+
     def get(self, update_id: int) -> ConversationRecord | None:
         row = self._database.connection.execute(
-            """
-            SELECT c.*, t.text, t.state AS turn_state, t.answer FROM conversations c
-            JOIN turns t ON t.conversation_id = c.id WHERE c.update_id = ?
-            """,
-            (update_id,),
+            "SELECT * FROM conversations WHERE update_id = ?", (update_id,)
         ).fetchone()
         return None if row is None else _record(row)
+
+    def conversation(self, conversation_id: int) -> ConversationRecord | None:
+        row = self._database.connection.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        return None if row is None else _record(row)
+
+    def at_thread(self, chat: int, thread: int) -> ConversationRecord | None:
+        row = self._database.connection.execute(
+            "SELECT * FROM conversations WHERE chat = ? AND thread_id = ? AND state = 'open'",
+            (chat, thread),
+        ).fetchone()
+        return None if row is None else _record(row)
+
+    def turn(self, update_id: int) -> TurnRecord | None:
+        row = self._database.connection.execute(
+            f"{_TURN_SELECT} WHERE t.update_id = ?", (update_id,)
+        ).fetchone()
+        return None if row is None else _turn(row)
+
+    def oldest_pending(self, conversation_id: int) -> TurnRecord | None:
+        row = self._database.connection.execute(
+            f"""
+            {_TURN_SELECT}
+            WHERE t.conversation_id = ? AND t.state = 'pending'
+            ORDER BY t.update_id LIMIT 1
+            """,
+            (conversation_id,),
+        ).fetchone()
+        return None if row is None else _turn(row)
+
+    def history(self, conversation_id: int, *, before: int) -> list[TurnRecord]:
+        rows = self._database.connection.execute(
+            f"""
+            {_TURN_SELECT}
+            WHERE t.conversation_id = ? AND t.state = 'done' AND t.update_id < ?
+            ORDER BY t.update_id
+            """,
+            (conversation_id, before),
+        ).fetchall()
+        return [_turn(row) for row in rows]
+
+    def set_effort(self, conversation_id: int, effort: str) -> None:
+        with self._database.transaction() as connection:
+            connection.execute(
+                "UPDATE conversations SET effort = ? WHERE id = ?", (effort, conversation_id)
+            )
 
     def fail(self, update_id: int) -> None:
         self._database.connection.execute(
@@ -106,25 +179,31 @@ class Conversations:
         )
         return cursor.rowcount == 1
 
-    def finish(self, update_id: int, answer: str, session: str, call: str | None) -> None:
+    def finish(self, update_id: int, answer: str, session: str | None, call: str | None) -> None:
+        # keep: a turn that failed before the agent answered keeps the session of the turns before
         with self._database.transaction() as connection:
             connection.execute(
                 "UPDATE turns SET state = 'done', answer = ?, call = ? WHERE update_id = ?",
                 (answer, call, update_id),
             )
             connection.execute(
-                "UPDATE conversations SET session = ? WHERE update_id = ?", (session, update_id)
+                """
+                UPDATE conversations SET session = COALESCE(?, session)
+                WHERE id = (SELECT conversation_id FROM turns WHERE update_id = ?)
+                """,
+                (session, update_id),
             )
 
-    def recover(self) -> list[ConversationRecord]:
+    def recover_creations(self) -> list[ConversationRecord]:
         with self._database.transaction() as connection:
             connection.execute("UPDATE conversations SET state = 'failed' WHERE state = 'creating'")
-            connection.execute("UPDATE turns SET state = 'interrupted' WHERE state = 'running'")
             rows = connection.execute(
-                """
-                SELECT c.*, t.text, t.answer, t.state AS turn_state FROM conversations c
-                JOIN turns t ON t.conversation_id = c.id
-                WHERE c.state = 'failed' OR t.state = 'interrupted'
-                """
+                "SELECT * FROM conversations WHERE state = 'failed'"
             ).fetchall()
             return [_record(row) for row in rows]
+
+    def recover_turns(self) -> list[TurnRecord]:
+        with self._database.transaction() as connection:
+            connection.execute("UPDATE turns SET state = 'interrupted' WHERE state = 'running'")
+            rows = connection.execute(f"{_TURN_SELECT} WHERE t.state = 'interrupted'").fetchall()
+            return [_turn(row) for row in rows]

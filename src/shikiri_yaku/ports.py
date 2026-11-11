@@ -890,6 +890,7 @@ class Pending:
     message_id: int
     destination: Destination
     message: Message
+    conversation_id: int | None = None
 
 
 class Outbox(Protocol):

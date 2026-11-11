@@ -45,6 +45,7 @@ from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ladder import LadderExpert
+from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
@@ -359,17 +360,31 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         destinations,
         shared_group=settings.telegram.shared_group,
     )
+    conversations = Conversations(journal)
+    topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
+    turns = None
+    if expert is not None and topics is not None and group_id is not None:
+        turns = ExpertTurns(
+            conversations,
+            outbox,
+            clock,
+            expert=expert,
+            topics=topics,
+            clients=clients,
+            scope={component.name: component.path for component in settings.components},
+            directory=directory,
+            channel=TELEGRAM_CHANNEL,
+            group_id=group_id,
+        )
     ask = Ask(
-        Conversations(journal),
+        conversations,
         outbox,
         clock,
-        expert=expert,
-        topics=None if group_id is None else TelegramForumTopics(bot_api, group_id),
-        clients=clients,
+        configured=expert is not None,
+        topics=topics,
+        turns=turns,
         scope={component.name: component.path for component in settings.components},
-        directory=directory,
         channel=TELEGRAM_CHANNEL,
-        group_id=group_id,
     )
     jobs.append(
         inbound_job(
@@ -386,6 +401,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             ladder=None if reasoning is None else reasoning.ladder,
             install_runner=install_executor,
             ask=ask,
+            turns=turns,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -412,7 +428,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         # keep: operator health signals belong to no component; a restart must not close them
         SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
-        ask.recover()
+        if turns is not None:
+            turns.recover()
         asyncio.run(destinations.prepare())
 
     rung_probes = {} if reasoning is None else {rung.name: rung.probe for rung in reasoning.rungs}
@@ -708,6 +725,7 @@ def inbound_job(
     ladder: RungStates | None,
     install_runner: InstallRunner,
     ask: Ask | None = None,
+    turns: ExpertTurns | None = None,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -772,6 +790,7 @@ def inbound_job(
         clock,
         interval_s=operator.inbound_interval_s,
         health_scope=INBOUND_HEALTH_SCOPE,
+        expert=turns,
     )
     return service.run
 

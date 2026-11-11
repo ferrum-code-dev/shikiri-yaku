@@ -150,7 +150,12 @@ may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-ou
 `/ask` in a component topic limits the Expert to that component; in General it can read all
 components. In a shared group, address General requests to the bot as `/ask@bot <question>`.
 If topic creation is uncertain, ask again; an interrupted turn is not repeated automatically.
-Follow-up turns and conversation cleanup are not yet available.
+
+Each message in an Expert topic is a follow-up turn of that conversation, answered after the
+turns sent before it. In an Expert topic, `/effort [level]` shows or sets the effort of the next
+turn, `/summarize` asks for a short summary, and `/help` lists them. The other commands do not
+work in an Expert topic, and the Expert commands do not work elsewhere. Closing a conversation
+with `/close` is not yet available.
 
 ## Approvals and automatic actions
 
