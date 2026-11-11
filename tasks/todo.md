@@ -168,29 +168,84 @@ constraints are in tasks/plan.md.
 
 - [ ] X1. Describe the Expert in the design
 
+## Acceptance criteria
+
+- docs/design.md describes the Expert completely, and nothing in it contradicts the new text (the Reasoner's rule on file reading stays, as a rule of the Reasoner).
+- The proposed Expert design file is deleted and no tracked file refers to it, except tasks/plan.md.
+- Only documentation changes. `git diff --check` is clean.
+
 ### X2
 
 - [ ] X2. Expert agents and ladder
+
+## Acceptance criteria
+
+- A table test fixes the argument list of each adapter for a first turn and a resumed turn, including every flag that removes the agent's own web tools and write access.
+- The ladder is tested with fake rungs: it stays on the last rung that answered, resumes within a provider, hands off across providers with findings and the last `handoff_turns` turns, skips a cooled-down rung, and reports when no rung answers.
+- An answer outside the schema or the scope is never returned to the caller.
+- Without `[expert]` nothing new runs and `doctor` is unchanged.
+- uv run poe check passes; unrelated failures are reported with evidence.
 
 ### X3
 
 - [ ] X3. `/ask` opens a conversation and answers
 
+## Acceptance criteria
+
+- `/ask` in a component topic scopes the conversation to that component, in General to all, tested with fakes for the Channel, the topics and the Expert.
+- A duplicate delivery of the same update opens one conversation and one topic.
+- Each refusal and the shared-group rule are tested as a table.
+- Crash points: after the journal row, after the topic, during the turn. None opens a second topic or runs a turn twice.
+- `/goal`, `/status`, `/open` and `/help` outside Expert topics behave as before.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X4
 
 - [ ] X4. Conversation turns and topic commands
+
+## Acceptance criteria
+
+- Two messages sent during a running turn are answered in order, each once.
+- A second turn resumes the session of the first; the effort set by `/effort` reaches the agent's argument list.
+- A message in an Expert topic from someone who is not an owner starts nothing.
+- Commands of other topics are not available in an Expert topic, and Expert commands are not available elsewhere.
+- uv run poe check passes; unrelated failures are reported with evidence.
 
 ### X5
 
 - [ ] X5. End of a conversation
 
+## Acceptance criteria
+
+- Each of the three endings, and the failed send, leaves no row, no directory and no topic of that conversation, and touches no other conversation or component topic.
+- Expiry counts from the last message of the conversation, by the Clock.
+- A deletion Telegram refuses is retried later and reported once; the rows stay until it succeeds or the topic is found gone.
+- Without the right, start-up fails with a message that names it; without `[expert]` the right is not required.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X6
 
 - [ ] X6. Task proposals with Submit all and Reject all
 
+## Acceptance criteria
+
+- Submit all issues exactly one `submit_task` per task, to the component the task names, tested with a fake ShikiruClient.
+- Two taps, or a tap after a restart, submit nothing twice.
+- A crash after some tasks were submitted leaves the rest unsubmitted or unknown, never repeated, and the PO is told which.
+- A tap on a voided or rejected proposal submits nothing and says so.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X7
 
 - [ ] X7. Web access through grants
+
+## Acceptance criteria
+
+- A host without a grant is never contacted: tested with a fake transport, including a redirect from a granted host to another one and a URL that is not `https`.
+- One request per host and turn is shown once; two taps store one grant and start one turn.
+- A grant given in one conversation serves the next conversation without a question.
+- The argument lists of X2 still remove every other web tool, and the web tool is the only MCP server the agents get.
+- uv run poe check passes; unrelated failures are reported with evidence.
 
 ## Historical implementation records
 

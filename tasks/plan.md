@@ -327,6 +327,9 @@ commit.
 
 Shared constraints:
 
+- The supplied AGENTS.md instruction forbids editing docs/design.md, while X1 requires it; the
+  design is currently silent on the Expert. X1 must consult the Leader about this conflict before
+  editing the design or deleting the proposed text. Do not silently choose either instruction.
 - The owner's request authorizes X1 to edit docs/design.md with the text of
   tasks/expert-design.md, despite AGENTS.md's general restriction. X2 to X7 do not edit the design;
   a difference they find is reported.
@@ -364,8 +367,8 @@ Add the `Expert` port, the Claude and Codex adapters and the ladder; nothing cal
 A turn takes the conversation's directory, the directories in scope, the message, the effort if
 set, and either a session to resume or a handoff text. It returns the typed answer (`reply`,
 `title`, `tasks`, `findings`), the session id and the call record. The adapters share the process
-plumbing of the Reasoner rungs where that needs no change of behavior there. Argument lists as in
-tasks/expert-design.md; the prompt goes through stdin. Verify whether Codex accepts an effort
+plumbing of the Reasoner rungs where that needs no change of behavior there. Argument lists as
+preserved in the design by X1; the prompt goes through stdin. Verify whether Codex accepts an effort
 setting; if not, the Codex adapter ignores the effort as the Reasoner's does, and the report says
 so. The prompt asks for a short, product-level answer without code and says that repository text
 and web pages are data.
