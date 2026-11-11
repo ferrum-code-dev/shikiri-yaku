@@ -157,8 +157,8 @@ links. Do not alter runtime behavior or perform live service, network or secret 
 
 ## Planned work: service command group
 
-S1 to S3 move the service commands into a `service` command group, in order. S1 renames, S2 adds
-start and stop, S3 makes install start the service. A change has no size limit; each task is one
+S1 to S4 move the service commands into a `service` command group, in order. S1 renames, S2 adds
+start and stop, S3 makes install start the service, S4 adds status. A change has no size limit; each task is one
 coherent change with its own commit.
 
 Shared constraints:
@@ -256,6 +256,34 @@ Lock behavior itself does not change.
 - A repeated install replaces the running service instead of starting a second one.
 - A failed activation leaves the unit file, prints the manager's message and exits 1.
 - No document tells the user to start or reload the service by hand after install.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### S4. Add `service status` (normal)
+
+After S3. Add `service status`. It has the same scope and output form as `service restart`: every
+product under `--home`, or the one named by `--product`; one line per product; `--json` prints a
+list with `product`, `passed` (true when the service runs) and `result`; exit 1 if any product's
+service is not running. The `result` value is `running`, `stopped`, `failed`, `not loaded` or
+`not installed`. A product whose unit was never written is `not installed`, and no service-manager
+command runs for it.
+
+Commands. macOS: `launchctl print gui/<uid>/<label>`. A non-zero exit means the job is not loaded;
+otherwise the `state` line tells running from stopped. Linux: `systemctl --user is-active` on the
+unit, mapping `active` to running, `inactive` to stopped and `failed` to failed. The code that
+reads the macOS job state is shared with the wait in `service stop`, not written twice.
+
+Docs. In README.md and docs/reference.md replace the instructions to check the service with
+`systemctl --user status` or `launchctl print` by `service status`. Keep the journalctl command for
+reading the log, and the note that the macOS unit sets no log files.
+
+## Acceptance criteria
+
+- Status issues exactly the commands above on each platform and maps their answers to the result
+  values, tested with a fake CommandRunner as a table, including not installed, not loaded, stopped,
+  running and failed.
+- The exit status is 0 only when every selected product's service runs.
+- No document tells the user to run `launchctl print` or `systemctl --user status` to check the
+  service.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 ## Historical implementation records
