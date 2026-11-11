@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_ending import ExpertEnding
+from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.outbox_sender import OutboxSender
@@ -22,7 +24,13 @@ from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import ChannelRefusedError, ExpertError, ShikiruTask
+from shikiri_yaku.ports import (
+    TOPIC_GONE_REASON,
+    ChannelError,
+    ChannelRefusedError,
+    ExpertError,
+    ShikiruTask,
+)
 from tests.support.destinations import FixedDestinations
 
 if TYPE_CHECKING:
@@ -40,6 +48,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import EscalationView, Message, ShikiruClient
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+_RETRY_LATER = "retry later"
 _DATABASES: list[Database] = []
 
 
@@ -77,6 +86,9 @@ class Topics:
         self.created: list[str] = []
         self.renamed: list[str] = []
         self.refuse_rename = False
+
+    async def delete(self, thread_id: int) -> None:
+        raise NotImplementedError
 
     async def create_expert(self, name: str) -> int:
         self.created.append(name)
@@ -127,6 +139,14 @@ class Channel:
         raise NotImplementedError
 
 
+class RefusingOriginTopic(Channel):
+    async def send(self, destination: Destination, message: Message) -> str:
+        del message
+        if destination.thread == 77:
+            raise ChannelRefusedError(TOPIC_GONE_REASON)
+        raise ChannelError(_RETRY_LATER)
+
+
 class Harness:
     def __init__(
         self,
@@ -144,6 +164,18 @@ class Harness:
         self.outbox = JournalOutbox(self.database, MessageStore(self.database, Reporter()))
         self.topics = Topics()
         self.expert = expert if expert is not None else Expert()
+        self.runs = ConversationRuns()
+        self.ending = ExpertEnding(
+            self.log,
+            self.runs,
+            self.topics,
+            self.outbox,
+            Clock(),
+            directory=path,
+            channel="telegram",
+            group_id=-100123,
+            retention=timedelta(days=14),
+        )
         self.turns = ExpertTurns(
             self.log,
             self.outbox,
@@ -155,6 +187,8 @@ class Harness:
             directory=path,
             channel="telegram",
             group_id=-100123,
+            runs=self.runs,
+            ending=self.ending,
         )
         self.ask = Ask(
             self.log,
@@ -383,6 +417,34 @@ def test_expert_answer_is_linked_to_its_conversation(tmp_path: Path) -> None:
     conversation = h.log.get(1)
     assert conversation is not None
     assert row["conversation_id"] == conversation.id
+
+
+def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    asyncio.run(
+        h.ask.handle(
+            Inbound(
+                1,
+                InboundKind.TEXT,
+                5,
+                -100123,
+                "1",
+                text="/ask hello",
+                thread=77,
+            ),
+            "api",
+        )
+    )
+    conversation = h.log.get(1)
+    assert conversation is not None
+
+    sender = OutboxSender(h.outbox, RefusingOriginTopic(), Clock(), interval_s=1, gone=h.ending)
+    asyncio.run(sender.tick())
+
+    remaining = h.log.get(1)
+    assert remaining is not None
+    assert remaining.thread_id == 22
+    assert conversation_directory(tmp_path, remaining.id).exists()
 
 
 def test_private_origin_interrupted_turn_is_reported_in_the_group_topic(tmp_path: Path) -> None:

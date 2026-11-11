@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from shikiri_yaku.domain.schedule import due_occurrence
 from shikiri_yaku.ports import Message
@@ -12,12 +12,18 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, ScheduleLog, WakeTarget
 
 
+class Expiry(Protocol):
+    """Ends the conversations that are due, and retries the endings not yet done."""
+
+    async def sweep(self) -> None: ...
+
+
 class Scheduler:
     """Everything it knows is in the journal, so a restart loses no wake-up and no reminder.
 
     A parked signal is claimed with a conditional state change before it is handed on, so it is
     dispatched once. A reminder occurrence is booked as an op and queued in the outbox in one step;
-    the outbox sender delivers it.
+    the outbox sender delivers it. Expiry is swept on every tick.
     """
 
     def __init__(
@@ -29,6 +35,7 @@ class Scheduler:
         interval_s: float,
         reminder_first_h: int,
         reminder_repeat_h: int,
+        expiry: Expiry | None = None,
     ) -> None:
         self._log = log
         self._target = target
@@ -36,6 +43,7 @@ class Scheduler:
         self._interval_s = interval_s
         self._first_h = reminder_first_h
         self._repeat_h = reminder_repeat_h
+        self._expiry = expiry
 
     async def run(self) -> None:
         while True:
@@ -45,6 +53,8 @@ class Scheduler:
     async def tick(self) -> None:
         await self._wake_due()
         self._remind()
+        if self._expiry is not None:
+            await self._expiry.sweep()
 
     async def _wake_due(self) -> None:
         for parked in self._log.due_parked(self._clock.now()):

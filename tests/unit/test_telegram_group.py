@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Final
 import pytest
 
 from shikiri_yaku.adapters.telegram import (
+    BOT_DELETE_RIGHT,
     BOT_TOPIC_RIGHTS,
     GROUP_HAS_OTHER_MEMBERS,
     GROUP_MEMBER_COUNT_UNAVAILABLE,
@@ -68,6 +69,7 @@ class _Group:
         administrators: list[dict[str, Any]],
         count: int,
         manage_topics: bool = True,
+        delete_messages: bool = False,
         owner_member: bool = True,
         replies: Mapping[str, object] | None = None,
     ) -> None:
@@ -75,6 +77,7 @@ class _Group:
         self._administrators = administrators
         self._count = count
         self._manage_topics = manage_topics
+        self._delete_messages = delete_messages
         self._owner_member = owner_member
         self._replies: Mapping[str, object] = replies or {}
 
@@ -94,6 +97,7 @@ class _Group:
         if user_id == BOT_ID:
             reply = _reply("forum_bot_member.json")
             reply["result"]["can_manage_topics"] = self._manage_topics
+            reply["result"]["can_delete_messages"] = self._delete_messages
             return reply
         reply = _reply("forum_owner_member.json")
         if not self._owner_member:
@@ -101,7 +105,13 @@ class _Group:
         return reply
 
 
-def _probe(api: _Group, *, shared_group: bool = True, allow_other_members: bool = False) -> None:
+def _probe(
+    api: _Group,
+    *,
+    shared_group: bool = True,
+    allow_other_members: bool = False,
+    delete_right: bool = False,
+) -> None:
     asyncio.run(
         probe_bot(
             api,
@@ -109,6 +119,7 @@ def _probe(api: _Group, *, shared_group: bool = True, allow_other_members: bool 
             OWNERS,
             allow_other_members=allow_other_members,
             shared_group=shared_group,
+            delete_right=delete_right,
         )
     )
 
@@ -260,3 +271,25 @@ def test_a_definite_administrator_refusal_fails_the_membership_check(error_code:
 
     assert type(raised.value) is ChannelError
     assert str(raised.value) == GROUP_MEMBER_COUNT_UNAVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("delete_right", "delete_messages", "refused"),
+    [
+        pytest.param(False, False, False, id="not-required-without-expert"),
+        pytest.param(True, False, True, id="missing-with-expert"),
+        pytest.param(True, True, False, id="granted-with-expert"),
+    ],
+)
+def test_expert_topics_need_the_right_to_delete_messages(
+    *, delete_right: bool, delete_messages: bool, refused: bool
+) -> None:
+    api = _Group(administrators=[BOT_ADMIN], count=2, delete_messages=delete_messages)
+
+    if refused:
+        with pytest.raises(ChannelError) as raised:
+            _probe(api, shared_group=False, delete_right=delete_right)
+        assert str(raised.value) == BOT_DELETE_RIGHT
+        assert "can_delete_messages" in str(raised.value)
+    else:
+        _probe(api, shared_group=False, delete_right=delete_right)

@@ -14,6 +14,7 @@ from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
+    TOPIC_GONE_REASON,
     Button,
     ChannelError,
     ChannelRefusedError,
@@ -50,6 +51,10 @@ EXPERT_TOPIC_COLOR: Final = 7322096
 TOPIC_NAME_LIMIT: Final = 128
 TELEGRAM_SUPERGROUP_PREFIX: Final = "-100"
 CLOSE_FORUM_TOPIC: Final = "closeForumTopic"
+DELETE_FORUM_TOPIC: Final = "deleteForumTopic"
+# keep: Telegram's words for a topic that no longer exists; matched, never kept
+THREAD_NOT_FOUND: Final = "thread not found"
+TOPIC_ID_INVALID: Final = "topic_id_invalid"
 REF_SEPARATOR: Final = "/"
 SUPERGROUP: Final = "supergroup"
 CREATOR: Final = "creator"
@@ -75,6 +80,10 @@ BOT_NOT_IDENTIFIED: Final = "getMe did not identify a Telegram bot"
 GROUP_NOT_READABLE: Final = "the Bot API could not read the configured group"
 GROUP_NOT_FORUM: Final = "the configured group is not a forum supergroup"
 BOT_TOPIC_RIGHTS: Final = "the bot must be an administrator with the manage-topics right"
+BOT_DELETE_RIGHT: Final = (
+    "the bot must be an administrator with the can_delete_messages right, which deletes the "
+    "Expert topics"
+)
 OWNER_NOT_MEMBER: Final = "a configured owner is not a member of the group"
 GROUP_HAS_OTHER_MEMBERS: Final = (
     "the group contains members other than its configured owners and bot"
@@ -129,6 +138,7 @@ class _Failed(BaseModel):
 
     ok: Literal[False]
     error_code: int
+    description: str = ""
     parameters: _RetryAfter | None = None
 
 
@@ -172,6 +182,7 @@ class _ChatMember(BaseModel):
     status: str
     user: _User
     can_manage_topics: bool | None = None
+    can_delete_messages: bool | None = None
     is_member: bool | None = None
 
 
@@ -310,7 +321,7 @@ class TelegramChannel:
         if isinstance(reply, _Ok):
             return reply
         if reply.error_code == BAD_REQUEST:
-            raise ChannelRefusedError(PLATFORM_REFUSED)
+            raise ChannelRefusedError(_refused_reason(reply))
         raise ChannelError(NOT_ACCEPTED)
 
     async def _post(self, method: str, payload: Mapping[str, object]) -> _Ok | _Failed:
@@ -325,6 +336,17 @@ def _target(message_ref: str) -> dict[str, object]:
     """Return the chat and the message a reference names, as the Bot API takes them."""
     chat, _, message_id = message_ref.partition(REF_SEPARATOR)
     return {"chat_id": chat, "message_id": int(message_id)}
+
+
+def _refused_reason(reply: _Failed) -> str:
+    """Return why a 400 refuses a request: a topic that is gone, or the platform's refusal.
+
+    Telegram's own text is only matched here, never kept, since it could repeat a secret.
+    """
+    text = reply.description.casefold()
+    if THREAD_NOT_FOUND in text or TOPIC_ID_INVALID in text:
+        return TOPIC_GONE_REASON
+    return PLATFORM_REFUSED
 
 
 def _refuse_secret(message: Message) -> None:
@@ -390,8 +412,12 @@ async def probe_bot(
     *,
     allow_other_members: bool = False,
     shared_group: bool = False,
+    delete_right: bool = False,
 ) -> None:
-    """Check bot authentication and the configured group's topic and membership requirements."""
+    """Check bot authentication and the configured group's topic and membership requirements.
+
+    `delete_right` adds the right that deletes Expert topics; it is required only with `[expert]`.
+    """
     body = await api.call(GET_ME, {})
     reply = _validated(body, _PROBE_REPLY)
     if isinstance(reply, _Failed):
@@ -407,6 +433,7 @@ async def probe_bot(
             reply.result.id,
             allow_other_members=allow_other_members,
             shared_group=shared_group,
+            delete_right=delete_right,
         )
 
 
@@ -422,6 +449,7 @@ class TelegramChannelCheck:
         *,
         allow_other_members: bool = False,
         shared_group: bool = False,
+        delete_right: bool = False,
     ) -> None:
         self._api = api
         self._token_file = token_file
@@ -429,6 +457,7 @@ class TelegramChannelCheck:
         self._owners = owners
         self._allow_other_members = allow_other_members
         self._shared_group = shared_group
+        self._delete_right = delete_right
 
     async def verify(self) -> None:
         await probe_bot(
@@ -437,6 +466,7 @@ class TelegramChannelCheck:
             self._owners,
             allow_other_members=self._allow_other_members,
             shared_group=self._shared_group,
+            delete_right=self._delete_right,
         )
 
     async def report(self) -> list[CheckLine]:
@@ -534,6 +564,20 @@ class TelegramForumTopics:
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
 
+    async def delete(self, thread_id: int) -> None:
+        """Delete the topic and its messages; a refusal is ChannelRefusedError, a gone topic too."""
+        body = await self._api.call(
+            DELETE_FORUM_TOPIC,
+            {"chat_id": self._group_id, "message_thread_id": thread_id},
+        )
+        reply = _validated(body, _CLOSE_TOPIC_REPLY)
+        if isinstance(reply, _Failed):
+            if reply.error_code == BAD_REQUEST:
+                raise ChannelRefusedError(_refused_reason(reply))
+            if reply.error_code == FORBIDDEN:
+                raise ChannelRefusedError(PLATFORM_REFUSED)
+            raise ChannelError(NOT_ACCEPTED)
+
 
 async def _probe_group(
     api: BotApi,
@@ -543,6 +587,7 @@ async def _probe_group(
     *,
     allow_other_members: bool,
     shared_group: bool,
+    delete_right: bool,
 ) -> None:
     group = _validated(await api.call(GET_CHAT, {"chat_id": group_id}), _CHAT_REPLY)
     if isinstance(group, _Failed):
@@ -553,6 +598,8 @@ async def _probe_group(
     bot = await _chat_member(api, group_id, bot_id, BOT_TOPIC_RIGHTS)
     if bot.user.id != bot_id or not bot.user.is_bot or not _has_topic_right(bot):
         raise ChannelError(BOT_TOPIC_RIGHTS)
+    if delete_right and not _has_delete_right(bot):
+        raise ChannelError(BOT_DELETE_RIGHT)
     for owner_id in set(owners) - {bot_id}:
         owner = await _chat_member(api, group_id, owner_id, OWNER_NOT_MEMBER)
         if not _is_member(owner, owner_id):
@@ -613,6 +660,12 @@ def _probe_refusal(reply: _Failed, failure: str) -> ChannelError:
 def _has_topic_right(member: _ChatMember) -> bool:
     return member.status == CREATOR or (
         member.status == ADMINISTRATOR and member.can_manage_topics is True
+    )
+
+
+def _has_delete_right(member: _ChatMember) -> bool:
+    return member.status == CREATOR or (
+        member.status == ADMINISTRATOR and member.can_delete_messages is True
     )
 
 

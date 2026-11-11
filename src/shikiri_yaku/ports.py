@@ -933,6 +933,7 @@ class Outbox(Protocol):
         *,
         key: str,
         now: datetime,
+        conversation_id: int | None = None,
     ) -> None:
         """Journal a command reply claim and every bounded part atomically, once per update."""
         ...
@@ -1219,6 +1220,10 @@ class ChannelUnavailableError(ChannelError):
 
 class ChannelProtocolError(ChannelError):
     """The platform answered in a shape the Channel does not read; retrying alone will not help."""
+
+
+# keep: the reason of a refusal because the topic a message names no longer exists
+TOPIC_GONE_REASON: Final = "topic_gone"
 
 
 class ChannelRefusedError(Exception):

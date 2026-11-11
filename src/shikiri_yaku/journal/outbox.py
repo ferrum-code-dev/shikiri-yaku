@@ -76,6 +76,7 @@ class JournalOutbox:
         *,
         key: str,
         now: datetime,
+        conversation_id: int | None = None,
     ) -> None:
         with self._database.transaction() as connection:
             created = connection.execute(
@@ -95,6 +96,7 @@ class JournalOutbox:
                         body=part,
                         notice_key=f"{key}:{index}",
                         now=now,
+                        conversation_id=conversation_id,
                     )
 
     def pending(self) -> list[Pending]:

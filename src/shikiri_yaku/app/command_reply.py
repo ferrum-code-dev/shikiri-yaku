@@ -29,6 +29,7 @@ def queue_command_reply(
     *,
     key: str,
     now: datetime,
+    conversation_id: int | None = None,
 ) -> None:
     """Queue the reply as one journaled set of parts, each under its key and index.
 
@@ -40,4 +41,10 @@ def queue_command_reply(
     if outbox.command_reply_queued(key):
         return
     parts = [text] if secret_form([text]) is not None else split_reply(text, MESSAGE_TEXT_LIMIT)
-    outbox.queue_command_reply(destinations, [Message(part) for part in parts], key=key, now=now)
+    outbox.queue_command_reply(
+        destinations,
+        [Message(part) for part in parts],
+        key=key,
+        now=now,
+        conversation_id=conversation_id,
+    )

@@ -116,9 +116,11 @@ Only the user IDs in `channels.telegram.owners` can issue commands or press butt
 
 - **Private chat:** each owner must open the bot and press **Start** first.
 - **Forum group (optional):** set `group_id` to a forum supergroup. The bot must be an administrator
-  with permission to manage topics, and every owner must be a member. By default, the group should
-  hold only the bot and the owners, plus the other instances' bots in a shared group, because other
-  members can read its messages. Non-owners' messages and button taps are ignored.
+  with permission to manage topics, and every owner must be a member. With `[expert]`, the bot also
+  needs permission to delete messages (`can_delete_messages`), because an Expert conversation ends
+  by deleting its topic. By default, the group should hold only the bot and the owners, plus the
+  other instances' bots in a shared group, because other members can read its messages.
+  Non-owners' messages and button taps are ignored.
 
 Several instances can share one group, each with its own bot. See
 [Several instances in one group](docs/reference.md#several-instances-in-one-group). If Telegram
@@ -154,8 +156,10 @@ If topic creation is uncertain, ask again; an interrupted turn is not repeated a
 Each message in an Expert topic is a follow-up turn of that conversation, answered after the
 turns sent before it. In an Expert topic, `/effort [level]` shows or sets the effort of the next
 turn, `/summarize` asks for a short summary, and `/help` lists them. The other commands do not
-work in an Expert topic, and the Expert commands do not work elsewhere. Closing a conversation
-with `/close` is not yet available.
+work in an Expert topic, and the Expert commands do not work elsewhere. `/close` ends the
+conversation. So does closing its topic in Telegram, or going unused for `retention_days`. An ending
+deletes the topic and the conversation's record and files. If Telegram refuses the deletion, the
+conversation stays, the PO is told once, and the deletion is tried again.
 
 ## Approvals and automatic actions
 

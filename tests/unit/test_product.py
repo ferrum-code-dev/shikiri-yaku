@@ -164,8 +164,9 @@ class _Outbox:
         *,
         key: str,
         now: datetime,
+        conversation_id: int | None = None,
     ) -> None:
-        del destinations, parts, key, now
+        del destinations, parts, key, now, conversation_id
         raise NotImplementedError
 
     def pending(self) -> list[Pending]:

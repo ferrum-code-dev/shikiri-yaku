@@ -44,7 +44,9 @@ from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
+from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
@@ -58,13 +60,13 @@ from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.open_command import OpenCommand
-from shikiri_yaku.app.outbox_sender import OutboxSender
+from shikiri_yaku.app.outbox_sender import OutboxSender, TopicGone
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.reconciler import ResolveReconciler
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.app.router import Router
-from shikiri_yaku.app.scheduler import Scheduler
+from shikiri_yaku.app.scheduler import Expiry, Scheduler
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.app.start_reconciler import StartReconciler
 from shikiri_yaku.app.stats import Measures, Stats
@@ -338,32 +340,28 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         tail_lines=infrastructure.install_output_tail_lines,
         forward_retry_s=settings.operator.forward_retry_s,
     )
-    assess = None if reasoning is None else reasoning.assessor.assess
-    jobs += routing_jobs(
-        settings,
-        journal,
-        clock,
-        classifier=RuleClassifier(extensions, assess),
-        handlers={extension.category: extension.handler for extension in extensions},
-        fallback=forwarder,
-        reporter=reporter,
-        settled=starts_reconciler.settled,
-        standing_on_failure=failure_policy(extensions),
-    )
-    channel = TelegramChannel(bot_api, clock, outbox)
-    jobs.append(outbox_job(settings, outbox, clock, channel))
-    goal = goal_command(
-        journal,
-        clients,
-        outbox,
-        clock,
-        destinations,
-        shared_group=settings.telegram.shared_group,
-    )
     conversations = Conversations(journal)
     topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
+    runs = ConversationRuns()
+    ending: ExpertEnding | None = None
     turns = None
-    if expert is not None and topics is not None and group_id is not None:
+    if (
+        expert is not None
+        and settings.expert is not None
+        and topics is not None
+        and group_id is not None
+    ):
+        ending = ExpertEnding(
+            conversations,
+            runs,
+            topics,
+            outbox,
+            clock,
+            directory=directory,
+            channel=TELEGRAM_CHANNEL,
+            group_id=group_id,
+            retention=timedelta(days=settings.expert.retention_days),
+        )
         turns = ExpertTurns(
             conversations,
             outbox,
@@ -375,6 +373,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             directory=directory,
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
+            runs=runs,
+            ending=ending,
         )
     ask = Ask(
         conversations,
@@ -385,6 +385,29 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         turns=turns,
         scope={component.name: component.path for component in settings.components},
         channel=TELEGRAM_CHANNEL,
+    )
+    assess = None if reasoning is None else reasoning.assessor.assess
+    jobs += routing_jobs(
+        settings,
+        journal,
+        clock,
+        classifier=RuleClassifier(extensions, assess),
+        handlers={extension.category: extension.handler for extension in extensions},
+        fallback=forwarder,
+        reporter=reporter,
+        settled=starts_reconciler.settled,
+        standing_on_failure=failure_policy(extensions),
+        expiry=ending,
+    )
+    channel = TelegramChannel(bot_api, clock, outbox)
+    jobs.append(outbox_job(settings, outbox, clock, channel, gone=ending))
+    goal = goal_command(
+        journal,
+        clients,
+        outbox,
+        clock,
+        destinations,
+        shared_group=settings.telegram.shared_group,
     )
     jobs.append(
         inbound_job(
@@ -445,6 +468,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             settings.telegram.owners,
             allow_other_members=settings.telegram.allow_other_members,
             shared_group=settings.telegram.shared_group,
+            delete_right=settings.expert is not None,
         ),
         rung_probes=rung_probes,
         expert_probes={rung.name: rung.probe for rung in expert_rungs},
@@ -667,6 +691,7 @@ def routing_jobs(
     reporter: Reporter,
     settled: asyncio.Event,
     standing_on_failure: Callable[[Signal], bool],
+    expiry: Expiry | None = None,
 ) -> list[Job]:
     """Return the Dispatcher and the Scheduler, which share one Router and wait for `settled`."""
     operator = settings.operator
@@ -690,6 +715,7 @@ def routing_jobs(
         interval_s=operator.scheduler_interval_s,
         reminder_first_h=settings.handlers.product.reminder_first_h,
         reminder_repeat_h=settings.handlers.product.reminder_repeat_h,
+        expiry=expiry,
     )
     return [after_settled(settled, dispatcher.run), after_settled(settled, scheduler.run)]
 
@@ -704,9 +730,18 @@ def after_settled(settled: asyncio.Event, job: Job) -> Job:
     return run
 
 
-def outbox_job(settings: Settings, outbox: Outbox, clock: Clock, channel: Channel) -> Job:
+def outbox_job(
+    settings: Settings,
+    outbox: Outbox,
+    clock: Clock,
+    channel: Channel,
+    *,
+    gone: TopicGone | None = None,
+) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
-    sender = OutboxSender(outbox, channel, clock, interval_s=settings.operator.outbox_interval_s)
+    sender = OutboxSender(
+        outbox, channel, clock, interval_s=settings.operator.outbox_interval_s, gone=gone
+    )
     return sender.run
 
 

@@ -9,6 +9,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest, ExpertTurn
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.domain.outbound import Purpose, fit
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.app.expert import ConversationLog, ExpertTopics
+    from shikiri_yaku.app.expert_ending import ExpertEnding
+    from shikiri_yaku.app.expert_runs import ConversationRuns
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import Clock, Expert, Outbox, ShikiruClient
@@ -37,15 +40,17 @@ _NO_ANSWER: Final = "No Expert agent could answer."
 _EFFORT: Final = "/effort"
 _EFFORT_USAGE: Final = "Usage: /effort [level]"
 _SUMMARIZE: Final = "/summarize"
+_CLOSE: Final = "/close"
 _HELP: Final = (
     "/effort [level] · show this conversation's effort, or set it from the next turn\n"
     f"{_SUMMARIZE} · a very short summary of the conversation\n"
-    "/close · close this conversation\n"
+    f"{_CLOSE} · close this conversation\n"
     "/help · this list"
 )
 _PENDING: Final = "pending"
 _DONE: Final = "done"
 _ESCALATION_OPEN: Final = "open"
+_CONVERSATION_OPEN: Final = "open"
 
 
 def queue_expert_notice(
@@ -76,7 +81,7 @@ class ExpertTurns:
     A turn is journaled before it waits, and only a pending turn starts, so a repeated delivery
     never runs a turn twice. A turn that could not start stays pending, and the turns after it
     wait for its retry. Commands run without the lock: `/effort` takes effect from the next turn
-    that starts.
+    that starts. A conversation that is ending starts no turn; its endings are in `ExpertEnding`.
     """
 
     def __init__(
@@ -92,6 +97,8 @@ class ExpertTurns:
         directory: Path,
         channel: str,
         group_id: int,
+        runs: ConversationRuns,
+        ending: ExpertEnding,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -103,20 +110,30 @@ class ExpertTurns:
         self._directory = directory
         self._channel = channel
         self._group_id = group_id
-        self._locks: dict[int, asyncio.Lock] = {}
+        self._runs = runs
+        self._ending = ending
 
     def owns(self, item: Inbound) -> bool:
-        """Return whether a text or reply was sent in an open Expert topic."""
+        """Return whether a text, reply or closed topic belongs to an open Expert topic."""
         return (
-            item.kind in (InboundKind.TEXT, InboundKind.REPLY)
+            item.kind in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.TOPIC_CLOSED)
+            and item.chat == self._group_id
             and item.thread is not None
-            and self._log.at_thread(item.chat, item.thread) is not None
+            and self._log.at_thread(item.thread) is not None
         )
 
     async def handle(self, item: Inbound) -> None:
-        conversation = None if item.thread is None else self._log.at_thread(item.chat, item.thread)
+        conversation = (
+            None
+            if item.chat != self._group_id or item.thread is None
+            else self._log.at_thread(item.thread)
+        )
         if conversation is None:
             return
+        if item.kind is InboundKind.TOPIC_CLOSED:
+            await self._ending.end(conversation.id)
+            return
+        self._log.touch(conversation.id, self._clock.now())
         text = item.text or ""
         words = text.split()
         if not text.startswith("/"):
@@ -129,38 +146,56 @@ class ExpertTurns:
         elif name == _SUMMARIZE:
             self._log.add_turn(conversation.id, item.update_id, SUMMARY_PROMPT, self._clock.now())
             await self.run(conversation.id, item.update_id)
+        elif name == _CLOSE:
+            await self._ending.end(conversation.id)
         else:
-            self._reply(item, _HELP)
+            self._reply(item, _HELP, conversation.id)
 
     async def run(self, conversation_id: int, update_id: int) -> None:
         """Run the turns before this one that are pending, then this one, and send their answers.
 
         A turn that is already done only sends its answer again, which the outbox keeps once.
         """
-        lock = self._locks.setdefault(conversation_id, asyncio.Lock())
-        async with lock:
+        async with self._runs.lock(conversation_id):
             while (turn := self._log.oldest_pending(conversation_id)) is not None:
                 if turn.update_id >= update_id:
                     break
                 if not await self._execute(conversation_id, turn.update_id):
-                    break
+                    return
                 await self._deliver(conversation_id, turn.update_id)
             own = self._log.turn(update_id)
-            if own is not None and own.state == _PENDING:
-                await self._execute(conversation_id, update_id)
+            awaits_run = own is not None and own.state == _PENDING
+            if awaits_run and not await self._execute(conversation_id, update_id):
+                return
             await self._deliver(conversation_id, update_id)
 
     async def _execute(self, conversation_id: int, update_id: int) -> bool:
-        """Run one pending turn; return False when it is no longer pending."""
+        """Run one pending turn in a task of its own; False when it did not run because it ends."""
         conversation = self._log.conversation(conversation_id)
+        if conversation is None or conversation.state != _CONVERSATION_OPEN:
+            return False
+        # keep: its own task, so an ending stops the turn, not the message task that awaits it
+        running = asyncio.create_task(self._answer(conversation, update_id))
+        self._runs.track(conversation_id, running)
+        try:
+            await asyncio.wait({running})
+        finally:
+            self._runs.untrack(conversation_id)
+            running.cancel()
+        if running.cancelled():
+            return False
+        return running.result()
+
+    async def _answer(self, conversation: ConversationRecord, update_id: int) -> bool:
+        """Gather context, run the turn and journal its answer; False if it did not start."""
         turn = self._log.turn(update_id)
-        if conversation is None or turn is None:
+        if turn is None:
             return False
         context = await self._context(conversation.scope)
-        directory = self._directory / "conversations" / str(conversation.id)
-        directory.mkdir(parents=True, exist_ok=True)
         if not self._log.start(update_id):
             return False
+        directory = conversation_directory(self._directory, conversation.id)
+        directory.mkdir(parents=True, exist_ok=True)
         request = ExpertRequest(
             directory=directory,
             scope={name: self._scope[name] for name in conversation.scope},
@@ -173,7 +208,7 @@ class ExpertTurns:
                     message=past.text,
                     reply=ExpertAnswer.model_validate_json(past.answer).reply,
                 )
-                for past in self._log.history(conversation_id, before=update_id)
+                for past in self._log.history(conversation.id, before=update_id)
                 if past.answer is not None
             ),
         )
@@ -181,13 +216,14 @@ class ExpertTurns:
             result = await self._expert.turn(request)
         except ExpertError:
             answer = ExpertAnswer(reply=_NO_ANSWER, title="", tasks=[], findings="")
-            self._log.finish(update_id, answer.model_dump_json(), None, None)
+            self._log.finish(update_id, answer.model_dump_json(), None, None, self._clock.now())
         else:
             self._log.finish(
                 update_id,
                 result.answer.model_dump_json(),
                 json.dumps(asdict(result.session)),
                 None if result.call is None else json.dumps(asdict(result.call)),
+                self._clock.now(),
             )
         return True
 
@@ -236,15 +272,16 @@ class ExpertTurns:
             reply = f"Effort set to {args[0]}. It applies from the next turn."
         else:
             reply = _EFFORT_USAGE
-        self._reply(item, reply)
+        self._reply(item, reply, conversation.id)
 
-    def _reply(self, item: Inbound, text: str) -> None:
+    def _reply(self, item: Inbound, text: str, conversation_id: int) -> None:
         queue_command_reply(
             self._outbox,
             [item_destination(self._channel, item)],
             text,
             key=f"expert:command:{item.update_id}",
             now=self._clock.now(),
+            conversation_id=conversation_id,
         )
 
     def recover(self) -> None:

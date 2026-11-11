@@ -12,7 +12,9 @@ import pytest
 from shikiri_yaku.adapters.expert_cli import ExpertCli
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
+from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
@@ -76,6 +78,7 @@ class Client:
 class Topics:
     def __init__(self) -> None:
         self.created = 0
+        self.deleted: list[int] = []
 
     async def create_expert(self, name: str) -> int:
         del name
@@ -84,6 +87,9 @@ class Topics:
 
     async def rename(self, thread_id: int, name: str) -> None:
         del thread_id, name
+
+    async def delete(self, thread_id: int) -> None:
+        self.deleted.append(thread_id)
 
     async def addressed(self, word: str) -> bool:
         del word
@@ -161,6 +167,18 @@ class Harness:
         scope = {name: path / name for name in ("api", "web")}
         shared = client or Client()
         clients = {name: cast("ShikiruClient", shared) for name in scope}
+        self.runs = ConversationRuns()
+        self.ending = ExpertEnding(
+            self.log,
+            self.runs,
+            self.topics,
+            self.outbox,
+            Clock(),
+            directory=path,
+            channel=CHANNEL,
+            group_id=GROUP_ID,
+            retention=timedelta(days=14),
+        )
         self.turns = ExpertTurns(
             self.log,
             self.outbox,
@@ -172,6 +190,8 @@ class Harness:
             directory=path,
             channel=CHANNEL,
             group_id=GROUP_ID,
+            runs=self.runs,
+            ending=self.ending,
         )
         self.ask = Ask(
             self.log,
@@ -210,9 +230,16 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         harness.database.close()
 
 
-def _item(update_id: int, text: str, *, thread: int | None = None, sender: int = OWNER) -> Inbound:
+def _item(
+    update_id: int,
+    text: str,
+    *,
+    thread: int | None = None,
+    sender: int = OWNER,
+    chat: int = CHAT,
+) -> Inbound:
     return Inbound(
-        update_id, InboundKind.TEXT, sender, CHAT, str(update_id), text=text, thread=thread
+        update_id, InboundKind.TEXT, sender, chat, str(update_id), text=text, thread=thread
     )
 
 
@@ -321,6 +348,55 @@ def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> 
     assert _answer_keys(h) == ["ask:answer:1", "ask:answer:2"]
 
 
+def test_a_private_origin_ends_through_the_expert_group_topic(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+
+    async def scenario() -> None:
+        ask_log = _Log(h.database, expected=1)
+        ask_log.record_batch(
+            CHANNEL, [_item(1, f"/ask {MESSAGES[0]}", chat=OWNER)], 2, Clock().now()
+        )
+        ask_service = InboundService(
+            cast("InboundPoller", _Poller()),
+            ask_log,
+            cast("Replies", h.commands),
+            cast("HealthSource", _Health()),
+            Clock(),
+            interval_s=1,
+            expert=h.turns,
+        )
+        await ask_service.tick()
+        await asyncio.wait_for(ask_log.handled.wait(), timeout=1)
+
+        conversation = h.log.get(1)
+        assert conversation is not None
+        assert conversation.chat == OWNER
+        assert not h.turns.owns(_item(2, "/close", thread=THREAD, chat=OWNER))
+
+        close_log = _Log(h.database, expected=1)
+        closed = Inbound(2, InboundKind.TOPIC_CLOSED, OWNER, GROUP_ID, "2", thread=THREAD)
+        close_log.record_batch(CHANNEL, [closed], 3, Clock().now())
+        close_service = InboundService(
+            cast("InboundPoller", _Poller()),
+            close_log,
+            cast("Replies", h.commands),
+            cast("HealthSource", _Health()),
+            Clock(),
+            interval_s=1,
+            expert=h.turns,
+        )
+        await close_service.tick()
+        await asyncio.wait_for(close_log.handled.wait(), timeout=1)
+
+    asyncio.run(scenario())
+
+    assert h.log.get(1) is None
+    assert h.topics.deleted == [THREAD]
+
+
 def test_a_later_message_waits_for_the_retry_of_a_turn_whose_context_failed(
     build: Callable[..., Harness],
 ) -> None:
@@ -355,6 +431,10 @@ def test_second_turn_resumes_the_session_and_takes_the_effort(
     argv = runner.calls[-1]
     assert argv[argv.index("--resume") + 1] == "session"
     assert argv[argv.index("--effort") + 1] == "high"
+    [effort_reply] = [
+        pending for pending in h.outbox.pending() if pending.message.text.startswith("Effort set")
+    ]
+    assert effort_reply.conversation_id == 1
 
 
 def test_a_non_owner_in_an_expert_topic_starts_nothing(build: Callable[..., Harness]) -> None:

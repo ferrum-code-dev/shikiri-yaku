@@ -21,6 +21,17 @@ _TURN_SELECT: Final = """
     SELECT t.update_id, t.conversation_id, c.thread_id, t.text, t.state, t.answer
     FROM turns t JOIN conversations c ON c.id = t.conversation_id
 """
+_OWNED_UPDATES: Final = """
+    SELECT update_id FROM messages
+    WHERE (conversation_id = :id OR update_id = :update_id OR
+           (chat = :topic_chat AND thread = :thread_id))
+        AND update_id IS NOT NULL
+"""
+_ERASE_MESSAGES: Final = """
+    DELETE FROM messages
+    WHERE conversation_id = :id OR update_id = :update_id OR
+          (chat = :topic_chat AND thread = :thread_id)
+"""
 
 
 def _record(row: sqlite3.Row) -> ConversationRecord:
@@ -112,10 +123,10 @@ class Conversations:
         ).fetchone()
         return None if row is None else _record(row)
 
-    def at_thread(self, chat: int, thread: int) -> ConversationRecord | None:
+    def at_thread(self, thread: int) -> ConversationRecord | None:
         row = self._database.connection.execute(
-            "SELECT * FROM conversations WHERE chat = ? AND thread_id = ? AND state = 'open'",
-            (chat, thread),
+            "SELECT * FROM conversations WHERE thread_id = ? AND state = 'open'",
+            (thread,),
         ).fetchone()
         return None if row is None else _record(row)
 
@@ -174,12 +185,23 @@ class Conversations:
 
     def start(self, update_id: int) -> bool:
         cursor = self._database.connection.execute(
-            "UPDATE turns SET state = 'running' WHERE update_id = ? AND state = 'pending'",
+            """
+            UPDATE turns SET state = 'running'
+            WHERE update_id = ? AND state = 'pending'
+                AND conversation_id IN (SELECT id FROM conversations WHERE state = 'open')
+            """,
             (update_id,),
         )
         return cursor.rowcount == 1
 
-    def finish(self, update_id: int, answer: str, session: str | None, call: str | None) -> None:
+    def finish(
+        self,
+        update_id: int,
+        answer: str,
+        session: str | None,
+        call: str | None,
+        now: datetime,
+    ) -> None:
         # keep: a turn that failed before the agent answered keeps the session of the turns before
         with self._database.transaction() as connection:
             connection.execute(
@@ -188,11 +210,71 @@ class Conversations:
             )
             connection.execute(
                 """
-                UPDATE conversations SET session = COALESCE(?, session)
+                UPDATE conversations SET session = COALESCE(?, session), last_activity = ?
                 WHERE id = (SELECT conversation_id FROM turns WHERE update_id = ?)
                 """,
-                (session, update_id),
+                (session, stamp(now), update_id),
             )
+
+    def touch(self, conversation_id: int, now: datetime) -> None:
+        with self._database.transaction() as connection:
+            connection.execute(
+                "UPDATE conversations SET last_activity = ? WHERE id = ?",
+                (stamp(now), conversation_id),
+            )
+
+    def begin_ending(self, conversation_id: int) -> bool:
+        """Mark an open conversation as ending; no new turn or message reaches it after this."""
+        with self._database.transaction() as connection:
+            cursor = connection.execute(
+                "UPDATE conversations SET state = 'closing' WHERE id = ? AND state = 'open'",
+                (conversation_id,),
+            )
+            return cursor.rowcount == 1
+
+    def idle_before(self, cutoff: datetime) -> list[ConversationRecord]:
+        """Return the open conversations whose last message is older than the cutoff."""
+        rows = self._database.connection.execute(
+            "SELECT * FROM conversations WHERE state = 'open' AND last_activity < ?",
+            (stamp(cutoff),),
+        ).fetchall()
+        return [_record(row) for row in rows]
+
+    def ending(self) -> list[ConversationRecord]:
+        """Return the conversations whose deletion has not succeeded yet."""
+        rows = self._database.connection.execute(
+            "SELECT * FROM conversations WHERE state = 'closing' ORDER BY id"
+        ).fetchall()
+        return [_record(row) for row in rows]
+
+    def erase(self, conversation_id: int, *, topic_chat: int) -> None:
+        """Delete every row of a conversation: its messages and replies, topic, turns and request.
+
+        A message is the conversation's when it is tagged with it, is its request, or was sent in
+        its topic. A channel does not reuse a topic's id in its chat, so the topic picks out only
+        the messages of this conversation.
+        """
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "SELECT update_id, thread_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            if row is None:
+                return
+            owned = {
+                "id": conversation_id,
+                "update_id": row["update_id"],
+                "topic_chat": str(topic_chat),
+                "thread_id": row["thread_id"],
+            }
+            updates = connection.execute(_OWNED_UPDATES, owned).fetchall()
+            connection.executemany(
+                "DELETE FROM command_replies WHERE reply_key LIKE '%:' || ?",
+                [(update["update_id"],) for update in updates],
+            )
+            connection.execute(_ERASE_MESSAGES, owned)
+            connection.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
+            connection.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
+            connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 
     def recover_creations(self) -> list[ConversationRecord]:
         with self._database.transaction() as connection:

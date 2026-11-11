@@ -119,6 +119,15 @@ def test_a_message_is_a_reply_only_to_a_message_other_than_the_topics_first(
     assert _read(body).items == (expected,)
 
 
+def test_a_closed_topic_is_read_as_its_topic_closed_item() -> None:
+    message: dict[str, Any] = {"message_id": 85, **_IN_TOPIC, "forum_topic_closed": {}}
+    body: dict[str, Any] = {"ok": True, "result": [{"update_id": 715, "message": message}]}
+
+    assert _read(body).items == (
+        Inbound(715, InboundKind.TOPIC_CLOSED, OWNER, GROUP, f"{GROUP}/85", thread=TOPIC),
+    )
+
+
 def test_a_kind_the_operator_does_not_read_moves_the_batch_but_gives_no_item() -> None:
     body: dict[str, Any] = {"ok": True, "result": [{"update_id": 704, "edited_message": {}}]}
 

@@ -10,6 +10,7 @@ class InboundKind(StrEnum):
     TAP = "tap"
     REPLY = "reply"
     TEXT = "text"
+    TOPIC_CLOSED = "topic_closed"
 
 
 @dataclass(frozen=True, slots=True)

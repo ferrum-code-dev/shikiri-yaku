@@ -94,8 +94,15 @@ conversation run one at a time, oldest first, and each later turn resumes the ag
 the earlier ones. Topic commands: `/effort [level]` shows the conversation's effort or sets it
 from the next turn;
 `/summarize` asks for a short summary; `/help` lists the commands. Other commands do not work in
-an Expert topic, and the Expert commands do not work elsewhere. Closing a conversation with
-`/close` is not yet available.
+an Expert topic, and the Expert commands do not work elsewhere.
+
+A conversation ends in four ways: `/close` in its topic, closing the topic in Telegram, `retention_days`
+after its last message (the Clock counts the days, and each message from the PO restarts them), or a
+topic that Telegram reports gone when a message is sent to it. An ending deletes the topic and the
+conversation's rows and directory under `conversations/`; the other conversations are not touched.
+If Telegram refuses the topic deletion, the conversation stays and its ending is tried again on each
+tick; the PO is told once, in the General topic. An ending needs the bot's `can_delete_messages`
+right in the group, checked at start-up when `[expert]` is set.
 
 The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`, `max_parallel = 2`,
 `handoff_turns = 5`, and `retention_days = 14`.
@@ -161,6 +168,7 @@ Only the Telegram user IDs listed in `channels.telegram.owners` can issue comman
 - **Private chat:** each owner must open the bot and press **Start** first.
 - **Forum group:** set `group_id` to the numeric ID of a forum supergroup.
   - The bot must be an administrator with permission to manage topics.
+  - With `[expert]`, the bot must also have permission to delete messages (`can_delete_messages`). Expert conversations end by deleting their topics; without the right, start-up fails and names it.
   - Every owner must be a member of the group.
   - By default, the group must hold only the bot and the owners, because other members can read its messages.
   - `allow_other_members = true` allows more readers. Only owners can still act. Messages and button taps from non-owners are ignored.
@@ -176,7 +184,7 @@ Give every instance the same `group_id`, and set `shared_group = true` in each `
 - `/status` and `/open` in General cover only this instance's components.
 - `/help`, free text, and a `/goal` without a component are answered by every instance's bot. The group receives one list per instance.
 
-Every instance's bot must be an administrator of the group, with the manage-topics right. Start-up reads the administrators, including the other bots. It admits the owners, this bot, and the other administrator bots. It refuses any other member, and any bot that is not an administrator. To admit an instance's bot, make it an administrator.
+Every instance's bot must be an administrator of the group, with the manage-topics right, and with `[expert]` the delete-messages right (`can_delete_messages`). Start-up reads the administrators, including the other bots. It admits the owners, this bot, and the other administrator bots. It refuses any other member, and any bot that is not an administrator. To admit an instance's bot, make it an administrator.
 
 `allow_other_members = true` does not admit another instance's bot. It skips the membership check, so any member can read the group.
 

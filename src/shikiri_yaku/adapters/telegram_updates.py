@@ -29,6 +29,10 @@ class _Replied(_Payload):
     message_id: int
 
 
+class _Closed(_Payload):
+    """The service message Telegram sends when a forum topic is closed; it has no fields we read."""
+
+
 class _Message(_Payload):
     message_id: int
     sender: Annotated[_Identity, Field(alias="from")]
@@ -36,6 +40,7 @@ class _Message(_Payload):
     text: str | None = None
     message_thread_id: StrictInt | None = None
     reply_to_message: _Replied | None = None
+    forum_topic_closed: _Closed | None = None
 
 
 class _Tapped(_Payload):
@@ -112,6 +117,16 @@ def _item(update: _Update) -> Inbound | None:
             tap.message.chat.id,
             ref,
             data=tap.data,
+        )
+    if update.message is not None and update.message.forum_topic_closed is not None:
+        closed = update.message
+        return Inbound(
+            update.update_id,
+            InboundKind.TOPIC_CLOSED,
+            closed.sender.id,
+            closed.chat.id,
+            _ref(closed.chat.id, closed.message_id),
+            thread=closed.message_thread_id,
         )
     if update.message is not None and update.message.text is not None:
         sent = update.message

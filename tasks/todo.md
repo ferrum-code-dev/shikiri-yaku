@@ -213,7 +213,7 @@ constraints are in tasks/plan.md.
 
 ### X5
 
-- [ ] X5. End of a conversation
+- [x] X5. End of a conversation
 
 ## Acceptance criteria
 

@@ -247,8 +247,9 @@ def test_replay_after_live_status_changes_reuses_the_committed_reply(
             *,
             key: str,
             now: datetime,
+            conversation_id: int | None = None,
         ) -> None:
-            queue_group(destinations, parts, key=key, now=now)
+            queue_group(destinations, parts, key=key, now=now, conversation_id=conversation_id)
             raise KeyboardInterrupt
 
         monkeypatch.setattr(stack.outbox, "queue_command_reply", interrupt_after_commit)
