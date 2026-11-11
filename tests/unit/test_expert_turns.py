@@ -16,14 +16,20 @@ from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
+from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
+from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
+from shikiri_yaku.journal.ops import OpStore
 from shikiri_yaku.journal.outbox import JournalOutbox
+from shikiri_yaku.journal.replies import JournalReplies
+from shikiri_yaku.journal.signals import SignalStore
+from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import CommandResult, ShikiruLinkDownError
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
@@ -35,7 +41,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.app.open_command import OpenCommand
-    from shikiri_yaku.app.replies import Replies
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.ports import EscalationView, Expert, ShikiruClient, ShikiruTask
 
@@ -193,6 +198,9 @@ class Harness:
             group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
+            web=ExpertWebRequests(
+                JournalWeb(self.database), self.outbox, Clock(), channel=CHANNEL, group_id=GROUP_ID
+            ),
             proposals=expert_proposals(
                 self.database,
                 self.log,
@@ -498,3 +506,69 @@ def test_expert_commands_are_unavailable_outside_expert_topics(
     assert reply.message.text.startswith("Unknown command")
     assert h.log.get(2) is None
     assert not runner.calls
+
+
+def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner(hold=True)
+    h = build(ladder(runner))
+    now = Clock().now()
+    h.log.create(1, chat=CHAT, thread=None, text="question", scope=["api"], now=now)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    h.log.opened(1, THREAD)
+    h.log.start(1)
+    h.log.finish(1, json.dumps(ANSWER), None, None, now)
+    web = JournalWeb(h.database)
+    web.request(1, "docs.example")
+    h.database.connection.execute(
+        "INSERT INTO messages (direction, channel, chat, platform_message_id, "
+        "notice_key, delivery, created_at) VALUES ('out', ?, ?, '9', 'expert:web:1', 'sent', ?)",
+        (CHANNEL, str(CHAT), now.isoformat()),
+    )
+    first = Inbound(2, InboundKind.TAP, OWNER, CHAT, "9", data="w:1", thread=THREAD)
+    second = Inbound(3, InboundKind.TAP, OWNER, CHAT, "9", data="w:1", thread=THREAD)
+    command = _item(4, "/help")
+    log = _Log(h.database, expected=3)
+    log.record_batch(CHANNEL, [first, second, command], 5, now)
+    replies = Replies(
+        JournalReplies(
+            h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
+        ),
+        h.outbox,
+        Clock(),
+        {},
+        channel=CHANNEL,
+        commands=h.commands,
+        goal=cast("GoalCommand", None),
+        expert_turns=h.turns,
+    )
+    service = InboundService(
+        cast("InboundPoller", _Poller()),
+        log,
+        replies,
+        cast("HealthSource", _Health()),
+        Clock(),
+        interval_s=1,
+        expert=h.turns,
+    )
+
+    async def scenario() -> None:
+        await asyncio.wait_for(service.tick(), timeout=1)
+        await asyncio.wait_for(runner.started.wait(), timeout=1)
+        assert h.outbox.command_reply_queued("command:4")
+        assert h.log.turn(2) is not None
+        assert not runner.release.is_set()
+        await asyncio.wait_for(service.tick(), timeout=1)
+        assert [item.update_id for item in log.pending()] == [2]
+        runner.release.set()
+        await asyncio.wait_for(log.handled.wait(), timeout=1)
+        await service.tick()
+        await replies.handle(first)
+
+    asyncio.run(scenario())
+    assert len(runner.calls) == 1
+    assert h.log.turn(3) is None
+    assert web.granted("docs.example")
+    assert log.pending() == []

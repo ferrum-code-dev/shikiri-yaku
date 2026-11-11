@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.commands import Commands
     from shikiri_yaku.app.expert_proposals import ExpertProposals
+    from shikiri_yaku.app.expert_turns import ExpertTurns
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
@@ -97,6 +98,7 @@ class Replies:
         goal: GoalCommand,
         install_replies: InstallReplyHandler | None = None,
         proposals: ExpertProposals | None = None,
+        expert_turns: ExpertTurns | None = None,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -107,6 +109,7 @@ class Replies:
         self._goal = goal
         self._install_replies = install_replies
         self._proposals = proposals
+        self._expert_turns = expert_turns
 
     async def handle(self, item: Inbound) -> None:
         if item.kind == InboundKind.TEXT:
@@ -115,8 +118,10 @@ class Replies:
         reference = item.reply_to_ref if item.kind == InboundKind.REPLY else item.message_ref
         origin = None if reference is None else self._log.origin(self._channel, reference)
         if origin is None:
-            if item.kind == InboundKind.TAP and not await self._proposal_tap(item):
-                await self._goal.tap(item)
+            if item.kind == InboundKind.TAP:
+                web = self._expert_turns is not None and await self._expert_turns.web_tap(item)
+                if not web and not await self._proposal_tap(item):
+                    await self._goal.tap(item)
             return
         if item.kind == InboundKind.REPLY:
             if origin.purpose == Purpose.QUESTION and item.text:

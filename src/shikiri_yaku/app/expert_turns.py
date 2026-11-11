@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_ending import ExpertEnding
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.expert_runs import ConversationRuns
+    from shikiri_yaku.app.expert_web import ExpertWebRequests
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import Clock, Expert, Outbox, ShikiruClient
@@ -100,6 +101,7 @@ class ExpertTurns:
         runs: ConversationRuns,
         ending: ExpertEnding,
         proposals: ExpertProposals,
+        web: ExpertWebRequests | None = None,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -114,6 +116,7 @@ class ExpertTurns:
         self._runs = runs
         self._ending = ending
         self._proposals = proposals
+        self._web = web
 
     def owns(self, item: Inbound) -> bool:
         """Return whether a text, reply or closed topic belongs to an open Expert topic."""
@@ -202,6 +205,7 @@ class ExpertTurns:
             directory=directory,
             scope={name: self._scope[name] for name in conversation.scope},
             message=turn.text,
+            update_id=update_id,
             context=json.dumps(context),
             effort=conversation.effort,
             session=conversation.session,
@@ -239,6 +243,8 @@ class ExpertTurns:
             return
         answer = ExpertAnswer.model_validate_json(turn.answer)
         self._proposals.queue_answer(update_id)
+        if self._web is not None:
+            self._web.queue(update_id)
         if answer.title and not self._log.history(conversation_id, before=update_id):
             with suppress(ChannelRefusedError):
                 await self._topics.rename(conversation.thread_id, f"💬 {answer.title}")
@@ -258,6 +264,10 @@ class ExpertTurns:
                 ],
             }
         return context
+
+    async def web_tap(self, item: Inbound) -> bool:
+        """Apply a web grant decision if this is a web request tap."""
+        return self._web is not None and await self._web.tap(item, self.run)
 
     def _effort(self, item: Inbound, conversation: ConversationRecord, args: list[str]) -> None:
         if not args:
@@ -300,3 +310,5 @@ class ExpertTurns:
                 key=f"ask:interrupted:{turn.update_id}",
                 conversation_id=turn.conversation_id,
             )
+        if self._web is not None:
+            self._web.queue()

@@ -239,4 +239,13 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             state TEXT NOT NULL
         )""",
     ),
+    (
+        "CREATE TABLE web_grants (host TEXT PRIMARY KEY, granted_at TEXT NOT NULL)",
+        """CREATE TABLE web_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            update_id INTEGER NOT NULL REFERENCES turns (update_id),
+            host TEXT NOT NULL, state TEXT NOT NULL, decision_update_id INTEGER,
+            UNIQUE (update_id, host)
+        )""",
+    ),
 )

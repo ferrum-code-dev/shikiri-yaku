@@ -76,6 +76,7 @@ class ExpertRequest:
     effort: str | None = None
     session: ExpertSession | None = None
     turns: tuple[ExpertTurn, ...] = ()
+    update_id: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,10 +9,20 @@ type SubmitTap = tuple[Literal["s"], PositiveInt]
 type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
 type SubmitAllTap = tuple[Literal["p"], PositiveInt]
 type RejectAllTap = tuple[Literal["r"], PositiveInt]
+type WebTap = tuple[Literal["w", "n"], PositiveInt]
 type Callback = (
-    AnswerTap | DetailsTap | StopRemindersTap | SubmitTap | InstallTap | SubmitAllTap | RejectAllTap
+    AnswerTap
+    | DetailsTap
+    | StopRemindersTap
+    | SubmitTap
+    | InstallTap
+    | SubmitAllTap
+    | RejectAllTap
+    | WebTap
 )
 
+WEB_ALLOW_VERB: Final = "w"
+WEB_DENY_VERB: Final = "n"
 STOP_REMINDERS_VERB: Final = "k"
 SUBMIT_VERB: Final = "s"
 INSTALL_VERB: Final = "i"

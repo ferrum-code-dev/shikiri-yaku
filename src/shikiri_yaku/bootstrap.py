@@ -9,16 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
 
+from mcp.server.fastmcp import FastMCP
+
 from shikiri_yaku import cli
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.expert_cli import ExpertCli
+from shikiri_yaku.adapters.expert_web import ExpertWeb
 from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import InstanceInstallFiles
 from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
@@ -49,6 +53,7 @@ from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
+from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
@@ -121,6 +126,7 @@ from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
+from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings, SettingsError, load_settings
 
@@ -236,7 +242,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     clock = SystemClock() if clock is None else clock
     commands = ProcessCommandRunner() if commands is None else commands
     reasoning = build_reasoner(settings, directory, journal, clock, commands)
-    expert, expert_rungs = build_expert(settings, clock, commands)
+    expert, expert_rungs = build_expert(settings, clock, commands, directory)
     reporter = StderrReporter()
     clients = {
         component.name: shikiru_client(settings, component, clock, link)
@@ -393,6 +399,9 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             runs=runs,
             ending=ending,
             proposals=proposals,
+            web=ExpertWebRequests(
+                JournalWeb(journal), outbox, clock, channel=TELEGRAM_CHANNEL, group_id=group_id
+            ),
         )
     ask = Ask(
         conversations,
@@ -498,7 +507,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
 
 
 def build_expert(
-    settings: Settings, clock: Clock, commands: CommandRunner
+    settings: Settings, clock: Clock, commands: CommandRunner, directory: Path
 ) -> tuple[LadderExpert | None, list[ExpertCli]]:
     """Build the optional Expert and its probes."""
     expert_rungs = (
@@ -511,6 +520,10 @@ def build_expert(
                 cast("ExpertCommandRunner", commands),
                 effort=rung.effort,
                 timeout_s=settings.expert.timeout_s,
+                journal_path=directory / JOURNAL_FILE_NAME,
+                web_timeout_s=settings.expert.web_timeout_s,
+                web_max_bytes=settings.expert.web_max_bytes,
+                web_max_redirects=settings.expert.web_max_redirects,
             )
             for rung in settings.expert.ladder
         ]
@@ -836,6 +849,7 @@ def inbound_job(
             runner=install_runner,
         ),
         proposals=proposals,
+        expert_turns=turns,
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(
@@ -1009,11 +1023,17 @@ def start_reconciler(
     )
 
 
+EXPERT_WEB_COMMAND: Final = "_expert-web"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one command with this module's composition; the console entry point calls this."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == EXPERT_WEB_COMMAND:
+        return _serve_expert_web(args[1:])
     settings = CliSettings()
     return cli.main(
-        argv,
+        args,
         compose,
         stats_measures,
         adopt_topic,
@@ -1092,3 +1112,22 @@ def schedule_log(journal: Database, reporter: Reporter) -> JournalSchedule:
         MessageStore(journal, reporter),
         OpStore(journal),
     )
+
+
+def _serve_expert_web(args: list[str]) -> int:
+    path, update_id, timeout, maximum, redirects = args
+    journal = _existing_journal(Path(path).parent)
+    web = ExpertWeb(
+        JournalWeb(journal),
+        int(update_id),
+        timeout_s=float(timeout),
+        max_bytes=int(maximum),
+        max_redirects=int(redirects),
+    )
+    server = FastMCP("expert_web")
+    server.tool(name="web_fetch")(web.fetch)
+    try:
+        server.run()
+    finally:
+        journal.close()
+    return 0

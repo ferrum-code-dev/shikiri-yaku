@@ -95,6 +95,10 @@ def test_fixed_cli_arguments(provider: str, resume: bool, tmp_path: Path) -> Non
             "--setting-sources",
             "",
             "--strict-mcp-config",
+            "--mcp-config",
+            argv[argv.index("--mcp-config") + 1],
+            "--allowedTools",
+            "mcp__expert_web__web_fetch",
             "--effort",
             "high",
         ]
@@ -115,6 +119,8 @@ def test_fixed_cli_arguments(provider: str, resume: bool, tmp_path: Path) -> Non
             'web_search="disabled"',
             "-c",
             'sandbox_mode="read-only"',
+            "-c",
+            next(a for a in argv if a.startswith("mcp_servers.expert_web=")),
             "--skip-git-repo-check",
             "-m",
             "model",
@@ -128,6 +134,17 @@ def test_fixed_cli_arguments(provider: str, resume: bool, tmp_path: Path) -> Non
         if resume:
             expected += ["resume", "old"]
     assert argv == expected
+    if provider == "claude":
+        config = json.loads(argv[argv.index("--mcp-config") + 1])
+        assert list(config["mcpServers"]) == ["expert_web"]
+        server = config["mcpServers"]["expert_web"]
+    else:
+        config = tomllib.loads(next(a for a in argv if a.startswith("mcp_servers.expert_web=")))
+        assert list(config["mcp_servers"]) == ["expert_web"]
+        server = config["mcp_servers"]["expert_web"]
+        assert server["default_tools_approval_mode"] == "approve"
+    assert server["command"] == "shikiri-yaku"
+    assert server["args"][0] == "_expert-web"
     assert "hello" in runner.stdin
     assert result.session.session_id == "session"
 

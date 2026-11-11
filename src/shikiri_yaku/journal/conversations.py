@@ -284,6 +284,11 @@ class Conversations:
             connection.execute(
                 "DELETE FROM proposals WHERE conversation_id = ?", (conversation_id,)
             )
+            connection.execute(
+                "DELETE FROM web_requests WHERE update_id IN "
+                "(SELECT update_id FROM turns WHERE conversation_id = ?)",
+                (conversation_id,),
+            )
             connection.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
             connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 

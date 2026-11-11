@@ -84,6 +84,9 @@ EXPERT_COOLDOWN_MIN: Final = 5
 EXPERT_MAX_PARALLEL: Final = 2
 EXPERT_HANDOFF_TURNS: Final = 5
 EXPERT_RETENTION_DAYS: Final = 14
+EXPERT_WEB_TIMEOUT_S: Final = 20
+EXPERT_WEB_MAX_BYTES: Final = 1000000
+EXPERT_WEB_MAX_REDIRECTS: Final = 10
 REASONER_ADAPTERS: Final = frozenset({"claude", "codex"})
 _RUNG_PARTS: Final = ("adapter", "model", "effort")
 _MIN_RUNG_PARTS: Final = 2
@@ -261,6 +264,9 @@ class ExpertSettings(_FrozenModel):
     max_parallel: PositiveInt = EXPERT_MAX_PARALLEL
     handoff_turns: PositiveInt = EXPERT_HANDOFF_TURNS
     retention_days: PositiveInt = EXPERT_RETENTION_DAYS
+    web_timeout_s: PositiveInt = EXPERT_WEB_TIMEOUT_S
+    web_max_bytes: PositiveInt = EXPERT_WEB_MAX_BYTES
+    web_max_redirects: PositiveInt = EXPERT_WEB_MAX_REDIRECTS
 
 
 class ChannelsSettings(_FrozenModel):

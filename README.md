@@ -108,6 +108,17 @@ To enable the Reasoner, add a `[reasoner]` table. See [Reasoner settings](docs/r
 The optional `[expert]` table configures read-only Expert agents and their ladder. See
 [Expert settings](docs/reference.md#expert). A forum group is required for `/ask`.
 
+The Expert asks before accessing a web host. **Allow** grants that exact host for all future
+conversations; **Deny** refuses it. Search sites also need a grant. To inspect or remove grants,
+use SQLite on `<home>/<product>/journal.db`:
+
+```sh
+sqlite3 '<home>/<product>/journal.db' 'SELECT host, granted_at FROM web_grants ORDER BY host;'
+sqlite3 '<home>/<product>/journal.db' "DELETE FROM web_grants WHERE host = 'example.com';"
+```
+
+A granted host may receive data in URLs and its pages may contain untrusted instructions.
+
 Every key and default is in the [reference](docs/reference.md#configuration).
 
 ## Telegram

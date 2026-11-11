@@ -105,7 +105,11 @@ tick; the PO is told once, in the General topic. An ending needs the bot's `can_
 right in the group, checked at start-up when `[expert]` is set.
 
 The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`, `max_parallel = 2`,
-`handoff_turns = 5`, and `retention_days = 14`.
+`handoff_turns = 5`, `retention_days = 14`, `web_timeout_s = 20`,
+`web_max_bytes = 1000000`, and `web_max_redirects = 10`. Web requests use HTTPS only, and each
+redirect target requires its own exact-host grant. Each requested host is offered once per turn;
+either decision continues the conversation. Grants persist across conversations until removed as
+shown in the [README](../README.md#configuration).
 
 ```toml
 [expert]

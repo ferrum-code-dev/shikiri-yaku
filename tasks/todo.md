@@ -237,7 +237,7 @@ constraints are in tasks/plan.md.
 
 ### X7
 
-- [ ] X7. Web access through grants
+- [x] X7. Web access through grants
 
 ## Acceptance criteria
 

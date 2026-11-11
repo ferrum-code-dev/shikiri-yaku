@@ -13,6 +13,11 @@ from shikiri_yaku.adapters.reasoner_cli import codex_call
 from shikiri_yaku.domain.classification import CallRecord
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
 from shikiri_yaku.ports import CommandError, ExpertError
+from shikiri_yaku.settings import (
+    EXPERT_WEB_MAX_BYTES,
+    EXPERT_WEB_MAX_REDIRECTS,
+    EXPERT_WEB_TIMEOUT_S,
+)
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.expert import ExpertRequest
@@ -53,6 +58,10 @@ class ExpertCli:
         *,
         effort: str | None,
         timeout_s: float,
+        journal_path: Path = Path("journal.db"),
+        web_timeout_s: int = EXPERT_WEB_TIMEOUT_S,
+        web_max_bytes: int = EXPERT_WEB_MAX_BYTES,
+        web_max_redirects: int = EXPERT_WEB_MAX_REDIRECTS,
     ) -> None:
         self.provider = provider
         self.name = f"{provider}:{model}" + (f":{effort}" if effort else "")
@@ -60,6 +69,10 @@ class ExpertCli:
         self._runner = runner
         self._effort = effort
         self._timeout_s = timeout_s
+        self._journal_path = journal_path
+        self._web_timeout_s = web_timeout_s
+        self._web_max_bytes = web_max_bytes
+        self._web_max_redirects = web_max_redirects
 
     async def probe(self) -> None:
         try:
@@ -123,6 +136,15 @@ class ExpertCli:
         answer_file: Path,
     ) -> list[str]:
         effort = request.effort or self._effort
+        web_args = [
+            "_expert-web",
+            str(self._journal_path),
+            str(request.update_id),
+            str(self._web_timeout_s),
+            str(self._web_max_bytes),
+            str(self._web_max_redirects),
+        ]
+        web_config = {"mcpServers": {"expert_web": {"command": "shikiri-yaku", "args": web_args}}}
         if self.provider == CLAUDE:
             argv = [
                 "claude",
@@ -141,6 +163,10 @@ class ExpertCli:
                 "--setting-sources",
                 "",
                 "--strict-mcp-config",
+                "--mcp-config",
+                json.dumps(web_config),
+                "--allowedTools",
+                "mcp__expert_web__web_fetch",
             ]
             if effort:
                 argv += ["--effort", effort]
@@ -160,6 +186,10 @@ class ExpertCli:
             'web_search="disabled"',
             "-c",
             'sandbox_mode="read-only"',
+            "-c",
+            'mcp_servers.expert_web={command="shikiri-yaku",args='
+            + json.dumps(web_args)
+            + ',default_tools_approval_mode="approve"}',
             "--skip-git-repo-check",
             "-m",
             self._model,
