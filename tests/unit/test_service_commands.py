@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
 import pytest
@@ -18,7 +20,6 @@ from shikiri_yaku.settings import CliSettings
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from pathlib import Path
 
 _UID: Final = 501
 _SHOP: Final = "shop"
@@ -28,6 +29,7 @@ _PASSED: Final = "✔ "
 _FAILED: Final = "✘ "
 _VERBS: Final = ("start", "stop", "restart")
 _EVERY_VERB: Final = (*_VERBS, "status")
+_ALL_VERBS: Final = (*_EVERY_VERB, "uninstall")
 _CLOCK_START: Final = datetime(2026, 1, 1, tzinfo=UTC)
 _OK: Final = CommandResult(0, "", "")
 _RUNNING: Final = CommandResult(0, "\tstate = running\n", "")
@@ -87,6 +89,27 @@ class _Launchctl(CommandRunner):
         return outcome
 
 
+class _Recording(_Launchctl):
+    """Records whether one unit file is still present when each command runs."""
+
+    def __init__(self, unit: Path) -> None:
+        super().__init__()
+        self._unit = unit
+        self.unit_present: list[bool] = []
+
+    @override
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandResult:
+        self.unit_present.append(self._unit.is_file())
+        return await super().run(argv, timeout_s=timeout_s, cwd=cwd, env=env)
+
+
 def _product_of(argv: Sequence[str]) -> str:
     """Return the product a command names: the unit name after the shikiri-yaku prefix."""
     return argv[-1].rsplit(SERVICE_PREFIX, 1)[-1].removesuffix(".service")
@@ -110,6 +133,17 @@ def _documented(platform: str, verb: str, product: str) -> list[list[str]]:
         "status": [_print(product)],
     }
     return recipes[verb]
+
+
+def _uninstalled(platform: str, product: str) -> list[list[str]]:
+    """Return the commands that uninstalling one product runs, in order."""
+    name = f"{SERVICE_PREFIX}{product}"
+    if platform == "linux":
+        return [
+            ["systemctl", "--user", "disable", "--now", f"{name}.service"],
+            ["systemctl", "--user", "daemon-reload"],
+        ]
+    return [["launchctl", "bootout", f"gui/{_UID}/{name}"]]
 
 
 def _pretend(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
@@ -464,7 +498,7 @@ def test_every_verb_uses_the_composed_command_timeout(
     assert set(commands.timeouts) == {73}
 
 
-@pytest.mark.parametrize("verb", _EVERY_VERB)
+@pytest.mark.parametrize("verb", _ALL_VERBS)
 def test_an_unsupported_platform_fails_and_no_command_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verb: str
 ) -> None:
@@ -477,7 +511,7 @@ def test_an_unsupported_platform_fails_and_no_command_runs(
     assert commands.commands == []
 
 
-@pytest.mark.parametrize("verb", _EVERY_VERB)
+@pytest.mark.parametrize("verb", _ALL_VERBS)
 def test_no_product_under_home_is_a_usage_error_and_no_command_runs(
     tmp_path: Path, verb: str
 ) -> None:
@@ -487,3 +521,198 @@ def test_no_product_under_home_is_a_usage_error_and_no_command_runs(
 
     assert _service(["--home", str(instances), "service", verb], commands, _Clock()) == _USAGE_ERROR
     assert commands.commands == []
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_uninstall_runs_its_commands_in_order_and_deletes_the_unit_before_the_reload(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    unit = unit_path(platform, user_home, _SHOP)
+    commands = _Recording(unit)
+
+    argv = ["--home", str(instances), "service", "uninstall"]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == _uninstalled(platform, _SHOP)
+    assert commands.unit_present == ([True, False] if platform == "linux" else [True])
+    assert not unit.exists()
+    assert (instances / _SHOP / "config.toml").is_file()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_uninstall_removes_the_unit_of_every_product_under_home(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP, _FERRUMCODE)
+    _install(user_home, platform, _SHOP, _FERRUMCODE)
+    commands = _Launchctl()
+
+    argv = ["--home", str(instances), "service", "uninstall"]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == [
+        *_uninstalled(platform, _FERRUMCODE),
+        *_uninstalled(platform, _SHOP),
+    ]
+    assert not unit_path(platform, user_home, _SHOP).exists()
+    assert not unit_path(platform, user_home, _FERRUMCODE).exists()
+
+
+@pytest.mark.parametrize(
+    ("platform", "answer"),
+    [
+        ("darwin", CommandResult(3, "", "Boot-out failed: 3: No such process\n")),
+        ("darwin", CommandResult(113, "", "Could not find service\n")),
+        ("linux", CommandResult(1, "", "Unit shikiri-yaku-shop.service not loaded.\n")),
+        ("linux", CommandResult(1, "", "Unit shikiri-yaku-shop.service is not enabled.\n")),
+        ("linux", CommandResult(1, "", "Unit shikiri-yaku-shop.service not running.\n")),
+    ],
+    ids=[
+        "launchd-no-such-process",
+        "launchd-no-service",
+        "not-loaded",
+        "not-enabled",
+        "not-running",
+    ],
+)
+def test_a_unit_the_manager_no_longer_loads_is_still_removed(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+    answer: CommandResult,
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+
+    argv = ["--json", "--home", str(instances), "service", "uninstall"]
+    assert _service(argv, _Launchctl({_SHOP: answer}), _Clock()) == 0
+
+    assert not unit_path(platform, user_home, _SHOP).exists()
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": True, "result": "uninstalled"}
+    ]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_a_refused_unload_is_reported_and_keeps_the_unit(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    commands = _Launchctl({_SHOP: CommandResult(1, "", "Operation not permitted\n")})
+
+    argv = ["--json", "--home", str(instances), "service", "uninstall"]
+    assert _service(argv, commands, _Clock()) == 1
+
+    assert unit_path(platform, user_home, _SHOP).is_file()
+    assert commands.commands == _uninstalled(platform, _SHOP)[:1]
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": False, "result": "Operation not permitted"}
+    ]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_a_unit_that_cannot_be_deleted_is_reported_with_its_path_and_no_reload_runs(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    unit = unit_path(platform, user_home, _SHOP)
+    real_unlink = Path.unlink
+
+    def refuse_the_unit(path: Path, **options: bool) -> None:
+        if path == unit:
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
+        real_unlink(path, **options)
+
+    monkeypatch.setattr(Path, "unlink", refuse_the_unit)
+    commands = _Launchctl()
+
+    argv = ["--json", "--home", str(instances), "service", "uninstall"]
+    assert _service(argv, commands, _Clock()) == 1
+
+    assert commands.commands == _uninstalled(platform, _SHOP)[:1]
+    [entry] = json.loads(capsys.readouterr().out)
+    assert entry["passed"] is False
+    assert str(unit) in entry["result"]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+@pytest.mark.usefixtures("user_home")
+def test_a_product_without_a_unit_passes_as_not_installed_and_no_command_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    commands = _Launchctl()
+
+    argv = ["--json", "--home", str(instances), "service", "uninstall"]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == []
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": True, "result": "not installed"}
+    ]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_a_repeated_uninstall_passes_because_nothing_is_left_to_remove(
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    platform: str,
+) -> None:
+    _pretend(monkeypatch, platform)
+    instances = _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    commands = _Launchctl()
+    argv = ["--json", "--home", str(instances), "service", "uninstall"]
+
+    assert _service(argv, commands, _Clock()) == 0
+    capsys.readouterr()
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == _uninstalled(platform, _SHOP)
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": True, "result": "not installed"}
+    ]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_uninstall_uses_the_composed_command_timeout(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    _pretend(monkeypatch, platform)
+    _products(tmp_path, _SHOP)
+    _install(user_home, platform, _SHOP)
+    commands = _Launchctl()
+
+    argv = ["--product", _SHOP, "service", "uninstall"]
+    assert _service(argv, commands, _Clock(), CliSettings(service_timeout_s=73)) == 0
+
+    assert commands.timeouts
+    assert set(commands.timeouts) == {73}

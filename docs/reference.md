@@ -105,8 +105,9 @@ Global options go before the command.
 | `service start` | Starts one product's service. Without `--product`, it starts every product under `--home`, in name order. Starting a running service leaves it running. |
 | `service stop` | Stops one product's service and waits until it has stopped. Without `--product`, it stops every product under `--home`, in name order. A service still running 30 seconds after the stop is a failure. |
 | `service restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. |
+| `service uninstall` | Stops one product's service, keeps it from starting at login and deletes its unit file. Without `--product`, it does so for every product under `--home`, in name order. A product whose unit was never installed is `not installed` and passes. |
 
-The three `service` commands do not refuse several products. Each prints one line per product and exits 1 if any product failed.
+The `service` commands other than `install` do not refuse several products. Each prints one line per product and exits 1 if any product failed.
 | `telegram adopt <component> <thread-id>` | Repairs an uncertain topic. See [Topic recovery](#topic-recovery). |
 | `telegram forget <component>` | Deletes an uncertain topic's row. See [Topic recovery](#topic-recovery). |
 
@@ -120,7 +121,7 @@ When `stats` cannot run, it prints one `✘` line on standard error and nothing 
 | --- | --- |
 | `doctor` | `passed` (true when every check passed), `failed` (the number of failed checks), `total`, and `checks`. Each entry of `checks` has `name`, `passed` and `detail`. |
 | `stats` | `completed`, `queued`, `lifetime_seconds`, `waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and `install_outcomes`. The durations are in seconds. `share` is the waiting fraction from 0 to 1, or `null` when unavailable. The last five keys each map a label to its count. |
-| `service start`, `service stop`, `service restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when the action finished) and `result`: `started`, `stopped` or `restarted`, or the reason it did not, such as `not installed`. |
+| `service start`, `service stop`, `service restart`, `service uninstall` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when the action finished) and `result`: `started`, `stopped`, `restarted` or `uninstalled`, or the reason it did not, such as `not installed`. |
 
 ## Telegram
 
@@ -267,7 +268,6 @@ shikiri-yaku --product shop service stop
 shikiri-yaku --product shop service status
 ```
 
-- To keep it from starting at a later login, run `launchctl disable gui/$(id -u)/shikiri-yaku-shop`. If you disabled it, run `launchctl enable` with the same target before you start it again.
 - The generated plist sets no stdout or stderr log files. Use `service status` to inspect the job state. To see application output while you troubleshoot, stop the service and run `shikiri-yaku --product shop run` in a terminal.
 
 ### Linux
@@ -286,7 +286,6 @@ shikiri-yaku --product shop service status
 journalctl --user -u shikiri-yaku-shop.service -f
 ```
 
-- To keep it from starting at a later login, run `systemctl --user disable shikiri-yaku-shop.service`. Disabling does not stop it; stop it with `shikiri-yaku --product shop service stop`.
 
 ### Clean stops and rewritten units
 
@@ -301,6 +300,8 @@ journalctl --user -u shikiri-yaku-shop.service -f
 A running service reads its code and `config.toml` only when it starts. A change takes effect after a restart.
 
 `shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. `service start`, `service stop` and `service status` act the same way, with their own commands: start does not replace a running job, stop waits on macOS until the job has stopped, and status reports `running`, `stopped`, `failed` or `not loaded`, and exits 1 unless the service runs. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
+
+`shikiri-yaku --product shop service uninstall` is the reverse of `service install`. It stops the service and keeps it from starting at a later login: on macOS it runs `launchctl bootout`, and on Linux it runs `systemctl --user disable --now` and then `systemctl --user daemon-reload` after the unit file is deleted. It then deletes the unit file. A manager answer that only says the unit is not loaded, not enabled or not running is not a failure. If the manager refuses the stop, or the file cannot be deleted, the result says why and the unit is kept or reported with its path. It keeps `config.toml`, the token file, the journal and its backups. A `run` process started in a terminal is not touched.
 
 The service runs the installed copy of `shikiri-yaku` that `service install` found on the login `PATH`. It never runs a checkout. That copy is a release. Do not install with `--editable`. The running service would follow unreviewed checkout changes, including after a crash restart.
 

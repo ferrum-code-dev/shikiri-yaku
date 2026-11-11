@@ -46,10 +46,11 @@ class CheckResult:
 
 @dataclass(frozen=True, slots=True)
 class ServiceResult:
-    """One product's service action: `problem` says why it did not finish; None means it did."""
+    """One product's service action: `result` is what became of it, or why it did not pass."""
 
     product: str
-    problem: str | None
+    passed: bool
+    result: str
 
 
 def print_doctor(checks: Sequence[CheckResult]) -> None:
@@ -61,21 +62,17 @@ def print_doctor(checks: Sequence[CheckResult]) -> None:
     console.print(_summary(checks))
 
 
-def print_services(results: Sequence[ServiceResult], done: str) -> None:
-    """Print one line per product: `done`, or the product and why it did not finish."""
+def print_services(results: Sequence[ServiceResult]) -> None:
+    """Print one line per product: its result, or the product and why it did not pass."""
     console = _console()
     for result in results:
-        console.print(_service_line(result, done))
+        console.print(_service_line(result))
 
 
-def service_document(results: Sequence[ServiceResult], done: str) -> list[dict[str, object]]:
+def service_document(results: Sequence[ServiceResult]) -> list[dict[str, object]]:
     """Build the service report as JSON: one entry per product, with its result."""
     return [
-        {
-            "product": result.product,
-            "passed": result.problem is None,
-            "result": done if result.problem is None else result.problem,
-        }
+        {"product": result.product, "passed": result.passed, "result": result.result}
         for result in results
     ]
 
@@ -223,13 +220,12 @@ def _check_line(check: CheckResult) -> Text:
     return line
 
 
-def _service_line(result: ServiceResult, done: str) -> Text:
-    if result.problem is None:
-        line = _outcome(passed=True)
-        line.append(f" {result.product} {done}", style=PRIMARY_TEXT_COLOR)
+def _service_line(result: ServiceResult) -> Text:
+    line = _outcome(passed=result.passed)
+    if result.passed:
+        line.append(f" {result.product} {result.result}", style=PRIMARY_TEXT_COLOR)
     else:
-        line = _outcome(passed=False)
-        line.append(f" {result.product}: {_one_line(result.problem)}", style=PRIMARY_TEXT_COLOR)
+        line.append(f" {result.product}: {_one_line(result.result)}", style=PRIMARY_TEXT_COLOR)
     return line
 
 

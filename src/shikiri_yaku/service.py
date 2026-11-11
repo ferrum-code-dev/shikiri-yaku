@@ -32,6 +32,9 @@ STOPPED: Final = "stopped"
 _LAUNCHD_RUNNING_LINE: Final = "state = running"
 _SYSTEMD_ACTIVE: Final = "active"
 _SYSTEMD_INACTIVE: Final = "inactive"
+# keep: a unit the manager no longer loads is already off, so unloading it is not a failure
+_LAUNCHD_NOT_LOADED: Final = ("No such process", "Could not find service")
+_SYSTEMD_NOT_LOADED: Final = ("not loaded", "not enabled", "not running")
 
 
 class ServiceError(Exception):
@@ -107,11 +110,12 @@ def restart_argv(platform: str, product: str, uid: int) -> list[str]:
 
 
 class ServiceManager:
-    """Starts, stops, restarts and reports products' services through the service manager.
+    """Starts, stops, restarts, reports and removes products' services through the service manager.
 
     Each action returns None when it finished, else why it did not. status returns None when the
-    service runs, else the state it is in or why its state is unknown. A product whose unit was
-    never written is not installed, and no command runs for it.
+    service runs, else the state it is in or why its state is unknown. uninstall returns
+    NOT_INSTALLED when there is no unit to remove. A product whose unit was never written is not
+    installed, and no command runs for it.
     """
 
     def __init__(
@@ -195,9 +199,44 @@ class ServiceManager:
     def _is_installed(self, product: str) -> bool:
         return unit_path(self._platform, self._user_home, product).is_file()
 
+    async def uninstall(self, product: str) -> str | None:
+        if not self._is_installed(product):
+            return NOT_INSTALLED
+        name = service_name(product)
+        if self._platform == LAUNCHD_PLATFORM:
+            problem = await self._unload(
+                ["launchctl", "bootout", f"gui/{self._uid}/{name}"], _LAUNCHD_NOT_LOADED
+            )
+        else:
+            problem = await self._unload(
+                ["systemctl", "--user", "disable", "--now", f"{name}.service"],
+                _SYSTEMD_NOT_LOADED,
+            )
+        if problem is not None:
+            return problem
+        try:
+            remove_service_file(unit_path(self._platform, self._user_home, product))
+        except ServiceError as error:
+            return str(error)
+        if self._platform == SYSTEMD_PLATFORM:
+            return await self._command(["systemctl", "--user", "daemon-reload"])
+        return None
+
+    async def _unload(self, argv: list[str], not_loaded: Sequence[str]) -> str | None:
+        try:
+            result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
+        except CommandError as error:
+            return str(error)
+        if result.returncode == 0 or _only_says(result.stderr, not_loaded):
+            return None
+        return _failure_reason(result)
+
     async def _run(self, product: str, argv: list[str]) -> str | None:
         if not self._is_installed(product):
             return NOT_INSTALLED
+        return await self._command(argv)
+
+    async def _command(self, argv: list[str]) -> str | None:
         try:
             result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
         except CommandError as error:
@@ -254,6 +293,15 @@ def write_service_file(service: ServiceFile) -> None:
         raise ServiceError(message) from error
 
 
+def remove_service_file(path: Path) -> None:
+    """Delete a unit that install wrote; nothing else of the instance is touched."""
+    try:
+        path.unlink()
+    except OSError as error:
+        message = f"cannot remove {path}: {error}"
+        raise ServiceError(message) from error
+
+
 def _unsupported(platform: str) -> ServiceError:
     message = f"shikiri-yaku supports macOS (launchd) and Linux (systemd), not {platform!r}"
     return ServiceError(message)
@@ -266,6 +314,11 @@ def _failure_reason(result: CommandResult) -> str:
 
 def _is_running(launchctl_print: str) -> bool:
     return any(line.strip() == _LAUNCHD_RUNNING_LINE for line in launchctl_print.splitlines())
+
+
+def _only_says(stderr: str, phrases: Sequence[str]) -> bool:
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    return bool(lines) and all(any(phrase in line for phrase in phrases) for line in lines)
 
 
 def _launchd_plist(name: str, program: Sequence[str], login_path: str) -> bytes:

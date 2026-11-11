@@ -49,6 +49,7 @@ from shikiri_yaku.ports import (
     ShikiruError,
 )
 from shikiri_yaku.service import (
+    NOT_INSTALLED,
     ServiceError,
     ServiceManager,
     service_file,
@@ -113,7 +114,8 @@ type Compose = Callable[[Settings, Path], Lifecycle]
 type ReadMeasures = Callable[[Path], Measures]
 type AdoptTopic = Callable[[Path, str, int], str]
 type ForgetTopic = Callable[[Path, str], str]
-type ServiceOperation = Callable[[ServiceManager, str], Awaitable[str | None]]
+type ServiceAction = Callable[[ServiceManager, str], Awaitable[str | None]]
+type ServiceOperation = Callable[[ServiceManager, str], Awaitable[ServiceResult]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,27 +286,36 @@ def _add_service_commands(
         "start", help="Start the service of one product, or of every product under home."
     )
     def service_start(ctx: typer.Context) -> None:
-        raise typer.Exit(run_service(_options(ctx), ServiceManager.start, "started"))
+        action = _reporting(ServiceManager.start, "started")
+        raise typer.Exit(run_service(_options(ctx), action))
 
     @service.command(
         "stop",
         help="Stop the service of one product, or of every product under home, and wait for it.",
     )
     def service_stop(ctx: typer.Context) -> None:
-        raise typer.Exit(run_service(_options(ctx), ServiceManager.stop, "stopped"))
+        raise typer.Exit(run_service(_options(ctx), _reporting(ServiceManager.stop, "stopped")))
 
     @service.command(
         "restart", help="Restart the service of one product, or of every product under home."
     )
     def service_restart(ctx: typer.Context) -> None:
-        raise typer.Exit(run_service(_options(ctx), ServiceManager.restart, "restarted"))
+        action = _reporting(ServiceManager.restart, "restarted")
+        raise typer.Exit(run_service(_options(ctx), action))
 
     @service.command(
         "status",
         help="Show whether the service of one product, or of every product under home, runs.",
     )
     def service_status(ctx: typer.Context) -> None:
-        raise typer.Exit(run_service(_options(ctx), ServiceManager.status, "running"))
+        raise typer.Exit(run_service(_options(ctx), _reporting(ServiceManager.status, "running")))
+
+    @service.command(
+        "uninstall",
+        help="Stop and remove the service of one product, or of every product under home.",
+    )
+    def service_uninstall(ctx: typer.Context) -> None:
+        raise typer.Exit(run_service(_options(ctx), _uninstall))
 
 
 def build_app(
@@ -330,7 +341,7 @@ def build_app(
     app.add_typer(
         service,
         name="service",
-        help="Install, start, stop, restart and check the service of a product.",
+        help="Install, start, stop, restart, check and uninstall the service of a product.",
     )
     _add_service_commands(service, commands=commands, clock=clock, cli_settings=cli_settings)
     telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
@@ -637,7 +648,6 @@ def _service_install(
 def _service(
     options: _Global,
     operation: ServiceOperation,
-    done: str,
     *,
     commands: CommandRunner,
     clock: Clock,
@@ -661,10 +671,10 @@ def _service(
         print_failure(str(error))
         return 1
     if options.json_output:
-        print_json(service_document(results, done))
+        print_json(service_document(results))
     else:
-        print_services(results, done)
-    return 0 if all(result.problem is None for result in results) else 1
+        print_services(results)
+    return 0 if all(result.passed for result in results) else 1
 
 
 def _service_products(options: _Global) -> list[str]:
@@ -681,7 +691,28 @@ def _service_products(options: _Global) -> list[str]:
 async def _each_product(
     manager: ServiceManager, operation: ServiceOperation, products: Sequence[str]
 ) -> list[ServiceResult]:
-    return [ServiceResult(product, await operation(manager, product)) for product in products]
+    return [await operation(manager, product) for product in products]
+
+
+def _reporting(action: ServiceAction, done: str) -> ServiceOperation:
+    async def operation(manager: ServiceManager, product: str) -> ServiceResult:
+        return _settled(product, await action(manager, product), done)
+
+    return operation
+
+
+async def _uninstall(manager: ServiceManager, product: str) -> ServiceResult:
+    problem = await manager.uninstall(product)
+    # keep: a product with no unit has nothing to remove, which is what uninstall asks for
+    if problem == NOT_INSTALLED:
+        return ServiceResult(product, passed=True, result=NOT_INSTALLED)
+    return _settled(product, problem, "uninstalled")
+
+
+def _settled(product: str, problem: str | None, done: str) -> ServiceResult:
+    if problem is None:
+        return ServiceResult(product, passed=True, result=done)
+    return ServiceResult(product, passed=False, result=problem)
 
 
 def _service_unit(target: _Target, login_path: str) -> ServiceFile:

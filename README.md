@@ -186,6 +186,12 @@ shikiri-yaku --product shop service stop
 `service stop` returns once the service has stopped. A stopped service stays down until you run
 `service start` or `service restart`, or log in again.
 
+To stop the service and remove its unit, run `service uninstall`. It keeps `config.toml`, the token file, the journal and its backups:
+
+```sh
+shikiri-yaku --product shop service uninstall
+```
+
 Logs, status and rewritten units are covered in [Service](docs/reference.md#service).
 
 ## Applying changes

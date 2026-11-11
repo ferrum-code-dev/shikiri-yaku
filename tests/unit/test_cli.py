@@ -1159,6 +1159,7 @@ def test_the_only_product_under_home_is_used_without_the_product_option(tmp_path
         ["service", "start", _PRODUCT],
         ["service", "stop", _PRODUCT],
         ["service", "restart", _PRODUCT],
+        ["service", "uninstall", _PRODUCT],
         ["stats", _PRODUCT],
         ["topics", "adopt", _PRODUCT, "api", "7"],
         ["topics", "forget", _PRODUCT, "api"],
@@ -1180,7 +1181,7 @@ def test_help_lists_the_verbs_and_the_groups(capsys: pytest.CaptureFixture[str])
     assert main(["service", "--help"]) == 0
 
     service_listed = capsys.readouterr().out
-    for word in ("install", "start", "stop", "restart"):
+    for word in ("install", "start", "stop", "restart", "uninstall"):
         assert word in service_listed
 
 

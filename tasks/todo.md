@@ -157,7 +157,7 @@ are in tasks/plan.md.
 
 ### S5
 
-- [ ] S5. Add `service uninstall`
+- [x] S5. Add `service uninstall`
 
 ## Historical implementation records
 
