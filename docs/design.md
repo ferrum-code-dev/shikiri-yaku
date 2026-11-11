@@ -15,6 +15,8 @@ The first release has four handlers:
 * **Review**: sends the PO the link of a pull request that waits for review (Shikiru's pull-request integration mode).
 * **Notice**: tells the PO that a task is done, or that the Operator itself has a problem.
 
+The Operator also answers the PO's own questions about the product. The **Expert** is a read-only agent the PO talks to in the chat: it reads the repositories of the components, looks things up on the web within what the PO has granted, and answers at product level. When an idea needs work, it proposes one task per component, and the PO submits them with one tap. The Expert removes the planning a PO would otherwise do by hand before a goal that spans several components.
+
 The Operator exists to remove idle time: work waiting for a person who is not watching, and problems a person would have fixed with one command. The `stats` command prints the figures of the journal that show it.
 
 ## Principles
@@ -22,9 +24,9 @@ The Operator exists to remove idle time: work waiting for a person who is not wa
 1. **Shikiru is the source of truth.** Tasks, escalations, their state and history live in Shikiru and are read and changed through its MCP server only (plus the `start` and `doctor` commands of its CLI). The Operator keeps no copy of the backlog and never touches Shikiru's database.
 2. **A small fixed core, growth by extension.** Watching, sorting, routing, replying and journaling are the core. Categories, handlers, actions, Reasoner jobs and channels are extensions, wired in one place.
 3. **Every route ends at the PO.** An unknown signal, an unsure classification, a failed or exhausted handler, or a model that is down all mean *forward to the PO*. Nothing is dropped, and a new extension can never do worse than plain forwarding.
-4. **Agents propose, code acts.** The Reasoner may look things up with read-only tools but cannot change anything, and returns typed data. Code validates it, builds every host command from fixed recipes, and runs only what the PO has approved. A model never writes a shell command.
+4. **Agents propose, code acts.** The Reasoner may look things up with read-only tools but cannot change anything, and returns typed data. Code validates it, builds every host command from fixed recipes, and runs only what the PO has approved. A model never writes a shell command. The Expert follows the same rule: it reads and proposes, and code submits the tasks the PO approved.
 5. **Journal before acting, check after.** Every effect (a Shikiru command, a host command, a message) is recorded before it happens, and success is checked by observation, not assumed.
-6. **No model is needed to stay useful.** Watching, rule-based sorting, forwarding and replies are plain code. With every model down the Operator still forwards everything.
+6. **No model is needed to stay useful.** Watching, rule-based sorting, forwarding and replies are plain code. With every model down the Operator still forwards everything. With every model down `/ask` says so, and `/goal` still works.
 7. **Nothing of the Operator is stored in the managed repositories,** just as Shikiru keeps its own state out of them.
 8. **If the Operator needs something Shikiru does not offer, the gap is fixed in Shikiru,** not worked around in the Operator. The structured escalation view is the one such dependency ([Shikiru interface](#shikiru-interface)).
 9. **Only what is described is built.** A case this document does not describe has no code.
@@ -55,7 +57,7 @@ flowchart LR
   RP -->|approve, decline install| IA
 ```
 
-Every module reads and writes the journal ([Journal](#journal)); it is left out of the picture. The Reasoner is used only by the Classifier: its verdict is stored with the signal, and the Install action reads it from there.
+Every module reads and writes the journal ([Journal](#journal)); it is left out of the picture. The Reasoner is used only by the Classifier: its verdict is stored with the signal, and the Install action reads it from there. The Expert answers the PO's messages, not signals, so it is not in the picture either ([Expert](#expert)).
 
 One Python process with one asyncio loop, one SQLite journal, one TOML config and the OS service manager. Modules, not services. The reason is that watching, pending questions and message delivery must keep working when an agent runs out of quota, changes or crashes, so they cannot live in an agent session.
 
@@ -74,9 +76,11 @@ One Operator instance serves one product, with its own instance directory, `jour
 | **Loop guard** (`app/loop_guard.py`) | Limits automatic actions per cause, from the journal | No |
 | **Install action** (`extensions/infrastructure/install.py`, `app/install_executor.py`) | Host facts, command building, approval, running and checking ([Installing a missing tool](#installing-a-missing-tool)) | No |
 | **Reasoner** (`app/reasoner_ladder.py`, `adapters/reasoner_cli.py`) | One job, `assess_blocker`, behind an interface; agent CLIs tried in a ladder ([Reasoner](#reasoner)) | Yes |
+| **Expert** (`app/expert.py`, `app/expert_ladder.py`, `adapters/expert_cli.py`) | Runs the turns of each conversation, one at a time, through a ladder of agent CLIs ([Expert](#expert)) | Yes |
+| **Web tool** (`adapters/expert_web.py`) | The only way an Expert agent reaches the web: an MCP tool that serves granted domains and records requests for the others | No |
 | **Channel** (`ports.Channel`, `adapters/telegram*.py`) | Sends, edits and deletes the PO's messages and polls the PO's updates ([PO channel](#po-channel)) | No |
 | **Outbox** (`journal/outbox.py`, `app/outbox_sender.py`) | Stores every message before it is sent and delivers it through the Channel | No |
-| **Replies** (`app/replies.py`, `app/inbound_service.py`) | Applies taps, replies and commands through the message they belong to: Shikiru commands, install approvals and goals | No |
+| **Replies** (`app/replies.py`, `app/inbound_service.py`) | Applies taps, replies and commands through the message they belong to: Shikiru commands, install approvals, goals, and the buttons of Expert answers and web grants | No |
 | **Reconcilers** (`app/reconciler.py`, `install_reconciler.py`, `start_reconciler.py`) | Settle the effects a restart left uncertain, by observing Shikiru and the host ([Restarts and recovery](#restarts-and-recovery)) | No |
 | **Journal** (`journal/`) | SQLite store ([Journal](#journal)) | No |
 
@@ -84,7 +88,7 @@ One Operator instance serves one product, with its own instance directory, `jour
 
 ### Composition and extension registration
 
-`bootstrap.compose()` is the composition root. It reads the settings and builds one Shikiru client per component, the Reasoner if one is configured, the journal, the Channel and Outbox, and the classifier, Router, Dispatcher, Scheduler, inbound poller and reconcilers. It returns the jobs to serve and a `recover()` step that runs before serving.
+`bootstrap.compose()` is the composition root. It reads the settings and builds one Shikiru client per component, the Reasoner if one is configured, the Expert if `[expert]` is set, the journal, the Channel and Outbox, and the classifier, Router, Dispatcher, Scheduler, inbound poller and reconcilers. It returns the jobs to serve and a `recover()` step that runs before serving.
 
 An **extension** is one folder under `extensions/` (`infrastructure/`, `review/`, `notice/`, `product/`) with its rules, its handler and the handler's actions. `registered_extensions()` lists them in classification order: infrastructure, review, notice, then product, whose catch-all rule comes last. The Router's handler table is built from the same list. Rules are checked in that order and the first match wins; startup fails if two extensions claim the same reason.
 
@@ -214,9 +218,9 @@ The infrastructure handler sends its own messages when it acts (a quota wait and
 
 * **Size limits.** A long question or option list is cut to fit Telegram, with a *Details* button that sends the full packet in parts. Button data is small, so it carries numbers only: the signal number (shown as `S41`, the journal row id) and the choice. A tap is matched to the journal by these numbers.
 * **Answers apply once.** Replies are matched by the message they reply to; an approval message accepts only its buttons. Shikiru rejects a resolution for an escalation that is no longer open, so "first answer wins" is Shikiru's guarantee; the Operator tells the later answer "Already resolved: B at 12:03" from its own journal. After resolving, every copy of the message is edited to its final state and its buttons are removed.
-* **Forum topics.** With `channels.telegram.group_id` set, the group is a forum and signals go to its topics. One topic per component carries every signal of that component; the built-in General topic carries the Operator's own health, and a component's signals never go to General. Start-up creates the missing topics and closes those of removed components, deciding from its own journal alone, because the Bot API cannot list a forum's topics. A topic made by hand is not adopted automatically, and an uncertain topic creation stops start-up until `telegram adopt` or `telegram forget` repairs it ([README](../README.md#telegram-topic-recovery)). Only owners are served, whatever other members the group holds. **Shared group.** Several instances may share one group, each with its own bot and its own components; two instances never share a bot, because a bot's updates can be read by one process only. With `shared_group = true`, a bot that is also a member of the group does not fail the start-up member check, a command sent in a topic that is not one of this instance's component topics is ignored without a reply, and `/goal` naming a component this instance does not have gets no reply. `/help`, `/status` and `/open` in General are answered by every instance, each for its own components. Without `shared_group`, those cases get the usage reply as before.
+* **Forum topics.** With `channels.telegram.group_id` set, the group is a forum and signals go to its topics. One topic per component carries every signal of that component; the built-in General topic carries the Operator's own health, and a component's signals never go to General. Expert topics are a second kind of topic beside component topics: deleting one needs the bot right `can_delete_messages` (taken from the Bot API reference, to be confirmed on the first real call), and start-up checks that right when `[expert]` is set. Start-up creates the missing component topics and closes those of removed components, deciding from its own journal alone, because the Bot API cannot list a forum's topics. A topic made by hand is not adopted automatically, and an uncertain component topic creation stops start-up until `telegram adopt` or `telegram forget` repairs it ([README](../README.md#telegram-topic-recovery)). Only owners are served, whatever other members the group holds. **Shared group.** Several instances may share one group, each with its own bot and its own components; two instances never share a bot, because a bot's updates can be read by one process only. With `shared_group = true`, a bot that is also a member of the group does not fail the start-up member check, a command sent in a topic that is not one of this instance's component or Expert topics is ignored without a reply, and `/goal` naming a component this instance does not have gets no reply. `/help`, `/status` and `/open` in General are answered by every instance, each for its own components. Without `shared_group`, those cases get the usage reply as before.
 
-**Commands.** `/status`, `/open`, `/goal` and `/help` are documented in the [README](../README.md#chat-commands). `/goal` is journaled before it is sent, identified by the Telegram update id, so a duplicate delivery cannot submit twice. After a crash, a goal whose acknowledgement was not recorded is never resubmitted; the PO is asked to check first.
+**Commands.** `/status`, `/open`, `/goal` and `/help` are documented in the [README](../README.md#chat-commands). `/ask` opens an Expert conversation; the commands inside an Expert topic are in [Expert](#expert). In a shared group, `/ask` in General must name the bot (`/ask@<bot>`), because every instance reads General; without the name it is ignored. `/goal` is journaled before it is sent, identified by the Telegram update id, so a duplicate delivery cannot submit twice. After a crash, a goal whose acknowledgement was not recorded is never resubmitted; the PO is asked to check first.
 
 **Secrets never travel through chat.** A message that carries a secret is refused and its body is never kept; where the platform allows, the message is deleted.
 
@@ -230,10 +234,37 @@ A thin module: an interface, one job, and adapters tried in a ladder.
 
 * **Adapters.** An adapter runs one agent CLI headless with an input cap, a timeout and a JSON schema for the answer, in a scratch directory so no repository instruction file is loaded. Claude and Codex are two adapters; another agent is another adapter.
 * **Ladder.** `reasoner.ladder` lists rungs written like Shikiru's agent specs, `adapter:model` or `adapter:model:effort`, tried in order. Any failure of a rung (quota, login, timeout, invalid output) moves to the next, and a rung that failed is skipped for `cooldown_min`, so a dead rung does not add its timeout to every question. The ladder is a wrapper behind the same interface, kept in memory, with no quota accounting of its own. When no rung gives a usable answer, the assessment is `other` with a note that the Reasoner failed, and the signal goes to the Product handler.
-* **Limited tools, not none.** The Claude adapter may use web search, web fetch and the read-only package queries `command -v`, `brew info` and `brew search`, so that its answer rests on the current state of the world and not on the model's memory. It may not read files: file reading cannot be limited to the scratch directory, and host-file access together with web fetch would let injected escalation text leak data. It has no install tools. The Codex adapter runs read-only in the scratch directory with no lookups at all. The tool limit is defence in depth; the guarantee that matters does not depend on the model. Code validates every name and builds the command, and the PO approves it. The residual risk is that injected escalation text steers a web fetch; the same text already goes to Telegram.
+* **Limited tools, not none.** The Claude adapter may use web search, web fetch and the read-only package queries `command -v`, `brew info` and `brew search`, so that its answer rests on the current state of the world and not on the model's memory. As a rule of the Reasoner, it may not read files: file reading cannot be limited to the scratch directory, and host-file access together with web fetch would let injected escalation text leak data. It has no install tools. The Codex adapter runs read-only in the scratch directory with no lookups at all. The tool limit is defence in depth; the guarantee that matters does not depend on the model. Code validates every name and builds the command, and the PO approves it. The residual risk is that injected escalation text steers a web fetch; the same text already goes to Telegram.
 * **Untrusted text in, data out.** Escalation and log text is evidence, never an instruction. The output is validated, every name is checked by code, and the model never supplies a command.
 * **Failures are visible.** A forwarded message says when the Reasoner failed and why. When the whole ladder fails, the health source raises one `health` signal, closed on the next success, so the PO is told once that decisions arrive without a suggestion, not on every call. `/status` and `doctor` show the state of each rung.
 * **Usage and timing** are logged per call in the signal's verdict record when the CLI reports them. They are not part of Shikiru's usage ledger; the calls are few and cheap.
+
+## Expert
+
+The Expert is not an extension: extensions handle signals, and a PO message is not a signal. It is a module on the inbound side with its own ladder, configured in `[expert]`. Without that section, or without `channels.telegram.group_id`, `/ask` is refused with the reason.
+
+**Conversation.** `/ask <text>` opens a conversation. Asked in a component topic, its scope is that component; asked in General, its scope is every component. The Operator creates a forum topic for the conversation, with the Expert's icon and a name cut from the question, and answers the command with a button that opens the topic. The topic is renamed when the first answer brings a title. Every message an owner sends in that topic is a **turn**. Turns of one conversation run one at a time, oldest first; conversations run in parallel up to `expert.max_parallel`. `/ask` is journaled by its Telegram update id before the topic is created, so a duplicate delivery opens nothing twice.
+
+**Topic commands.** In an Expert topic only these commands exist: `/effort` shows the effort of the conversation, `/effort <level>` changes it from the next turn, `/summarize` asks for a very short summary, `/close` deletes the conversation, and `/help` lists these commands. Any other command is answered with that help.
+
+**Answer.** An agent returns typed data, checked against a schema: `reply`, `title`, `tasks` (each with `component`, `title` and `text`) and `findings`. The reply is written for a Product Owner: at product level, without code, short. It is sent as one message and cut to fit; there is no *Details* button. A task that names a component outside the scope makes the answer invalid.
+
+**Tasks.** An answer with tasks shows one line per task (component and title) and two buttons, *Submit all* and *Reject all*. *Submit all* submits each task's text with `submit_task`, one `submit` op per task, in the order given, and the message is edited to show the task ids. The rules of `/goal` apply: an op left unknown by a crash is never resubmitted, and the PO is asked to check. To change the proposal, the PO says so in the conversation and gets a new one. Tasks are submitted together and Shikiru runs them independently, so each task's text carries what it needs from the others.
+
+**Ladder and session.** `expert.ladder` lists rungs like the Reasoner's, and a turn that a rung does not finish within `expert.timeout_s` fails on that rung. A conversation stays on the rung that answered last and moves down the ladder only when that rung fails; a failed rung is skipped for `expert.cooldown_min`. While the provider stays the same, the agent's own session is resumed, so nothing is read twice, also when the model or the effort changes. The spike verified a model change for Claude only; for Codex a model change and an effort setting are not yet tested. When the provider changes, a new session starts from a **handoff**: the `findings` of the last answer (the agent's own running notes on what matters and what it concluded, never shown to the PO) and the last `expert.handoff_turns` turns. The journal keeps every turn, so no switch loses the conversation. The effort set with `/effort` replaces the effort of every rung for that conversation. When no rung answers, the topic gets a message saying so.
+
+**What an agent may do.** It reads files and nothing else: no writes, no network from a shell, no web tool of its own, no Shikiru tools. Code gives it the open tasks and escalations of the components in scope as input. Each adapter passes a fixed argument list, and the prompt goes through stdin, because Claude's `--add-dir` takes several values and would swallow a prompt given as the last argument.
+
+* Claude: `--restricted`, `--tools "Read,Grep,Glob"`, `--permission-mode dontAsk`, `--setting-sources ""`, `--strict-mcp-config`, and `--add-dir` for each component in scope. A first turn is a new session with `--json-schema` for the answer; a resumed turn adds `--resume <id>`. The answer carries `session_id`. File reads outside those directories are refused by the CLI, so the scope is enforced.
+* Codex: `--ignore-user-config`, `--disable apps`, `-c 'web_search="disabled"'`, `-c 'sandbox_mode="read-only"'` and `-c 'mcp_servers.<name>.default_tools_approval_mode="approve"'` for the Operator's web tool. A first turn is `codex exec --json` with `--output-schema`; a resumed turn is `codex exec resume <id>` with the same schema option. The session id is the `thread_id` in the `--json` events. Codex can read any file the user can, so for a Codex rung the scope is an instruction, not a boundary.
+
+Repository text and web pages are data, never instructions; the prompt says so, and the output is validated.
+
+**Web.** The only web access is the Operator's MCP tool `web_fetch(url)`, started by the agent CLI as a subprocess. It serves a page only when its host is in the grants of the journal; a redirect to another host is checked the same way. For any other host it records a request and tells the agent that the PO has been asked. After the turn, each requested host is shown to the PO with *Allow* and *Deny*. *Allow* stores the grant for good, for every conversation; either answer becomes a turn that tells the agent, so the conversation continues by itself. There is no search tool: a search site is one more host to grant. Because the check is code, it is the same for every agent.
+
+**End of a conversation.** A conversation ends when the PO closes its topic, sends `/close`, or sends nothing for `expert.retention_days` (14). The Operator then deletes the topic, the conversation's rows and its directory under the instance directory. Telegram does not tell a bot that a topic was deleted, so a topic the PO deleted is cleaned up when the next send fails or when it expires.
+
+**Restart.** A turn that was running is marked interrupted and the PO is told in the topic; it is not run again by itself. A topic whose creation is uncertain is not adopted: the PO is told to ask again.
 
 ## Journal
 
@@ -243,21 +274,25 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 |---|---|---|
 | `cursors` | Per project: last event id, last lifecycle event, and the id of the last respected clean stop | Resume without losing or replaying events; the liveness rule |
 | `signals` | Id and number, project, kind, reason, text, category and who set it (rule or Reasoner, with its verdict and timing), handler, state, notes, wake-up time | Deferred work, no double handling, misroute review |
-| `messages` | The outbox and every message sent: signal, channel, chat, platform message id, purpose (`question`, `approval`, `notice`), notice key, delivery state, body | Edits, reminders, duplicates recognized |
+| `messages` | The outbox and every message sent: signal or Expert conversation, channel, chat, platform message id, purpose (`question`, `approval`, `notice` or `expert`), notice key, delivery state, body | Edits, reminders, duplicates recognized |
 | `ops` | Every effect: kind (`resolve`, `start`, `submit`, `install`, `wait`), identity or Telegram update id, project, task, reason, payload (for an install: the exact argument list), state, Shikiru's command id, output path, timestamps | Safe restart, the loop guard, approvals that run exactly what was shown |
+| `conversations` | Each Expert conversation: number, scope, topic, effort, provider and session id, findings, state, last activity | The topic, the session and the handoff survive a restart |
+| `turns` | Each Expert turn: conversation, Telegram update id, text, answer, rung, state, call record | A turn is never run twice, and an interrupted one is reported |
+| `web_grants` | Each granted host and when it was granted | A grant lasts for good |
+| `web_requests` | Each host an Expert turn asked for, and its state | A request waits for the PO's answer across restarts |
 
 A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install also passes `approved` and may end `declined`, `expired` or `void`.
 
-The other tables hold the Telegram poll offset (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
+The other tables hold the Telegram poll offset (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component and of each Expert conversation (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
 
-Not stored: tasks, escalation packets, logs, agent usage. They stay in Shikiru and are read on demand. There is no retention job.
+Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert conversations.
 
 ## Restarts and recovery
 
 Start-up runs in this order (`cli._run` and `bootstrap.compose`):
 
 1. The settings are loaded, the instance lock is taken, the composition root is built and the Telegram channel is verified.
-2. `recover()` closes the signals of removed components, asks the PO about any `/goal` an earlier process left unknown (it is not resubmitted) and prepares the forum topics.
+2. `recover()` closes the signals of removed components, asks the PO about any `/goal` an earlier process left unknown (it is not resubmitted), marks the Expert turns that were running as interrupted and prepares the forum topics.
 3. The engine-start reconciler runs first. Until it settles, the project sources, the Dispatcher, the Scheduler and install recovery wait on its gate, so no signal is acted on while an earlier start is unknown. An unsettled start is confirmed from `status.engine_up` or failed, and it is never run again.
 4. Resolves that were issued but not confirmed are settled by observation: the escalation's state and events decide, and a lost one is shown to the PO again. Installs are settled by their check, and the PO is asked again if the tool is still missing. Outbox messages whose delivery was not confirmed are sent again, carrying their stable reference (`S41`), so a duplicate is recognizable.
 5. Parked signals whose wake-up time has passed are dispatched, and `new` and `handling` signals are handled again. A handler may therefore run twice for one signal, so its effects are keyed by the signal (an op identity, a message per signal).
@@ -283,9 +318,9 @@ The Operator uses these Shikiru capabilities, through the MCP server and the CLI
 
 | Capability | Used for |
 |---|---|
-| `wait_for_events`, `status` (`engine_up`, quotas with `resets_at`), `list_escalations`, `get_escalation` (the escalation, its packet text and allowed resolutions), `list_tasks`, `get_task` | Signals, messages, `/status` |
+| `wait_for_events`, `status` (`engine_up`, quotas with `resets_at`), `list_escalations`, `get_escalation` (the escalation, its packet text and allowed resolutions), `list_tasks`, `get_task` | Signals, messages, `/status`, the Expert's input |
 | `resolve_escalation` with `answer`, `retry`, `accept`, `cancel`; rejection when the escalation is no longer open or the resolution is not valid for its reason; the command id in the `escalation_resolved` event | Applying answers exactly once, and confirming them |
-| `submit_task` | `/goal` |
+| `submit_task` | `/goal` and the tasks an Expert answer proposes |
 | `engine_stopped` carries a stop reason only on a fault stop; `pr_opened` (with `url`) and `pr_withdrawn` events; a task stays *integrating* until its PR settles | The liveness rule; the review handler |
 | CLI `shikiru --project <path> start`, `doctor --json`, `--version` | Engine restart, diagnostics, and the version check of [Releases and deployment](#releases-and-deployment) |
 
@@ -314,10 +349,11 @@ shikiri-yaku/
   src/shikiri_yaku/               # the importable package name needs underscores
     domain/       signals, categories, outcomes, rules and extensions, recipes (pure, no I/O)
     app/          dispatcher, router, scheduler, loop guard, sources, replies, outbox sender,
-                  reconcilers, install executor, Reasoner ladder and assessor
+                  reconcilers, install executor, Reasoner ladder and assessor, Expert and its ladder
     extensions/   infrastructure/ product/ review/ notice/   (each: rules, handler, actions)
     ports.py      Protocols the core uses: ShikiruClient, Channel, Updates, Reasoner, ...
-    adapters/     Shikiru MCP link, Telegram, Reasoner CLIs, process runner, host lock, clock
+    adapters/     Shikiru MCP link, Telegram, Reasoner CLIs, Expert CLIs, Expert web tool,
+                  process runner, host lock, clock
     journal/      SQLite access; the only place with SQL
     bootstrap.py  the composition root: the only place that builds concrete objects
     cli.py        run, doctor, stats, service install, start, stop and restart, telegram adopt and forget
@@ -329,18 +365,21 @@ shikiri-yaku/
 * Failures cross a port as typed exceptions. Only the Router turns them into `Forward`; no other code swallows them.
 * Numbers are settings with defaults in one settings object (see the [configuration reference](../README.md#configuration-reference)), not literals in handlers.
 
-**Verification.** The guarantees above are protected by tests with fakes for the ports: the classifier and the liveness rule as tables, the Reasoner ladder and its cooldown, the Router fallback and loop guard, install name validation, recipes, check-before and approval, the process runner's timeout and process-group kill, and crash-point restarts against the journal. Telegram payloads are tested against fixtures. The check that needs a real Shikiru engine is the contract job of CI; anything that needs a real chat or host the owner does by hand.
+**Verification.** The guarantees above are protected by tests with fakes for the ports: the classifier and the liveness rule as tables, the Reasoner ladder and its cooldown, the Router fallback and loop guard, install name validation, recipes, check-before and approval, the process runner's timeout and process-group kill, and crash-point restarts against the journal. Telegram payloads are tested against fixtures. The Expert's guarantees are protected the same way: the argument list of each adapter for a first and a resumed turn, as a table; the ladder with fake rungs (it stays on the rung that answered, resumes within a provider, hands off across providers, skips a cooled-down rung and reports when no rung answers); an answer outside the schema or the scope is never returned; a page is served only for a granted host, and a redirect is checked the same way; a duplicate `/ask` opens one conversation and one topic; and each crash point after `/ask` opens no second topic and runs no turn twice. The check that needs a real Shikiru engine is the contract job of CI; anything that needs a real chat, host or agent CLI the owner does by hand.
 
 ## Known limits
 
 1. **Classification from text.** A `decision_required` signal costs a model call and can be misrouted. That is bounded by "unsure means product", by approval before any host change, and by reviewing verdicts.
-2. **The Reasoner runs outside Shikiru.** A few cheap calls behind a small ladder, with read-only lookup tools. Failure forwards, so there is no quota accounting; its usage is logged by the Operator, not in Shikiru's ledger.
+2. **Models run outside Shikiru.** The Reasoner makes a few cheap calls. The Expert's calls are neither few nor cheap: they read repositories. Both are logged by the Operator, not in Shikiru's ledger.
 3. **Typed install recipes.** Only the user-level package managers listed in the [README](../README.md#install-approval) are covered; system managers that need `sudo` are forwarded as instructions.
 4. **The PO approves what code built.** The approval shows commands built from validated names, not a review of model-written shell.
 5. **Retries may fail.** Shikiru retries within its own budgets before it escalates, and the loop guard bounds the Operator's own retries.
-6. **One goal, one component.** The PO names the component in `/goal`; nothing plans across components.
+6. **Tasks of one plan are submitted together.** The Expert plans across components, but nothing orders the tasks: Shikiru runs them independently.
 7. **A stale engine environment.** An engine keeps the environment it was started with, so a tool installed into a new directory may stay invisible to its agents until the engine restarts. The success message gives the full path.
 8. **Escalation text leaves the host.** Questions go to Telegram automatically, and *Details* sends more of the packet on request. Packets can contain project data; the PO decides what the chat may hold by choosing the bot and its owners.
 9. **One host, one channel.** Not highly available. A lost Telegram acknowledgement can produce a duplicate message, which carries its reference.
 10. **A clean stop is judged by time.** Shikiru does not record who stopped the engine, so a stop is respected only after `stop_grace_min` with the Operator running. A project the PO stopped while the Operator was down is started again.
 11. **An unmerged pull request may cost one retry.** Shikiru raises `integration_blocked` when a PR waits beyond its budget; the first retry just waits again, and the loop guard forwards the second.
+12. **A Codex rung is not confined to the scope.** It can read any file the user can. It has no way to send what it reads anywhere except to a granted host and to the PO's chat.
+13. **A granted host is trusted.** A page of a granted host can carry text that steers the agent, and a request to a granted host can carry data out in its URL.
+14. **Agent sessions stay in the agent's own store.** Deleting a conversation deletes the Operator's data; the session files the CLIs keep under their own directories are not touched.

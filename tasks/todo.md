@@ -166,7 +166,7 @@ constraints are in tasks/plan.md.
 
 ### X1
 
-- [ ] X1. Describe the Expert in the design
+- [x] X1. Describe the Expert in the design
 
 ## Acceptance criteria
 
