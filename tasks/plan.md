@@ -155,6 +155,109 @@ links. Do not alter runtime behavior or perform live service, network or secret 
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 
+## Planned work: service command group
+
+S1 to S3 move the service commands into a `service` command group, in order. S1 renames, S2 adds
+start and stop, S3 makes install start the service. A change has no size limit; each task is one
+coherent change with its own commit.
+
+Shared constraints:
+
+- The old top-level install command (the hyphenated one) and the old top-level restart command are
+  removed without aliases. Afterwards no tracked file mentions them, including this file and
+  tasks/todo.md, whose historical records S1 rewords. Audit with patterns that do not match
+  themselves: `install[-_]service` and `yaku[ ]restart`, and look for the old restart verb used as
+  a bare subcommand in tests and scripts.
+- The explicit request authorizes editing docs/design.md for these command names, despite
+  AGENTS.md's general restriction. Nothing else in the design changes.
+- Tests use a fake CommandRunner. None runs launchctl or systemctl, installs a package, runs sudo or
+  touches the host. A check on a real macOS and a real Linux host is the owner's; the report says
+  it was not run.
+- Each task ticks only its own S-line in tasks/todo.md and runs `uv run poe check`.
+
+### S1. Group the service commands under `service` (normal)
+
+Add a `service` command group with `install` and `restart`. Remove the old top-level install and
+restart commands, with no aliases. Both keep their behavior, global options (`--product`, `--home`,
+`--json`), output, JSON shape and exit codes; only the command path changes to
+`shikiri-yaku service install` and `shikiri-yaku service restart`. Rename the functions, tests and
+other identifiers that carry the old command names. Update every reference: README.md,
+docs/reference.md, docs/design.md (the module list and the paragraph on installing and updating),
+help text, messages the program prints, tests, scripts and CI. Reword the historical records in
+tasks/plan.md and tasks/todo.md that name the old commands, in neutral words, without changing their
+meaning or completion states. The commit type ends with `!` because it removes commands.
+
+## Acceptance criteria
+
+- `shikiri-yaku service install` and `shikiri-yaku service restart` behave as the old commands did.
+  The old commands are unknown commands (usage error), with no alias.
+- `shikiri-yaku --help` lists `service`, and `shikiri-yaku service --help` lists `install` and
+  `restart`.
+- A search of all tracked files with the audit patterns of the shared constraints finds nothing, and
+  no source identifier, test name, document or message carries the old command names.
+- The restart tests are moved to the new path, not weakened. No other behavior changes.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### S2. Add `service start` and `service stop` (normal)
+
+After S1. Add `service start` and `service stop`. They have the same scope and output as
+`service restart`: every product under `--home`, or the one named by `--product`; one line per
+product; `--json` prints a list with the same fields; exit 1 if any product failed. The `result`
+value is `started`, `stopped` or the reason it did not (`restarted` stays for restart). A product
+whose unit was never written is `not installed`, and nothing runs for it.
+
+Commands. macOS start: `launchctl kickstart gui/<uid>/<label>` (without `-k`, so a running job is
+left alone). macOS stop: `launchctl kill SIGTERM gui/<uid>/<label>`, then wait until the job no
+longer runs, polling `launchctl print`, bounded by a timeout. A timeout is a failure. Linux:
+`systemctl --user start` and `systemctl --user stop` on the unit. The poll interval and the timeout
+are settings.
+
+Meaning. Stop means stopped now. `run` exits cleanly on SIGTERM and the units do not restart after a
+clean exit, so the service stays down until `service start`, `service restart` or the next login.
+On macOS the job stays loaded after stop, so start and restart keep working. A unit that was written
+but is not loaded is reported with the service manager's message; S3 makes install load it.
+
+Docs. In README.md and docs/reference.md replace the raw launchctl and systemctl instructions that
+start or stop the service (including the stop in the rollback data-restore steps) with the new
+commands. Keep the inspection commands (status, journalctl, launchctl print) and the instructions
+to disable the service at login.
+
+## Acceptance criteria
+
+- Start and stop issue exactly the commands above on each platform, tested with a fake CommandRunner
+  as a table, including the not-installed, manager-refused and stop-timeout cases.
+- On macOS the stop waits until the job no longer runs before it reports `stopped`.
+- Restart, install and the other commands behave as after S1.
+- No document tells the user to run launchctl or systemctl to start or stop the service.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### S3. `service install` starts the service (high)
+
+After S2. After it writes the unit, `service install` makes the service run that unit. Linux:
+reload the user manager, enable the unit, and run it; restart it if it already runs so the new
+unit file takes effect. macOS: load the LaunchAgent so it runs, replacing a loaded one so the new
+plist is read. Running install twice leaves one running service from the latest unit. The order is
+as before (validate settings, find the executable, write the unit) and then activate. If
+activation fails, the unit file stays, the manager's message is printed and the exit status is 1.
+The output names the unit path and says the service started; it no longer prints a command for the
+user to run, and the field that carried it is removed if nothing else uses it.
+
+Docs. Replace the statements that writing the unit does not activate it, and the manual reload
+instructions after a rewritten unit, in README.md and docs/reference.md with the new behavior.
+Disabling the service at login stays a manual step. State what the implementation does when another
+process, such as a foreground `run`, holds the instance lock, and that it must be stopped first.
+Lock behavior itself does not change.
+
+## Acceptance criteria
+
+- Install writes the unit and then runs the activation commands of each platform in the order
+  above, tested with a fake CommandRunner as a table, including a first install, a repeated install
+  of a running service and a refused activation.
+- A repeated install replaces the running service instead of starting a second one.
+- A failed activation leaves the unit file, prints the manager's message and exits 1.
+- No document tells the user to start or reload the service by hand after install.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Historical implementation records
 
 Everything from here to the end of this file records how T0 to E14 were implemented. It is kept

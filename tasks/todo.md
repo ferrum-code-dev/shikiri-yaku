@@ -134,6 +134,23 @@ R10 and R11 replace T-126. Details and shared constraints are in `tasks/plan.md`
 - The change is limited to README.md, docs/reference.md (where T-129 moved the full reference detail) and this task's checklist entry; production code, tests, package metadata and service state are unchanged.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+## Planned work: service command group
+
+S1 to S3 move the service commands into a `service` command group. Details and shared constraints
+are in tasks/plan.md.
+
+### S1
+
+- [ ] S1. Group the service commands under `service`
+
+### S2
+
+- [ ] S2. Add `service start` and `service stop`
+
+### S3
+
+- [ ] S3. `service install` starts the service
+
 ## Historical implementation records
 
 The entries below from Phase 0 (T0) to Phase E are historical records. They are not current guidance,
