@@ -32,6 +32,7 @@ from shikiri_yaku.ports import (
     ShikiruTask,
 )
 from tests.support.destinations import FixedDestinations
+from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -176,19 +177,29 @@ class Harness:
             group_id=-100123,
             retention=timedelta(days=14),
         )
+        clients = clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")}
         self.turns = ExpertTurns(
             self.log,
             self.outbox,
             Clock(),
             expert=self.expert,
             topics=self.topics,
-            clients=clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")},
+            clients=clients,
             scope={name: path / name for name in ("api", "web")},
             directory=path,
             channel="telegram",
             group_id=-100123,
             runs=self.runs,
             ending=self.ending,
+            proposals=expert_proposals(
+                self.database,
+                self.log,
+                self.outbox,
+                Clock(),
+                clients,
+                channel="telegram",
+                group_id=-100123,
+            ),
         )
         self.ask = Ask(
             self.log,

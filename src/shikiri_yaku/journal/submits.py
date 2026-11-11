@@ -27,20 +27,22 @@ class JournalSubmits:
         self._channel_name = channel_name
 
     def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
-        inserted = self._ops.intend(
-            NewOp(
-                identity=_identity(self._channel_name, update_id),
-                kind=_KIND,
-                project=payload.component,
-                payload=payload.model_dump_json(),
-            ),
-            now,
-        )
-        op = self.get(inserted.row_id)
-        if op is None:
-            message = f"submit op {inserted.row_id} is missing from the journal"
-            raise JournalError(message)
-        return op
+        return self._intend(_identity(self._channel_name, update_id), payload, now)
+
+    def intend_task(
+        self, proposal_id: int, index: int, payload: SubmitPayload, now: datetime
+    ) -> None:
+        """Journal one task of a proposal; its identity is the proposal and the task's place."""
+        self._intend(f"{self._channel_name}:proposal:{proposal_id}:{index}", payload, now)
+
+    def for_proposal(self, proposal_id: int) -> list[SubmitOp]:
+        """Return the tasks of a proposal in the order they were journaled."""
+        rows = self._database.connection.execute(
+            "SELECT id FROM ops WHERE kind = ? AND json_extract(payload, '$.proposal') = ?"
+            " ORDER BY id",
+            (_KIND, proposal_id),
+        ).fetchall()
+        return [op for row in rows if (op := self.get(row["id"])) is not None]
 
     def get(self, op_id: int) -> SubmitOp | None:
         op = self._ops.get(op_id)
@@ -76,8 +78,10 @@ class JournalSubmits:
             return self.intend(update_id, payload, now)
 
     def unfinished(self) -> list[SubmitOp]:
+        """Return the goal submits not final; a proposal's tasks are settled by their proposal."""
         ops = [_submit_op(op) for op in self._ops.non_final() if op.kind == _KIND]
-        return [op for op in ops if self._taken_by(op.id) is None]
+        goals = [op for op in ops if op.payload.proposal is None]
+        return [op for op in goals if self._taken_by(op.id) is None]
 
     def _taken_by(self, prompt_id: int) -> str | None:
         """Return the identity of the replacement that consumed the prompt, or None."""
@@ -116,6 +120,22 @@ class JournalSubmits:
             },
         ).rowcount
         return moved == 1
+
+    def _intend(self, identity: str, payload: SubmitPayload, now: datetime) -> SubmitOp:
+        inserted = self._ops.intend(
+            NewOp(
+                identity=identity,
+                kind=_KIND,
+                project=payload.component,
+                payload=payload.model_dump_json(),
+            ),
+            now,
+        )
+        op = self.get(inserted.row_id)
+        if op is None:
+            message = f"submit op {inserted.row_id} is missing from the journal"
+            raise JournalError(message)
+        return op
 
 
 def _identity(channel_name: str, update_id: int) -> str:

@@ -248,7 +248,10 @@ class Conversations:
         return [_record(row) for row in rows]
 
     def erase(self, conversation_id: int, *, topic_chat: int) -> None:
-        """Delete every row of a conversation: its messages and replies, topic, turns and request.
+        """Delete every row of a conversation.
+
+        That is its messages and replies, topic, turns, request, and its proposals with their tasks,
+        whose request texts are the conversation's own.
 
         A message is the conversation's when it is tagged with it, is its request, or was sent in
         its topic. A channel does not reuse a topic's id in its chat, so the topic picks out only
@@ -273,6 +276,14 @@ class Conversations:
             )
             connection.execute(_ERASE_MESSAGES, owned)
             connection.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
+            connection.execute(
+                "DELETE FROM ops WHERE kind = 'submit' AND json_extract(payload, '$.proposal')"
+                " IN (SELECT update_id FROM proposals WHERE conversation_id = ?)",
+                (conversation_id,),
+            )
+            connection.execute(
+                "DELETE FROM proposals WHERE conversation_id = ?", (conversation_id,)
+            )
             connection.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
             connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
 

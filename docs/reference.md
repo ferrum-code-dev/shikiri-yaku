@@ -238,6 +238,39 @@ The outcome depends on what Shikiru reports:
 - **Connection failed after submission may have reached Shikiru:** the bot says the result is uncertain and offers **Submit again**. It never retries on its own.
 - **Crash after submission, before the acknowledgement was recorded:** after a restart, the same uncertain prompt with **Submit again** appears. Recovery marks the goal uncertain and does not send it again. Check the Shikiru project before you tap **Submit again**. The first request may have been accepted, so a retry can create a duplicate task.
 
+### Task proposals
+
+An Expert answer that proposes tasks shows one line per task (component and title). The bot offers
+**Submit all** and **Reject all** only after every task-list message has been sent; if a task-list
+message is refused, the actions are not offered. Every task is shown whole, and once submitted its
+outcome is shown too. Long outcomes continue in following messages, preserving the complete
+Shikiru task ids.
+
+- **Submit all:** each task's text goes to its component with `submit_task`, one submit op per task,
+  in the order given, one at a time. The action message is then edited to remove its buttons and
+  show the outcome when it fits; otherwise it points to following result messages. Each outcome
+  includes the full Shikiru task id, "not submitted, Shikiru refused it", or "unknown". The submit
+  stops at the first task that is unknown or whose component is not configured; the tasks after it
+  stay unsent.
+- **Reject all:** nothing is submitted, and the message says so.
+- **Once only:** a tap submits at most once. A second tap, a tap after a restart, and a tap on a
+  proposal that a newer answer in the same conversation voided each submit nothing and say why. A
+  tap counts only from the action message sent after its task list; a button tapped on any other
+  message is ignored. Settled and voided messages lose their buttons.
+- **Newer answers:** a newer answer voids the offered proposals of its conversation. Delivering an
+  older answer again changes nothing, so it cannot void a newer proposal.
+- **Crash during Submit all:** tasks already confirmed stay submitted. A task that was being sent
+  when the process stopped is **unknown**: it may have reached Shikiru, so it is never sent again.
+  Tasks not yet sent stay unsent. After the restart the bot posts one notice that numbers the
+  submitted, unknown and unsent tasks. Check the Shikiru project before you resubmit anything; a
+  new answer gives a new proposal.
+- **Restart:** a proposal's state is recorded before its message is edited, and every restart
+  edits each settled message to its recorded state. An edit lost to a crash is made up then.
+
+A proposal is offered, submitting, submitted, rejected, voided or interrupted. Its state and its
+task ops are journaled before Shikiru is asked, in the `proposals` table of `journal.db` (migration
+27, a journal schema change). Erasing a conversation deletes its proposals and their task ops.
+
 ## Questions, approvals and reminders
 
 An open escalation arrives with its question and the choices Shikiru offers. Tap a choice to apply it.

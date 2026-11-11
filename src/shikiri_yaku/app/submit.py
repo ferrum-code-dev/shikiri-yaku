@@ -49,6 +49,14 @@ class Submitter:
         client = self._clients.get(op.payload.component)
         return op if client is None else await self._advance(client, op, now)
 
+    async def advance(self, op: SubmitOp) -> SubmitOp:
+        """Send an intended op no earlier attempt claimed; return it as the journal holds it.
+
+        A component dropped from the settings leaves its op intended, unsent.
+        """
+        client = self._clients.get(op.payload.component)
+        return op if client is None else await self._advance(client, op, self._clock.now())
+
     def recover(self) -> list[SubmitOp]:
         """Settle the submits an earlier process left unfinished, and return the unknown ones.
 

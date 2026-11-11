@@ -101,6 +101,17 @@ class JournalFinalEdits:
                     (_BODY.dump_json(final).decode(), line, row["id"]),
                 )
 
+    def settle_notice(self, notice_key: str, message: Message) -> None:
+        # keep: a text already settled is not edited again, so settling after a restart is harmless
+        body = _BODY.dump_json(message).decode()
+        self._database.connection.execute(
+            """
+            UPDATE messages SET final_body = ?, final_line = NULL, final_edited = 0
+            WHERE notice_key = ? AND direction = ? AND (final_body IS NULL OR final_body <> ?)
+            """,
+            (body, notice_key, Direction.OUT, body),
+        )
+
     def to_edit(self) -> list[FinalEdit]:
         rows = self._database.connection.execute(
             """

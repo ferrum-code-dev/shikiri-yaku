@@ -225,7 +225,7 @@ constraints are in tasks/plan.md.
 
 ### X6
 
-- [ ] X6. Task proposals with Submit all and Reject all
+- [x] X6. Task proposals with Submit all and Reject all
 
 ## Acceptance criteria
 

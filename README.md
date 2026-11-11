@@ -153,6 +153,16 @@ may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-ou
 components. In a shared group, address General requests to the bot as `/ask@bot <question>`.
 If topic creation is uncertain, ask again; an interrupted turn is not repeated automatically.
 
+When an Expert answer proposes tasks, it lists each task, then offers **Submit all** and **Reject
+all** after every task-list message has been sent. If a task-list message is refused, the actions
+are not offered. Submit all sends each
+task to its component, one at a time, then shows the complete task ids; long results continue in
+following messages too. Reject all submits nothing. A tap submits at most once: a second tap, a
+tap after a restart, or a tap on a proposal that a newer answer voided says so and submits nothing.
+If the bot restarts during Submit all, it says which tasks were submitted, which are unknown and
+not sent again, and which were never sent. Check Shikiru before you resubmit any of them. Details are in
+[Task proposals](docs/reference.md#task-proposals).
+
 Each message in an Expert topic is a follow-up turn of that conversation, answered after the
 turns sent before it. In an Expert topic, `/effort [level]` shows or sets the effort of the next
 turn, `/summarize` asks for a short summary, and `/help` lists them. The other commands do not

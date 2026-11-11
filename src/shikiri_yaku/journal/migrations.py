@@ -30,6 +30,7 @@ so an upgraded journal replaces the approval it already holds.
 Migration 24 keeps the name of each one-time repair that ran, so an upgraded journal repairs once.
 Migration 26 keeps the effort a conversation was given with `/effort`, which its next turn passes
 to the agent.
+Migration 27 keeps the state of each Expert task proposal, so its buttons act at most once.
 """
 
 from __future__ import annotations
@@ -231,4 +232,11 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         )""",
     ),
     ("ALTER TABLE conversations ADD COLUMN effort TEXT",),
+    (
+        """CREATE TABLE proposals (
+            update_id INTEGER PRIMARY KEY,
+            conversation_id INTEGER NOT NULL REFERENCES conversations (id),
+            state TEXT NOT NULL
+        )""",
+    ),
 )

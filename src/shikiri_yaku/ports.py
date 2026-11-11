@@ -998,6 +998,13 @@ class FinalEdits(Protocol):
         """Return the signals whose line is not yet shown on every copy, with that line."""
         ...
 
+    def settle_notice(self, notice_key: str, message: Message) -> None:
+        """Record the final state of the copy sent under a notice key, shown to the platform next.
+
+        The copy is edited once it is sent; a copy not yet sent is edited after its send.
+        """
+        ...
+
     def settle(self, number: int, line: str) -> None:
         """Record, for each sent copy with buttons, its text with the line added and no buttons.
 
@@ -1518,11 +1525,24 @@ class SubmitStatus:
     UNKNOWN: Final = "unknown"
 
 
+class ProposalStatus:
+    """States of an Expert task proposal, as text: the journal and the app share them."""
+
+    OFFERED: Final = "offered"
+    SUBMITTING: Final = "submitting"
+    SUBMITTED: Final = "submitted"
+    REJECTED: Final = "rejected"
+    VOIDED: Final = "voided"
+    UNOFFERED: Final = "unoffered"
+    INTERRUPTED: Final = "interrupted"
+
+
 class SubmitPayload(BaseModel):
     """What a submit op sends: the component whose Shikiru takes it, and the request.
 
     `destination` is the chat the outcome is reported in. `retry_of` is the unknown submit that a
-    replacement consumed; it is None for a goal the PO sent.
+    replacement consumed; it is None for a goal the PO sent. `proposal` is the update id of the
+    Expert proposal the task belongs to; it is None for a goal.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -1530,6 +1550,7 @@ class SubmitPayload(BaseModel):
     request: str
     destination: Destination
     retry_of: int | None = None
+    proposal: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,10 +12,9 @@ from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest, ExpertTurn
 from shikiri_yaku.domain.inbound import InboundKind
-from shikiri_yaku.domain.outbound import Purpose, fit
+from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     ChannelRefusedError,
     ExpertError,
     Message,
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert import ConversationLog, ExpertTopics
     from shikiri_yaku.app.expert_ending import ExpertEnding
+    from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.expert_runs import ConversationRuns
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.domain.inbound import Inbound
@@ -99,6 +99,7 @@ class ExpertTurns:
         group_id: int,
         runs: ConversationRuns,
         ending: ExpertEnding,
+        proposals: ExpertProposals,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -112,6 +113,7 @@ class ExpertTurns:
         self._group_id = group_id
         self._runs = runs
         self._ending = ending
+        self._proposals = proposals
 
     def owns(self, item: Inbound) -> bool:
         """Return whether a text, reply or closed topic belongs to an open Expert topic."""
@@ -236,14 +238,7 @@ class ExpertTurns:
         if turn.state != _DONE or turn.answer is None:
             return
         answer = ExpertAnswer.model_validate_json(turn.answer)
-        queue_expert_notice(
-            self._outbox,
-            self._clock,
-            Destination(self._channel, str(self._group_id), conversation.thread_id),
-            fit(answer.reply, MESSAGE_TEXT_LIMIT),
-            key=f"ask:answer:{update_id}",
-            conversation_id=conversation.id,
-        )
+        self._proposals.queue_answer(update_id)
         if answer.title and not self._log.history(conversation_id, before=update_id):
             with suppress(ChannelRefusedError):
                 await self._topics.rename(conversation.thread_id, f"💬 {answer.title}")
@@ -286,6 +281,7 @@ class ExpertTurns:
 
     def recover(self) -> None:
         """Tell topics about creations left uncertain and turns a restart interrupted."""
+        self._proposals.recover()
         for row in self._log.recover_creations():
             queue_expert_notice(
                 self._outbox,

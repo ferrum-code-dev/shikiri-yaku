@@ -26,6 +26,7 @@ from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.ports import CommandResult, ShikiruLinkDownError
 from tests.support.destinations import FixedDestinations
+from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping, Sequence
@@ -192,6 +193,15 @@ class Harness:
             group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
+            proposals=expert_proposals(
+                self.database,
+                self.log,
+                self.outbox,
+                Clock(),
+                clients,
+                channel=CHANNEL,
+                group_id=GROUP_ID,
+            ),
         )
         self.ask = Ask(
             self.log,

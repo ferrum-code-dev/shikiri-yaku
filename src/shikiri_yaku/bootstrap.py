@@ -46,6 +46,7 @@ from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
+from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.goal import GoalCommand
@@ -114,6 +115,7 @@ from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.install_reconcile import JournalInstallReconcile
 from shikiri_yaku.journal.install_runs import JournalInstallRuns
 from shikiri_yaku.journal.open import JournalOpen
+from shikiri_yaku.journal.proposals import JournalProposals
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.stats import JournalStats
@@ -344,6 +346,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
     runs = ConversationRuns()
     ending: ExpertEnding | None = None
+    proposals: ExpertProposals | None = None
     turns = None
     if (
         expert is not None
@@ -362,6 +365,20 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             group_id=group_id,
             retention=timedelta(days=settings.expert.retention_days),
         )
+        proposals = ExpertProposals(
+            JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+            conversations,
+            Submitter(
+                JournalSubmits(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+                clients,
+                clock,
+            ),
+            JournalFinalEdits(journal, _journal_replies(journal)),
+            outbox,
+            clock,
+            channel=TELEGRAM_CHANNEL,
+            group_id=group_id,
+        )
         turns = ExpertTurns(
             conversations,
             outbox,
@@ -375,6 +392,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             group_id=group_id,
             runs=runs,
             ending=ending,
+            proposals=proposals,
         )
     ask = Ask(
         conversations,
@@ -425,6 +443,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             install_runner=install_executor,
             ask=ask,
             turns=turns,
+            proposals=proposals,
         )
     )
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
@@ -761,6 +780,7 @@ def inbound_job(
     install_runner: InstallRunner,
     ask: Ask | None = None,
     turns: ExpertTurns | None = None,
+    proposals: ExpertProposals | None = None,
 ) -> Job:
     """Return the one poller of the PO's chat; it applies taps and replies as they arrive."""
     operator = settings.operator
@@ -815,6 +835,7 @@ def inbound_job(
             approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
             runner=install_runner,
         ),
+        proposals=proposals,
     )
     health = HealthSource(OPERATOR_SCOPE, sources, clock, operator.link_unreachable_min)
     service = InboundService(
@@ -828,6 +849,12 @@ def inbound_job(
         expert=turns,
     )
     return service.run
+
+
+def _journal_replies(journal: Database) -> JournalReplies:
+    return JournalReplies(
+        journal, SignalStore(journal), OpStore(journal), channel_name=TELEGRAM_CHANNEL
+    )
 
 
 def goal_command(

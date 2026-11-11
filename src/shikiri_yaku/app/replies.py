@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.app.commands import Commands
+    from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
@@ -80,7 +81,8 @@ def _confirm_op(key: str) -> int | None:
 class Replies:
     """Apply stored inbound items through their originating messages and journaled resolve ops.
 
-    A tap whose message has no signal is a *Submit again* of a goal, so it goes to the goal.
+    A tap whose message has no signal is a proposal's *Submit all* or *Reject all*, or else a
+    *Submit again* of a goal, so it goes to the proposals and then to the goal.
     """
 
     def __init__(
@@ -94,6 +96,7 @@ class Replies:
         commands: Commands,
         goal: GoalCommand,
         install_replies: InstallReplyHandler | None = None,
+        proposals: ExpertProposals | None = None,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -103,6 +106,7 @@ class Replies:
         self._commands = commands
         self._goal = goal
         self._install_replies = install_replies
+        self._proposals = proposals
 
     async def handle(self, item: Inbound) -> None:
         if item.kind == InboundKind.TEXT:
@@ -111,7 +115,7 @@ class Replies:
         reference = item.reply_to_ref if item.kind == InboundKind.REPLY else item.message_ref
         origin = None if reference is None else self._log.origin(self._channel, reference)
         if origin is None:
-            if item.kind == InboundKind.TAP:
+            if item.kind == InboundKind.TAP and not await self._proposal_tap(item):
                 await self._goal.tap(item)
             return
         if item.kind == InboundKind.REPLY:
@@ -119,6 +123,9 @@ class Replies:
                 await self._answer(item, origin, text=item.text)
             return
         await self._tap(item, origin)
+
+    async def _proposal_tap(self, item: Inbound) -> bool:
+        return self._proposals is not None and await self._proposals.tap(item)
 
     async def _tap(self, item: Inbound, origin: ReplyOrigin) -> None:
         if not item.data or item.data not in {button.data for button in origin.message.buttons}:

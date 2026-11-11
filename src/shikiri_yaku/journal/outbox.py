@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.journal.messages import Delivery
 from shikiri_yaku.ports import Pending
 
 if TYPE_CHECKING:
@@ -109,13 +110,13 @@ class JournalOutbox:
                 stored.conversation_id,
             )
             for stored in self._messages.unconfirmed()
-            if stored.body is not None
+            if stored.body is not None and self._ready(stored.id)
         ]
 
     def pending_message(self, message_id: int) -> Pending | None:
         self._messages.retire_obsolete(self._endings)
         stored = self._messages.unconfirmed_message(message_id)
-        if stored is None or stored.body is None:
+        if stored is None or stored.body is None or not self._ready(stored.id):
             return None
         return Pending(
             stored.id,
@@ -123,6 +124,47 @@ class JournalOutbox:
             stored.body,
             stored.conversation_id,
         )
+
+    def _ready(self, message_id: int) -> bool:
+        pending = self._database.connection.execute(
+            "SELECT notice_key, final_body, channel, chat, thread FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        if pending is None:
+            return False
+        notice_key = pending["notice_key"]
+        if (
+            notice_key is None
+            or not notice_key.startswith("ask:answer:")
+            or not notice_key.endswith(":actions")
+        ):
+            return True
+        if pending["final_body"] is not None:
+            self._database.connection.execute(
+                "UPDATE messages SET delivery = ? WHERE id = ? AND delivery = ?",
+                (Delivery.OBSOLETE, message_id, Delivery.PENDING),
+            )
+            return False
+        answer_key = notice_key.removesuffix(":actions")
+        rows = self._database.connection.execute(
+            "SELECT delivery FROM messages WHERE channel = ? AND chat = ? AND thread IS ?"
+            " AND (notice_key = ? OR notice_key LIKE ?)",
+            (
+                pending["channel"],
+                pending["chat"],
+                pending["thread"],
+                answer_key,
+                f"{answer_key}:part:%",
+            ),
+        ).fetchall()
+        deliveries = [row["delivery"] for row in rows]
+        if any(delivery in (Delivery.REFUSED, Delivery.OBSOLETE) for delivery in deliveries):
+            self._database.connection.execute(
+                "UPDATE messages SET delivery = ? WHERE id = ? AND delivery = ?",
+                (Delivery.OBSOLETE, message_id, Delivery.PENDING),
+            )
+            return False
+        return bool(deliveries) and all(delivery == Delivery.SENT for delivery in deliveries)
 
     def confirm(self, message_id: int, message_ref: str) -> None:
         self._messages.confirm_delivery(message_id, message_ref)

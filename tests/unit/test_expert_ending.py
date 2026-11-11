@@ -30,6 +30,7 @@ from shikiri_yaku.ports import (
     Message,
     ShikiruTask,
 )
+from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator
@@ -179,19 +180,29 @@ class Harness:
             group_id=GROUP_ID,
             retention=RETENTION,
         )
+        clients = {"api": cast("ShikiruClient", client)}
         self.turns = ExpertTurns(
             self.log,
             self.outbox,
             self.clock,
             expert=expert,
             topics=self.topics,
-            clients={"api": cast("ShikiruClient", client)},
+            clients=clients,
             scope={"api": path / "api"},
             directory=path,
             channel=CHANNEL,
             group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
+            proposals=expert_proposals(
+                self.database,
+                self.log,
+                self.outbox,
+                self.clock,
+                clients,
+                channel=CHANNEL,
+                group_id=GROUP_ID,
+            ),
         )
 
     def open_conversation(self, update_id: int, thread: int, *, origin_chat: int = CHAT) -> int:

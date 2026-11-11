@@ -7,12 +7,18 @@ type DetailsTap = tuple[Literal["d"], PositiveInt]
 type StopRemindersTap = tuple[Literal["k"], PositiveInt]
 type SubmitTap = tuple[Literal["s"], PositiveInt]
 type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
-type Callback = AnswerTap | DetailsTap | StopRemindersTap | SubmitTap | InstallTap
+type SubmitAllTap = tuple[Literal["p"], PositiveInt]
+type RejectAllTap = tuple[Literal["r"], PositiveInt]
+type Callback = (
+    AnswerTap | DetailsTap | StopRemindersTap | SubmitTap | InstallTap | SubmitAllTap | RejectAllTap
+)
 
 STOP_REMINDERS_VERB: Final = "k"
 SUBMIT_VERB: Final = "s"
 INSTALL_VERB: Final = "i"
 DECLINE_VERB: Final = "x"
+SUBMIT_ALL_VERB: Final = "p"
+REJECT_ALL_VERB: Final = "r"
 _CALLBACK = TypeAdapter[Callback](Callback)
 
 
@@ -24,6 +30,16 @@ def stop_reminders_data(number: int) -> str:
 def submit_data(op_id: int) -> str:
     """Return the callback data of *Submit again*; the op id is its journal reference."""
     return f"{SUBMIT_VERB}:{op_id}"
+
+
+def submit_all_data(proposal_id: int) -> str:
+    """Return the callback data of *Submit all*; the proposal is the Expert turn's update id."""
+    return f"{SUBMIT_ALL_VERB}:{proposal_id}"
+
+
+def reject_all_data(proposal_id: int) -> str:
+    """Return the callback data of *Reject all*; the proposal is the Expert turn's update id."""
+    return f"{REJECT_ALL_VERB}:{proposal_id}"
 
 
 def install_data(number: int, op_id: int) -> str:
