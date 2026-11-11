@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, override
 
 from shikiri_yaku.ports import ChannelCheck, CheckLine, CommandResult, CommandRunner
 from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings
+from tests.support.clock import NapClock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping, Sequence
@@ -181,6 +182,7 @@ def test_run_and_doctor_use_fake_channel_check_without_importing_telegram(
                     adopt_topic,
                     forget_topic,
                     commands=_NoHostCommands(),
+                    clock=NapClock(),
                     cli_settings=CliSettings(),
                 )
                 == 0

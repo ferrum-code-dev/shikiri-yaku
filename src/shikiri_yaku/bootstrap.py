@@ -879,6 +879,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         adopt_topic,
         forget_topic,
         commands=ProcessCommandRunner(),
+        clock=SystemClock(),
         cli_settings=settings,
     )
 

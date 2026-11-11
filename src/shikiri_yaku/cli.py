@@ -20,14 +20,14 @@ from typer.main import get_command
 
 from shikiri_yaku.cli_render import (
     CheckResult,
-    RestartResult,
+    ServiceResult,
     doctor_document,
     print_doctor,
     print_failure,
     print_json,
-    print_restarts,
+    print_services,
     print_stats,
-    restart_document,
+    service_document,
     stats_document,
 )
 from shikiri_yaku.domain.releases import release_numbers
@@ -50,7 +50,7 @@ from shikiri_yaku.ports import (
 )
 from shikiri_yaku.service import (
     ServiceError,
-    restart_product,
+    ServiceManager,
     service_file,
     write_service_file,
 )
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
     from shikiri_yaku.app.stats import Measures
-    from shikiri_yaku.ports import ChannelCheck, CommandRunner
+    from shikiri_yaku.ports import ChannelCheck, Clock, CommandRunner
     from shikiri_yaku.service import ServiceFile
     from shikiri_yaku.settings import Settings
 
@@ -113,6 +113,7 @@ type Compose = Callable[[Settings, Path], Lifecycle]
 type ReadMeasures = Callable[[Path], Measures]
 type AdoptTopic = Callable[[Path, str, int], str]
 type ForgetTopic = Callable[[Path, str], str]
+type ServiceOperation = Callable[[ServiceManager, str], Awaitable[str | None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,9 +224,8 @@ JSON_OPTION = Annotated[
     typer.Option(
         "--json",
         help=(
-            "Print doctor's and stats' output as one JSON object, and service restart's as a "
-            "JSON list. "
-            "[bold]Default:[/] off"
+            "Print doctor's and stats' output as one JSON object, and each service command's as "
+            "a JSON list. [bold]Default:[/] off"
         ),
     ),
 ]
@@ -267,6 +267,39 @@ def _options(ctx: typer.Context) -> _Global:
     return cast("_Global", ctx.find_root().obj)
 
 
+def _add_service_commands(
+    service: typer.Typer,
+    *,
+    commands: CommandRunner,
+    clock: Clock,
+    cli_settings: CliSettings,
+) -> None:
+    run_service = partial(_service, commands=commands, clock=clock, cli_settings=cli_settings)
+
+    @service.command("install", help="Write the service unit of one product.")
+    def service_install(ctx: typer.Context) -> None:
+        raise typer.Exit(_service_install(_target(ctx)))
+
+    @service.command(
+        "start", help="Start the service of one product, or of every product under home."
+    )
+    def service_start(ctx: typer.Context) -> None:
+        raise typer.Exit(run_service(_options(ctx), ServiceManager.start, "started"))
+
+    @service.command(
+        "stop",
+        help="Stop the service of one product, or of every product under home, and wait for it.",
+    )
+    def service_stop(ctx: typer.Context) -> None:
+        raise typer.Exit(run_service(_options(ctx), ServiceManager.stop, "stopped"))
+
+    @service.command(
+        "restart", help="Restart the service of one product, or of every product under home."
+    )
+    def service_restart(ctx: typer.Context) -> None:
+        raise typer.Exit(run_service(_options(ctx), ServiceManager.restart, "restarted"))
+
+
 def build_app(
     compose: Compose,
     read_measures: ReadMeasures,
@@ -274,6 +307,7 @@ def build_app(
     forget_topic: ForgetTopic,
     *,
     commands: CommandRunner,
+    clock: Clock,
     cli_settings: CliSettings,
 ) -> typer.Typer:
     """Build the command line over the callables it is given; it builds no concrete object."""
@@ -286,7 +320,12 @@ def build_app(
         rich_markup_mode="rich",
     )
     service = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
-    app.add_typer(service, name="service", help="Install and restart the service of a product.")
+    app.add_typer(
+        service,
+        name="service",
+        help="Install, start, stop and restart the service of a product.",
+    )
+    _add_service_commands(service, commands=commands, clock=clock, cli_settings=cli_settings)
     telegram = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
     app.add_typer(telegram, name="telegram", help="Repair the Telegram topic of a component.")
 
@@ -315,16 +354,6 @@ def build_app(
                 as_json=_options(ctx).json_output,
             )
         )
-
-    @service.command("install", help="Write the service unit of one product.")
-    def service_install(ctx: typer.Context) -> None:
-        raise typer.Exit(_service_install(_target(ctx)))
-
-    @service.command(
-        "restart", help="Restart the service of one product, or of every product under home."
-    )
-    def service_restart(ctx: typer.Context) -> None:
-        raise typer.Exit(_restart(_options(ctx), commands, cli_settings))
 
     @app.command(help="Print the figures of one product's journal.")
     def stats(ctx: typer.Context) -> None:
@@ -359,6 +388,7 @@ def main(
     forget_topic: ForgetTopic,
     *,
     commands: CommandRunner,
+    clock: Clock,
     cli_settings: CliSettings,
 ) -> int:
     """Run one command line and return its exit code; the caller supplies what it needs."""
@@ -368,6 +398,7 @@ def main(
         adopt_topic,
         forget_topic,
         commands=commands,
+        clock=clock,
         cli_settings=cli_settings,
     )
     command = get_command(app)
@@ -571,7 +602,7 @@ def _service_install(target: _Target) -> int:
     login_path = os.environ.get("PATH", "")
     try:
         load_settings(target.directory)
-        service = _service(target, login_path)
+        service = _service_unit(target, login_path)
         write_service_file(service)
     except (SettingsError, ServiceError) as error:
         print_failure(str(error))
@@ -580,22 +611,40 @@ def _service_install(target: _Target) -> int:
     return 0
 
 
-def _restart(options: _Global, commands: CommandRunner, cli_settings: CliSettings) -> int:
+def _service(
+    options: _Global,
+    operation: ServiceOperation,
+    done: str,
+    *,
+    commands: CommandRunner,
+    clock: Clock,
+    cli_settings: CliSettings,
+) -> int:
+    """Run one service action on each product the options name and print what became of each."""
+    products = _service_products(options)
+    manager = ServiceManager(
+        commands,
+        clock,
+        sys.platform,
+        Path.home(),
+        os.getuid(),
+        command_timeout_s=cli_settings.service_timeout_s,
+        stop_timeout_s=cli_settings.stop_timeout_s,
+        stop_poll_s=cli_settings.stop_poll_s,
+    )
     try:
-        results = asyncio.run(
-            _restart_all(commands, _restart_products(options), cli_settings.restart_timeout_s)
-        )
+        results = asyncio.run(_each_product(manager, operation, products))
     except ServiceError as error:
         print_failure(str(error))
         return 1
     if options.json_output:
-        print_json(restart_document(results))
+        print_json(service_document(results, done))
     else:
-        print_restarts(results)
+        print_services(results, done)
     return 0 if all(result.problem is None for result in results) else 1
 
 
-def _restart_products(options: _Global) -> list[str]:
+def _service_products(options: _Global) -> list[str]:
     if options.product is not None:
         return [options.product]
     home = home_dir(options.home)
@@ -606,21 +655,13 @@ def _restart_products(options: _Global) -> list[str]:
     return found
 
 
-async def _restart_all(
-    commands: CommandRunner, products: Sequence[str], timeout_s: float
-) -> list[RestartResult]:
-    home = Path.home()
-    uid = os.getuid()
-    results: list[RestartResult] = []
-    for product in products:
-        problem = await restart_product(
-            commands, sys.platform, home, uid, product, timeout_s=timeout_s
-        )
-        results.append(RestartResult(product, problem))
-    return results
+async def _each_product(
+    manager: ServiceManager, operation: ServiceOperation, products: Sequence[str]
+) -> list[ServiceResult]:
+    return [ServiceResult(product, await operation(manager, product)) for product in products]
 
 
-def _service(target: _Target, login_path: str) -> ServiceFile:
+def _service_unit(target: _Target, login_path: str) -> ServiceFile:
     executable = shutil.which(_PROGRAM, path=login_path)
     if executable is None:
         message = f"{_PROGRAM} is not on PATH, so a service could not find it"

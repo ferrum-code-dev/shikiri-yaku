@@ -62,7 +62,9 @@ RETRY_BUDGET_PER_DAY: Final = 1
 RESTART_BUDGET_PER_HOUR: Final = 1
 RESTART_CONFIRM_S: Final = 60
 RESTART_POLL_S: Final = 5
-RESTART_TIMEOUT_S: Final = 30
+SERVICE_TIMEOUT_S: Final = 30
+STOP_TIMEOUT_S: Final = 30
+STOP_POLL_S: Final = 1
 APPROVAL_EXPIRY_H: Final = 24
 HOST_LOCK_POLL_S: Final = 1
 INSTALL_OUTPUT_TAIL_LINES: Final = 20
@@ -278,7 +280,9 @@ class Settings(_FrozenModel):
 class CliSettings(_FrozenModel):
     """Default-only settings for host-facing CLI operations."""
 
-    restart_timeout_s: PositiveInt = RESTART_TIMEOUT_S
+    service_timeout_s: PositiveInt = SERVICE_TIMEOUT_S
+    stop_timeout_s: PositiveInt = STOP_TIMEOUT_S
+    stop_poll_s: PositiveInt = STOP_POLL_S
 
 
 def product_names(home: Path) -> list[str]:

@@ -145,7 +145,7 @@ are in tasks/plan.md.
 
 ### S2
 
-- [ ] S2. Add `service start` and `service stop`
+- [x] S2. Add `service start` and `service stop`
 
 ### S3
 

@@ -320,7 +320,7 @@ shikiri-yaku/
     adapters/     Shikiru MCP link, Telegram, Reasoner CLIs, process runner, host lock, clock
     journal/      SQLite access; the only place with SQL
     bootstrap.py  the composition root: the only place that builds concrete objects
-    cli.py        run, doctor, stats, service install and restart, telegram adopt and forget
+    cli.py        run, doctor, stats, service install, start, stop and restart, telegram adopt and forget
   tests/
 ```
 

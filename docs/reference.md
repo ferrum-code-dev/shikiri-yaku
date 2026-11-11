@@ -93,7 +93,7 @@ Global options go before the command.
 | --- | --- |
 | `--product NAME` | The product to work on. You may leave it out when `--home` holds exactly one product directory. With none or several, the command refuses and names what it found. |
 | `--home PATH` | The directory that holds the product directories. Default: `~/.shikiri-yaku`. |
-| `--json` | Prints `doctor` and `stats` as one JSON object, and `service restart` as a JSON list. Other commands ignore it. Exit codes stay the same. |
+| `--json` | Prints `doctor` and `stats` as one JSON object, and each `service` command as a JSON list. Other commands ignore it. Exit codes stay the same. |
 | `--version` | Shows the version and exits. |
 
 | Command | Purpose |
@@ -102,7 +102,11 @@ Global options go before the command.
 | `doctor` | Checks one product's instance. |
 | `stats` | Prints the figures of one product's journal. |
 | `service install` | Writes a launchd or systemd unit that runs `run` at login. |
-| `service restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. Unlike the other verbs, it does not refuse several products. It prints one line per product and exits 1 if any product was not restarted. |
+| `service start` | Starts one product's service. Without `--product`, it starts every product under `--home`, in name order. Starting a running service leaves it running. |
+| `service stop` | Stops one product's service and waits until it has stopped. Without `--product`, it stops every product under `--home`, in name order. A service still running 30 seconds after the stop is a failure. |
+| `service restart` | Restarts one product's service. Without `--product`, it restarts every product under `--home`, in name order. |
+
+The three `service` commands do not refuse several products. Each prints one line per product and exits 1 if any product failed.
 | `telegram adopt <component> <thread-id>` | Repairs an uncertain topic. See [Topic recovery](#topic-recovery). |
 | `telegram forget <component>` | Deletes an uncertain topic's row. See [Topic recovery](#topic-recovery). |
 
@@ -116,7 +120,7 @@ When `stats` cannot run, it prints one `✘` line on standard error and nothing 
 | --- | --- |
 | `doctor` | `passed` (true when every check passed), `failed` (the number of failed checks), `total`, and `checks`. Each entry of `checks` has `name`, `passed` and `detail`. |
 | `stats` | `completed`, `queued`, `lifetime_seconds`, `waiting_seconds`, `share`, `handled_without_po`, `reasons`, `verdicts`, `installs` and `install_outcomes`. The durations are in seconds. `share` is the waiting fraction from 0 to 1, or `null` when unavailable. The last five keys each map a label to its count. |
-| `service restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when it restarted) and `result`: `restarted`, or the reason it did not, such as `not installed`. |
+| `service start`, `service stop`, `service restart` | A list with one entry per product, in name order. Each entry has `product`, `passed` (true when the action finished) and `result`: `started`, `stopped` or `restarted`, or the reason it did not, such as `not installed`. |
 
 ## Telegram
 
@@ -250,34 +254,39 @@ Run `shikiri-yaku --product shop service install` after you install the command 
 
 ### macOS
 
-The unit is a LaunchAgent at `~/Library/LaunchAgents/shikiri-yaku-shop.plist`. Activate it with the printed command:
+The unit is a LaunchAgent at `~/Library/LaunchAgents/shikiri-yaku-shop.plist`. Start it and stop it with:
 
 ```sh
-launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
+shikiri-yaku --product shop service start
+shikiri-yaku --product shop service stop
+```
+
+`service stop` sends SIGTERM and returns once the job no longer runs. The job stays loaded, so `service start` works again without another setup step. To inspect the job state:
+
+```sh
 launchctl print gui/$(id -u)/shikiri-yaku-shop
 ```
 
-Stop and unload it:
-
-```sh
-launchctl bootout gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
-```
-
-- To keep it from starting at a later login, run `launchctl disable gui/$(id -u)/shikiri-yaku-shop`. Before you bootstrap it again, run `launchctl enable` with the same target.
+- To keep it from starting at a later login, run `launchctl disable gui/$(id -u)/shikiri-yaku-shop`. If you disabled it, run `launchctl enable` with the same target before you start it again.
 - The generated plist sets no stdout or stderr log files. Use `launchctl print` to inspect the job state. To see application output while you troubleshoot, stop the service and run `shikiri-yaku --product shop run` in a terminal.
 
 ### Linux
 
-The unit is a user service at `~/.config/systemd/user/shikiri-yaku-shop.service`. The printed command enables it at login and starts it now:
+The unit is a user service at `~/.config/systemd/user/shikiri-yaku-shop.service`. Start it and stop it with:
 
 ```sh
-systemctl --user enable --now shikiri-yaku-shop.service
+shikiri-yaku --product shop service start
+shikiri-yaku --product shop service stop
+```
+
+To inspect it:
+
+```sh
 systemctl --user status shikiri-yaku-shop.service
 journalctl --user -u shikiri-yaku-shop.service -f
 ```
 
-- To stop it for now: `systemctl --user stop shikiri-yaku-shop.service`.
-- To stop it and disable it at login: `systemctl --user disable --now shikiri-yaku-shop.service`.
+- To keep it from starting at a later login, run `systemctl --user disable shikiri-yaku-shop.service`. Disabling does not stop it; stop it with `shikiri-yaku --product shop service stop`.
 
 ### Clean stops and rewritten units
 
@@ -285,13 +294,13 @@ journalctl --user -u shikiri-yaku-shop.service -f
 - The generated units restart after an unsuccessful exit. A stop requested through the service manager is not restarted.
 - Only one process can hold an instance's lock.
 - After you change `config.toml`, restart the product's service so it reads the new settings.
-- After `service install` rewrites a unit, reload it. On Linux, run `systemctl --user daemon-reload`, then restart the service. On macOS, boot out and bootstrap the LaunchAgent again.
+- After `service install` rewrites a unit, shikiri-yaku does not reload it yet. Until it does, `service start`, `service stop` and `service restart` keep using the unit the service manager loaded before.
 
 ## Applying changes
 
 A running service reads its code and `config.toml` only when it starts. A change takes effect after a restart.
 
-`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. A restart that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
+`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. `service start` and `service stop` act the same way, with their own commands: start does not replace a running job, and stop waits on macOS until the job has stopped. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
 
 The service runs the installed copy of `shikiri-yaku` that `service install` found on the login `PATH`. It never runs a checkout. That copy is a release. Do not install with `--editable`. The running service would follow unreviewed checkout changes, including after a crash restart.
 
@@ -322,10 +331,10 @@ shikiri-yaku service restart
 
 A rollback restores code, not data. A release that migrated a journal leaves the old version unable to open it. It stops with `JournalTooNewError`. To restore the data, repeat these steps for that product on each host where its service runs:
 
-1. Stop the service: `systemctl --user stop shikiri-yaku-<product>.service` on Linux, or `launchctl bootout gui/$(id -u)/shikiri-yaku-<product>` on macOS.
+1. Stop the service: `shikiri-yaku --product <product> service stop`.
 2. Copy the newest `journal-schema<N>.db` in `<home>/<product>/backups/` over `<home>/<product>/journal.db`.
 3. Delete `journal.db-wal` and `journal.db-shm` if they exist.
-4. Start the service again, as in [Service](#service).
+4. Start the service again: `shikiri-yaku --product <product> service start`.
 
 Changes made after that backup are lost.
 

@@ -381,6 +381,7 @@ def _run_doctor(
         adopt_topic,
         forget_topic,
         commands=_Clis(shikiru=shikiru),
+        clock=NapClock(),
         cli_settings=_CLI_SETTINGS,
     )
 
@@ -673,6 +674,7 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            clock=NapClock(),
             cli_settings=_CLI_SETTINGS,
         )
         == 1
@@ -773,6 +775,7 @@ def _started(home: Path, bot: BotFactory) -> int:
         adopt_topic,
         forget_topic,
         commands=_Clis(),
+        clock=NapClock(),
         cli_settings=_CLI_SETTINGS,
     )
 
@@ -872,6 +875,7 @@ def _exit_when_serving(argv: list[str], serving: Event) -> None:
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            clock=NapClock(),
             cli_settings=_CLI_SETTINGS,
         )
     )
@@ -982,6 +986,7 @@ def test_run_checks_liveness_and_signals_an_engine_that_is_down(
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            clock=NapClock(),
             cli_settings=_CLI_SETTINGS,
         )
         == 0
@@ -1127,6 +1132,8 @@ def test_the_only_product_under_home_is_used_without_the_product_option(tmp_path
         ["run", _PRODUCT],
         ["doctor", _PRODUCT],
         ["service", "install", _PRODUCT],
+        ["service", "start", _PRODUCT],
+        ["service", "stop", _PRODUCT],
         ["service", "restart", _PRODUCT],
         ["stats", _PRODUCT],
         ["topics", "adopt", _PRODUCT, "api", "7"],
@@ -1149,7 +1156,7 @@ def test_help_lists_the_verbs_and_the_groups(capsys: pytest.CaptureFixture[str])
     assert main(["service", "--help"]) == 0
 
     service_listed = capsys.readouterr().out
-    for word in ("install", "restart"):
+    for word in ("install", "start", "stop", "restart"):
         assert word in service_listed
 
 
@@ -1173,6 +1180,7 @@ def test_each_global_option_says_its_default(flag: str) -> None:
             adopt_topic,
             forget_topic,
             commands=_Clis(),
+            clock=NapClock(),
             cli_settings=_CLI_SETTINGS,
         )
     )

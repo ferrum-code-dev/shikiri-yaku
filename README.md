@@ -176,19 +176,15 @@ This writes a per-product service unit and prints its activation command. Writin
 start it. The unit uses the `PATH` of the shell that ran the command, so `shikiru` and the Reasoner
 CLIs are found.
 
-On macOS, the unit is a LaunchAgent. Start it, and stop it:
+On macOS the unit is a LaunchAgent; on Linux it is a user service. Start and stop it with:
 
 ```sh
-launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
-launchctl bootout gui/$(id -u) "$HOME/Library/LaunchAgents/shikiri-yaku-shop.plist"
+shikiri-yaku --product shop service start
+shikiri-yaku --product shop service stop
 ```
 
-On Linux, the unit is a user service. Start it, and stop it:
-
-```sh
-systemctl --user enable --now shikiri-yaku-shop.service
-systemctl --user stop shikiri-yaku-shop.service
-```
+`service stop` returns once the service has stopped. A stopped service stays down until you run
+`service start` or `service restart`, or log in again.
 
 Logs, status and rewritten units are covered in [Service](docs/reference.md#service).
 

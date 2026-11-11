@@ -1,4 +1,4 @@
-"""The output of the command line: doctor, stats, restart and one line per failure, as text or JSON.
+"""The output of the command line: doctor, stats, service actions and failures, as text or JSON.
 
 Rich writes colour only to a terminal, so piped output is plain text. Soft wrapping keeps each
 line whole, so a long detail is never split across lines of a pipe.
@@ -45,8 +45,8 @@ class CheckResult:
 
 
 @dataclass(frozen=True, slots=True)
-class RestartResult:
-    """One product's restart: `problem` says why it did not restart; None means it did."""
+class ServiceResult:
+    """One product's service action: `problem` says why it did not finish; None means it did."""
 
     product: str
     problem: str | None
@@ -61,20 +61,20 @@ def print_doctor(checks: Sequence[CheckResult]) -> None:
     console.print(_summary(checks))
 
 
-def print_restarts(results: Sequence[RestartResult]) -> None:
-    """Print one line per product: restarted, or the product and why it was not."""
+def print_services(results: Sequence[ServiceResult], done: str) -> None:
+    """Print one line per product: `done`, or the product and why it did not finish."""
     console = _console()
     for result in results:
-        console.print(_restart_line(result))
+        console.print(_service_line(result, done))
 
 
-def restart_document(results: Sequence[RestartResult]) -> list[dict[str, object]]:
-    """Build the restart report as JSON: one entry per product, with its result."""
+def service_document(results: Sequence[ServiceResult], done: str) -> list[dict[str, object]]:
+    """Build the service report as JSON: one entry per product, with its result."""
     return [
         {
             "product": result.product,
             "passed": result.problem is None,
-            "result": "restarted" if result.problem is None else result.problem,
+            "result": done if result.problem is None else result.problem,
         }
         for result in results
     ]
@@ -223,10 +223,10 @@ def _check_line(check: CheckResult) -> Text:
     return line
 
 
-def _restart_line(result: RestartResult) -> Text:
+def _service_line(result: ServiceResult, done: str) -> Text:
     if result.problem is None:
         line = _outcome(passed=True)
-        line.append(f" {result.product} restarted", style=PRIMARY_TEXT_COLOR)
+        line.append(f" {result.product} {done}", style=PRIMARY_TEXT_COLOR)
     else:
         line = _outcome(passed=False)
         line.append(f" {result.product}: {_one_line(result.problem)}", style=PRIMARY_TEXT_COLOR)
