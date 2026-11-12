@@ -259,15 +259,15 @@ constraints are in tasks/plan.md.
 
 ## Planned work: the Muse Code agent
 
-M1 to M5 add Muse Code as a third agent of the Reasoner and the Expert, after moving the agent
-adapters into separate modules. Details and shared constraints are in tasks/plan.md.
+M1 to M5 add Muse Code as a third agent of the Reasoner and the Expert. Execute each entry as a
+separate task in order; M2 must establish the component write boundary before M5 starts. Details and
+shared constraints are in tasks/plan.md.
 
 ### M1
 
 - [ ] M1. Move the CLI adapters into one module per agent
 
 ## Acceptance criteria
-
 - The existing Reasoner and Expert tests pass with only their imports and construction calls changed; no assertion changes.
 - No agent module imports another, and `common.py` and `registry.py` contain no agent name; a test enforces it.
 - `bootstrap.py` and `settings.py` contain no agent name. An unknown adapter is rejected with the same message as before, from `doctor` and from `run`.
@@ -280,7 +280,6 @@ adapters into separate modules. Details and shared constraints are in tasks/plan
 - [ ] M2. Probe Muse for the Expert and capture fixtures
 
 ## Acceptance criteria
-
 - `edit_file` and `write_file` are tried under the Expert's flags in the scratch directory, in a temporary directory outside it and in a directory that stands for a component, by absolute path, by a symlink and by a `../` path; a subagent, `monitor` and `workflow` are tried too. The report states where each succeeds. If a component can be written by any route, M5 is not started.
 - The results match the hand probe recorded in tasks/plan.md, or the report says how they differ. Another installed `muse` version is run over the same probes, or the report says that only 1.4.15 was checked.
 - The fixtures include the refusals `absolute path is outside the workspace`, `path escapes workspace` and `tool policy denied shell execution`.
@@ -296,7 +295,6 @@ adapters into separate modules. Details and shared constraints are in tasks/plan
 - [ ] M3. Muse Reasoner rung
 
 ## Acceptance criteria
-
 - A table test fixes the argument list: required flags present, `--disable-write`, `--trust-workspace`, `--yolo`, `--disable-sandbox` and `--disable-approval` absent, the prompt last, the effort passed only when named.
 - Fixture cases: valid answer, failed terminal, no terminal, schema mismatch, non-zero exit, timeout, non-JSON output; each is a `ReasonerError` naming the rung.
 - The call record has summed token counts and `None` for duration and cost, and is `None` without `run.usage`.
@@ -309,7 +307,6 @@ adapters into separate modules. Details and shared constraints are in tasks/plan
 - [ ] M4. Doctor and the owner's check of the Muse rung
 
 ## Acceptance criteria
-
 - `doctor` names a missing `muse` binary and a failing `muse --version` as a failed probe, in the form used for Claude and Codex.
 - The report lists the owner's checks that tests do not run: `doctor` under the service environment, a real Reasoner call, and `muse login` as the service's user.
 - README.md says how to give the service a `PATH` that finds `muse`, if the probe fails only because of it.
@@ -320,7 +317,6 @@ adapters into separate modules. Details and shared constraints are in tasks/plan
 - [ ] M5. Muse Expert rung
 
 ## Acceptance criteria
-
 - Started only if M2 shows that a component directory cannot be written under the Expert's flags by any route; otherwise stop and report.
 - A scope with a component under the system temporary directory is refused before Muse runs; components elsewhere are accepted.
 - Every turn runs with `request.directory` as its working directory; the schema and prompt files are in a temporary directory inside it, removed after the turn.
