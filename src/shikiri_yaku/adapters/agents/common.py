@@ -284,15 +284,20 @@ class CliExpert(ABC):
             msg = f"{self.name}: no usable answer: {error}"
             raise ExpertError(msg) from error
 
-    def _check_scope(self, request: ExpertRequest) -> None:
+    def _check_scope(self, request: ExpertRequest) -> None:  # noqa: B027 -- default accepts all
         pass
 
     def _prepare(
-        self, session: str | None, prompt: str, schema_file: Path
+        self,
+        session: str | None,
+        prompt: str,
+        schema_file: Path,  # noqa: ARG002 -- the hook's shape, which an override may need
     ) -> tuple[str | None, str]:
         return session, prompt
 
-    def _check_session(self, requested: str | None, returned: str) -> None:
+    def _check_session(  # noqa: B027 -- default accepts any session
+        self, requested: str | None, returned: str
+    ) -> None:
         pass
 
     def _web_args(self, request: ExpertRequest) -> list[str]:

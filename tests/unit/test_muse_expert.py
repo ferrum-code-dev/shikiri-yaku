@@ -21,6 +21,19 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 
+def _fixture_result(session: str) -> CommandResult:
+    fixture = Path("tests/fixtures/muse/success-schema-turn1.jsonl")
+    records = [json.loads(line) for line in fixture.read_text().splitlines()]
+    for item in records:
+        if item["stream"]["kind"] == "session":
+            item["stream"]["id"] = session
+        if item["payload_type"] == "run.terminal.completed":
+            item["payload"]["text"] = json.dumps(
+                {"reply": "ok", "title": "title", "tasks": [], "findings": "facts"}
+            )
+    return CommandResult(0, "\n".join(json.dumps(item) for item in records), "")
+
+
 class Runner:
     def __init__(self, mode: str = "ok") -> None:
         self.mode = mode
@@ -39,27 +52,23 @@ class Runner:
         stdin: str | None = None,
     ) -> CommandResult:
         del timeout_s, env, stdin
-        self.calls.append(list(argv))
+        return self._respond(list(argv), cwd)
+
+    def _respond(self, argv: list[str], cwd: Path | None) -> CommandResult:
+        self.calls.append(argv)
         self.directories.append(cwd)
         schema = Path(argv[argv.index("--output-schema") + 1])
         prompt = Path(argv[argv.index("--prompt-file") + 1])
         self.scratch.append(schema.parent)
         self.prompts.append(prompt.read_text(encoding="utf-8"))
-        assert schema.exists() and prompt.parent == schema.parent
+        assert schema.exists()
+        assert prompt.parent == schema.parent
         session = argv[argv.index("--session-id") + 1]
         if self.mode == "timeout":
-            raise CommandError("timeout")
+            msg = "timeout"
+            raise CommandError(msg)
         if self.mode == "fixture":
-            fixture = Path("tests/fixtures/muse/success-schema-turn1.jsonl")
-            records = [json.loads(line) for line in fixture.read_text().splitlines()]
-            for item in records:
-                if item["stream"]["kind"] == "session":
-                    item["stream"]["id"] = session
-                if item["payload_type"] == "run.terminal.completed":
-                    item["payload"]["text"] = json.dumps(
-                        {"reply": "ok", "title": "title", "tasks": [], "findings": "facts"}
-                    )
-            return CommandResult(0, "\n".join(json.dumps(item) for item in records), "")
+            return _fixture_result(session)
         answer: dict[str, object] = {
             "reply": "ok",
             "title": "title",
@@ -127,7 +136,8 @@ def test_muse_arguments_and_session(tmp_path: Path, session: str | None) -> None
     server = json.loads(config.split("=", 1)[1])
     assert server["command"] == "shikiri-yaku"
     assert server["args"][0] == "_expert-web"
-    assert runner.directories == [tmp_path] and scratch.parent == tmp_path
+    assert runner.directories == [tmp_path]
+    assert scratch.parent == tmp_path
     assert "hello" in runner.prompts[0]
     assert not scratch.exists()
 
@@ -198,7 +208,8 @@ def test_ladder_resumes_muse_and_hands_off(tmp_path: Path) -> None:
     asyncio.run(run())
     assert fallback.calls[0][0] is None
     assert fallback.calls[0][1] is not None
-    assert "facts" in fallback.calls[0][1] and "earlier" in fallback.calls[0][1]
+    assert "facts" in fallback.calls[0][1]
+    assert "earlier" in fallback.calls[0][1]
     assert runner.directories == [tmp_path, tmp_path, tmp_path]
     assert all(path.parent == tmp_path and not path.exists() for path in runner.scratch)
 
@@ -225,7 +236,8 @@ def test_fixture_stream_and_handoff_to_muse(tmp_path: Path) -> None:
     result = asyncio.run(ladder.turn(request))
     assert result.session.provider == "muse"
     assert result.session.session_id != "old"
-    assert "previous facts" in runner.prompts[0] and "earlier" in runner.prompts[0]
+    assert "previous facts" in runner.prompts[0]
+    assert "earlier" in runner.prompts[0]
     assert result.call is not None
     again = asyncio.run(ladder.turn(ExpertRequest(tmp_path, request.scope, "new")))
     assert again.session.session_id != result.session.session_id

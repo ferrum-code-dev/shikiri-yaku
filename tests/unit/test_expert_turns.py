@@ -523,7 +523,8 @@ def test_expert_commands_are_unavailable_outside_expert_topics(
 
 @pytest.mark.parametrize("muse", [False, True])
 def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
-    build: Callable[..., Harness], muse: bool  # noqa: FBT001
+    build: Callable[..., Harness],
+    muse: bool,  # noqa: FBT001
 ) -> None:
     runner = Runner(hold=True)
     h = build(ladder(runner, muse=muse), muse=muse)
