@@ -138,6 +138,7 @@ from shikiri_yaku.settings import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
 
+    from shikiri_yaku.adapters.agents.common import AgentAdapter
     from shikiri_yaku.adapters.shikiru_mcp import Connector
     from shikiri_yaku.adapters.telegram import BotApi
     from shikiri_yaku.cli import Job
@@ -513,18 +514,37 @@ def compose(  # noqa: PLR0915 -- composition wires each job
 def _check_adapters(settings: Settings) -> None:
     # keep: settings cannot read the registry, so the check runs here, before any file is opened
     if settings.reasoner is not None:
-        _check_ladder("reasoner", settings.reasoner.ladder)
+        _check_ladder("reasoner", settings.reasoner.ladder, lambda agent: agent.reasoner)
     if settings.expert is not None:
-        _check_ladder("expert", settings.expert.ladder)
+        _check_ladder("expert", settings.expert.ladder, lambda agent: agent.expert)
 
 
-def _check_ladder(section: str, ladder: Sequence[LadderRung]) -> None:
+def _check_ladder(
+    section: str, ladder: Sequence[LadderRung], factory: Callable[[AgentAdapter], object]
+) -> None:
     for index, rung in enumerate(ladder):
+        key = f"{section}.ladder[{index}].adapter"
         if rung.adapter not in AGENTS:
             names = ", ".join(sorted(AGENTS))
-            problem = f"unknown adapter '{rung.adapter}'; the adapters are {names}"
-            key = f"{section}.ladder[{index}].adapter"
+            raise invalid_setting(
+                key, f"unknown adapter '{rung.adapter}'; the adapters are {names}"
+            )
+        if factory(AGENTS[rung.adapter]) is None:
+            offered = sorted(name for name, agent in AGENTS.items() if factory(agent) is not None)
+            names = ", ".join(offered)
+            problem = (
+                f"adapter '{rung.adapter}' has no {section} rung; the adapters with one are {names}"
+            )
             raise invalid_setting(key, problem)
+
+
+def _expert_factory(adapter: str) -> Callable[..., ExpertRung]:
+    factory = AGENTS[adapter].expert
+    if factory is None:  # keep: _check_adapters refuses such a ladder before this runs
+        key = "expert.ladder"
+        problem = f"adapter '{adapter}' has no expert rung"
+        raise invalid_setting(key, problem)
+    return factory
 
 
 def build_expert(
@@ -535,7 +555,7 @@ def build_expert(
         []
         if settings.expert is None
         else [
-            AGENTS[rung.adapter].expert(
+            _expert_factory(rung.adapter)(
                 rung.model,
                 cast("ExpertCommandRunner", commands),
                 effort=rung.effort,

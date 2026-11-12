@@ -10,6 +10,7 @@ import asyncio
 import copy
 import itertools
 import json
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -62,7 +63,7 @@ from shikiri_yaku.ports import (
     ResolutionKind,
     SubmitStatus,
 )
-from shikiri_yaku.settings import load_settings
+from shikiri_yaku.settings import SettingsError, load_settings
 from tests.support.clock import NapClock
 from tests.support.expert_migration import remove_expert_schema
 from tests.support.telegram_bot import FIRST_MESSAGE_ID, FakeBotApi
@@ -2056,3 +2057,25 @@ def test_composing_an_upgraded_journal_marks_its_stop_button_copies_standing(
     composition.close()
 
     assert _standing_of(directory, number) == 1
+
+
+@pytest.mark.parametrize(
+    ("section", "adapter", "problem"),
+    [
+        ("reasoner", "fake", "unknown adapter 'fake'; the adapters are claude, codex, muse"),
+        (
+            "expert",
+            "muse",
+            "adapter 'muse' has no expert rung; the adapters with one are claude, codex",
+        ),
+    ],
+)
+def test_a_ladder_that_names_an_adapter_without_its_rung_is_refused_before_anything_opens(
+    section: str, adapter: str, problem: str, tmp_path: Path
+) -> None:
+    directory = _instance(tmp_path)
+    with (directory / "config.toml").open("a", encoding="utf-8") as config:
+        config.write(f'\n[{section}]\nladder = ["{adapter}:model"]\n')
+
+    with pytest.raises(SettingsError, match=re.escape(problem)):
+        compose(load_settings(directory), directory, clock=NapClock())

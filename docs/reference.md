@@ -72,7 +72,7 @@ ladder = ["claude:<model>:<effort>", "codex:<model>"]
 Replace the placeholders with model and effort values that the installed CLI accepts.
 
 - `ladder` is required when the section is present. It lists one or more rungs in fallback order. Each rung is `adapter:model` or `adapter:model:effort`.
-- The adapter must be `claude` or `codex`. The model and effort must be non-empty strings. Effort is optional. Claude receives it. Codex ignores it.
+- The adapter must be `claude`, `codex` or `muse`. The model and effort must be non-empty strings. Effort is optional. Claude and Muse receive it. Codex ignores it.
 - The local CLI for every rung must be installed and runnable.
 - The numeric settings are optional positive integers.
 
@@ -83,7 +83,8 @@ Replace the placeholders with model and effort values that the installed CLI acc
 
 ### `[expert]`
 
-The optional Expert ladder accepts the same `adapter:model[:effort]` entries as the Reasoner.
+The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude` and `codex`, as the
+Reasoner does. `muse` has no Expert rung yet, so an Expert ladder that names it is refused at start-up.
 `doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
 shared group, address General requests as `/ask@bot <question>`. The **Open topic** button replies
@@ -469,7 +470,8 @@ Keep the instance directory private. Back it up with the same care as other oper
 ## Limits
 
 - Components must be local Shikiru project directories. Telegram is the only chat channel.
-- The Reasoner is optional. It uses the configured local Claude or Codex CLIs. Without one, escalations that need a model assessment go to the Product Owner.
+- The Reasoner is optional. It uses the configured local Claude, Codex or Muse CLIs. Without one, escalations that need a model assessment go to the Product Owner.
 - If every configured Reasoner rung fails, the escalation still goes to the Product Owner, with a note and a Reasoner health signal.
 - A Claude rung gets no file-reading tool, only the web and package lookups its adapter lists. A Codex rung's read-only sandbox stops writes but not reads. Its model can read any file your user account can read.
+- A Muse rung's read-only profile denies writes but not reads. It has no shell, web tool or reminder, and its model can read any file your user account can read.
 - Automatic quota waits are limited to 24 hours by default (`quota_wait_max_h`). Retries are limited to one per day (`retry_budget_per_day`). Engine restarts are limited to one per component per hour (`restart_budget_per_hour`). You can change these values in the configuration.

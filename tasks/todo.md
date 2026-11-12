@@ -292,7 +292,7 @@ shared constraints are in tasks/plan.md.
 
 ### M3
 
-- [ ] M3. Muse Reasoner rung
+- [x] M3. Muse Reasoner rung
 
 ## Acceptance criteria
 - A table test fixes the argument list: required flags present, `--disable-write`, `--trust-workspace`, `--yolo`, `--disable-sandbox` and `--disable-approval` absent, the prompt last, the effort passed only when named.

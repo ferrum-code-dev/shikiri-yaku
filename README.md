@@ -46,7 +46,9 @@ tool after the owner approves the exact command. Forwarding means one tap applie
   `shikiru init` has set up.
 - A Telegram bot token from [BotFather](https://t.me/BotFather). Keep it private. The bot uses long
   polling, so do not configure a webhook.
-- Optional: the local `claude` and/or `codex` CLI, for a Reasoner ladder.
+- Optional: the local `claude`, `codex` and/or `muse` CLI, for a Reasoner ladder. `muse` uses the
+  login from `muse login` or the `META_API_KEY` environment variable; which one to use is the
+  owner's choice.
 
 `doctor` fails on a Shikiru older than this release's minimum, and names that minimum.
 
@@ -278,8 +280,8 @@ More cases, including engine-down signals and clean stops, are in
   can act.
 - Components must be local Shikiru project directories. Telegram is the only chat channel.
 - The Reasoner is optional. Without it, or when every rung fails, escalations go to the PO.
-- A Codex rung's read-only sandbox stops writes, not reads. Its model can read any file your user
-  account can read.
+- A Codex or Muse rung's read-only setting stops writes, not reads. Its model can read any file your
+  user account can read.
 
 Local state, data flow and all limits are in the [reference](docs/reference.md#local-state).
 

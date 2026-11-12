@@ -177,9 +177,12 @@ class CliRung(ABC):
             result = await self._runner.run(argv, timeout_s=self._timeout_s, cwd=scratch)
         except CommandError as error:
             self._fail(str(error))
+        self._check_exit(result)
+        return result
+
+    def _check_exit(self, result: CommandResult) -> None:
         if result.returncode != 0:
             self._fail(f"the call exited with code {result.returncode}")
-        return result
 
     def _fail(self, reason: str) -> NoReturn:
         message = f"{self.name} gave no usable answer: {reason}"
@@ -306,8 +309,11 @@ class CliExpert(ABC):
 
 @dataclass(frozen=True, slots=True)
 class AgentAdapter:
-    """What an agent module offers the composition: its name and a factory for each rung kind."""
+    """What an agent module offers the composition: its name and a factory for each rung kind.
+
+    An agent without an Expert rung has no `expert` factory; a ladder that names it is refused.
+    """
 
     name: str
     reasoner: Callable[..., ReasonerRung]
-    expert: Callable[..., ExpertRung]
+    expert: Callable[..., ExpertRung] | None
