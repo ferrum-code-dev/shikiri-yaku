@@ -277,7 +277,7 @@ shared constraints are in tasks/plan.md.
 
 ### M2
 
-- [ ] M2. Probe Muse for the Expert and capture fixtures
+- [x] M2. Probe Muse for the Expert and capture fixtures
 
 ## Acceptance criteria
 - `edit_file` and `write_file` are tried under the Expert's flags in the scratch directory, in a temporary directory outside it and in a directory that stands for a component, by absolute path, by a symlink and by a `../` path; a subagent, `monitor` and `workflow` are tried too. The report states where each succeeds. If a component can be written by any route, M5 is not started.
