@@ -329,7 +329,7 @@ Standing messages (the pull-request message and the health notices) keep their *
 
 Run `shikiri-yaku --product shop service install` after you install the command and create a valid instance. It writes a per-product service unit under your home directory, prints the unit's path and starts the service. Reinstalling replaces the running service with the new unit.
 
-Stop any other process holding the instance lock, such as a foreground `run`, first. Otherwise the service cannot acquire the lock and exits. The unit carries the `PATH` of the shell where `service install` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts.
+Stop any other process holding the instance lock, such as a foreground `run`, first. Otherwise the service cannot acquire the lock and exits. The unit carries the `PATH` of the shell where `service install` ran, so `shikiru` and the configured Reasoner CLIs can be found when the service starts. `doctor` runs in the caller's shell, so it does not show a CLI that only the service's `PATH` lacks; rerun `service install` from a shell whose `PATH` includes that CLI's directory.
 
 ### macOS
 

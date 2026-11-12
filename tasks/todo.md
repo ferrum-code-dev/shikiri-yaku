@@ -304,7 +304,7 @@ shared constraints are in tasks/plan.md.
 
 ### M4
 
-- [ ] M4. Doctor and the owner's check of the Muse rung
+- [x] M4. Doctor and the owner's check of the Muse rung
 
 ## Acceptance criteria
 - `doctor` names a missing `muse` binary and a failing `muse --version` as a failed probe, in the form used for Claude and Codex.

@@ -320,6 +320,20 @@ def test_the_probe_runs_only_the_version_flag(tmp_path: Path) -> None:
     assert runner.argv == ["muse", "--version"]
 
 
+def test_a_probe_whose_muse_cannot_start_names_the_rung_with_its_effort(tmp_path: Path) -> None:
+    runner = _Muse(error=CommandError("no such file"))
+
+    with pytest.raises(ReasonerError, match=re.escape(f"muse:{_MODEL}:high")):
+        asyncio.run(_rung(runner, tmp_path, effort="high").probe())
+
+
+def test_a_probe_whose_version_flag_fails_is_a_reasoner_error(tmp_path: Path) -> None:
+    runner = _Muse(returncode=127)
+
+    with pytest.raises(ReasonerError, match=re.escape(f"muse:{_MODEL}")):
+        asyncio.run(_rung(runner, tmp_path).probe())
+
+
 def test_a_muse_rung_is_named_with_its_model_and_its_effort(tmp_path: Path) -> None:
     config = ReasonerSettings.model_validate({"ladder": [f"muse:{_MODEL}", f"muse:{_MODEL}:high"]})
 

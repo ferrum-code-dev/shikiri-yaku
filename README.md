@@ -219,6 +219,12 @@ This writes a per-product service unit and starts it, replacing the running serv
 Stop any other process holding the instance lock, such as a foreground `run`, first. The unit uses
 the `PATH` of the shell that ran the command, so `shikiru` and the Reasoner CLIs are found.
 
+A service manager starts with a smaller `PATH` than a terminal. If a Reasoner CLI such as `muse` is
+in a directory the service does not have (Homebrew on Apple silicon uses `/opt/homebrew/bin`),
+`doctor` passes in a terminal but the service cannot run that rung. Run `service install` again from
+a shell whose `PATH` includes that directory; the unit takes that `PATH` and the service restarts
+with it.
+
 On macOS the unit is a LaunchAgent; on Linux it is a user service. Start and stop it with:
 
 ```sh

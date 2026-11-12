@@ -581,6 +581,19 @@ def test_doctor_names_a_reasoner_rung_whose_cli_is_missing(
     assert _failed(capsys.readouterr().out) == {"reasoner claude:haiku"}
 
 
+def test_doctor_names_a_muse_rung_whose_cli_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = _instance(tmp_path) / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + '\n[reasoner]\nladder = ["muse:muse-ember-1.0"]\n',
+        encoding="utf-8",
+    )
+
+    assert _run_doctor(tmp_path, commands=_Clis(frozenset({"muse"}))) == 1
+    assert _failed(capsys.readouterr().out) == {"reasoner muse:muse-ember-1.0"}
+
+
 def test_doctor_passes_a_reasoner_rung_whose_cli_runs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
