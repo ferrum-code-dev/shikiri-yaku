@@ -1,6 +1,13 @@
 # Task plan
 
-## Current work: release documentation cleanup
+## Current work: T-152 MCP doctor output
+
+Remove routine MCP request logs (such as `Processing request of type ...`) from `doctor` output. Keep
+other Shikiru diagnostics and link failures visible through the Shikiru check, and preserve usable
+text/JSON reports. Add an offline regression test using a harmless local
+MCP server. Run `uv run poe check` before completion.
+
+## Historical work: release documentation cleanup
 
 This section replaces the T-81 parent request with R1 to R9, executed in order. R1 to R8 are
 done, and R9 closes the cleanup. Entries keep their original wording, except that R9 removes

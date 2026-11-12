@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
+import sys
+import threading
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, TextIO, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -27,16 +31,21 @@ from shikiri_yaku.ports import (
     ShikiruTask,
     TaskDetail,
 )
+from shikiri_yaku.settings import STDERR_DRAIN_S
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Sequence
     from pathlib import Path
+    from typing import BinaryIO
 
     from mcp.types import CallToolResult, ListToolsResult
 
     from shikiri_yaku.ports import Clock, CommandRunner
 
 BACKOFF_FACTOR = 2
+ROUTINE_REQUEST_TRACE: Final = re.compile(
+    r"(?:\[[^\]]*\]\s+)?INFO\s+Processing request of type \S+"
+)
 # keep: the directory `shikiru init` creates in a project; its absence means the path is not one
 SHIKIRU_STATE_DIRECTORY = ".shikiru"
 
@@ -93,11 +102,41 @@ def stdio_connector(executable: str, project: Path) -> Connector:
                 "run shikiru init there"
             )
             raise ShikiruLinkDownError(message)
-        async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
+        async with (
+            _stderr_without_request_traces() as errlog,
+            stdio_client(parameters, errlog=errlog) as (read, write),
+            ClientSession(read, write) as session,
+        ):
             await session.initialize()
             yield session
 
     return connect
+
+
+@asynccontextmanager
+async def _stderr_without_request_traces() -> AsyncGenerator[TextIO]:
+    read_fd, write_fd = os.pipe()
+    pump = threading.Thread(
+        target=_copy_without_request_traces,
+        args=(os.fdopen(read_fd, "rb"),),
+        daemon=True,
+    )
+    pump.start()
+    errlog = os.fdopen(write_fd, "w", encoding="utf-8", buffering=1)
+    try:
+        yield errlog
+    finally:
+        errlog.close()
+        await asyncio.to_thread(pump.join, STDERR_DRAIN_S)
+
+
+def _copy_without_request_traces(source: BinaryIO) -> None:
+    with source:
+        for raw in source:
+            line = raw.decode("utf-8", errors="replace")
+            if ROUTINE_REQUEST_TRACE.fullmatch(line.rstrip("\r\n")) is None:
+                sys.stderr.write(line)
+                sys.stderr.flush()
 
 
 class ShikiruMcpClient:

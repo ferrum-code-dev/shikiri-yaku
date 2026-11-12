@@ -1,6 +1,16 @@
 # Todo
 
-## Current work: release documentation cleanup
+## Current work: T-152 MCP doctor output
+
+- [x] T-152. Suppress routine MCP request logs in doctor output
+
+Acceptance criteria:
+- Doctor output omits routine MCP request-processing logs; other Shikiru diagnostics and link failures remain visible.
+- Doctor still checks the Shikiru link and reports failures; text and JSON reports remain usable.
+- A focused offline regression test covers the reported behavior.
+- `uv run poe check` passes; unrelated failures are reported with evidence.
+
+## Historical work: release documentation cleanup
 
 R1 to R9 replace the T-81 parent request. Details and shared constraints are in tasks/plan.md.
 

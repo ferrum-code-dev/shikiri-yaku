@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
+import sys
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +40,7 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
     from datetime import timedelta
+    from typing import TextIO
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
 
@@ -665,8 +669,9 @@ def test_a_path_is_connected_only_when_it_has_a_shikiru_state_directory(
         (tmp_path / state_directory).mkdir()
     attempts: list[StdioServerParameters] = []
 
-    def stdio_client_stub(parameters: StdioServerParameters) -> _RefusingLink:
+    def stdio_client_stub(parameters: StdioServerParameters, *, errlog: TextIO) -> _RefusingLink:
         attempts.append(parameters)
+        assert errlog.fileno() >= 0
         return _RefusingLink(OSError("no process"))
 
     monkeypatch.setattr("shikiri_yaku.adapters.shikiru_mcp.stdio_client", stdio_client_stub)
@@ -679,3 +684,75 @@ def test_a_path_is_connected_only_when_it_has_a_shikiru_state_directory(
 
     asyncio.run(scenario())
     assert bool(attempts) is (state_directory is not None)
+
+
+_FAKE_MCP_SERVER = """#!{python}
+import asyncio
+import logging
+from mcp.server.lowlevel import Server
+from mcp.server.stdio import stdio_server
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+logging.getLogger("fake").warning("shikiru diagnostic kept")
+routine = "INFO     Processing request of type ListToolsRequest"
+logging.getLogger("fake").error("handler failed after %s", routine)
+{extra}
+server = Server("fake")
+
+@server.list_tools()
+async def list_tools():
+    return []
+
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+asyncio.run(main())
+"""
+
+
+def _write_fake_server(path: Path, extra: str = "") -> str:
+    path.write_text(_FAKE_MCP_SERVER.format(python=sys.executable, extra=extra), encoding="utf-8")
+    path.chmod(0o700)
+    return str(path)
+
+
+def test_stdio_connector_drops_only_routine_info_traces(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / SHIKIRU_STATE_DIRECTORY).mkdir()
+    executable = _write_fake_server(tmp_path / "fake-mcp")
+
+    async def scenario() -> None:
+        async with stdio_connector(executable, tmp_path)() as session:
+            await session.list_tools()
+
+    asyncio.run(scenario())
+    err = capsys.readouterr().err
+    assert not any(line.startswith("INFO") for line in err.splitlines())
+    assert "shikiru diagnostic kept" in err
+    assert "handler failed after INFO     Processing request of type ListToolsRequest" in err
+
+
+def test_stdio_connector_returns_when_a_child_keeps_stderr_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / SHIKIRU_STATE_DIRECTORY).mkdir()
+    pid_file = tmp_path / "child.pid"
+    extra = (
+        "import subprocess\n"
+        f"child = subprocess.Popen([{sys.executable!r}, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pid_file)!r}, 'w', encoding='utf-8').write(str(child.pid))\n"
+    )
+    executable = _write_fake_server(tmp_path / "fake-mcp", extra=extra)
+    monkeypatch.setattr("shikiri_yaku.adapters.shikiru_mcp.STDERR_DRAIN_S", 0.5)
+
+    async def scenario() -> None:
+        async with stdio_connector(executable, tmp_path)() as session:
+            await session.list_tools()
+
+    try:
+        asyncio.run(asyncio.wait_for(scenario(), timeout=20))
+    finally:
+        if pid_file.exists():
+            os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
