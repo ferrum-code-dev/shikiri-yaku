@@ -257,6 +257,81 @@ constraints are in tasks/plan.md.
 - The argument lists of X2 still remove every other web tool, and the web tool is the only MCP server the agents get.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+## Planned work: the Muse Code agent
+
+M1 to M5 add Muse Code as a third agent of the Reasoner and the Expert, after moving the agent
+adapters into separate modules. Details and shared constraints are in tasks/plan.md.
+
+### M1
+
+- [ ] M1. Move the CLI adapters into one module per agent
+
+## Acceptance criteria
+
+- The existing Reasoner and Expert tests pass with only their imports and construction calls changed; no assertion changes.
+- No agent module imports another, and `common.py` and `registry.py` contain no agent name; a test enforces it.
+- `bootstrap.py` and `settings.py` contain no agent name. An unknown adapter is rejected with the same message as before, from `doctor` and from `run`.
+- A test registers a fake agent through the registry and runs a rung built for it, without editing `common.py`.
+- import-linter passes and the contracts are not weakened.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M2
+
+- [ ] M2. Probe Muse for the Expert and capture fixtures
+
+## Acceptance criteria
+
+- `edit_file` and `write_file` are tried under the Expert's flags in the scratch directory, in a temporary directory outside it and in a directory that stands for a component, by absolute path, by a symlink and by a `../` path; a subagent, `monitor` and `workflow` are tried too. The report states where each succeeds. If a component can be written by any route, M5 is not started.
+- The results match the hand probe recorded in tasks/plan.md, or the report says how they differ. Another installed `muse` version is run over the same probes, or the report says that only 1.4.15 was checked.
+- The fixtures include the refusals `absolute path is outside the workspace`, `path escapes workspace` and `tool policy denied shell execution`.
+- Where `add_memory` writes is confirmed, and the report says whether the conversation's directory keeps it to one memory directory per conversation.
+- The real `_expert-web` server is loaded through `-c mcpServers.expert_web=...`, its tool is called, and an ungranted host is refused as in X7.
+- Three turns with one `--session-id` and a schema resume correctly; the session id in the stream equals the one passed.
+- A new UUID, a used UUID and a SIGTERM then resume are recorded with exit code and last record.
+- Redacted fixtures for success with usage, each seen failure text, an interrupted run and a policy-denied tool call are committed under `tests/fixtures/muse/` with a README.
+- Nothing outside temporary directories and `tests/fixtures/muse/` is written; probe directories are removed. `git diff --check` is clean.
+
+### M3
+
+- [ ] M3. Muse Reasoner rung
+
+## Acceptance criteria
+
+- A table test fixes the argument list: required flags present, `--disable-write`, `--trust-workspace`, `--yolo`, `--disable-sandbox` and `--disable-approval` absent, the prompt last, the effort passed only when named.
+- Fixture cases: valid answer, failed terminal, no terminal, schema mismatch, non-zero exit, timeout, non-JSON output; each is a `ReasonerError` naming the rung.
+- The call record has summed token counts and `None` for duration and cost, and is `None` without `run.usage`.
+- `muse:<model>[:<effort>]` is accepted in a ladder and shown by `doctor` and `/status`.
+- README.md and docs/reference.md list `muse` and its limits.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M4
+
+- [ ] M4. Doctor and the owner's check of the Muse rung
+
+## Acceptance criteria
+
+- `doctor` names a missing `muse` binary and a failing `muse --version` as a failed probe, in the form used for Claude and Codex.
+- The report lists the owner's checks that tests do not run: `doctor` under the service environment, a real Reasoner call, and `muse login` as the service's user.
+- README.md says how to give the service a `PATH` that finds `muse`, if the probe fails only because of it.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M5
+
+- [ ] M5. Muse Expert rung
+
+## Acceptance criteria
+
+- Started only if M2 shows that a component directory cannot be written under the Expert's flags by any route; otherwise stop and report.
+- A scope with a component under the system temporary directory is refused before Muse runs; components elsewhere are accepted.
+- Every turn runs with `request.directory` as its working directory; the schema and prompt files are in a temporary directory inside it, removed after the turn.
+- README.md says that Muse's per-workspace memory for a conversation outlives it and where it is.
+- A table test fixes the argument lists for a first and a resumed turn: required flags present, `--disable-write`, `--yolo`, `--disable-sandbox` and `--disable-approval` absent, the prompt file inside the scratch directory, and the web tool the only MCP server.
+- A first turn passes a fresh UUID and returns it; a resumed turn returns the stored id; a stream with a different or missing session id is a failure.
+- Schema, scope, failed-run, no-terminal, non-zero-exit and timeout failures are never returned; the ladder resumes and hands off with Muse as one provider.
+- The web-grant tests of X7 pass with a Muse rung in the ladder.
+- README.md and docs/reference.md state the rung's limits; the report lists the docs/design.md places that must change, without editing it.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Historical implementation records
 
 The entries below from Phase 0 (T0) to Phase E are historical records. They are not current guidance,

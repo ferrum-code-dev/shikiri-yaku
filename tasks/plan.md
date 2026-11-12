@@ -514,6 +514,386 @@ search site is one more host to grant.
   server the agents get.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+## Planned work: the Muse Code agent
+
+M1 to M5 add Muse Code (Meta's CLI, installed as `muse`) as a third agent of the Reasoner and the
+Expert, in order. The owner asked for two things: Muse support, and agent adapters that live in
+separate modules and are not coupled with the core, with no branching on the agent's name. M1 makes
+the second possible without changing behavior; M2 to M5 add Muse. Each task is one coherent change
+with its own commit.
+
+### Scope
+
+This repository only ever runs an agent CLI in two places: a Reasoner rung (`assess_blocker`, one
+JSON answer) and an Expert rung (a conversation turn with a session). Shikiru's own ladders
+(Leader, Implementer, Helper) are Shikiru's concern and need nothing here. Nothing outside the two
+adapter files and the wiring names an agent today.
+
+### What the probes found
+
+The facts below were probed against `muse` 1.4.15 (`1.4.15-R8339.1`) on the owner's machine with a
+real login, before this plan was written. They are the basis of the argument lists, and the tasks
+must verify them again where they say so. A flag that the installed CLI refuses is reported with the
+evidence, not replaced by a weaker one.
+
+- **Output.** `muse exec --json` writes one JSON record per line. Each record has `schema_version`,
+  `stream{kind,id}`, `sequence`, `record_type`, `payload_type` and `payload`. The session id is the
+  `stream.id` of a record whose `stream.kind` is `session`. The final answer is the `text` of the
+  `run.terminal.completed` payload, which holds the JSON of the schema when `--output-schema` is
+  given. A failed run ends with `run.terminal.failed`, whose `reason` is a plain string, and exit
+  code 1. Token counts are in the `run.usage` payload (`models[]` with `input_tokens`,
+  `cached_tokens`, `output_tokens`, `reasoning_tokens` and `calls`); it carries no cost and no
+  duration.
+- **Prompt.** The prompt is the positional argument or `--prompt-file <path>`. Standard input is
+  not read ("missing prompt"), so the stdin route the Expert uses for Claude and Codex does not
+  exist for Muse.
+- **Session.** `muse exec --session-id <uuid>` starts a session with that id on the first turn and
+  resumes it on the next, also with `--output-schema`. There is no `exec resume` verb: the words
+  become prompt text.
+- **Effort and model.** `--reasoning-effort none|minimal|low|medium|high|xhigh|max|ultra` (alias
+  `--effort`) and `--model <id>`. The default model today is `muse-wonder-1.0`.
+- **Read-only.** `--permission-profile :read-only` works with `--output-schema`: reads succeed and
+  `write_file` fails with `tool policy denied filesystem write`. The other profile names tried
+  (`:readonly`, `:workspace-write`, `read-only`) do not exist. A profile cannot be combined with
+  `--approval-mode` or `--disable-approval`, and a shell or MCP call under `:read-only` waits for an
+  approval that no one gives and hangs until the timeout. So `:read-only` is usable only when the
+  agent has no shell (`--disable-shell`) and no MCP tool.
+- **`--disable-write` is unusable.** With or without a schema, every run fails with
+  "model `<id>` does not exist or you lack access". Never pass it.
+- **File access.** Without a profile, `read_file` reads any absolute path the user can read,
+  including the home directory; there is no equivalent of Claude's `--add-dir`, so reads cannot be
+  limited to the component directories. `write_file` is limited to the workspace (the working
+  directory unless `--workspace` is given) and the temporary directories; a write under `$HOME`
+  fails with `absolute path is outside the workspace`. Muse's file tools are `read_file`, `search`,
+  `write_file` and `edit_file`, plus memory, subagent, workflow and monitor tools.
+- **Write probes under the Expert's flags.** Run with `--approval-mode never --trust-workspace
+  --disable-shell --disable-web-tools --disable-reminders` and the scratch directory as the working
+  directory, against a throwaway directory under `$HOME` that stood for a component. The probes
+  ran on 2026-11-12 with `muse` 1.4.15 and changed nothing in that directory:
+  - `edit_file` on an existing file and `write_file` of a new file, both by absolute path, failed
+    with `absolute path is outside the workspace`.
+  - `write_file` and `edit_file` through a symlink inside the workspace that points at the
+    directory failed with `path escapes workspace`, and so did `write_file` through a `../`
+    relative path.
+  - A subagent told to run a shell write reported "NOT EXECUTED": it inherits the disabled shell
+    and its only shell-like tool, `monitor`, failed with `tool policy denied shell execution`.
+    `monitor` called by the main agent fails the same way. A `workflow` whose child writes to the
+    directory fails with the workspace refusal.
+  - `edit_file` and `write_file` succeeded on a file in a temporary directory outside the working
+    directory. So the real boundary is the workspace plus the temporary directories (the system
+    temporary directory, for example under `/var/folders` on macOS), not the scratch directory
+    alone. A component that lives under a temporary directory would not be protected.
+  - `add_memory` succeeded. It writes `MEMORY.md` under
+    `~/.local/share/muse/memory/projects/<workspace path>/`, Muse's own data, keyed by the
+    workspace path. A new scratch directory for every turn leaves one such directory per turn.
+- **Approvals.** `--approval-mode never` makes every tool call run without asking and does not
+  hang. It is the only way to let an MCP tool run in a headless call.
+- **MCP.** A server can be given for one run with
+  `-c 'mcpServers.<name>={"command":"...","args":[...]}'`; the whole `mcpServers` map is refused,
+  only `mcpServers.<name>` is accepted. The tool is then called `mcp__<name>__<tool>`. The server
+  loads only when the workspace is trusted, so `--trust-workspace` is required. The scratch
+  directory holds no rules or skills, so trusting it loads nothing.
+- **Other flags that are safe.** `--disable-shell`, `--disable-web-tools`, `--disable-reminders`
+  and `--no-session-log`. `--no-session-log` also prints "local session messaging disabled" on
+  standard error; that is not a failure.
+- **Failure texts seen.** A rejected key reads "your API key from META_API_KEY was rejected", a
+  missing login "missing meta credentials: run `muse login` or set META_API_KEY", an unknown model
+  "model `<id>` does not exist or you lack access". Quota, overload and context-length failures
+  were not observed.
+- **Auth.** Muse uses the login of the user account (`~/.config/muse`, honours `XDG_CONFIG_HOME`)
+  or `META_API_KEY` from the environment. This repository passes the environment through and never
+  reads or strips either.
+- **Version.** `muse --version` works without a login and without a model call, so it serves as the
+  probe like `claude --version` and `codex --version` do.
+
+### Argument lists
+
+Reasoner rung, run in its scratch directory (no trust flag, because nothing needs to load):
+
+```
+muse exec --json --model <model> [--reasoning-effort <effort>] --permission-profile :read-only
+  --disable-shell --disable-web-tools --disable-reminders --no-session-log
+  --output-schema <scratch>/schema.json <prompt>
+```
+
+The prompt is the last argument, as for the other rungs, so the escalation text is only ever that
+one argument. The rung has no lookups, like the Codex rung. It is stricter than Codex: a write is
+refused by the profile, not only limited to a directory.
+
+Expert rung, run with the conversation's scratch directory as its working directory:
+
+```
+muse exec --json --model <model> [--reasoning-effort <effort>] --approval-mode never
+  --trust-workspace --disable-shell --disable-web-tools --disable-reminders
+  --output-schema <scratch>/schema.json --session-id <uuid>
+  -c 'mcpServers.expert_web={"command":"shikiri-yaku","args":[...]}'
+  --prompt-file <scratch>/prompt.md
+```
+
+The first turn of a conversation generates the UUID and the answer's session is that same id; a
+resumed turn passes the stored id. The Expert's own write protection is the workspace boundary
+(writes only in the scratch directory and temporary directories, never in a component) together
+with the absence of a shell (a subagent and the `monitor` tool inherit it), because `:read-only`
+cannot be used next to the MCP web tool. The boundary is the workspace plus the temporary
+directories, as the write probes above show. This is weaker than Claude's
+`--tools "Read,Grep,Glob"`, and the trust notes must say so. The working directory is the
+conversation's own directory under the instance directory (`request.directory`, which the Expert
+already uses and removes when the conversation ends). It is stable for the life of the conversation,
+so Muse's per-workspace memory is one directory per conversation, not one per turn.
+
+### Design of the separation (M1)
+
+Today the Claude and Codex logic is spread over three places that know agent names: the branch on
+the provider in `ExpertCli._argv` and `ExpertCli._answer`, the import of `codex_call` from
+`reasoner_cli` into `expert_cli`, and two hard-coded name lists (`RUNG_CLASSES` in `bootstrap.py`
+and `REASONER_ADAPTERS` in `settings.py`). The new shape:
+
+- A package `shikiri_yaku.adapters.agents` holds one module per agent: `claude.py`, `codex.py`
+  and, later, `muse.py`. Each module holds that agent's Reasoner rung and its Expert rung, and
+  nothing about any other agent.
+- `common.py` holds what the agents share and is the only place that knows both flows: the
+  Reasoner base (prompt, scratch directory, call, checks) and the Expert flow (prompt, scratch
+  directory, call, answer checks, scope check). Each agent supplies only its argument list and how
+  it reads an answer and its usage. The base calls those two hooks; it never tests which agent it
+  is.
+- `registry.py` maps an agent name to one `AgentAdapter` value that has a factory for each rung
+  kind. Registering is one line per module. `bootstrap.py` builds rungs by looking the name up
+  there and has no branch on the name. Claude's usage record and Codex's token reader stay in their
+  own modules; if both flows of one agent need a helper, it lives in that agent's module.
+- Settings. `settings.py` is core and cannot import adapters (import-linter: domain, app and
+  settings-side code do not import adapters). `RungSpec.adapter` therefore stops checking against a
+  fixed set and checks only that the name is a non-empty token. Unknown names are rejected where the
+  registry is available, in `bootstrap.py`, with the same message ("unknown adapter '<name>'; the
+  adapters are claude, codex, muse"). `load_settings` no longer knows which agents exist; the
+  consequence is that an unknown adapter fails at composition instead of at settings load, which
+  must be visible in `doctor` and `run` output exactly as a settings error is today.
+- The public classes keep their behavior. The old module paths `adapters.reasoner_cli` and
+  `adapters.expert_cli` are removed, not kept as shims, and their tests move with them.
+
+### Shared constraints
+
+- No test calls a real agent CLI, Telegram or the network. Agents run through the fake
+  `CommandRunner`; fixtures are recorded `muse` output from the probes, redacted of ids, paths and
+  tokens, plus the failure texts as quoted above. Quota, overload and context-length texts were not
+  observed, so no test or code invents them; Muse's failure handling is the generic rung failure
+  (the ladder already moves on and cools the rung down).
+- `docs/design.md` is not edited. Where it is wrong or silent for Muse, the report says so. Known
+  places: the Reasoner adapter sentence ("Claude and Codex are two adapters"), the Expert argument
+  lists and the stdin sentence, and Known limits item 12 ("A Codex rung is not confined to the
+  scope"), which must name Muse.
+- No new setting is needed: the ladder syntax `muse:<model>[:<effort>]` already fits, and every
+  number is an existing `reasoner.*` or `expert.*` setting. A literal limit that Muse adds (the
+  profile name, the flag names, the record types) is a named constant in `muse.py`.
+- Each task documents what it adds in README.md and docs/reference.md, ticks only its own M-line in
+  tasks/todo.md and runs `uv run poe check`. Commits are Conventional Commits; none of M1 to M5
+  changes a journal schema, a stored value or the minimum Shikiru version, so none needs `!`.
+- Nothing is pushed.
+
+### M1. Move the CLI adapters into one module per agent (normal)
+
+Create the `adapters/agents` package described above and move the existing Claude and Codex logic
+into it, with no change of behavior. Delete `adapters/reasoner_cli.py` and `adapters/expert_cli.py`
+once nothing imports them. Replace `RUNG_CLASSES` and the `ExpertCli(provider, ...)` construction in
+`bootstrap.py` with registry lookups. Replace `REASONER_ADAPTERS` and `_known_adapter` in
+`settings.py` as designed, and add the registry check to `bootstrap.py`. Keep the argument lists,
+prompts, schema, error texts and the `name` of every rung byte for byte the same.
+
+## Acceptance criteria
+
+- The existing Reasoner and Expert tests pass with only their imports and construction calls changed
+  (`CodexRung(...)`, `ExpertCli("codex", ...)` become the new classes); no assertion changes.
+  The argument-list table tests of both flows still pass unchanged in content.
+- No module under `adapters/agents/` other than `common.py` and `registry.py` imports another
+  agent's module, and `common.py` and `registry.py` contain no agent name: a unit test over the
+  imports and source text fails if one appears.
+- `bootstrap.py` and `settings.py` contain no agent name. An unknown adapter in a ladder is
+  rejected with the same message as before, listing the registered agents, and the owner sees it
+  from `doctor` and from `run` as they see a settings error.
+- Adding an agent needs one new module and one registry line: a test registers a fake agent through
+  the registry and runs a rung built by `bootstrap` for it, without editing `common.py`.
+- import-linter passes and the contracts are not weakened.
+- docs/reference.md lists the accepted adapters from the registry's names in the same sentence form
+  as before.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M2. Probe Muse for the Expert and capture fixtures (normal)
+
+A spike with no production code. It exists because the Expert rung is the one part whose safety
+rests on facts that the first probes did not close, and the Reasoner rung does not need them. The
+write probes of the list above have already been run by hand once and gave the results recorded
+there; M2 repeats them to produce fixtures and to confirm the results on the machine that
+implements M5, and runs the probes that are still open (the web server, sessions, the temporary
+directory case).
+Run each probe in a temporary directory outside the repository, with a harmless prompt, a stub or
+the real web server on a temporary journal, no real secrets and no Telegram. Record the answers in
+the report. Commit only the redacted fixtures that M3 and M5 test against, under
+`tests/fixtures/muse/` with a short README that names the `muse` version, the date, what was
+redacted and what is synthetic.
+
+## Acceptance criteria
+
+- `edit_file` and `write_file` are tried under the Expert's flags with the target (a) in the
+  scratch directory, (b) in a temporary directory outside it and (c) in a directory that stands for
+  a component (under the home directory), by absolute path, by a symlink inside the workspace and by
+  a `../` path. A subagent and the `monitor` and `workflow` tools are tried with the same target.
+  The report states where each succeeds and fails. If (c) can be written by any route, M5 is not
+  started and the report says so. The expected results are those recorded under "Write probes".
+- A second `muse` version, if one is installed, is run over the same write probes and the report
+  says whether the results differ. If none is installed, the report says that only 1.4.15 was
+  checked.
+- The fixtures include the refusals `absolute path is outside the workspace`,
+  `path escapes workspace` and `tool policy denied shell execution`, so that M5's tests fail if a
+  later `muse` stops refusing them.
+- The location of the memory that `add_memory` writes is confirmed, and the report says whether a
+  stable scratch directory per conversation keeps it to one directory per conversation.
+- The real `shikiri-yaku _expert-web` server (on a temporary journal) is loaded through
+  `-c 'mcpServers.expert_web=...'`; its tool is called by the model, and a host with no grant is
+  refused by the server as in X7. The report states whether Muse's `--approval-mode never` call of
+  the tool behaves as Claude's `--allowedTools` does, and the tool name Muse gives it.
+- A conversation of three turns is run with one `--session-id`, with a schema on every turn:
+  resume works, and the second answer uses the first turn's content. The session id seen in the
+  stream equals the one passed.
+- A first turn with a UUID that was never used, a turn with a UUID already used, and a turn killed
+  with SIGTERM and then resumed are each recorded, with the exit code and the last record.
+- The fixtures cover: a successful schema answer with `run.usage`, a failed run for each failure
+  text quoted above, an interrupted run, and a tool call that fails by policy.
+- No file outside the temporary directories and `tests/fixtures/muse/` is written, and every probe
+  directory is removed.
+- Only the fixtures and their README change. `git diff --check` is clean.
+
+### M3. Muse Reasoner rung (normal)
+
+Add `adapters/agents/muse.py` with the Reasoner rung and register it. The rung is built with the
+argument list above. It reads the JSON-lines output: it finds the last `run.terminal.completed` or
+`run.terminal.failed` record, treats a failed or missing terminal as a failure of the rung with the
+`reason` in the message, validates the `text` as `BlockerAnswer`, and builds the call record from
+the `run.usage` payload (`duration_ms` and `cost_usd` are `None`; `usage` holds the token counts,
+summed over `models[]`). Muse's own diagnostics go to standard error and are not read; a line on
+standard output that is not a JSON record is a failure of the rung. The probe is `muse --version`. The prompt text for lookups is the Codex
+wording: the rung has none.
+
+## Acceptance criteria
+
+- A table test fixes the argument list: every flag above is present, `--disable-write` is absent,
+  the prompt is the last argument, the effort is passed as `--reasoning-effort` when the rung names
+  one and omitted otherwise, and `--trust-workspace`, `--yolo`, `--disable-sandbox` and
+  `--disable-approval` are never present.
+- Fixture-driven cases: a valid answer, a `run.terminal.failed` run, a stream with no terminal
+  record, an answer that does not match the schema, a non-zero exit, a timeout, and standard output
+  that is not JSON. Each failure is a `ReasonerError` that names the rung; none returns an
+  assessment.
+- The call record has the summed token counts and `None` for duration and cost, and is `None` when
+  the stream has no `run.usage`.
+- The ladder skips a failed Muse rung as it does any other (covered by an existing ladder test
+  using a Muse rung from the registry).
+- `muse:<model>` and `muse:<model>:<effort>` are accepted by a ladder setting and shown by
+  `doctor` and `/status` with the rung name.
+- README.md lists `muse` as an optional agent and says that `muse login` or `META_API_KEY` is the
+  owner's choice; docs/reference.md lists `muse` as an adapter, says that its effort is passed, and
+  notes that its read-only profile denies writes but not reads.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M4. Doctor and the owner's check of the Muse rung (normal)
+
+`doctor` already probes every rung. This task makes the Muse rung's probe and its failure messages
+useful without a model call, and records what the owner must check by hand. It changes code only if
+M3's probe leaves a gap.
+
+## Acceptance criteria
+
+- `doctor` names a missing `muse` binary and a non-zero `muse --version` exit as a failed probe of
+  the rung, in the same form as for Claude and Codex.
+- The report lists the owner's checks, which are not run by tests: `doctor` under the service
+  environment (launchd or systemd has a smaller `PATH`, and a Homebrew install is under
+  `/opt/homebrew/bin`), a real Reasoner call with `muse:<model>`, and that `muse login` was done as
+  the service's user.
+- If the probe fails only because of the service environment, README.md says how to give the
+  service the `PATH`; no setting is added unless the existing service unit already has a place for
+  it.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### M5. Muse Expert rung (high)
+
+Add the Expert rung to `adapters/agents/muse.py` and register it. It writes the prompt to a file in
+the conversation's scratch directory, because Muse reads no standard input, and passes the file with
+`--prompt-file`. It generates the UUID for a first turn, passes the stored session for a resumed
+turn, and returns the session id read from the stream. The web tool is the only MCP server, given
+with `-c 'mcpServers.expert_web=...'`. The scope check on the answer's tasks, the validation of the
+schema and the failure handling are those of the common Expert flow, not repeated here.
+
+Start this task only if M2's report shows that a component directory cannot be written under the
+Expert's flags by any route (the hand probe already shows this for 1.4.15). If it can, stop and
+report; the Expert rung then stays Claude and Codex only and the documentation says why.
+
+The boundary of this rung is the workspace plus the temporary directories, so the rung refuses a
+turn whose scope names a component directory inside the system temporary directory: that is a
+failure of the rung with a message that names the component, and the ladder moves on. The working
+directory of every turn of a conversation is one scratch directory that lives as long as the
+conversation, not a new directory per turn, so Muse's per-workspace memory stays one directory per
+conversation. The working directory is the conversation's directory, `request.directory`, as for
+the other agents; the schema and the prompt file go in a temporary directory inside it. The
+directory is removed with the conversation, but nothing removes Muse's memory directory for it,
+which is Muse's own data under `~/.local/share/muse/memory/projects/`. The report states how much
+one conversation leaves there, and README.md says that ended conversations leave that memory behind
+and where it is.
+
+## Acceptance criteria
+
+- A table test fixes the argument list for a first turn and a resumed turn: the flags above are
+  present, `--disable-write`, `--yolo`, `--disable-sandbox` and `--disable-approval` are absent,
+  the prompt file is inside the scratch directory and holds the prompt, and the web tool is the
+  only `mcpServers` entry.
+- A scope with a component under the system temporary directory is refused before Muse runs, and a
+  scope with components elsewhere is not.
+- Every turn of one conversation runs with `request.directory` as its working directory, and the
+  schema and prompt files are in a temporary directory inside it that is removed after the turn.
+- README.md says that Muse keeps a per-workspace memory for each conversation's directory under
+  `~/.local/share/muse/memory/projects/` and that closing a conversation does not remove it.
+- A first turn passes a fresh UUID and the result carries it as the session; a resumed turn passes
+  the stored id and returns the same one. A stream whose session id differs from the one passed, or
+  carries none, is a failure of the rung.
+- An answer outside the schema, an answer whose task names a component outside the scope, a failed
+  run, a stream with no terminal record, a non-zero exit and a timeout are each a failure and never
+  returned. The ladder resumes within a provider and hands off across providers, as the tests of
+  X2 show for the others, using Muse as one provider.
+- The `expert_web` tool is the only tool of this rung that reaches the network: the argument list
+  disables Muse's own web tools, and the Expert's web-grant tests of X7 pass with a Muse rung in
+  the ladder.
+- README.md and docs/reference.md describe the Expert rung and its limits: the rung cannot write to
+  the components but can read any file the user can read, and its file protection is the workspace
+  boundary plus the absent shell.
+- The report lists the places in docs/design.md that must change for Muse and for the Expert's
+  weaker confinement, without editing it.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### Risks and open points
+
+- **Auto-approval.** `--approval-mode never` lets every tool run unasked. For the Expert the only
+  barrier against a write to a component is the workspace boundary plus the absent shell. The hand
+  probes covered `write_file`, `edit_file`, symlinks, `../` paths, a subagent, `monitor` and
+  `workflow` on 1.4.15 and found no way into a component under the home directory; M2 repeats them
+  and keeps the refusals as fixtures. A MCP tool's side effects are outside this boundary: the web
+  server is ours and fetches only granted hosts.
+- **Temporary directories are writable.** A component under a system temporary directory is not
+  protected, so M5 refuses such a scope.
+- **Boundary regression.** A later `muse` could loosen the workspace check. Nothing in the flags
+  would then stop a write, and the refusal fixtures are the only signal. The Expert's trust note
+  says that the protection depends on Muse's own policy.
+- **Memory.** `add_memory` writes Muse's own per-workspace memory, outside the repositories. It is
+  not a risk to the components, but it is persistent state that survives the conversation's
+  directory; this repository does not remove it.
+- **Unconfined reads.** A Muse rung, like a Codex rung, can read any file the user can read, and
+  the Expert can then send what it read only to a granted host and to the PO's chat. The trust notes
+  must say so for Muse.
+- **Settings validation moves.** After M1 an unknown adapter fails at composition. If an existing
+  test or message depends on the failure at settings load, M1 reports it.
+- **Muse versions.** Flags and record types come from 1.4.15. A later `muse` that refuses a flag
+  makes the rung fail through the generic failure path; no version gate is added.
+- **Unobserved failures.** Quota, overload and context-length texts are not recorded. Until the
+  first real sample, those failures are generic rung failures.
+- **Service environment.** The rung needs `muse` on the service's `PATH` and the user's login.
+  M4 records this as an owner check.
+
 ## Historical implementation records
 
 Everything from here to the end of this file records how T0 to E14 were implemented. It is kept
