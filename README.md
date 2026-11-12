@@ -184,7 +184,9 @@ turn, `/summarize` asks for a short summary, and `/help` lists them. The other c
 work in an Expert topic, and the Expert commands do not work elsewhere. `/close` ends the
 conversation. So does closing its topic in Telegram, or going unused for `retention_days`. An ending
 deletes the topic and the conversation's record and files. If Telegram refuses the deletion, the
-conversation stays, the PO is told once, and the deletion is tried again.
+conversation stays, the PO is told once, and the deletion is tried again. Muse keeps per-workspace
+memory for each conversation directory under `~/.local/share/muse/memory/projects/`; closing a
+conversation does not remove it.
 
 ## Approvals and automatic actions
 
@@ -286,8 +288,10 @@ More cases, including engine-down signals and clean stops, are in
   can act.
 - Components must be local Shikiru project directories. Telegram is the only chat channel.
 - The Reasoner is optional. Without it, or when every rung fails, escalations go to the PO.
-- A Codex or Muse rung's read-only setting stops writes, not reads. Its model can read any file your
-  user account can read.
+- Codex and Muse Reasoner rungs can read any file your user account can read. A Muse Expert rung
+  can also read any such file. It cannot write components outside the system temporary directory;
+  its protection is the workspace boundary and the absent shell. Components under the system
+  temporary directory are refused.
 
 Local state, data flow and all limits are in the [reference](docs/reference.md#local-state).
 

@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
 from shikiri_yaku.adapters.agents.claude import ClaudeExpert
+from shikiri_yaku.adapters.agents.muse import MuseExpert
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
@@ -36,7 +38,6 @@ from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping, Sequence
-    from pathlib import Path
 
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.health_source import HealthSource
@@ -144,6 +145,14 @@ class Runner:
         if self.hold and len(self.calls) == 1:
             self.started.set()
             await self.release.wait()
+        if argv[0] == "muse":
+            session = argv[argv.index("--session-id") + 1]
+            muse_output = {
+                "stream": {"kind": "session", "id": session},
+                "payload_type": "run.terminal.completed",
+                "payload": {"text": json.dumps(ANSWER)},
+            }
+            return CommandResult(0, json.dumps(muse_output), "")
         output: dict[str, object] = {
             "is_error": False,
             "session_id": "session",
@@ -152,8 +161,9 @@ class Runner:
         return CommandResult(0, json.dumps(output), "")
 
 
-def ladder(runner: Runner) -> LadderExpert:
-    rung = ClaudeExpert("model", runner, effort=None, timeout_s=20)
+def ladder(runner: Runner, *, muse: bool = False) -> LadderExpert:
+    expert_class = MuseExpert if muse else ClaudeExpert
+    rung = expert_class("model", runner, effort=None, timeout_s=20)
     return LadderExpert(
         [rung],
         Clock(),
@@ -165,12 +175,15 @@ def ladder(runner: Runner) -> LadderExpert:
 
 
 class Harness:
-    def __init__(self, path: Path, expert: Expert, client: Client | None = None) -> None:
+    def __init__(
+        self, path: Path, expert: Expert, client: Client | None = None, *, muse: bool = False
+    ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
         self.outbox = JournalOutbox(self.database, MessageStore(self.database, Reporter()))
         self.topics = Topics()
-        scope = {name: path / name for name in ("api", "web")}
+        scope_root = Path("/component") if muse else path
+        scope = {name: scope_root / name for name in ("api", "web")}
         shared = client or Client()
         clients = {name: cast("ShikiruClient", shared) for name in scope}
         self.runs = ConversationRuns()
@@ -238,8 +251,8 @@ class Harness:
 def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
     made: list[Harness] = []
 
-    def make(expert: Expert, client: Client | None = None) -> Harness:
-        harness = Harness(tmp_path, expert, client)
+    def make(expert: Expert, client: Client | None = None, *, muse: bool = False) -> Harness:
+        harness = Harness(tmp_path, expert, client, muse=muse)
         made.append(harness)
         return harness
 
@@ -508,11 +521,12 @@ def test_expert_commands_are_unavailable_outside_expert_topics(
     assert not runner.calls
 
 
+@pytest.mark.parametrize("muse", [False, True])
 def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
-    build: Callable[..., Harness],
+    build: Callable[..., Harness], muse: bool  # noqa: FBT001
 ) -> None:
     runner = Runner(hold=True)
-    h = build(ladder(runner))
+    h = build(ladder(runner, muse=muse), muse=muse)
     now = Clock().now()
     h.log.create(1, chat=CHAT, thread=None, text="question", scope=["api"], now=now)
     conversation = h.log.get(1)

@@ -1,22 +1,30 @@
-"""The Muse Code CLI: its Reasoner rung, and nothing about any other agent."""
+"""The Muse Code CLI: its Reasoner and Expert rungs."""
 
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shikiri_yaku.adapters.agents.common import (
     SCHEMA_FILE,
+    WEB_COMMAND,
+    WEB_SERVER,
     AgentAdapter,
     BlockerAnswer,
+    CliExpert,
     CliRung,
 )
 from shikiri_yaku.domain.classification import CallRecord
+from shikiri_yaku.domain.expert import ExpertAnswer
+from shikiri_yaku.ports import ExpertError
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
+    from shikiri_yaku.domain.expert import ExpertRequest
     from shikiri_yaku.ports import CommandResult
 
 NAME: Final = "muse"
@@ -24,6 +32,8 @@ READ_ONLY_PROFILE: Final = ":read-only"
 COMPLETED: Final = "run.terminal.completed"
 FAILED: Final = "run.terminal.failed"
 USAGE: Final = "run.usage"
+SESSION: Final = "session"
+PROMPT_FILE: Final = "prompt.md"
 TOKEN_FIELDS: Final = ("input_tokens", "cached_tokens", "output_tokens", "reasoning_tokens")
 _TERMINALS: Final = frozenset({COMPLETED, FAILED})
 _USAGE_TYPES: Final = frozenset({USAGE})
@@ -33,6 +43,7 @@ _LOOKUPS: Final = "Answer from the facts above alone. Run no command and look no
 class _Record(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
+    stream: dict[str, str] | None = None
     payload_type: str
     payload: dict[str, object]
 
@@ -156,4 +167,81 @@ def _call_of(usage: _Record | None) -> CallRecord | None:
     return CallRecord(duration_ms=None, cost_usd=None, usage=totals)
 
 
-AGENT: Final = AgentAdapter(name=NAME, reasoner=MuseRung, expert=None)
+class MuseExpert(CliExpert):
+    """A Muse Expert turn with a workspace boundary and no shell."""
+
+    provider = NAME
+
+    @override
+    def _check_scope(self, request: ExpertRequest) -> None:
+        temp = Path(tempfile.gettempdir()).resolve()
+        for name, path in request.scope.items():
+            if path.resolve().is_relative_to(temp):
+                msg = f"{self.name}: component {name} is under the temporary directory"
+                raise ExpertError(msg)
+
+    @override
+    def _prepare(self, session: str | None, prompt: str, schema_file: Path) -> tuple[str, str]:
+        (schema_file.parent / PROMPT_FILE).write_text(prompt, encoding="utf-8")
+        return session or str(uuid4()), ""
+
+    @override
+    def _argv(
+        self,
+        request: ExpertRequest,
+        session: str | None,
+        schema: str,
+        schema_file: Path,
+        answer_file: Path,
+    ) -> list[str]:
+        effort = request.effort or self._effort
+        config = json.dumps({"command": WEB_COMMAND, "args": self._web_args(request)})
+        return [
+            "muse",
+            "exec",
+            "--json",
+            "--model",
+            self._model,
+            *(["--reasoning-effort", effort] if effort else []),
+            "--approval-mode",
+            "never",
+            "--trust-workspace",
+            "--disable-shell",
+            "--disable-web-tools",
+            "--disable-reminders",
+            "--output-schema",
+            str(schema_file),
+            "--session-id",
+            str(session),
+            "-c",
+            f"mcpServers.{WEB_SERVER}={config}",
+            "--prompt-file",
+            str(schema_file.parent / PROMPT_FILE),
+        ]
+
+    @override
+    def _answer(
+        self, result: CommandResult, answer_file: Path
+    ) -> tuple[ExpertAnswer, str, CallRecord | None]:
+        records = [_Record.model_validate_json(line) for line in result.stdout.splitlines()]
+        terminal = _last(records, _TERMINALS)
+        if terminal is None or terminal.payload_type != COMPLETED:
+            msg = f"{self.name}: no completed terminal"
+            raise ExpertError(msg)
+        sessions = {
+            r.stream.get("id") for r in records if r.stream and r.stream.get("kind") == SESSION
+        }
+        if len(sessions) != 1 or not (session := next(iter(sessions))):
+            msg = f"{self.name}: no unique session"
+            raise ExpertError(msg)
+        answer = ExpertAnswer.model_validate_json(_Terminal.model_validate(terminal.payload).text)
+        return answer, session, _call_of(_last(records, _USAGE_TYPES))
+
+    @override
+    def _check_session(self, requested: str | None, returned: str) -> None:
+        if requested != returned:
+            msg = f"{self.name}: session mismatch"
+            raise ExpertError(msg)
+
+
+AGENT: Final = AgentAdapter(name=NAME, reasoner=MuseRung, expert=MuseExpert)

@@ -83,8 +83,8 @@ Replace the placeholders with model and effort values that the installed CLI acc
 
 ### `[expert]`
 
-The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude` and `codex`, as the
-Reasoner does. `muse` has no Expert rung yet, so an Expert ladder that names it is refused at start-up.
+The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude`, `codex` and `muse`, as the
+Reasoner does.
 `doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
 shared group, address General requests as `/ask@bot <question>`. The **Open topic** button replies
@@ -119,9 +119,13 @@ ladder = ["claude:sonnet", "codex:gpt-5"]
 ```
 
 Claude is restricted to file reads in the scoped directories. Codex runs read-only with web search
-and apps disabled, but its file scope is an instruction rather than a filesystem boundary. Both
+and apps disabled, but its file scope is an instruction rather than a filesystem boundary. All
 Expert adapters pass the configured effort; the effort set with `/effort` in a conversation's topic
 overrides the rung effort.
+Muse cannot write components outside the system temporary directory; its file protection is the
+workspace boundary and the absent shell. Components under the system temporary directory are
+refused. Muse can read any file the user can read. Its per-workspace memory for each conversation
+directory remains under `~/.local/share/muse/memory/projects/` after the conversation closes.
 Supported Codex effort levels depend on the model. No live agent or group verification is included
 in the local test suite.
 

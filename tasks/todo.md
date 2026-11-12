@@ -314,7 +314,7 @@ shared constraints are in tasks/plan.md.
 
 ### M5
 
-- [ ] M5. Muse Expert rung
+- [x] M5. Muse Expert rung
 
 ## Acceptance criteria
 - Started only if M2 shows that a component directory cannot be written under the Expert's flags by any route; otherwise stop and report.

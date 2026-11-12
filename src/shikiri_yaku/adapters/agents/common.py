@@ -251,18 +251,21 @@ class CliExpert(ABC):
             f"Handoff:\n{handoff or ''}\nMessage:\n{request.message}"
         )
         try:
+            self._check_scope(request)
             with tempfile.TemporaryDirectory(dir=request.directory) as scratch:
                 schema_file = Path(scratch) / SCHEMA_FILE
                 answer_file = Path(scratch) / ANSWER_FILE
                 schema_file.write_text(schema, encoding="utf-8")
+                session_id, stdin = self._prepare(session_id, prompt, schema_file)
                 argv = self._argv(request, session_id, schema, schema_file, answer_file)
                 result = await self._runner.run(
-                    argv, timeout_s=self._timeout_s, cwd=request.directory, stdin=prompt
+                    argv, timeout_s=self._timeout_s, cwd=request.directory, stdin=stdin
                 )
                 if result.returncode:
                     msg = f"{self.name}: exited with {result.returncode}"
                     raise ExpertError(msg)
                 answer, session, call = self._answer(result, answer_file)
+                self._check_session(session_id, session)
                 if any(task.component not in request.scope for task in answer.tasks):
                     msg = f"{self.name}: task outside scope"
                     raise ExpertError(msg)
@@ -280,6 +283,17 @@ class CliExpert(ABC):
         ) as error:
             msg = f"{self.name}: no usable answer: {error}"
             raise ExpertError(msg) from error
+
+    def _check_scope(self, request: ExpertRequest) -> None:
+        pass
+
+    def _prepare(
+        self, session: str | None, prompt: str, schema_file: Path
+    ) -> tuple[str | None, str]:
+        return session, prompt
+
+    def _check_session(self, requested: str | None, returned: str) -> None:
+        pass
 
     def _web_args(self, request: ExpertRequest) -> list[str]:
         return [

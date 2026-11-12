@@ -19,6 +19,9 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import pytest
 from mcp.types import CallToolResult
 
+from shikiri_yaku.adapters.agents.common import AgentAdapter
+from shikiri_yaku.adapters.agents.muse import MuseRung
+from shikiri_yaku.adapters.agents.registry import AGENTS
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.telegram import BAD_REQUEST
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN
@@ -2065,14 +2068,16 @@ def test_composing_an_upgraded_journal_marks_its_stop_button_copies_standing(
         ("reasoner", "fake", "unknown adapter 'fake'; the adapters are claude, codex, muse"),
         (
             "expert",
-            "muse",
-            "adapter 'muse' has no expert rung; the adapters with one are claude, codex",
+            "fake",
+            "adapter 'fake' has no expert rung; the adapters with one are claude, codex, muse",
         ),
     ],
 )
 def test_a_ladder_that_names_an_adapter_without_its_rung_is_refused_before_anything_opens(
-    section: str, adapter: str, problem: str, tmp_path: Path
+    section: str, adapter: str, problem: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if section == "expert":
+        monkeypatch.setitem(AGENTS, "fake", AgentAdapter("fake", MuseRung, None))
     directory = _instance(tmp_path)
     with (directory / "config.toml").open("a", encoding="utf-8") as config:
         config.write(f'\n[{section}]\nladder = ["{adapter}:model"]\n')
