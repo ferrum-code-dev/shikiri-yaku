@@ -776,12 +776,16 @@ class Message:
 
     A message that waits for the PO's typed text (`expects_reply`) has no buttons: the Channel
     opens the reply box in its place.
+
+    `reply_to` is the Channel's reference of the message this one answers, so the PO sees which
+    command it belongs to. It is stored with the body, so a retry or a restart keeps it.
     """
 
     text: str
     buttons: tuple[Button, ...] = ()
     heading: str = ""
     expects_reply: bool = False
+    reply_to: str | None = None
 
     def __post_init__(self) -> None:
         if self.expects_reply and self.buttons:

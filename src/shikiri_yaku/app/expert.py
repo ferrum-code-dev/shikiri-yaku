@@ -110,7 +110,7 @@ class Ask:
         button = Button("Open topic", url=self._topics.link(row.thread_id))
         self._outbox.queue_command_reply(
             [item_destination(self._channel, item)],
-            [Message("Open the Expert conversation.", (button,))],
+            [Message("Open the Expert conversation.", (button,), reply_to=item.message_ref)],
             key=f"ask:open:{item.update_id}",
             now=self._clock.now(),
             conversation_id=row.id,

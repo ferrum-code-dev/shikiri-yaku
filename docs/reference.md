@@ -86,8 +86,9 @@ Replace the placeholders with model and effort values that the installed CLI acc
 The optional Expert ladder accepts the same `adapter:model[:effort]` entries as the Reasoner.
 `doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
-shared group, address General requests as `/ask@bot <question>`. An uncertain topic creation is
-not retried; ask again. An interrupted turn is reported and is not repeated.
+shared group, address General requests as `/ask@bot <question>`. The **Open topic** button replies
+to its `/ask`, so concurrent requests keep their own buttons. An uncertain topic creation is not
+retried; ask again. An interrupted turn is reported and is not repeated.
 
 Each message in an Expert topic is a follow-up turn of that conversation. The turns of one
 conversation run one at a time, oldest first, and each later turn resumes the agent session of

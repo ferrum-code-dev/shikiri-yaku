@@ -483,3 +483,59 @@ def test_refused_topic_rename_does_not_prevent_answer(tmp_path: Path) -> None:
     assert answers[0].message.text == "answer"
     assert len(h.expert.requests) == 1
     assert len(h.topics.created) == 1
+
+
+def _ask(update_id: int, message_ref: str) -> Inbound:
+    return Inbound(
+        update_id, InboundKind.TEXT, 5, -100123, message_ref, text=f"/ask question {update_id}"
+    )
+
+
+def test_each_ask_reply_names_its_own_command_and_opens_its_own_topic(tmp_path: Path) -> None:
+    async def scenario(h: Harness) -> None:
+        await asyncio.gather(
+            h.ask.handle(_ask(1, "-100123/71"), None),
+            h.ask.handle(_ask(2, "-100123/72"), None),
+        )
+
+    h = Harness(tmp_path)
+    asyncio.run(scenario(h))
+
+    buttons = [item for item in h.outbox.pending() if item.message.buttons]
+    assert sorted(item.message.reply_to or "" for item in buttons) == [
+        "-100123/71",
+        "-100123/72",
+    ]
+    for update_id, command in ((1, "-100123/71"), (2, "-100123/72")):
+        [button] = [item for item in buttons if item.message.reply_to == command]
+        conversation = h.log.get(update_id)
+        assert conversation is not None
+        assert conversation.thread_id is not None
+        assert button.message.buttons[0].url == h.topics.link(conversation.thread_id)
+
+
+class FlakyChannel(Channel):
+    """Fails the first send with a transient error, then accepts every send."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    async def send(self, destination: Destination, message: Message) -> str:
+        if not self.failed:
+            self.failed = True
+            raise ChannelError(_RETRY_LATER)
+        return await super().send(destination, message)
+
+
+def test_the_reply_target_survives_a_failed_send(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    asyncio.run(h.ask.handle(_ask(1, "-100123/71"), None))
+
+    channel = FlakyChannel()
+    sender = OutboxSender(h.outbox, channel, Clock(), interval_s=1)
+    asyncio.run(sender.tick())
+    asyncio.run(sender.tick())
+
+    [button] = [message for _, message in channel.sent if message.buttons]
+    assert button.reply_to == "-100123/71"

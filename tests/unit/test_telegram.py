@@ -180,6 +180,22 @@ def test_send_posts_a_topic_thread_when_the_destination_has_one() -> None:
     assert api.calls[0][1]["message_thread_id"] == 73
 
 
+def test_send_replies_to_the_message_it_answers_even_if_that_message_is_gone() -> None:
+    api = _Api([_recorded("send_ok.json")])
+    answer = Message(
+        "Open the Expert conversation.",
+        (Button("Open topic", url="https://example.test/topic"),),
+        reply_to="1001/42",
+    )
+
+    _send(api, _Clock(), answer)
+
+    assert api.calls[0][1]["reply_parameters"] == {
+        "message_id": 42,
+        "allow_sending_without_reply": True,
+    }
+
+
 def test_edit_targets_the_ref_and_clears_buttons_with_an_empty_keyboard() -> None:
     api = _Api([_recorded("edit_ok.json")])
 

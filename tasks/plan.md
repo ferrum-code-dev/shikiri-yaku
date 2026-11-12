@@ -417,6 +417,21 @@ in `topics` by migration.
 - `/goal`, `/status`, `/open` and `/help` outside Expert topics behave as before.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+### X3a. Reply to each `/ask` with its topic button (normal)
+
+After X3. The answer to `/ask` is a message that replies to the command and carries its *Open
+topic* button, so the PO can tell the buttons of concurrent `/ask` commands apart. The reply target
+is part of the stored message body, so a retry or a restart sends the same reply. No journal
+schema change: the body is stored as JSON and gains a field.
+
+## Acceptance criteria
+
+- With concurrent `/ask` commands, each button message names its own command as the message it
+  replies to, and its button opens the topic of its own conversation.
+- The reply target survives a failed send. The Telegram payload carries it with
+  `allow_sending_without_reply`, so a command the PO deleted does not lose the button.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X4. Conversation turns and topic commands (normal)
 
 After X3. Every message an owner sends in an Expert topic is a turn of its conversation. Turns of

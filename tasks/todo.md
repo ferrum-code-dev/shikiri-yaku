@@ -199,6 +199,16 @@ constraints are in tasks/plan.md.
 - `/goal`, `/status`, `/open` and `/help` outside Expert topics behave as before.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+### X3a
+
+- [x] X3a. Reply to each `/ask` with its topic button
+
+## Acceptance criteria
+
+- With concurrent `/ask` commands, each button message names its own command as the message it replies to, and its button opens the topic of its own conversation.
+- The reply target survives a failed send. The Telegram payload carries it with `allow_sending_without_reply`, so a command the PO deleted does not lose the button.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X4
 
 - [x] X4. Conversation turns and topic commands

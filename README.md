@@ -162,6 +162,8 @@ may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-ou
 
 `/ask` in a component topic limits the Expert to that component; in General it can read all
 components. In a shared group, address General requests to the bot as `/ask@bot <question>`.
+The **Open topic** button replies to the `/ask` it belongs to, so several questions asked together
+each keep their own button.
 If topic creation is uncertain, ask again; an interrupted turn is not repeated automatically.
 
 When an Expert answer proposes tasks, it lists each task, then offers **Submit all** and **Reject

@@ -279,6 +279,8 @@ class TelegramChannel:
         payload: dict[str, object] = {"chat_id": destination.chat, **_content(message)}
         if destination.thread is not None:
             payload["message_thread_id"] = destination.thread
+        if message.reply_to is not None:
+            payload["reply_parameters"] = _reply_parameters(message.reply_to)
         reply = await self._request(SEND_MESSAGE, payload)
         if not isinstance(reply.result, _Sent):
             raise ChannelError(UNEXPECTED_REPLY)
@@ -336,6 +338,15 @@ def _target(message_ref: str) -> dict[str, object]:
     """Return the chat and the message a reference names, as the Bot API takes them."""
     chat, _, message_id = message_ref.partition(REF_SEPARATOR)
     return {"chat_id": chat, "message_id": int(message_id)}
+
+
+def _reply_parameters(message_ref: str) -> dict[str, object]:
+    """Return the reply that answers the referenced message.
+
+    The message is sent even when the PO has deleted the one it answers, so its button is not lost.
+    """
+    _, _, message_id = message_ref.partition(REF_SEPARATOR)
+    return {"message_id": int(message_id), "allow_sending_without_reply": True}
 
 
 def _refused_reason(reply: _Failed) -> str:
