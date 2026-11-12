@@ -474,7 +474,7 @@ Keep the instance directory private. Back it up with the same care as other oper
 ## Limits
 
 - Components must be local Shikiru project directories. Telegram is the only chat channel.
-- The Reasoner is optional. It uses the configured local Claude, Codex or Muse CLIs. Without one, escalations that need a model assessment go to the Product Owner.
+- The Reasoner is optional. It uses configured local agent CLIs. Without one, escalations that need a model assessment go to the Product Owner.
 - If every configured Reasoner rung fails, the escalation still goes to the Product Owner, with a note and a Reasoner health signal.
 - A Claude rung gets no file-reading tool, only the web and package lookups its adapter lists. A Codex rung's read-only sandbox stops writes but not reads. Its model can read any file your user account can read.
 - A Muse rung's read-only profile denies writes but not reads. It has no shell, web tool or reminder, and its model can read any file your user account can read.

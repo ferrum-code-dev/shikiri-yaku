@@ -46,9 +46,7 @@ tool after the owner approves the exact command. Forwarding means one tap applie
   `shikiru init` has set up.
 - A Telegram bot token from [BotFather](https://t.me/BotFather). Keep it private. The bot uses long
   polling, so do not configure a webhook.
-- Optional: the local `claude`, `codex` and/or `muse` CLI, for a Reasoner ladder. `muse` uses the
-  login from `muse login` or the `META_API_KEY` environment variable; which one to use is the
-  owner's choice.
+- Optional: local agent CLIs (`claude`, `codex` and/or `muse`) for a Reasoner ladder.
 
 `doctor` fails on a Shikiru older than this release's minimum, and names that minimum.
 
@@ -221,8 +219,8 @@ This writes a per-product service unit and starts it, replacing the running serv
 Stop any other process holding the instance lock, such as a foreground `run`, first. The unit uses
 the `PATH` of the shell that ran the command, so `shikiru` and the Reasoner CLIs are found.
 
-A service manager starts with a smaller `PATH` than a terminal. If a Reasoner CLI such as `muse` is
-in a directory the service does not have (Homebrew on Apple silicon uses `/opt/homebrew/bin`),
+A service manager starts with a smaller `PATH` than a terminal. If a configured agent CLI is in a
+directory the service does not have (Homebrew on Apple silicon uses `/opt/homebrew/bin`),
 `doctor` passes in a terminal but the service cannot run that rung. Run `service install` again from
 a shell whose `PATH` includes that directory; the unit takes that `PATH` and the service restarts
 with it.
