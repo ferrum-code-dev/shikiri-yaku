@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from shikiri_yaku.adapters.expert_cli import ExpertCli
+from shikiri_yaku.adapters.agents.claude import ClaudeExpert
+from shikiri_yaku.adapters.agents.codex import CodexExpert
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.domain.expert import (
     ExpertAnswer,
@@ -67,12 +68,15 @@ class Runner:
         Path(argv[argv.index("--output-last-message") + 1]).write_text(json.dumps(self.answer))
 
 
+EXPERTS = {"claude": ClaudeExpert, "codex": CodexExpert}
+
+
 @pytest.mark.parametrize(
     ("provider", "resume"), [("claude", False), ("claude", True), ("codex", False), ("codex", True)]
 )
 def test_fixed_cli_arguments(provider: str, resume: bool, tmp_path: Path) -> None:  # noqa: FBT001
     runner = Runner(provider)
-    rung = ExpertCli(provider, "model", runner, effort="high", timeout_s=20)
+    rung = EXPERTS[provider]("model", runner, effort="high", timeout_s=20)
     request = ExpertRequest(tmp_path, {"api": tmp_path / "api"}, "hello")
     result = asyncio.run(rung.turn(request, session_id="old" if resume else None, handoff=None))
     argv = runner.argv
@@ -167,7 +171,7 @@ def test_codex_effort_override(
     tmp_path: Path,
 ) -> None:
     runner = Runner("codex")
-    rung = ExpertCli("codex", "model", runner, effort=rung_effort, timeout_s=20)
+    rung = CodexExpert("model", runner, effort=rung_effort, timeout_s=20)
     request = ExpertRequest(tmp_path, {"api": tmp_path}, "hello", effort=conversation_effort)
     asyncio.run(rung.turn(request, session_id=session, handoff=None))
     overrides = [arg for arg in runner.argv if arg.startswith("model_reasoning_effort=")]
@@ -186,7 +190,7 @@ def test_codex_effort_override(
 def test_invalid_answer_never_escapes(
     provider: str, answer: dict[str, object], tmp_path: Path
 ) -> None:
-    rung = ExpertCli(provider, "model", Runner(provider, answer), effort=None, timeout_s=20)
+    rung = EXPERTS[provider]("model", Runner(provider, answer), effort=None, timeout_s=20)
     with pytest.raises(ExpertError):
         asyncio.run(
             rung.turn(

@@ -557,6 +557,8 @@ def _lock_check(directory: Path) -> _Check:
 def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> list[_Check]:
     try:
         composition = compose(settings, directory)
+    except SettingsError as error:
+        return [_Check("config", str(error))]
     except CompositionError as error:
         return [_Check("journal", str(error))]
     try:

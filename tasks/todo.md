@@ -265,7 +265,7 @@ shared constraints are in tasks/plan.md.
 
 ### M1
 
-- [ ] M1. Move the CLI adapters into one module per agent
+- [x] M1. Move the CLI adapters into one module per agent
 
 ## Acceptance criteria
 - The existing Reasoner and Expert tests pass with only their imports and construction calls changed; no assertion changes.

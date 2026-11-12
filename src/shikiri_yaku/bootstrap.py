@@ -19,13 +19,12 @@ from typing import TYPE_CHECKING, Final, cast
 from mcp.server.fastmcp import FastMCP
 
 from shikiri_yaku import cli
+from shikiri_yaku.adapters.agents.registry import AGENTS
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
-from shikiri_yaku.adapters.expert_cli import ExpertCli
 from shikiri_yaku.adapters.expert_web import ExpertWeb
 from shikiri_yaku.adapters.host_lock import FileHostLock
 from shikiri_yaku.adapters.install_files import InstanceInstallFiles
-from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import (
@@ -128,7 +127,13 @@ from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import CompositionError
-from shikiri_yaku.settings import SHIKIRU_EXECUTABLE, CliSettings, SettingsError, load_settings
+from shikiri_yaku.settings import (
+    SHIKIRU_EXECUTABLE,
+    CliSettings,
+    SettingsError,
+    invalid_setting,
+    load_settings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -146,6 +151,7 @@ if TYPE_CHECKING:
         CommandRunner,
         Destinations,
         ExpertCommandRunner,
+        ExpertRung,
         Forwarder,
         Guard,
         InstallLog,
@@ -164,7 +170,7 @@ if TYPE_CHECKING:
         StartLog,
         WaitLog,
     )
-    from shikiri_yaku.settings import Component, ReasonerSettings, Settings
+    from shikiri_yaku.settings import Component, LadderRung, ReasonerSettings, Settings
 
 
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
@@ -174,10 +180,6 @@ INBOUND_HEALTH_SCOPE: Final = "telegram_inbound_batch"
 ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_KEY}:",)
 REASONER_SCRATCH_DIR: Final = "reasoner-scratch"
 FALLBACK_SHELL: Final = "/bin/sh"
-RUNG_CLASSES: Final[Mapping[str, Callable[..., ReasonerRung]]] = {
-    "claude": ClaudeRung,
-    "codex": CodexRung,
-}
 
 type LinkFactory = Callable[[str, Path], Connector]
 type BotFactory = Callable[[Settings], BotApi]
@@ -228,8 +230,10 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     `link` opens a project's MCP link and `bot` makes the Telegram transport; tests give fakes.
     `clock` is the system clock unless a test gives one whose waits are short, and `commands`
     runs the host commands of the Reasoner's CLIs, which are the process runner unless a test
-    gives a fake.
+    gives a fake. A ladder that names an adapter no agent registers is a SettingsError, raised
+    before the journal is opened.
     """
+    _check_adapters(settings)
     try:
         journal = Database.open(directory / JOURNAL_FILE_NAME)
     except JournalError as error:
@@ -506,16 +510,32 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     )
 
 
+def _check_adapters(settings: Settings) -> None:
+    # keep: settings cannot read the registry, so the check runs here, before any file is opened
+    if settings.reasoner is not None:
+        _check_ladder("reasoner", settings.reasoner.ladder)
+    if settings.expert is not None:
+        _check_ladder("expert", settings.expert.ladder)
+
+
+def _check_ladder(section: str, ladder: Sequence[LadderRung]) -> None:
+    for index, rung in enumerate(ladder):
+        if rung.adapter not in AGENTS:
+            names = ", ".join(sorted(AGENTS))
+            problem = f"unknown adapter '{rung.adapter}'; the adapters are {names}"
+            key = f"{section}.ladder[{index}].adapter"
+            raise invalid_setting(key, problem)
+
+
 def build_expert(
     settings: Settings, clock: Clock, commands: CommandRunner, directory: Path
-) -> tuple[LadderExpert | None, list[ExpertCli]]:
+) -> tuple[LadderExpert | None, list[ExpertRung]]:
     """Build the optional Expert and its probes."""
     expert_rungs = (
         []
         if settings.expert is None
         else [
-            ExpertCli(
-                rung.adapter,
+            AGENTS[rung.adapter].expert(
                 rung.model,
                 cast("ExpertCommandRunner", commands),
                 effort=rung.effort,
@@ -579,7 +599,7 @@ def reasoner_rungs(
     """
     share_s = config.timeout_s / len(config.ladder)
     return [
-        RUNG_CLASSES[rung.adapter](
+        AGENTS[rung.adapter].reasoner(
             rung.model,
             commands,
             effort=rung.effort,

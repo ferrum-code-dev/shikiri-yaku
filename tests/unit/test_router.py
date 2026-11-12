@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, override
 
 import pytest
 
-from shikiri_yaku.adapters.reasoner_cli import CodexRung
+from shikiri_yaku.adapters.agents.codex import CodexRung
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.app.scheduler import Scheduler

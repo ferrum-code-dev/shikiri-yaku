@@ -603,6 +603,26 @@ def test_doctor_probes_a_configured_expert_rung(
     assert _failed(capsys.readouterr().out) == {"expert claude:haiku"}
 
 
+def _with_unknown_adapter(directory: Path) -> None:
+    config = directory / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + '\n[reasoner]\nladder = ["gemini:haiku"]\n',
+        encoding="utf-8",
+    )
+
+
+def test_doctor_names_an_unknown_adapter_as_a_config_problem(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_unknown_adapter(_instance(tmp_path))
+
+    assert _run_doctor(tmp_path) == 1
+    output = capsys.readouterr().out
+    assert _failed(output) == {"config"}
+    assert "gemini" in output
+    assert "claude, codex" in output
+
+
 def test_doctor_has_no_expert_probe_without_configuration(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -770,6 +790,21 @@ def test_run_refuses_a_config_with_several_problems_on_one_error_line(
     assert error_lines[0].startswith(_FAILED_MARK)
     assert "components" in error_lines[0]
     assert "channels" in error_lines[0]
+
+
+def test_run_refuses_an_unknown_adapter_on_one_settings_error_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _with_unknown_adapter(_instance(tmp_path))
+
+    assert main(["--product", _PRODUCT, "--home", str(tmp_path), "run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error_lines = captured.err.splitlines()
+    assert len(error_lines) == 1
+    assert error_lines[0].startswith(_FAILED_MARK)
+    assert "gemini" in error_lines[0]
 
 
 def test_run_is_refused_when_the_lock_file_cannot_be_opened(tmp_path: Path) -> None:

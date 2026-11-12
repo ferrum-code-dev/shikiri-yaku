@@ -87,7 +87,6 @@ EXPERT_RETENTION_DAYS: Final = 14
 EXPERT_WEB_TIMEOUT_S: Final = 20
 EXPERT_WEB_MAX_BYTES: Final = 1000000
 EXPERT_WEB_MAX_REDIRECTS: Final = 10
-REASONER_ADAPTERS: Final = frozenset({"claude", "codex"})
 _RUNG_PARTS: Final = ("adapter", "model", "effort")
 _MIN_RUNG_PARTS: Final = 2
 
@@ -217,14 +216,6 @@ class HandlersSettings(_FrozenModel):
     product: ProductHandlerSettings = Field(default_factory=ProductHandlerSettings)
 
 
-def _known_adapter(value: str) -> str:
-    if value not in REASONER_ADAPTERS:
-        message = "unknown adapter '{adapter}'; the adapters are {known}"
-        known = ", ".join(sorted(REASONER_ADAPTERS))
-        raise PydanticCustomError(_RULE, message, {"adapter": value, "known": known})
-    return value
-
-
 def _split_rung(value: object) -> object:
     if not isinstance(value, str):
         return value
@@ -241,7 +232,8 @@ class LadderRung(_FrozenModel):
     The effort is optional; an adapter whose CLI has no flag for it ignores it.
     """
 
-    adapter: Annotated[str, AfterValidator(_known_adapter)]
+    # keep: settings cannot read the agent registry; the composition rejects an unknown adapter
+    adapter: Annotated[str, Field(min_length=1)]
     model: Annotated[str, Field(min_length=1)]
     effort: Annotated[str, Field(min_length=1)] | None = None
 
@@ -370,3 +362,8 @@ def _key_path(location: tuple[int | str, ...]) -> str:
 
 def _problem(key: str, problem: str) -> str:
     return f"'{key}' {problem}"
+
+
+def invalid_setting(key: str, problem: str) -> SettingsError:
+    """Return the error for a value that parsed but that only the composition can check."""
+    return SettingsError(_problem(key, f"is invalid: {problem}"))

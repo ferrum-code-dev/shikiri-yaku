@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any, Final, override
 
 import pytest
 
-from shikiri_yaku.adapters.reasoner_cli import ClaudeRung, CodexRung
+from shikiri_yaku.adapters.agents.claude import ClaudeRung
+from shikiri_yaku.adapters.agents.codex import CodexRung
 from shikiri_yaku.bootstrap import reasoner_rungs
 from shikiri_yaku.domain.classification import Assessment, CallRecord, Verdict
 from shikiri_yaku.domain.signal import Kind, Signal

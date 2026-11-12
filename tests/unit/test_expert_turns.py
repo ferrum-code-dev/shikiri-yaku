@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.expert_cli import ExpertCli
+from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
@@ -153,7 +153,7 @@ class Runner:
 
 
 def ladder(runner: Runner) -> LadderExpert:
-    rung = ExpertCli("claude", "model", runner, effort=None, timeout_s=20)
+    rung = ClaudeExpert("model", runner, effort=None, timeout_s=20)
     return LadderExpert(
         [rung],
         Clock(),
