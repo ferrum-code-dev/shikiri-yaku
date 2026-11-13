@@ -31,6 +31,7 @@ Migration 24 keeps the name of each one-time repair that ran, so an upgraded jou
 Migration 26 keeps the effort a conversation was given with `/effort`, which its next turn passes
 to the agent.
 Migration 27 keeps the state of each Expert task proposal, so its buttons act at most once.
+Migration 28 keeps the time an Expert conversation began ending, so recovery preserves its reply.
 """
 
 from __future__ import annotations
@@ -248,4 +249,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             UNIQUE (update_id, host)
         )""",
     ),
+    ("ALTER TABLE conversations ADD COLUMN ending_at TEXT",),
 )

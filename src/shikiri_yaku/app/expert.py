@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_turns import CREATION_UNCERTAIN, queue_expert_notice
-from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX
+from shikiri_yaku.domain.callback import CONVERSATION_CLOSED_DATA, EXPERT_SELECTION_PREFIX
+from shikiri_yaku.domain.outbound import TIME_FORMAT
 from shikiri_yaku.ports import Button, ChannelError, Message
 
 if TYPE_CHECKING:
@@ -20,6 +22,20 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox
 
 _OPEN: Final = "open"
+OPEN_REPLY: Final = "Open the Expert conversation."
+_CLOSED: Final = "Conversation closed {when}"
+_CLOSED_TIME: Final = f"%Y-%m-%d {TIME_FORMAT}"
+
+
+def open_reply_keys(update_id: int) -> tuple[str, str]:
+    """Return the notice keys of a conversation's /ask reply: the open and the selection one."""
+    return f"ask:open:{update_id}:0", f"ask:select:{update_id}:0"
+
+
+def closed_reply(closed_at: datetime) -> Message:
+    """Return the /ask reply of an ended conversation: its text and inert button show the time."""
+    text = _CLOSED.format(when=closed_at.astimezone(UTC).strftime(_CLOSED_TIME))
+    return Message(text, (Button(text, data=CONVERSATION_CLOSED_DATA),))
 
 
 class ConversationLog(Protocol):
@@ -144,12 +160,11 @@ class Ask:
         if row is None or row.state != _OPEN or row.thread_id is None:
             return
         button = Button("Open topic", url=self._topics.link(row.thread_id))
-        message = Message("Open the Expert conversation.", (button,))
+        message = Message(OPEN_REPLY, (button,))
         if selection:
             if self._final is not None:
-                self._final.settle_notice(
-                    f"ask:select:{item.update_id}:0", message, conversation_id=row.id
-                )
+                _, selection_key = open_reply_keys(item.update_id)
+                self._final.settle_notice(selection_key, message, conversation_id=row.id)
         else:
             self._outbox.queue_command_reply(
                 [item_destination(self._channel, item)],

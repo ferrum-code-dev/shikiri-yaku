@@ -39,8 +39,8 @@ class CopyEditor:
             try:
                 await self._channel.edit(edit.message_ref, edit.message)
             except ChannelRefusedError as error:
-                self._log.give_up(edit.message_ref, str(error))
+                self._log.give_up(edit.message_ref, edit.message, str(error))
             except ChannelError:
                 continue
             else:
-                self._log.confirm_edit(edit.message_ref)
+                self._log.confirm_edit(edit.message_ref, edit.message)

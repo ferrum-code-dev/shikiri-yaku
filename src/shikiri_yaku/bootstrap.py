@@ -375,6 +375,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             retention=timedelta(days=settings.expert.retention_days),
+            final=JournalFinalEdits(journal, _journal_replies(journal)),
         )
         proposals = ExpertProposals(
             JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),

@@ -1,5 +1,19 @@
 # Todo
 
+## Planned work: closed Expert replies (T-158)
+
+- [x] X5a. Close the `/ask` reply when its conversation ends
+
+## Acceptance criteria
+
+- Each ending (topic closed, `/close`, expiry, a send to a gone topic) changes the `/ask` reply of that conversation, and only that one, to the closed text and button; the reply and button of the other conversation are untouched. Table-driven over the endings and both reply kinds.
+- The closed time is the time the conversation ended, and a deletion retried later keeps it.
+- The ending state and its time are durable together; recovery after that write but before the reply edit uses the first time.
+- Closing associates a shared-group selection reply even if the process stopped after the topic was opened but before that reply was tagged; the rows remain until its edit is confirmed or given up.
+- The conversation's rows are not erased before the reply edit is confirmed or given up, and are erased after it.
+- A tap on the closed button changes nothing.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Planned work: T-155 risk follow-up
 
 ### X3c

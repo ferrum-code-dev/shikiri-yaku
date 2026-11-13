@@ -96,7 +96,8 @@ class JournalFinalEdits:
             for row in rows:
                 final = final_copy(_BODY.validate_json(row["body"]), line)
                 connection.execute(
-                    "UPDATE messages SET final_body = ?, final_line = ?, final_edited = 0"
+                    "UPDATE messages SET final_body = ?, final_line = ?, final_edited = 0,"
+                    " refusal = NULL"
                     " WHERE id = ?",
                     (_BODY.dump_json(final).decode(), line, row["id"]),
                 )
@@ -108,12 +109,24 @@ class JournalFinalEdits:
         body = _BODY.dump_json(message).decode()
         self._database.connection.execute(
             """
-            UPDATE messages SET final_body = ?, final_line = NULL, final_edited = 0,
+            UPDATE messages SET final_body = ?, final_line = NULL, final_edited = 0, refusal = NULL,
                 conversation_id = COALESCE(?, conversation_id)
             WHERE notice_key = ? AND direction = ? AND (final_body IS NULL OR final_body <> ?)
             """,
             (body, conversation_id, notice_key, Direction.OUT, body),
         )
+
+    def pending_for(self, conversation_id: int) -> bool:
+        row = self._database.connection.execute(
+            """
+            SELECT 1 FROM messages
+            WHERE conversation_id = ? AND final_body IS NOT NULL AND final_edited = 0
+              AND delivery IN (?, ?)
+            LIMIT 1
+            """,
+            (conversation_id, Delivery.PENDING, Delivery.SENT),
+        ).fetchone()
+        return row is not None
 
     def to_edit(self) -> list[FinalEdit]:
         rows = self._database.connection.execute(
@@ -129,23 +142,31 @@ class JournalFinalEdits:
             for row in rows
         ]
 
-    def confirm_edit(self, message_ref: str) -> None:
-        self._database.connection.execute(
+    def confirm_edit(self, message_ref: str, message: Message) -> None:
+        for row_id in self._showing(message_ref, message):
+            self._database.connection.execute(
+                "UPDATE messages SET final_edited = 1 WHERE id = ?", (row_id,)
+            )
+
+    def give_up(self, message_ref: str, message: Message, reason: str) -> None:
+        for row_id in self._showing(message_ref, message):
+            # keep: an identical settlement must not reopen a state the channel refused.
+            self._database.connection.execute(
+                "UPDATE messages SET final_edited = 1, refusal = COALESCE(refusal, ?) WHERE id = ?",
+                (reason, row_id),
+            )
+
+    def _showing(self, message_ref: str, message: Message) -> list[int]:
+        """Return the rows of a copy whose final state is the message; a later state is not."""
+        # keep: an edit in flight when the copy's final state changed is stale, and its result waits
+        rows = self._database.connection.execute(
             """
-            UPDATE messages SET final_edited = 1
+            SELECT id, final_body FROM messages
             WHERE platform_message_id = ? AND direction = ? AND final_body IS NOT NULL
             """,
             (message_ref, Direction.OUT),
-        )
-
-    def give_up(self, message_ref: str, reason: str) -> None:
-        self._database.connection.execute(
-            """
-            UPDATE messages SET final_body = NULL, refusal = COALESCE(refusal, ?)
-            WHERE platform_message_id = ? AND direction = ? AND final_body IS NOT NULL
-            """,
-            (reason, message_ref, Direction.OUT),
-        )
+        ).fetchall()
+        return [row["id"] for row in rows if _BODY.validate_json(row["final_body"]) == message]
 
 
 def final_copy(original: Message, line: str) -> Message:

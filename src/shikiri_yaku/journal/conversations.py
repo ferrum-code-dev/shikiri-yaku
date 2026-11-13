@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.expert import ConversationRecord, ExpertSession, TurnRecord
-from shikiri_yaku.journal.database import stamp
+from shikiri_yaku.journal.database import parse_stamp, stamp
 
 if TYPE_CHECKING:
     import sqlite3
@@ -46,6 +46,7 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
         state=row["state"],
         effort=row["effort"],
         session=None if session is None else ExpertSession(**json.loads(session)),
+        ending_at=parse_stamp(row["ending_at"]),
     )
 
 
@@ -223,14 +224,18 @@ class Conversations:
                 (stamp(now), conversation_id),
             )
 
-    def begin_ending(self, conversation_id: int) -> bool:
-        """Mark an open conversation as ending; no new turn or message reaches it after this."""
+    def begin_ending(self, conversation_id: int, now: datetime) -> ConversationRecord | None:
+        """Mark an open conversation as ending and keep that first time for recovery."""
         with self._database.transaction() as connection:
-            cursor = connection.execute(
-                "UPDATE conversations SET state = 'closing' WHERE id = ? AND state = 'open'",
-                (conversation_id,),
+            connection.execute(
+                """UPDATE conversations SET state = 'closing', ending_at = COALESCE(ending_at, ?)
+                WHERE id = ? AND state IN ('open', 'closing')""",
+                (stamp(now), conversation_id),
             )
-            return cursor.rowcount == 1
+            row = connection.execute(
+                "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            return None if row is None else _record(row)
 
     def idle_before(self, cutoff: datetime) -> list[ConversationRecord]:
         """Return the open conversations whose last message is older than the cutoff."""

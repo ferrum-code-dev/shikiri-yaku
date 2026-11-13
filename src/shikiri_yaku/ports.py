@@ -1023,11 +1023,22 @@ class FinalEdits(Protocol):
         """
         ...
 
+    def pending_for(self, conversation_id: int) -> bool:
+        """Return whether a copy tagged with this conversation still waits for its final edit.
+
+        A copy that the platform refused, or whose edit was given up, does not count.
+        """
+        ...
+
     def to_edit(self) -> list[FinalEdit]: ...
 
-    def confirm_edit(self, message_ref: str) -> None: ...
+    def confirm_edit(self, message_ref: str, message: Message) -> None:
+        """Mark the copy edited to the message that was sent; a final state settled since waits."""
+        ...
 
-    def give_up(self, message_ref: str, reason: str) -> None: ...
+    def give_up(self, message_ref: str, message: Message, reason: str) -> None:
+        """Give up the edit of the message that was refused; a final state settled since waits."""
+        ...
 
 
 class SecretLog(Protocol):

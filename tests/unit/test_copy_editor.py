@@ -35,7 +35,7 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import ShikiruClient
@@ -45,6 +45,7 @@ RESOLVED_AT: Final = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
 REFS: Final = ("1001/42", "1002/17")
 _BODY: Final = TypeAdapter(Message)
 QUESTION: Final = Message("S1 · question", (Button("Keep", "a:1:1"), Button("Drop", "a:1:2")))
+OVERTAKING: Final = "Resolved: Drop at 12:09 UTC"
 
 
 class _Clock:
@@ -56,17 +57,24 @@ class _Clock:
 
 
 class _Channel:
-    """Records each edit with the final body the journal held when the platform was asked."""
+    """Records each edit with the final body the journal held when the platform was asked.
+
+    A `before` step runs once, while the edit of its copy is in flight, before the platform answers.
+    """
 
     def __init__(self, database: Database, *, failures: dict[str, Exception] | None = None) -> None:
         self._database = database
         self.failures = failures or {}
+        self.before: dict[str, Callable[[], None]] = {}
         self.edits: list[tuple[str, Message, bool]] = []
 
     async def send(self, destination: Destination, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:
+        step = self.before.pop(message_ref, None)
+        if step is not None:
+            step()
         row = self._database.connection.execute(
             "SELECT final_body FROM messages WHERE platform_message_id = ?", (message_ref,)
         ).fetchone()
@@ -205,6 +213,32 @@ def test_an_edit_the_platform_refuses_is_not_repeated(h: _Harness) -> None:
     asyncio.run(editor.tick())
     asyncio.run(editor.tick())
     assert [ref for ref, _, _ in channel.edits].count(REFS[0]) == 1
+
+
+@pytest.mark.parametrize(
+    "outcome", [None, ChannelRefusedError("gone")], ids=["confirmed", "refused"]
+)
+def test_an_edit_overtaken_by_a_new_final_state_waits_for_its_own_edit(
+    h: _Harness, outcome: Exception | None
+) -> None:
+    h.resolve()
+    channel = _Channel(h.database, failures={} if outcome is None else {REFS[0]: outcome})
+
+    def overtake() -> None:
+        JournalFinalEdits(h.database, h.replies).settle(h.number, OVERTAKING)
+
+    channel.before[REFS[0]] = overtake
+    editor = h.editor(channel)
+    asyncio.run(editor.tick())
+    assert not h.edited(REFS[0])
+    asyncio.run(editor.tick())
+    assert h.edited(REFS[0])
+    sent = [message.text for ref, message, _ in channel.edits if ref == REFS[0]]
+    assert OVERTAKING in sent[-1]
+    row = h.database.connection.execute(
+        "SELECT refusal FROM messages WHERE platform_message_id = ?", (REFS[0],)
+    ).fetchone()
+    assert row["refusal"] is None
 
 
 def test_a_long_question_is_cut_so_its_final_state_still_fits(h: _Harness) -> None:

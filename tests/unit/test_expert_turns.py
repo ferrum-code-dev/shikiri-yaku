@@ -25,6 +25,7 @@ from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
+from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.ops import OpStore
@@ -32,7 +33,14 @@ from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.web import JournalWeb
-from shikiri_yaku.ports import CommandResult, ShikiruLinkDownError
+from shikiri_yaku.ports import (
+    TOPIC_GONE_REASON,
+    ChannelRefusedError,
+    CommandResult,
+    ShikiruLinkDownError,
+)
+from tests.support.copies import Platform
+from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
 
@@ -96,6 +104,8 @@ class Topics:
         del thread_id, name
 
     async def delete(self, thread_id: int) -> None:
+        if thread_id in self.deleted:
+            raise ChannelRefusedError(TOPIC_GONE_REASON)
         self.deleted.append(thread_id)
 
     async def addressed(self, word: str) -> bool:
@@ -190,6 +200,10 @@ class Harness:
         shared = client or Client()
         clients = {name: cast("ShikiruClient", shared) for name in scope}
         self.runs = ConversationRuns()
+        replies = JournalReplies(
+            self.database, SignalStore(self.database), OpStore(self.database), channel_name=CHANNEL
+        )
+        self.final = JournalFinalEdits(self.database, replies)
         self.ending = ExpertEnding(
             self.log,
             self.runs,
@@ -200,6 +214,7 @@ class Harness:
             channel=CHANNEL,
             group_id=GROUP_ID,
             retention=timedelta(days=14),
+            final=self.final,
         )
         self.turns = ExpertTurns(
             self.log,
@@ -426,6 +441,8 @@ def test_a_private_origin_ends_through_the_expert_group_topic(
         await asyncio.wait_for(close_log.handled.wait(), timeout=1)
 
     asyncio.run(scenario())
+    deliver_copies(h.outbox, h.final, Clock(), Platform(), gone=h.ending)
+    asyncio.run(h.ending.sweep())
 
     assert h.log.get(1) is None
     assert h.topics.deleted == [THREAD]

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     from shikiri_yaku.domain.classification import CallRecord
@@ -49,6 +50,7 @@ class ConversationRecord:
     state: str
     effort: str | None
     session: ExpertSession | None
+    ending_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)

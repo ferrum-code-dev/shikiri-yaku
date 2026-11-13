@@ -120,7 +120,7 @@ def _settle_all(final: JournalFinalEdits) -> list[FinalEdit]:
         final.settle(number, line)
     edits = final.to_edit()
     for edit in edits:
-        final.confirm_edit(edit.message_ref)
+        final.confirm_edit(edit.message_ref, edit.message)
     return edits
 
 

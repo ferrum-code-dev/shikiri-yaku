@@ -183,6 +183,7 @@ class Harness:
             channel="telegram",
             group_id=-100123,
             retention=timedelta(days=14),
+            final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
         )
         clients = clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")}
         self.turns = ExpertTurns(

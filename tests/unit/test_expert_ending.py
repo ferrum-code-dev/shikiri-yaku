@@ -8,28 +8,38 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
+from pydantic import ValidationError
 
+from shikiri_yaku.app.expert import OPEN_REPLY
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.outbox_sender import OutboxSender
+from shikiri_yaku.domain.callback import CONVERSATION_CLOSED_DATA, decode_callback
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
+from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
+from shikiri_yaku.journal.ops import OpStore
 from shikiri_yaku.journal.outbox import JournalOutbox
+from shikiri_yaku.journal.replies import JournalReplies
+from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.ports import (
     TOPIC_GONE_REASON,
+    Button,
     ChannelError,
     ChannelRefusedError,
     Expert,
     Message,
     ShikiruTask,
 )
+from tests.support.copies import Platform
+from tests.support.copies import deliver as deliver_copies
 from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
@@ -99,6 +109,8 @@ class Topics:
     async def delete(self, thread_id: int) -> None:
         if self.refusals:
             raise self.refusals.pop(0)
+        if thread_id in self.deleted:
+            raise ChannelRefusedError(TOPIC_GONE_REASON)
         self.deleted.append(thread_id)
 
     async def create_expert(self, name: str) -> int:
@@ -172,6 +184,10 @@ class Harness:
         self.topics = Topics()
         self.directory = path
         self.runs = ConversationRuns()
+        replies = JournalReplies(
+            self.database, SignalStore(self.database), OpStore(self.database), channel_name=CHANNEL
+        )
+        self.final = JournalFinalEdits(self.database, replies)
         self.ending = ExpertEnding(
             self.log,
             self.runs,
@@ -182,6 +198,7 @@ class Harness:
             channel=CHANNEL,
             group_id=GROUP_ID,
             retention=RETENTION,
+            final=self.final,
         )
         clients = {"api": cast("ShikiruClient", client)}
         self.turns = ExpertTurns(
@@ -225,6 +242,15 @@ class Harness:
         directory.mkdir(parents=True)
         (directory / "notes.txt").write_text("notes", encoding="utf-8")
         return row.id
+
+    def deliver(self, platform: Platform) -> None:
+        deliver_copies(self.outbox, self.final, self.clock, platform, gone=self.ending)
+
+    def copy_ref(self, notice_key: str) -> str:
+        row = self.database.connection.execute(
+            "SELECT platform_message_id FROM messages WHERE notice_key = ?", (notice_key,)
+        ).fetchone()
+        return str(row["platform_message_id"])
 
     def remaining(self, conversation_id: int) -> int:
         """Count the rows of a conversation that are left, across every table that holds one."""
@@ -301,10 +327,14 @@ async def _topic_gone_on_send(h: Harness, conversation: int, thread: int) -> Non
     await sender.tick()
 
 
+_ENDINGS: Final = [_topic_closed, _close_command, _expired, _topic_gone_on_send]
+_ENDING_IDS: Final = ["topic-closed", "close-command", "expired", "topic-gone-on-send"]
+
+
 @pytest.mark.parametrize(
     "end",
-    [_topic_closed, _close_command, _expired, _topic_gone_on_send],
-    ids=["topic-closed", "close-command", "expired", "topic-gone-on-send"],
+    _ENDINGS,
+    ids=_ENDING_IDS,
 )
 def test_each_ending_leaves_no_rows_files_or_topic_and_touches_no_other_conversation(
     build: Callable[..., Harness],
@@ -442,6 +472,8 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
         await h.turns.handle(items[3])
 
     asyncio.run(scenario())
+    h.deliver(Platform())
+    asyncio.run(h.ending.sweep())
 
     def count(query: str, params: tuple[object, ...]) -> int:
         row = h.database.connection.execute(query, params).fetchone()
@@ -615,3 +647,173 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
     asyncio.run(scenario())
 
     assert h.remaining(conversation) == 0
+
+
+def _queue_ask_reply(h: Harness, reply: str, conversation: int | None, update_id: int) -> str:
+    """Queue the /ask reply of a conversation as its handler does, and return its notice key."""
+    if reply == "open":
+        key = f"ask:open:{update_id}"
+        message = Message(OPEN_REPLY, (Button("Open topic", url="https://t.me/c/1/22"),))
+    else:
+        key = f"ask:select:{update_id}"
+        message = Message("Choose an Expert.", (Button("/ask@bot", data=f"expert:{update_id}"),))
+    h.outbox.queue_command_reply(
+        [Destination(CHANNEL, str(PRIVATE_CHAT), None)],
+        [message],
+        key=key,
+        now=NOW,
+        conversation_id=conversation,
+    )
+    return f"{key}:0"
+
+
+@pytest.mark.parametrize("end", _ENDINGS, ids=_ENDING_IDS)
+@pytest.mark.parametrize("reply", ["open", "select"])
+def test_each_ending_closes_its_ask_reply_and_no_other(
+    build: Callable[..., Harness],
+    end: Callable[[Harness, int, int], Awaitable[None]],
+    reply: str,
+) -> None:
+    h = build()
+    target = h.open_conversation(CREATED, TARGET_THREAD)
+    bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
+    target_key = _queue_ask_reply(h, reply, target, CREATED)
+    bystander_key = _queue_ask_reply(h, "open", bystander, CREATED + 100)
+    h.log.touch(bystander, NOW + timedelta(days=3))
+    platform = Platform()
+    h.deliver(platform)
+    target_ref = h.copy_ref(target_key)
+    bystander_ref = h.copy_ref(bystander_key)
+
+    asyncio.run(end(h, target, TARGET_THREAD))
+    h.deliver(platform)
+    asyncio.run(h.ending.sweep())
+
+    edits = dict(platform.edits)
+    closed = edits[target_ref]
+    assert closed.text.endswith(h.clock.now().strftime("%Y-%m-%d %H:%M UTC"))
+    assert [button.label for button in closed.buttons] == [closed.text]
+    assert [button.data for button in closed.buttons] == [CONVERSATION_CLOSED_DATA]
+    assert bystander_ref not in edits
+    assert h.remaining(target) == 0
+    assert h.remaining(bystander) > 0
+
+
+@pytest.mark.parametrize(
+    ("failure", "erased_at_once"),
+    [(ChannelError("offline"), False), (ChannelRefusedError("cannot edit"), True)],
+    ids=["retried", "given-up"],
+)
+def test_the_rows_stay_until_the_closed_reply_is_edited_or_given_up(
+    build: Callable[..., Harness],
+    *,
+    failure: Exception,
+    erased_at_once: bool,
+) -> None:
+    h = build()
+    target = h.open_conversation(CREATED, TARGET_THREAD)
+    _queue_ask_reply(h, "open", target, CREATED)
+    platform = Platform()
+    h.deliver(platform)
+
+    asyncio.run(h.ending.end(target))
+    platform.edit_failures.append(failure)
+    h.deliver(platform)
+    asyncio.run(h.ending.sweep())
+    assert (h.remaining(target) == 0) is erased_at_once
+
+    h.deliver(platform)
+    asyncio.run(h.ending.sweep())
+    assert h.remaining(target) == 0
+    assert not conversation_directory(h.directory, target).exists()
+
+
+def test_a_retried_ending_keeps_the_time_the_conversation_closed(
+    build: Callable[..., Harness],
+) -> None:
+    h = build()
+    target = h.open_conversation(CREATED, TARGET_THREAD)
+    _queue_ask_reply(h, "open", target, CREATED)
+    platform = Platform()
+    h.deliver(platform)
+
+    asyncio.run(h.ending.end(target))
+    platform.edit_failures.append(ChannelError("offline"))
+    h.deliver(platform)
+    h.clock.current = NOW + timedelta(hours=1)
+    asyncio.run(h.ending.sweep())
+    h.deliver(platform)
+
+    [(_, closed)] = platform.edits
+    assert closed.buttons[0].label.endswith("2026-01-01 00:00 UTC")
+
+
+def test_recovery_after_recording_an_ending_keeps_its_time(
+    build: Callable[..., Harness],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    h = build()
+    target = h.open_conversation(CREATED, TARGET_THREAD)
+    _queue_ask_reply(h, "open", target, CREATED)
+    platform = Platform()
+    h.deliver(platform)
+    settle_notice = h.final.settle_notice
+
+    def crash_before_reply_edit(
+        notice_key: str, message: Message, *, conversation_id: int | None = None
+    ) -> None:
+        del notice_key, message, conversation_id
+        failure = "crash"
+        raise RuntimeError(failure)
+
+    monkeypatch.setattr(h.final, "settle_notice", crash_before_reply_edit)
+    with pytest.raises(RuntimeError, match="crash"):
+        asyncio.run(h.ending.end(target))
+
+    row = h.log.conversation(target)
+    assert row is not None
+    assert row.state == "closing"
+    assert row.ending_at == NOW
+
+    monkeypatch.setattr(h.final, "settle_notice", settle_notice)
+    h.clock.current = NOW + timedelta(hours=1)
+    asyncio.run(h.ending.sweep())
+    h.deliver(platform)
+
+    [(_, closed)] = platform.edits
+    assert closed.buttons[0].label.endswith("2026-01-01 00:00 UTC")
+
+
+def test_closing_associates_an_untagged_shared_selection_reply(
+    build: Callable[..., Harness],
+) -> None:
+    h = build()
+    selection_key = _queue_ask_reply(h, "select", None, CREATED)
+    platform = Platform()
+    h.deliver(platform)
+    selection_ref = h.copy_ref(selection_key)
+    target = h.open_conversation(CREATED, TARGET_THREAD)
+    assert (
+        h.database.connection.execute(
+            "SELECT conversation_id FROM messages WHERE notice_key = ?", (selection_key,)
+        ).fetchone()["conversation_id"]
+        is None
+    )
+
+    asyncio.run(h.ending.end(target))
+    associated = h.database.connection.execute(
+        "SELECT conversation_id FROM messages WHERE notice_key = ?", (selection_key,)
+    ).fetchone()
+    assert associated["conversation_id"] == target
+    assert h.final.pending_for(target)
+    assert h.remaining(target) > 0
+
+    h.deliver(platform)
+    assert dict(platform.edits)[selection_ref].buttons[0].label.endswith("2026-01-01 00:00 UTC")
+    asyncio.run(h.ending.sweep())
+    assert h.remaining(target) == 0
+
+
+def test_the_closed_button_carries_data_no_handler_decodes() -> None:
+    with pytest.raises(ValidationError):
+        decode_callback(CONVERSATION_CLOSED_DATA)
