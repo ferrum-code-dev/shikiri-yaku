@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import shutil
 import signal
 import sys
+from contextlib import redirect_stderr
 from dataclasses import dataclass
 from functools import partial
 from importlib.metadata import version
@@ -48,6 +50,7 @@ from shikiri_yaku.ports import (
     ExpertError,
     ReasonerError,
     ShikiruError,
+    ShikiruLinkDownError,
 )
 from shikiri_yaku.service import (
     NOT_INSTALLED,
@@ -562,7 +565,9 @@ def _composed_checks(settings: Settings, directory: Path, compose: Compose) -> l
     except CompositionError as error:
         return [_Check("journal", str(error))]
     try:
-        channel_lines = asyncio.run(composition.channel_check.report())
+        # keep: diagnostics are not the report; a failed check names its cause on its own line
+        with redirect_stderr(io.StringIO()):
+            channel_lines = asyncio.run(composition.channel_check.report())
         links = [
             _Check(f"link {name}", _probe_problem(probe))
             for name, probe in composition.link_probes.items()
@@ -591,11 +596,36 @@ def _verify_channel(channel_check: ChannelCheck) -> None:
 
 
 def _probe_problem(probe: Callable[[], Awaitable[None]]) -> str | None:
-    try:
-        asyncio.run(probe())
-    except (ShikiruError, ChannelError, ReasonerError, ExpertError) as error:
-        return str(error) or type(error).__name__
+    # keep: a probe's stderr is read only when it fails, so a passing check stays silent
+    diagnostics = io.StringIO()
+    with redirect_stderr(diagnostics):
+        try:
+            asyncio.run(probe())
+        except (ShikiruError, ChannelError, ReasonerError, ExpertError) as error:
+            return _problem(error, diagnostics.getvalue())
     return None
+
+
+def _problem(error: Exception, diagnostics: str) -> str:
+    problem = str(error) or type(error).__name__
+    cause = _stderr_title(diagnostics)
+    if not isinstance(error, ShikiruLinkDownError) or cause is None:
+        return problem
+    return f"{problem}; {cause}"
+
+
+# keep: Shikiru titles each failure with the same ✕ its doctor uses; logs and tracebacks have none
+_FAILURE_TITLE: Final = re.compile(r"^\s*✕\s+(\S.*?)\s*$")
+
+
+def _stderr_title(diagnostics: str) -> str | None:
+    # keep: the last title is the failure written just before the server exited
+    cause = None
+    for line in diagnostics.splitlines():
+        match = _FAILURE_TITLE.match(line)
+        if match is not None:
+            cause = match.group(1)
+    return cause
 
 
 def _stats(directory: Path, read_measures: ReadMeasures, *, as_json: bool) -> int:

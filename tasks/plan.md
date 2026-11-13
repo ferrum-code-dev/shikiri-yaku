@@ -1,11 +1,13 @@
 # Task plan
 
-## Current work: T-152 MCP doctor output
+## Current work: T-153 MCP doctor output
 
-Remove routine MCP request logs (such as `Processing request of type ...`) from `doctor` output. Keep
-other Shikiru diagnostics and link failures visible through the Shikiru check, and preserve usable
-text/JSON reports. Add an offline regression test using a harmless local
-MCP server. Run `uv run poe check` before completion.
+Fix the routine MCP request filter for the server's Rich two-line format (header with
+`server.py:733`, request type on its own indented line). Doctor keeps its check lines and
+summary in the Shikiru doctor style, names each failed check with a human-readable cause and
+exits unsuccessfully, and keeps text/JSON reports usable without extraneous logging. Add
+offline regression coverage using a harmless local MCP server. Run `uv run poe check`
+before completion.
 
 ## Historical work: release documentation cleanup
 

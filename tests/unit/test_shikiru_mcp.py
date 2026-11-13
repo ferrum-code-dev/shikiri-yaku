@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, override
 
@@ -39,7 +39,6 @@ from shikiri_yaku.ports import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
-    from datetime import timedelta
     from typing import TextIO
 
     from shikiri_yaku.adapters.shikiru_mcp import ToolSession
@@ -686,22 +685,39 @@ def test_a_path_is_connected_only_when_it_has_a_shikiru_state_directory(
     assert bool(attempts) is (state_directory is not None)
 
 
-_FAKE_MCP_SERVER = """#!{python}
+_FAKE_MCP_SERVER = """#!__PYTHON__
 import asyncio
 import logging
+import sys
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
+from mcp.types import TextContent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
 logging.getLogger("fake").warning("shikiru diagnostic kept")
+logging.getLogger("fake").info("Processing request of type InitializeRequest")
 routine = "INFO     Processing request of type ListToolsRequest"
 logging.getLogger("fake").error("handler failed after %s", routine)
-{extra}
+__EXTRA__
 server = Server("fake")
+
+def _trace(request_type, prefix="[11/13/26 16:35:31] INFO     Processing request of type"):
+    sys.stderr.write(prefix)
+    sys.stderr.write("            server.py:733\\n")
+    sys.stderr.write(" " * 29 + request_type + " " * 35 + "\\n")
+    sys.stderr.flush()
+
+BLANK_PREFIX = "                    INFO     Processing request of type"
 
 @server.list_tools()
 async def list_tools():
+    _trace("ListToolsRequest")
     return []
+
+@server.call_tool()
+async def call_tool(name, arguments):
+    _trace("CallToolRequest", BLANK_PREFIX)
+    return [TextContent(type="text", text="ok")]
 
 async def main():
     async with stdio_server() as (read_stream, write_stream):
@@ -712,7 +728,8 @@ asyncio.run(main())
 
 
 def _write_fake_server(path: Path, extra: str = "") -> str:
-    path.write_text(_FAKE_MCP_SERVER.format(python=sys.executable, extra=extra), encoding="utf-8")
+    text = _FAKE_MCP_SERVER.replace("__PYTHON__", sys.executable).replace("__EXTRA__", extra)
+    path.write_text(text, encoding="utf-8")
     path.chmod(0o700)
     return str(path)
 
@@ -726,12 +743,21 @@ def test_stdio_connector_drops_only_routine_info_traces(
     async def scenario() -> None:
         async with stdio_connector(executable, tmp_path)() as session:
             await session.list_tools()
+            await session.call_tool("status", {}, timedelta(seconds=_CALL_TIMEOUT_S))
 
     asyncio.run(scenario())
     err = capsys.readouterr().err
     assert not any(line.startswith("INFO") for line in err.splitlines())
+    assert "server.py:733" not in err
+    assert not any(
+        line.strip() in {"ListToolsRequest", "CallToolRequest"} for line in err.splitlines()
+    )
+    kept = "handler failed after INFO     Processing request of type ListToolsRequest"
+    assert all(
+        "Processing request of type" not in line for line in err.splitlines() if kept not in line
+    )
     assert "shikiru diagnostic kept" in err
-    assert "handler failed after INFO     Processing request of type ListToolsRequest" in err
+    assert kept in err
 
 
 def test_stdio_connector_returns_when_a_child_keeps_stderr_open(

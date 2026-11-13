@@ -1,14 +1,15 @@
 # Todo
 
-## Current work: T-152 MCP doctor output
+## Current work: T-153 MCP doctor output
 
 - [x] T-152. Suppress routine MCP request logs in doctor output
+- [x] T-153. Keep doctor output readable in the real Rich log format
 
 Acceptance criteria:
-- Doctor output omits routine MCP request-processing logs; other Shikiru diagnostics and link failures remain visible.
-- Doctor still checks the Shikiru link and reports failures; text and JSON reports remain usable.
-- A focused offline regression test covers the reported behavior.
-- `uv run poe check` passes; unrelated failures are reported with evidence.
+- Doctor output contains the final check results and summary without low-level application or MCP request-processing logs, including in the reported real-use path.
+- When a check fails, doctor reports a human-readable cause and exits unsuccessfully; successful checks and the summary remain readable in the style of Shikiru doctor.
+- Doctor continues to perform its checks, and its JSON output remains a usable report without extraneous logging.
+- Offline regression coverage covers the observed logging path and failed-check reporting using fakes or harmless local commands; `uv run poe check` passes.
 
 ## Historical work: release documentation cleanup
 

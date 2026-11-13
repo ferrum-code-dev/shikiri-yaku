@@ -43,9 +43,12 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, CommandRunner
 
 BACKOFF_FACTOR = 2
+# keep: the server wraps the request type onto its own indented line
 ROUTINE_REQUEST_TRACE: Final = re.compile(
-    r"(?:\[[^\]]*\]\s+)?INFO\s+Processing request of type \S+"
+    r"^\s*(?:\[[^\]]*\]\s+)?INFO\s+Processing request of type\b"
 )
+REQUEST_CONTINUATION: Final = re.compile(r"^\s+[A-Za-z_]\w*Request\s*$")
+ANSI_ESCAPE: Final = re.compile(r"\x1b\[[0-9;]*m")
 # keep: the directory `shikiru init` creates in a project; its absence means the path is not one
 SHIKIRU_STATE_DIRECTORY = ".shikiru"
 
@@ -131,12 +134,20 @@ async def _stderr_without_request_traces() -> AsyncGenerator[TextIO]:
 
 
 def _copy_without_request_traces(source: BinaryIO) -> None:
+    in_trace = False
     with source:
         for raw in source:
             line = raw.decode("utf-8", errors="replace")
-            if ROUTINE_REQUEST_TRACE.fullmatch(line.rstrip("\r\n")) is None:
-                sys.stderr.write(line)
-                sys.stderr.flush()
+            plain = ANSI_ESCAPE.sub("", line.rstrip("\r\n"))
+            if ROUTINE_REQUEST_TRACE.match(plain) is not None:
+                in_trace = True
+                continue
+            if in_trace and REQUEST_CONTINUATION.fullmatch(plain) is not None:
+                in_trace = False
+                continue
+            in_trace = False
+            sys.stderr.write(line)
+            sys.stderr.flush()
 
 
 class ShikiruMcpClient:
@@ -307,19 +318,28 @@ async def probe_link(connect: Connector, timeout_s: float) -> None:
     It checks that Shikiru offers every declared tool and that the reads without arguments
     answer in a shape the client reads. Raises a ShikiruError if any of it fails.
     """
+    failure: ShikiruError | None = None
     try:
         async with asyncio.timeout(timeout_s), connect() as session:
-            await _check_offered(session)
-            await _invoke(session, "status", {}, EngineStatus, timeout_s)
-            await _invoke(session, "list_escalations", {}, _Result[list[EscalationView]], timeout_s)
-            await _invoke(
-                session, "list_tasks", {"statuses": None}, _Result[list[ShikiruTask]], timeout_s
-            )
+            # keep: closing a session wraps an error from inside it as a dead link
+            try:
+                await _check_offered(session)
+                await _invoke(session, "status", {}, EngineStatus, timeout_s)
+                await _invoke(
+                    session, "list_escalations", {}, _Result[list[EscalationView]], timeout_s
+                )
+                await _invoke(
+                    session, "list_tasks", {"statuses": None}, _Result[list[ShikiruTask]], timeout_s
+                )
+            except ShikiruError as error:
+                failure = error
     except ShikiruError:
         raise
     except Exception as error:
         message = f"the link did not come up: {_reason(error)}"
         raise ShikiruLinkDownError(message) from error
+    if failure is not None:
+        raise failure
 
 
 async def _check_offered(session: ToolSession) -> None:

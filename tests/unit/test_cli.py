@@ -738,6 +738,193 @@ def test_doctor_reports_every_component_whose_real_mcp_transport_dies_on_start(
     assert _failed(capsys.readouterr().out) == {"link api", "link web"}
 
 
+_DOCTOR_FAKE_SERVER = """#!__PYTHON__
+import asyncio
+import logging
+import sys
+from mcp.server.lowlevel import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+logging.getLogger("fake").warning("shikiru diagnostic kept")
+
+DECLARED = [
+    "status",
+    "wait_for_events",
+    "list_escalations",
+    "get_escalation",
+    "list_tasks",
+    "get_task",
+    "resolve_escalation",
+    "submit_task",
+]
+server = Server("fake")
+
+def _trace(request_type, prefix="[11/13/26 16:35:31] INFO     Processing request of type"):
+    sys.stderr.write(prefix)
+    sys.stderr.write("            server.py:733\\n")
+    sys.stderr.write(" " * 29 + request_type + " " * 35 + "\\n")
+    sys.stderr.flush()
+
+BLANK_PREFIX = "                    INFO     Processing request of type"
+
+@server.list_tools()
+async def list_tools():
+    _trace("ListToolsRequest")
+    __LIST_BODY__
+
+@server.call_tool()
+async def call_tool(name, arguments):
+    _trace("CallToolRequest", BLANK_PREFIX)
+    if name == "status":
+        return {"engine_up": True, "quotas": {}}
+    return {"result": []}
+
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, server.create_initialization_options())
+
+asyncio.run(main())
+"""
+
+
+def _write_doctor_fake_server(path: Path, *, offering: bool) -> str:
+    body = (
+        'return [Tool(name=n, inputSchema={"type": "object"}) for n in DECLARED]'
+        if offering
+        else "return []"
+    )
+    text = _DOCTOR_FAKE_SERVER.replace("__PYTHON__", sys.executable).replace("__LIST_BODY__", body)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o700)
+    return str(path)
+
+
+def _run_doctor_with_fake(home: Path, fake: str, *, json_output: bool = False) -> int:
+    composed = partial(
+        compose,
+        link=lambda _executable, project: stdio_connector(fake, project),
+        bot=_accepting_bot,
+    )
+    options = ["--product", _PRODUCT, "--home", str(home)]
+    if json_output:
+        options.append("--json")
+    options.append("doctor")
+    return cli.main(
+        options,
+        composed,
+        stats_measures,
+        adopt_topic,
+        forget_topic,
+        commands=_Clis(),
+        clock=NapClock(),
+        cli_settings=_CLI_SETTINGS,
+    )
+
+
+def test_doctor_hides_request_traces_and_passes_with_real_transport(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+    (tmp_path / "api" / ".shikiru").mkdir()
+    fake = _write_doctor_fake_server(tmp_path / "fake-mcp", offering=True)
+
+    assert _run_doctor_with_fake(tmp_path, fake) == 0
+    captured = capsys.readouterr()
+    assert _failed(captured.out) == set()
+    checks, summary = _doctor_lines(captured.out)
+    assert all(line.startswith(_PASSED_MARK) for line in checks)
+    assert summary.startswith("✔ Doctor passed")
+    assert captured.err == ""
+    assert "Processing request of type" not in captured.out + captured.err
+    assert "server.py:733" not in captured.out + captured.err
+    assert "shikiru diagnostic kept" not in captured.out + captured.err
+    assert not any(
+        line.strip() in {"ListToolsRequest", "CallToolRequest"}
+        for line in (captured.out + captured.err).splitlines()
+    )
+
+    assert _run_doctor_with_fake(tmp_path, fake, json_output=True) == 0
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    assert document["passed"] is True
+    assert captured.err == ""
+    assert "Processing request of type" not in captured.out + captured.err
+    assert "server.py:733" not in captured.out + captured.err
+    assert "shikiru diagnostic kept" not in captured.out + captured.err
+
+
+def test_doctor_real_transport_failure_has_readable_cause_and_no_traces(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+    (tmp_path / "api" / ".shikiru").mkdir()
+    fake = _write_doctor_fake_server(tmp_path / "fake-mcp", offering=False)
+
+    assert _run_doctor_with_fake(tmp_path, fake) == 1
+    captured = capsys.readouterr()
+    assert _failed(captured.out) == {"link api"}
+    assert "Shikiru does not offer" in captured.out
+    assert captured.err == ""
+    assert "Processing request of type" not in captured.out + captured.err
+    assert "server.py:733" not in captured.out + captured.err
+    assert "shikiru diagnostic kept" not in captured.out + captured.err
+
+    assert _run_doctor_with_fake(tmp_path, fake, json_output=True) == 1
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    (failed,) = [check for check in document["checks"] if not check["passed"]]
+    assert failed["name"] == "link api"
+    assert "Shikiru does not offer" in failed["detail"]
+    assert captured.err == ""
+    assert "Processing request of type" not in captured.out + captured.err
+    assert "shikiru diagnostic kept" not in captured.out + captured.err
+
+
+# keep: the shape Shikiru writes at startup exit: unrelated logs, then a ✕ title and details
+_STARTUP_CAUSE: Final = "Project configuration is missing"
+_STARTUP_NOISE: Final = (
+    "WARNING  retrying the cache\n"
+    "Traceback (most recent call last):\n"
+    '  File "cache.py", line 3, in load\n'
+    "ValueError: stale entry\n"
+)
+_STARTUP_DETAILS: Final = "Details\n  Missing: /elsewhere/.shikiru/config.toml"
+
+
+def test_doctor_names_only_the_title_of_a_server_that_exits_at_startup(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+    (tmp_path / "api" / ".shikiru").mkdir()
+    fake = tmp_path / "fake-mcp"
+    error = f"{_STARTUP_NOISE}✕ {_STARTUP_CAUSE}\n\n{_STARTUP_DETAILS}\n"
+    script = f"import sys\nsys.stderr.write({error!r})\nsys.exit(3)\n"
+    fake.write_text(f"#!{sys.executable}\n{script}", encoding="utf-8")
+    fake.chmod(0o700)
+
+    assert _run_doctor_with_fake(tmp_path, str(fake)) == 1
+    captured = capsys.readouterr()
+    assert _failed(captured.out) == {"link api"}
+    assert f"Connection closed; {_STARTUP_CAUSE}" in captured.out
+    assert "retrying the cache" not in captured.out
+    assert "ValueError" not in captured.out
+    assert "Missing:" not in captured.out
+    assert captured.err == ""
+
+    assert _run_doctor_with_fake(tmp_path, str(fake), json_output=True) == 1
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
+    (failed,) = [check for check in document["checks"] if not check["passed"]]
+    assert failed["name"] == "link api"
+    assert failed["detail"].endswith(f"; {_STARTUP_CAUSE}")
+    assert "retrying the cache" not in failed["detail"]
+    assert "ValueError" not in failed["detail"]
+    assert "Missing:" not in failed["detail"]
+    assert captured.err == ""
+
+
 def test_doctor_shows_a_held_instance_lock_as_running_and_passes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
