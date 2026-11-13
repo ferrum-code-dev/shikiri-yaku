@@ -557,10 +557,13 @@ class TelegramForumTopics:
         _, _, address = word.partition("@")
         if not address:
             return False
+        return address.casefold() == (await self.bot_name()).casefold()
+
+    async def bot_name(self) -> str:
         reply = _validated(await self._api.call(GET_ME, {}), _PROBE_REPLY)
         if isinstance(reply, _Failed) or not reply.result.username:
             raise ChannelUnavailableError(BOT_NOT_IDENTIFIED)
-        return address.casefold() == reply.result.username.casefold()
+        return reply.result.username
 
     def link(self, thread_id: int) -> str:
         group = str(self._group_id).removeprefix(TELEGRAM_SUPERGROUP_PREFIX)

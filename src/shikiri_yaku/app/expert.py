@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_turns import CREATION_UNCERTAIN, queue_expert_notice
+from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX
 from shikiri_yaku.ports import Button, ChannelError, Message
 
 if TYPE_CHECKING:
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_turns import ExpertTurns
     from shikiri_yaku.domain.expert import ConversationRecord, TurnRecord
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Outbox
+    from shikiri_yaku.ports import Clock, FinalEdits, Outbox
 
 _OPEN: Final = "open"
 
@@ -60,6 +61,7 @@ class ExpertTopics(Protocol):
     async def rename(self, thread_id: int, name: str) -> None: ...
     def link(self, thread_id: int) -> str: ...
     async def addressed(self, word: str) -> bool: ...
+    async def bot_name(self) -> str: ...
 
 
 class Ask:
@@ -76,6 +78,7 @@ class Ask:
         turns: ExpertTurns | None,
         scope: Mapping[str, Path],
         channel: str,
+        final: FinalEdits | None = None,
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -85,11 +88,44 @@ class Ask:
         self._turns = turns
         self._scope = scope
         self._channel = channel
+        self._final = final
 
     async def addressed(self, word: str) -> bool:
         return self._topics is not None and await self._topics.addressed(word)
 
-    async def handle(self, item: Inbound, component: str | None) -> None:
+    async def offer(self, item: Inbound) -> None:
+        if not self._configured or self._topics is None:
+            return
+        words = (item.text or "").split(maxsplit=1)
+        text = words[1].strip() if len(words) > 1 else ""
+        reason = self._refusal(text)
+        if reason:
+            await self.handle(item, None)
+            return
+        name = await self._topics.bot_name()
+        self._outbox.queue_command_reply(
+            [item_destination(self._channel, item)],
+            [
+                Message(
+                    "Choose an Expert.",
+                    (Button(f"/ask@{name}", f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
+                    reply_to=item.message_ref,
+                )
+            ],
+            key=f"ask:select:{item.update_id}",
+            now=self._clock.now(),
+        )
+
+    async def tap(self, item: Inbound) -> bool:
+        original = self._outbox.expert_selection(self._channel, item)
+        if original is None:
+            return False
+        await self.handle(original, None, selection=True)
+        return True
+
+    async def handle(
+        self, item: Inbound, component: str | None, *, selection: bool = False
+    ) -> None:
         words = (item.text or "").split(maxsplit=1)
         text = words[1].strip() if len(words) > 1 else ""
         reason = self._refusal(text)
@@ -108,13 +144,20 @@ class Ask:
         if row is None or row.state != _OPEN or row.thread_id is None:
             return
         button = Button("Open topic", url=self._topics.link(row.thread_id))
-        self._outbox.queue_command_reply(
-            [item_destination(self._channel, item)],
-            [Message("Open the Expert conversation.", (button,), reply_to=item.message_ref)],
-            key=f"ask:open:{item.update_id}",
-            now=self._clock.now(),
-            conversation_id=row.id,
-        )
+        message = Message("Open the Expert conversation.", (button,))
+        if selection:
+            if self._final is not None:
+                self._final.settle_notice(
+                    f"ask:select:{item.update_id}:0", message, conversation_id=row.id
+                )
+        else:
+            self._outbox.queue_command_reply(
+                [item_destination(self._channel, item)],
+                [Message(message.text, message.buttons, reply_to=item.message_ref)],
+                key=f"ask:open:{item.update_id}",
+                now=self._clock.now(),
+                conversation_id=row.id,
+            )
         await self._turns.run(row.id, item.update_id)
 
     async def _open(

@@ -21,6 +21,7 @@ type Callback = (
     | WebTap
 )
 
+EXPERT_SELECTION_PREFIX: Final = "expert:"
 WEB_ALLOW_VERB: Final = "w"
 WEB_DENY_VERB: Final = "n"
 STOP_REMINDERS_VERB: Final = "k"

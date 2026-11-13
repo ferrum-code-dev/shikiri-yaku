@@ -102,6 +102,9 @@ class Topics:
         del word
         return False
 
+    async def bot_name(self) -> str:
+        return "bot"
+
     def link(self, thread_id: int) -> str:
         return f"https://t.me/c/123/{thread_id}"
 

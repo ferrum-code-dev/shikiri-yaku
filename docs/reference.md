@@ -87,8 +87,10 @@ The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude`
 Reasoner does.
 `doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
-shared group, address General requests as `/ask@bot <question>`. The **Open topic** button replies
-to its `/ask`, so concurrent requests keep their own buttons. An uncertain topic creation is not
+shared group, each configured Expert replies to an unaddressed General request with its own
+selection button; tap it to open that Expert’s conversation. You can also address a bot directly as
+`/ask@bot <question>`. The **Open topic** button replies to its `/ask`, so concurrent requests
+keep their own buttons. An uncertain topic creation is not
 retried; ask again. An interrupted turn is reported and is not repeated.
 
 Each message in an Expert topic is a follow-up turn of that conversation. The turns of one

@@ -220,6 +220,17 @@ constraints are in tasks/plan.md.
 - The reply target survives a failed send. The Telegram payload carries it with `allow_sending_without_reply`, so a command the PO deleted does not lose the button.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
+### X3b
+
+- [ ] X3b. Select an Expert in a shared group
+
+## Acceptance criteria
+
+- Independent instances offer their own buttons; only a selected instance opens a conversation.
+- The reply targets the original command and becomes the conversation topic link after selection.
+- Unauthorized or forged taps do nothing; retries and restarts do not duplicate topics or turns.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ### X4
 
 - [x] X4. Conversation turns and topic commands

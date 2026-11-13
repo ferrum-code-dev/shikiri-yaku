@@ -132,11 +132,13 @@ class FlakyFinal(JournalFinalEdits):
         super().__init__(database, replies)
         self.failures = 0
 
-    def settle_notice(self, notice_key: str, message: Message) -> None:
+    def settle_notice(
+        self, notice_key: str, message: Message, *, conversation_id: int | None = None
+    ) -> None:
         if self.failures > 0:
             self.failures -= 1
             raise CrashError
-        super().settle_notice(notice_key, message)
+        super().settle_notice(notice_key, message, conversation_id=conversation_id)
 
 
 class Harness:

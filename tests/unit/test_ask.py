@@ -19,9 +19,10 @@ from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
-from shikiri_yaku.domain.inbound import Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
+from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.outbox import JournalOutbox
@@ -48,7 +49,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.expert import ExpertRequest
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import EscalationView, Message, ShikiruClient
+    from shikiri_yaku.journal.replies import JournalReplies
+    from shikiri_yaku.ports import EscalationView, Message, ShikiruClient, Updates as UpdatesPort
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _RETRY_LATER = "retry later"
@@ -105,6 +107,9 @@ class Topics:
 
     async def addressed(self, word: str) -> bool:
         return word.lower() == "/ask@bot"
+
+    async def bot_name(self) -> str:
+        return "bot"
 
     def link(self, thread_id: int) -> str:
         return f"https://t.me/c/123/{thread_id}"
@@ -212,6 +217,7 @@ class Harness:
             turns=self.turns,
             scope={name: path / name for name in ("api", "web")},
             channel="telegram",
+            final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
         )
         self.commands = Commands(
             self.outbox,
@@ -255,7 +261,7 @@ def test_scope_and_duplicate(tmp_path: Path, thread: int | None, expected: set[s
         (False, True, "/ask hello", False, None, 1),
         (True, False, "/ask hello", False, None, 1),
         (True, True, "/ask", False, None, 1),
-        (True, True, "/ask hello", True, None, 0),
+        (True, True, "/ask hello", True, None, 1),
         (True, True, "/ask@bot hello", True, None, 2),
         (True, True, "/ask@another hello", True, None, 0),
         (True, True, "/ask hello", True, 77, 2),
@@ -275,7 +281,10 @@ def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
     h.send(text, thread)
     pending = h.outbox.pending()
     assert len(pending) == replies
-    if replies == 1:
+    if replies == 1 and shared and text == "/ask hello" and thread is None:
+        assert pending[0].message.reply_to == "1"
+        assert pending[0].message.buttons[0].label == "/ask@bot"
+    elif replies == 1:
         reason = "configured" if not enabled else "group" if not group else "question"
         assert reason in pending[0].message.text.lower()
     assert len(h.topics.created) == (1 if replies == 2 else 0)
@@ -627,9 +636,173 @@ def test_ask_in_general_through_the_inbound_service(
     assert len(h.topics.created) == (1 if opened else 0)
     assert len(h.expert.requests) == (1 if opened else 0)
     pending = h.outbox.pending()
-    assert len(pending) == (2 if opened else 0)
+    assert len(pending) == (2 if opened else 1)
     if opened:
         [button] = [item for item in pending if item.message.buttons]
         assert button.destination.thread is None
         assert button.message.reply_to == "-100123/91"
         assert button.message.buttons[0].url == "https://t.me/c/123/22"
+
+
+def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
+    h = Harness(tmp_path, shared=True)
+    original = _ask(1, "-100123/71")
+    inbound = JournalInbound(h.database)
+    inbound.record_batch("telegram", [original], 2, NOW)
+    asyncio.run(h.commands.handle(original))
+    asyncio.run(h.commands.handle(original))
+    [offer] = h.outbox.pending()
+    assert offer.message.reply_to == original.message_ref
+    assert offer.message.buttons[0].label == "/ask@bot"
+    channel = Channel()
+    asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
+    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    forged = Inbound(3, InboundKind.TAP, 5, -100123, "-100123/999", data="expert:1")
+    assert not asyncio.run(h.commands.tap(forged))
+    assert asyncio.run(h.commands.tap(tap))
+    assert asyncio.run(h.commands.tap(tap))
+    assert len(h.topics.created) == len(h.expert.requests) == 1
+    final = JournalFinalEdits(h.database, cast("JournalReplies", None))
+    [edit] = final.to_edit()
+    assert edit.message_ref == tap.message_ref
+    assert edit.message.buttons[0].url == "https://t.me/c/123/22"
+
+
+def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
+    h = Harness(tmp_path, shared=True)
+    original = _ask(1, "-100123/71")
+    JournalInbound(h.database).record_batch("telegram", [original], 2, NOW)
+    asyncio.run(h.commands.handle(original))
+    channel = FlakyChannel()
+    sender = OutboxSender(h.outbox, channel, Clock(), interval_s=1)
+    asyncio.run(sender.tick())
+    assert len(h.outbox.pending()) == 1
+    asyncio.run(sender.tick())
+    assert channel.sent[0][1].reply_to == original.message_ref
+    h.log.create(1, chat=-100123, thread=None, text="question 1", scope=["api", "web"], now=NOW)
+    h.log.opened(1, 22)
+    h.turns.recover()
+    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    assert asyncio.run(h.commands.tap(tap))
+    assert not h.topics.created
+    assert len(h.expert.requests) == 1
+    final = JournalFinalEdits(h.database, cast("JournalReplies", None))
+    assert len(final.to_edit()) == 1
+
+
+def test_shared_instances_offer_independently(tmp_path: Path) -> None:
+    first = Harness(tmp_path / "first", shared=True)
+    second = Harness(tmp_path / "second", shared=True)
+    original = _ask(1, "-100123/71")
+    for instance in (first, second):
+        JournalInbound(instance.database).record_batch("telegram", [original], 2, NOW)
+        asyncio.run(instance.commands.handle(original))
+        asyncio.run(OutboxSender(instance.outbox, Channel(), Clock(), interval_s=1).tick())
+    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    assert asyncio.run(first.commands.tap(tap))
+    assert len(first.expert.requests) == 1
+    assert not second.expert.requests
+    assert not second.topics.created
+
+
+def test_selection_rejects_non_owner_before_delivery(tmp_path: Path) -> None:
+    h = Harness(tmp_path, shared=True)
+    original = _ask(1, "-100123/71")
+    inbound = JournalInbound(h.database)
+    inbound.record_batch("telegram", [original], 2, NOW)
+    asyncio.run(h.commands.handle(original))
+    asyncio.run(OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick())
+    tap = Inbound(2, InboundKind.TAP, 99, -100123, "-100123/1", data="expert:1")
+
+    class Updates:
+        async def fetch(self, offset: int, wait_s: float) -> Batch:  # noqa: ARG002
+            return Batch(2, (tap,))
+
+    poller = InboundPoller(
+        cast("UpdatesPort", Updates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
+    )
+    asyncio.run(poller.poll_once())
+    assert all(item.update_id != 2 for item in inbound.pending())
+    assert not h.topics.created
+
+
+def test_unconfigured_expert_offers_nothing(tmp_path: Path) -> None:
+    h = Harness(tmp_path, enabled=False, shared=True)
+    h.send()
+    assert not h.outbox.pending()
+    assert not h.topics.created
+
+
+def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        expert = WaitingExpert()
+        h = Harness(tmp_path, shared=True, expert=expert)
+
+        class InboundLog(JournalInbound):
+            def __init__(self, database: Database) -> None:
+                super().__init__(database)
+                self.completed = asyncio.Event()
+                self.count = 0
+
+            def mark_handled(self, update_id: int) -> None:
+                super().mark_handled(update_id)
+                if update_id >= 3:
+                    self.count += 1
+                    if self.count == 3:
+                        self.completed.set()
+
+        log = InboundLog(h.database)
+        originals = [_ask(1, "-100123/71"), _ask(2, "-100123/72")]
+        log.record_batch("telegram", originals, 3, NOW)
+        for original in originals:
+            await h.commands.handle(original)
+            log.mark_handled(original.update_id)
+        await OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick()
+        items = [
+            Inbound(3, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1"),
+            Inbound(4, InboundKind.TAP, 5, -100123, "-100123/2", data="expert:2"),
+            Inbound(5, InboundKind.TEXT, 5, -100123, "-100123/73", text="hello"),
+        ]
+        log.record_batch("telegram", items, 6, NOW)
+
+        class Poller:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def poll_once(self) -> None:
+                self.calls += 1
+
+        class Handler:
+            def __init__(self) -> None:
+                self.ordinary = False
+
+            async def handle(self, item: Inbound) -> None:
+                if item.kind == InboundKind.TAP:
+                    assert await h.commands.tap(item)
+                else:
+                    self.ordinary = True
+
+        poller = Poller()
+        handler = Handler()
+        service = InboundService(
+            cast("InboundPoller", poller),
+            log,
+            cast("Replies", handler),
+            cast("HealthSource", _NoHealth()),
+            Clock(),
+            interval_s=1,
+        )
+        await asyncio.wait_for(service.tick(), timeout=1)
+        await asyncio.wait_for(expert.started.wait(), timeout=1)
+        await asyncio.wait_for(service.tick(), timeout=1)
+        assert handler.ordinary
+        assert poller.calls == 2
+        assert len(h.topics.created) == len(expert.requests) == 2
+        assert len(log.pending()) == 2
+        expert.release.set()
+        await asyncio.wait_for(log.completed.wait(), timeout=1)
+        await service.tick()
+        assert not log.pending()
+        assert len(expert.requests) == 2
+
+    asyncio.run(scenario())

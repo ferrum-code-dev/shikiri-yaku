@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal.messages import Delivery
@@ -99,6 +100,29 @@ class JournalOutbox:
                         now=now,
                         conversation_id=conversation_id,
                     )
+
+    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+        row = self._database.connection.execute(
+            """SELECT original.* FROM messages AS offered
+            JOIN messages AS original
+              ON offered.notice_key = 'ask:select:' || original.update_id || ':0'
+            WHERE offered.direction = 'out' AND offered.delivery = 'sent'
+              AND offered.channel = ? AND offered.chat = ? AND offered.platform_message_id = ?
+              AND original.direction = 'in' AND original.kind = 'text'
+              AND ? = 'expert:' || original.update_id""",
+            (channel, str(item.chat), item.message_ref, item.data),
+        ).fetchone()
+        if row is None:
+            return None
+        return Inbound(
+            row["update_id"],
+            InboundKind.TEXT,
+            row["sender"],
+            int(row["chat"]),
+            row["message_ref"],
+            text=row["body"],
+            thread=row["thread"],
+        )
 
     def pending(self) -> list[Pending]:
         self._messages.retire_obsolete(self._endings)

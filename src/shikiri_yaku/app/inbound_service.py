@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import ValidationError
 
-from shikiri_yaku.domain.callback import WEB_ALLOW_VERB, WEB_DENY_VERB, decode_callback
+from shikiri_yaku.domain.callback import (
+    EXPERT_SELECTION_PREFIX,
+    WEB_ALLOW_VERB,
+    WEB_DENY_VERB,
+    decode_callback,
+)
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError, ShikiruError
 
@@ -29,9 +34,9 @@ class InboundService:
 
     A transport failure is tried again on the next tick. A batch that cannot be read opens one
     `health` signal, which the next readable batch closes. An item whose Shikiru call fails stays
-    pending, and ordinary items after it wait. Independent `/ask` requests, web decisions and
-    messages in Expert topics run concurrently and remain pending until their work finishes; the
-    Expert orders the turns of each conversation itself.
+    pending, and ordinary items after it wait. Independent `/ask` requests, Expert selections,
+    web decisions and messages in Expert topics run concurrently and remain pending until their
+    work finishes; the Expert orders the turns of each conversation itself.
     """
 
     def __init__(
@@ -84,7 +89,7 @@ class InboundService:
             self._log.mark_handled(item.update_id)
 
     def _background(self, item: Inbound) -> bool:
-        return _is_ask(item) or (
+        return _is_ask(item) or _is_expert_selection(item) or (
             self._expert is not None and (self._expert.owns(item) or _is_web_tap(item))
         )
 
@@ -123,3 +128,7 @@ def _is_web_tap(item: Inbound) -> bool:
         return decode_callback(item.data or "")[0] in (WEB_ALLOW_VERB, WEB_DENY_VERB)
     except ValidationError:
         return False
+
+
+def _is_expert_selection(item: Inbound) -> bool:
+    return item.kind == InboundKind.TAP and (item.data or "").startswith(EXPERT_SELECTION_PREFIX)

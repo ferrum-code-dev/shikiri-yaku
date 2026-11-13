@@ -417,6 +417,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         turns=turns,
         scope={component.name: component.path for component in settings.components},
         channel=TELEGRAM_CHANNEL,
+        final=JournalFinalEdits(journal, _journal_replies(journal)),
     )
     assess = None if reasoning is None else reasoning.assessor.assess
     jobs += routing_jobs(

@@ -110,6 +110,9 @@ class Topics:
     async def addressed(self, word: str) -> bool:
         raise NotImplementedError
 
+    async def bot_name(self) -> str:
+        return "bot"
+
     def link(self, thread_id: int) -> str:
         raise NotImplementedError
 

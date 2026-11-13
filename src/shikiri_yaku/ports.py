@@ -942,6 +942,10 @@ class Outbox(Protocol):
         """Journal a command reply claim and every bounded part atomically, once per update."""
         ...
 
+    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+        """Return the original command for a tap on its recorded selection message."""
+        ...
+
     def pending(self) -> list[Pending]:
         """Return the recorded messages not yet confirmed, oldest first.
 
@@ -1002,7 +1006,9 @@ class FinalEdits(Protocol):
         """Return the signals whose line is not yet shown on every copy, with that line."""
         ...
 
-    def settle_notice(self, notice_key: str, message: Message) -> None:
+    def settle_notice(
+        self, notice_key: str, message: Message, *, conversation_id: int | None = None
+    ) -> None:
         """Record the final state of the copy sent under a notice key, shown to the platform next.
 
         The copy is edited once it is sent; a copy not yet sent is edited after its send.

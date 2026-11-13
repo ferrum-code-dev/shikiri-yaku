@@ -7,6 +7,7 @@ from pydantic import PositiveInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.domain.callback import (
     DECLINE_VERB,
+    EXPERT_SELECTION_PREFIX,
     INSTALL_VERB,
     STOP_REMINDERS_VERB,
     decode_callback,
@@ -119,6 +120,9 @@ class Replies:
         origin = None if reference is None else self._log.origin(self._channel, reference)
         if origin is None:
             if item.kind == InboundKind.TAP:
+                selecting = (item.data or "").startswith(EXPERT_SELECTION_PREFIX)
+                if selecting and await self._commands.tap(item):
+                    return
                 web = self._expert_turns is not None and await self._expert_turns.web_tap(item)
                 if not web and not await self._proposal_tap(item):
                     await self._goal.tap(item)

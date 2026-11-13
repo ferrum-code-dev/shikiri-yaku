@@ -408,8 +408,8 @@ topic. Rename the topic when the answer brings a title. The reply is one message
 Telegram's limit. Code passes the open tasks and escalations of the components in scope to the
 agent as input.
 
-Refusals, each with its reason: no `[expert]`, no `group_id`, empty text. In a shared group `/ask`
-in General must name the bot; without the name it is ignored without a reply. A topic creation left
+Refusals, each with its reason: no `[expert]`, no `group_id`, empty text. Shared-group selection
+is specified in X3b. A topic creation left
 uncertain by a crash is not adopted: the conversation fails and the PO is told to ask again. A turn
 that was running at a restart is marked interrupted and the PO is told; it is not run again. When
 no rung answers, the topic says so. Add the `conversations` and `turns` tables and Expert topics
@@ -439,6 +439,20 @@ schema change: the body is stored as JSON and gains a field.
   replies to, and its button opens the topic of its own conversation.
 - The reply target survives a failed send. The Telegram payload carries it with
   `allow_sending_without_reply`, so a command the PO deleted does not lose the button.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### X3b. Select an Expert in a shared group (high)
+
+In General, each instance with a configured Expert replies to an unaddressed `/ask` with its own
+bot selection button. The selected instance opens one conversation and edits that reply to link to
+its topic. Owner authorization, existing refusals, addressed commands, recovery and idempotency
+continue to apply. The selection and its edit are journaled.
+
+## Acceptance criteria
+
+- Independent instances offer their own buttons; only a selected instance opens a conversation.
+- The reply targets the original command and becomes the conversation topic link after selection.
+- Unauthorized or forged taps do nothing; retries and restarts do not duplicate topics or turns.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
 ### X4. Conversation turns and topic commands (normal)

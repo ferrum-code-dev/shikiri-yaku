@@ -161,7 +161,7 @@ and never retries on its own. Check the Shikiru project before you tap it, becau
 may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-outcomes).
 
 `/ask` in a component topic limits the Expert to that component; in General it can read all
-components. In a shared group, address General requests to the bot as `/ask@bot <question>`.
+components. In a shared group, an unaddressed `/ask` in General gets a selection button from each configured Expert. Tap the desired bot’s button, or address it directly as `/ask@bot <question>`.
 The **Open topic** button replies to the `/ask` it belongs to, so several questions asked together
 each keep their own button.
 If topic creation is uncertain, ask again; an interrupted turn is not repeated automatically.

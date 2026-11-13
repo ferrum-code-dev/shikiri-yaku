@@ -81,6 +81,8 @@ class Commands:
             return
         if name == _ASK and self._ask is not None:
             if self._shared_group and item.thread is None and not await self._ask.addressed(word):
+                if word.lower() == _ASK:
+                    await self._ask.offer(item)
                 return
             await self._ask.handle(item, component)
             return
@@ -100,6 +102,9 @@ class Commands:
             key=key,
             now=self._clock.now(),
         )
+
+    async def tap(self, item: Inbound) -> bool:
+        return self._ask is not None and await self._ask.tap(item)
 
     async def _answer(self, word: str, name: str, component: str | None) -> str:
         if not word.startswith("/") or name == _HELP_NAME:
