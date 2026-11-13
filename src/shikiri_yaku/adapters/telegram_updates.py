@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 GET_UPDATES: Final = "getUpdates"
 ALLOWED_UPDATES: Final = ("message", "callback_query")
+# keep: Telegram's built-in General topic is 1 on the wire; the app knows it as no thread
+GENERAL_THREAD: Final = 1
 
 
 class _Payload(BaseModel):
@@ -126,7 +128,7 @@ def _item(update: _Update) -> Inbound | None:
             closed.sender.id,
             closed.chat.id,
             _ref(closed.chat.id, closed.message_id),
-            thread=closed.message_thread_id,
+            thread=_thread(closed.message_thread_id),
         )
     if update.message is not None and update.message.text is not None:
         sent = update.message
@@ -139,9 +141,14 @@ def _item(update: _Update) -> Inbound | None:
             _ref(sent.chat.id, sent.message_id),
             reply_to_ref=None if replied is None else _ref(sent.chat.id, replied.message_id),
             text=sent.text,
-            thread=sent.message_thread_id,
+            thread=_thread(sent.message_thread_id),
         )
     return None
+
+
+def _thread(thread: int | None) -> int | None:
+    """Return the topic a message names, with the built-in General topic as no thread."""
+    return None if thread == GENERAL_THREAD else thread
 
 
 def _replied(sent: _Message) -> _Replied | None:

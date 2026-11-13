@@ -30,6 +30,7 @@ UPDATES: Final = json.loads((FIXTURES / "get_updates_ok.json").read_text(encodin
 TEXT, REPLY, TAP = 700, 701, 702
 TOPIC: Final = 73
 BOT_MESSAGE: Final = 42
+GENERAL: Final = 1
 
 
 class _Api:
@@ -106,6 +107,11 @@ _TOPIC_SHAPES: Final = [
         {"message_id": 84, **_IN_GROUP, "text": "/help"},
         Inbound(714, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/84", text="/help"),
         id="command in group without topics",
+    ),
+    pytest.param(
+        {"message_id": 86, **_IN_GROUP, "message_thread_id": GENERAL, "text": "/ask@bot hello"},
+        Inbound(716, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/86", text="/ask@bot hello"),
+        id="command in the General topic on the wire",
     ),
 ]
 

@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
 from shikiri_yaku.app.expert_turns import ExpertTurns
+from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
@@ -35,12 +37,12 @@ from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
     from pathlib import Path
 
+    from shikiri_yaku.adapters.telegram import BotApi
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.health_source import HealthSource
-    from shikiri_yaku.app.inbound_poller import InboundPoller
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.replies import Replies
     from shikiri_yaku.app.status import Status
@@ -539,3 +541,95 @@ def test_the_reply_target_survives_a_failed_send(tmp_path: Path) -> None:
 
     [button] = [message for _, message in channel.sent if message.buttons]
     assert button.reply_to == "-100123/71"
+
+
+class _BotApi:
+    """Answers getUpdates with one scripted payload."""
+
+    def __init__(self, payload: Mapping[str, object]) -> None:
+        self._payload = payload
+        self.calls: list[str] = []
+
+    async def call(self, method: str, payload: Mapping[str, object]) -> object:  # noqa: ARG002
+        self.calls.append(method)
+        assert method == "getUpdates"
+        return self._payload
+
+
+def _general_payload(text: str) -> dict[str, object]:
+    return {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 1,
+                "message": {
+                    "message_id": 91,
+                    "from": {"id": 5},
+                    "chat": {"id": -100123},
+                    "message_thread_id": 1,
+                    "text": text,
+                },
+            }
+        ],
+    }
+
+
+def _pump(h: Harness, payload: Mapping[str, object]) -> None:
+    async def scenario() -> None:
+        done = asyncio.Event()
+        updates = TelegramUpdates(cast("BotApi", _BotApi(payload)), group_id=-100123)
+        log = JournalInbound(h.database)
+        poller = InboundPoller(updates, log, Clock(), channel="telegram", owners=[5], wait_s=1)
+        service = InboundService(
+            poller,
+            log,
+            cast("Replies", _Signalled(h.commands, done)),
+            cast("HealthSource", _NoHealth()),
+            Clock(),
+            interval_s=1,
+            expert=h.turns,
+        )
+        await service.tick()
+        await asyncio.wait_for(done.wait(), timeout=1)
+        await service.tick()
+
+    asyncio.run(scenario())
+
+
+class _NoHealth:
+    def source_recovered(self, scope: str) -> None:  # noqa: ARG002
+        return None
+
+
+class _Signalled:
+    def __init__(self, inner: Commands, done: asyncio.Event) -> None:
+        self._inner = inner
+        self._done = done
+
+    async def handle(self, item: Inbound) -> None:
+        await self._inner.handle(item)
+        self._done.set()
+
+
+@pytest.mark.parametrize(
+    ("shared", "text"),
+    [(False, "/ask hello"), (True, "/ask@bot hello"), (True, "/ask hello")],
+)
+def test_ask_in_general_through_the_inbound_service(
+    tmp_path: Path,
+    shared: bool,  # noqa: FBT001 -- table column
+    text: str,
+) -> None:
+    h = Harness(tmp_path, shared=shared)
+    _pump(h, _general_payload(text))
+
+    opened = text == "/ask@bot hello" or not shared
+    assert len(h.topics.created) == (1 if opened else 0)
+    assert len(h.expert.requests) == (1 if opened else 0)
+    pending = h.outbox.pending()
+    assert len(pending) == (2 if opened else 0)
+    if opened:
+        [button] = [item for item in pending if item.message.buttons]
+        assert button.destination.thread is None
+        assert button.message.reply_to == "-100123/91"
+        assert button.message.buttons[0].url == "https://t.me/c/123/22"
