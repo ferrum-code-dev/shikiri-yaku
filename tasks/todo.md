@@ -1,5 +1,18 @@
 # Todo
 
+## Planned work: T-155 risk follow-up
+
+### X3c
+
+- [ ] X3c. Resolve the reported shared-group selection risks
+
+## Acceptance criteria
+
+- Each risk reported for T-155 is identified from its report and checked against the current workspace, with evidence for any already resolved or unresolvable risk.
+- Each remaining risk within the task's scope is resolved and protected by behavior-focused offline verification.
+- Shared-group selection preserves owner authorization and does not duplicate topics or turns across retries and restarts.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Current work: T-153 MCP doctor output
 
 - [x] T-152. Suppress routine MCP request logs in doctor output

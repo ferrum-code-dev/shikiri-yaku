@@ -1,5 +1,24 @@
 # Task plan
 
+## Planned work: T-155 risk follow-up
+
+### X3c. Resolve the reported shared-group selection risks (high)
+
+The request refers to risks from T-155, but its commit and X3b tracker entry do not record
+those risks. Obtain the T-155 report through the available Shikiru interface; do not infer its
+contents from the feature. Verify each reported risk against the current code before changing it.
+If the report is unavailable, consult the Leader for the risk details. If it identifies multiple
+independent changes, consult the Leader to split them into separate tasks before implementation.
+Keep the existing owner authorization, idempotency and recovery guarantees; do not edit the design.
+Tick only X3c in tasks/todo.md.
+
+## Acceptance criteria
+
+- Each risk reported for T-155 is identified from its report and checked against the current workspace, with evidence for any already resolved or unresolvable risk.
+- Each remaining risk within the task's scope is resolved and protected by behavior-focused offline verification.
+- Shared-group selection preserves owner authorization and does not duplicate topics or turns across retries and restarts.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Current work: T-153 MCP doctor output
 
 Fix the routine MCP request filter for the server's Rich two-line format (header with
