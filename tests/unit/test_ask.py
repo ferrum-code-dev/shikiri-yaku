@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.expert import ExpertRequest
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.replies import JournalReplies
-    from shikiri_yaku.ports import EscalationView, Message, ShikiruClient, Updates as UpdatesPort
+    from shikiri_yaku.ports import EscalationView, Message, ShikiruClient, Updates
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _RETRY_LATER = "retry later"
@@ -714,12 +714,12 @@ def test_selection_rejects_non_owner_before_delivery(tmp_path: Path) -> None:
     asyncio.run(OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick())
     tap = Inbound(2, InboundKind.TAP, 99, -100123, "-100123/1", data="expert:1")
 
-    class Updates:
+    class FakeUpdates:
         async def fetch(self, offset: int, wait_s: float) -> Batch:  # noqa: ARG002
             return Batch(2, (tap,))
 
     poller = InboundPoller(
-        cast("UpdatesPort", Updates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
+        cast("Updates", FakeUpdates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
     )
     asyncio.run(poller.poll_once())
     assert all(item.update_id != 2 for item in inbound.pending())
@@ -733,8 +733,8 @@ def test_unconfigured_expert_offers_nothing(tmp_path: Path) -> None:
     assert not h.topics.created
 
 
-def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> None:
-    async def scenario() -> None:
+def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> None:  # noqa: C901
+    async def scenario() -> None:  # noqa: C901
         expert = WaitingExpert()
         h = Harness(tmp_path, shared=True, expert=expert)
 

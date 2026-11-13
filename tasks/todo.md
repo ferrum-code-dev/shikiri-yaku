@@ -4,7 +4,7 @@
 
 ### X3c
 
-- [ ] X3c. Resolve the reported shared-group selection risks
+- [x] X3c. Resolve the reported shared-group selection risks
 
 ## Acceptance criteria
 

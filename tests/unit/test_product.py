@@ -41,6 +41,8 @@ from tests.support.destinations import FixedDestinations
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
+    from shikiri_yaku.domain.inbound import Inbound
+
 _FIXTURES: Final = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 NUMBER: Final = 41
 TITLE: Final = "Pick the layout"
@@ -156,6 +158,9 @@ class _Outbox:
     def command_reply_queued(self, key: str) -> bool:
         del key
         return False
+
+    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+        raise NotImplementedError
 
     def queue_command_reply(
         self,

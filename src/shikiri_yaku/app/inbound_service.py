@@ -89,8 +89,10 @@ class InboundService:
             self._log.mark_handled(item.update_id)
 
     def _background(self, item: Inbound) -> bool:
-        return _is_ask(item) or _is_expert_selection(item) or (
-            self._expert is not None and (self._expert.owns(item) or _is_web_tap(item))
+        return (
+            _is_ask(item)
+            or _is_expert_selection(item)
+            or (self._expert is not None and (self._expert.owns(item) or _is_web_tap(item)))
         )
 
     async def _run_background(self, item: Inbound) -> None:
