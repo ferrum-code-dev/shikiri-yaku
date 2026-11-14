@@ -112,8 +112,15 @@ The defaults are `timeout_s = 120` per rung, `cooldown_min = 5`, `max_parallel =
 `handoff_turns = 5`, `retention_days = 14`, `web_timeout_s = 20`,
 `web_max_bytes = 1000000`, and `web_max_redirects = 10`. Web requests use HTTPS only, and each
 redirect target requires its own exact-host grant. Each requested host is offered once per turn;
-either decision continues the conversation. Grants persist across conversations until removed as
-shown in the [README](../README.md#configuration).
+either decision continues the conversation. **Allow** grants that exact host for all future
+conversations; **Deny** refuses it. The Expert has no search tool, so a search site is one more host
+to grant. A granted host may receive data in URLs, and its pages may
+contain untrusted instructions. To inspect or remove grants, use SQLite on `<home>/<product>/journal.db`:
+
+```sh
+sqlite3 '<home>/<product>/journal.db' 'SELECT host, granted_at FROM web_grants ORDER BY host;'
+sqlite3 '<home>/<product>/journal.db' "DELETE FROM web_grants WHERE host = 'example.com';"
+```
 
 ```toml
 [expert]
@@ -232,6 +239,21 @@ Commands work in private chats and in forum topics. Replies go to the chat and t
 | `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component's destination. If none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports its name and lists the commands. |
 | `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
+
+### `/ask`
+
+- **Scope:** `/ask` opens an Expert topic. In a component topic the Expert sees only that component;
+  in General it sees all components. `/ask` needs a forum group.
+- **Shared groups:** in a shared group, an unaddressed `/ask` in General gets one selection button per
+  configured Expert. Tap a button, or address a bot directly as `/ask@bot <question>`. The **Open
+  topic** button replies to its `/ask`, so concurrent questions keep their own buttons.
+- **Expert topics:** each message is a follow-up turn. `/effort [level]`, `/summarize` and `/help`
+  work there; other commands do not, and Expert commands do not work elsewhere. `/close` ends the
+  conversation, as described in [`[expert]`](#expert).
+- **Task proposals:** when an answer proposes tasks, **Submit all** and **Reject all** are offered
+  only after every task-list message has been sent. See [Task proposals](#task-proposals).
+- **Interrupted or uncertain:** an interrupted turn is reported and not repeated. If topic creation is
+  uncertain, ask again.
 
 ### `/goal`
 

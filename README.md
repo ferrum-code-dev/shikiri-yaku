@@ -105,19 +105,8 @@ see [Service](#service).
 
 To enable the Reasoner, add a `[reasoner]` table. See [Reasoner settings](docs/reference.md#reasoner).
 
-The optional `[expert]` table configures read-only Expert agents and their ladder. See
-[Expert settings](docs/reference.md#expert). A forum group is required for `/ask`.
-
-The Expert asks before accessing a web host. **Allow** grants that exact host for all future
-conversations; **Deny** refuses it. Search sites also need a grant. To inspect or remove grants,
-use SQLite on `<home>/<product>/journal.db`:
-
-```sh
-sqlite3 '<home>/<product>/journal.db' 'SELECT host, granted_at FROM web_grants ORDER BY host;'
-sqlite3 '<home>/<product>/journal.db' "DELETE FROM web_grants WHERE host = 'example.com';"
-```
-
-A granted host may receive data in URLs and its pages may contain untrusted instructions.
+To add Expert agents, set the optional `[expert]` table. `/ask` needs a forum group. See
+[Expert settings](docs/reference.md#expert).
 
 Every key and default is in the [reference](docs/reference.md#configuration).
 
@@ -128,8 +117,7 @@ Only the user IDs in `channels.telegram.owners` can issue commands or press butt
 - **Private chat:** each owner must open the bot and press **Start** first.
 - **Forum group (optional):** set `group_id` to a forum supergroup. The bot must be an administrator
   with permission to manage topics, and every owner must be a member. With `[expert]`, the bot also
-  needs permission to delete messages (`can_delete_messages`), because an Expert conversation ends
-  by deleting its topic. By default, the group should hold only the bot and the owners, plus the
+  needs permission to delete messages (`can_delete_messages`). By default, the group should hold only the bot and the owners, plus the
   other instances' bots in a shared group, because other members can read its messages.
   Non-owners' messages and button taps are ignored.
 
@@ -160,31 +148,20 @@ The request goes to Shikiru as written. If the outcome is uncertain, the bot off
 and never retries on its own. Check the Shikiru project before you tap it, because the first request
 may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-outcomes).
 
-`/ask` in a component topic limits the Expert to that component; in General it can read all
-components. In a shared group, an unaddressed `/ask` in General gets a selection button from each configured Expert. Tap the desired bot’s button, or address it directly as `/ask@bot <question>`.
-The **Open topic** button replies to the `/ask` it belongs to, so several questions asked together
-each keep their own button.
-If topic creation is uncertain, ask again; an interrupted turn is not repeated automatically.
+### `/ask`
 
-When an Expert answer proposes tasks, it lists each task, then offers **Submit all** and **Reject
-all** after every task-list message has been sent. If a task-list message is refused, the actions
-are not offered. Submit all sends each
-task to its component, one at a time, then shows the complete task ids; long results continue in
-following messages too. Reject all submits nothing. A tap submits at most once: a second tap, a
-tap after a restart, or a tap on a proposal that a newer answer voided says so and submits nothing.
-If the bot restarts during Submit all, it says which tasks were submitted, which are unknown and
-not sent again, and which were never sent. Check Shikiru before you resubmit any of them. Details are in
-[Task proposals](docs/reference.md#task-proposals).
+- **Scope:** in a component topic, the Expert sees that component. In General, it sees all components.
+- **Shared groups:** an unaddressed `/ask` in General gets a button from each Expert. Tap one, or
+  write `/ask@bot <question>`.
+- **Expert topics:** each message there is a follow-up turn. `/effort [level]`, `/summarize` and
+  `/help` work there. `/close` ends the conversation.
+- **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed.
+  Each proposal submits at most once.
+- **Restarts and uncertain topics:** an interrupted turn is not repeated. If topic creation is
+  uncertain, ask again.
 
-Each message in an Expert topic is a follow-up turn of that conversation, answered after the
-turns sent before it. In an Expert topic, `/effort [level]` shows or sets the effort of the next
-turn, `/summarize` asks for a short summary, and `/help` lists them. The other commands do not
-work in an Expert topic, and the Expert commands do not work elsewhere. `/close` ends the
-conversation. So does closing its topic in Telegram, or going unused for `retention_days`. An ending
-deletes the topic and the conversation's record and files. If Telegram refuses the deletion, the
-conversation stays, the PO is told once, and the deletion is tried again. Muse keeps per-workspace
-memory for each conversation directory under `~/.local/share/muse/memory/projects/`; closing a
-conversation does not remove it.
+Details are in [Chat commands](docs/reference.md#chat-commands) and
+[Task proposals](docs/reference.md#task-proposals). Check Shikiru before you resubmit a task.
 
 ## Approvals and automatic actions
 
