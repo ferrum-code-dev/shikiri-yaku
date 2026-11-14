@@ -5,9 +5,8 @@
 ### X5a. Close the `/ask` reply when its conversation ends (normal)
 
 After X5 and X3a. When a conversation ends, the reply to its `/ask` (the *Open topic* message, or
-the selection reply of a shared group) changes its text and its button both to
-`Conversation closed <date and time>`, so the chat no longer offers a topic that is gone. The button
-opens nothing: a tap on it is ignored. The reply is edited through the journal's final edits, so a
+the selection reply of a shared group) changes its text to `Conversation closed <date and time>` and
+loses its button, so the chat no longer offers a topic that is gone. The reply is edited through the journal's final edits, so a
 retry or a restart finishes the edit. The conversation's rows are erased only after that edit is
 confirmed or given up. The closing time is fixed when the conversation starts to end; a retried
 ending keeps it. docs/design.md is silent on the reply after an ending; this plan does not edit it.
@@ -15,8 +14,8 @@ ending keeps it. docs/design.md is silent on the reply after an ending; this pla
 ## Acceptance criteria
 
 - Each ending (topic closed, `/close`, expiry, a send to a gone topic) changes the `/ask` reply of
-  that conversation, and only that one, to the closed text with the closed button, which has the
-  same label; the reply and button of the other conversation are untouched. Table-driven over the
+  that conversation, and only that one, to the closed text with no button; the reply of the other
+  conversation is untouched. Table-driven over the
   endings and both reply kinds.
 - The closed time is the time the conversation ended, and a deletion retried later keeps it.
 - The ending state and its time are durable together; recovery after that write but before the reply
@@ -25,7 +24,6 @@ ending keeps it. docs/design.md is silent on the reply after an ending; this pla
   opened but before that reply was tagged; the rows remain until its edit is confirmed or given up.
 - The conversation's rows are not erased before the reply edit is confirmed or given up, and are
   erased after it.
-- A tap on the closed button changes nothing.
 - An edit overtaken by a newer final state of the same copy is not confirmed or given up by its own
   result; the newer state is sent next.
 - uv run poe check passes; unrelated failures are reported with evidence.

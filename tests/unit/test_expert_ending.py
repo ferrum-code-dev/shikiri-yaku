@@ -8,14 +8,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
-from pydantic import ValidationError
 
 from shikiri_yaku.app.expert import OPEN_REPLY
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.outbox_sender import OutboxSender
-from shikiri_yaku.domain.callback import CONVERSATION_CLOSED_DATA, decode_callback
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
@@ -692,8 +690,7 @@ def test_each_ending_closes_its_ask_reply_and_no_other(
     edits = dict(platform.edits)
     closed = edits[target_ref]
     assert closed.text.endswith(h.clock.now().strftime("%Y-%m-%d %H:%M UTC"))
-    assert [button.label for button in closed.buttons] == [closed.text]
-    assert [button.data for button in closed.buttons] == [CONVERSATION_CLOSED_DATA]
+    assert closed.buttons == ()
     assert bystander_ref not in edits
     assert h.remaining(target) == 0
     assert h.remaining(bystander) > 0
@@ -745,7 +742,7 @@ def test_a_retried_ending_keeps_the_time_the_conversation_closed(
     h.deliver(platform)
 
     [(_, closed)] = platform.edits
-    assert closed.buttons[0].label.endswith("2026-01-01 00:00 UTC")
+    assert closed.text.endswith("2026-01-01 00:00 UTC")
 
 
 def test_recovery_after_recording_an_ending_keeps_its_time(
@@ -781,7 +778,7 @@ def test_recovery_after_recording_an_ending_keeps_its_time(
     h.deliver(platform)
 
     [(_, closed)] = platform.edits
-    assert closed.buttons[0].label.endswith("2026-01-01 00:00 UTC")
+    assert closed.text.endswith("2026-01-01 00:00 UTC")
 
 
 def test_closing_associates_an_untagged_shared_selection_reply(
@@ -809,11 +806,6 @@ def test_closing_associates_an_untagged_shared_selection_reply(
     assert h.remaining(target) > 0
 
     h.deliver(platform)
-    assert dict(platform.edits)[selection_ref].buttons[0].label.endswith("2026-01-01 00:00 UTC")
+    assert dict(platform.edits)[selection_ref].text.endswith("2026-01-01 00:00 UTC")
     asyncio.run(h.ending.sweep())
     assert h.remaining(target) == 0
-
-
-def test_the_closed_button_carries_data_no_handler_decodes() -> None:
-    with pytest.raises(ValidationError):
-        decode_callback(CONVERSATION_CLOSED_DATA)

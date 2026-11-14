@@ -22,8 +22,6 @@ type Callback = (
 )
 
 EXPERT_SELECTION_PREFIX: Final = "expert:"
-# keep: no verb decodes "closed", so a tap on the closed button of an ended conversation is ignored
-CONVERSATION_CLOSED_DATA: Final = "closed"
 WEB_ALLOW_VERB: Final = "w"
 WEB_DENY_VERB: Final = "n"
 STOP_REMINDERS_VERB: Final = "k"

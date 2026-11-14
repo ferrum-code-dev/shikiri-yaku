@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_turns import CREATION_UNCERTAIN, queue_expert_notice
-from shikiri_yaku.domain.callback import CONVERSATION_CLOSED_DATA, EXPERT_SELECTION_PREFIX
+from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX
 from shikiri_yaku.domain.outbound import TIME_FORMAT
 from shikiri_yaku.ports import Button, ChannelError, Message
 
@@ -33,9 +33,8 @@ def open_reply_keys(update_id: int) -> tuple[str, str]:
 
 
 def closed_reply(closed_at: datetime) -> Message:
-    """Return the /ask reply of an ended conversation: its text and inert button show the time."""
-    text = _CLOSED.format(when=closed_at.astimezone(UTC).strftime(_CLOSED_TIME))
-    return Message(text, (Button(text, data=CONVERSATION_CLOSED_DATA),))
+    """Return the /ask reply of an ended conversation: its text shows the time, and no button."""
+    return Message(_CLOSED.format(when=closed_at.astimezone(UTC).strftime(_CLOSED_TIME)))
 
 
 class ConversationLog(Protocol):
