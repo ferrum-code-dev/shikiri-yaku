@@ -19,12 +19,14 @@ _STATUS: Final = "/status"
 _OPEN: Final = "/open"
 _GOAL: Final = "/goal"
 _ASK: Final = "/ask"
+_ADMIN: Final = "/admin"
 _HELP_NAME: Final = "/help"
 _HELP: Final = (
     f"{_STATUS} · each component's engine, tasks and quota blocks; in a component topic, its own\n"
     f"{_OPEN} · open escalations and approvals, shown again; in a component topic, its own\n"
     f"{_GOAL} <component> <request> · submit a goal to a component's Shikiru\n"
     "/ask <question> · open an Expert conversation\n"
+    "/admin <question> · open an admin conversation, for listed admins\n"
     f"{_HELP_NAME} · this list"
 )
 _UNKNOWN: Final = "Unknown command {name}.\n{help}"
@@ -79,12 +81,17 @@ class Commands:
         in_other_topic = self._shared_group and item.thread is not None and component is None
         if in_other_topic and word.startswith("/"):
             return
-        if name == _ASK and self._ask is not None:
-            if self._shared_group and item.thread is None and not await self._ask.addressed(word):
-                if word.lower() == _ASK:
-                    await self._ask.offer(item)
-                return
-            await self._ask.handle(item, component)
+        if name in (_ASK, _ADMIN) and self._ask is not None:
+            if not (self._shared_group and name == _ADMIN and not self._ask.is_admin(item.sender)):
+                if (
+                    self._shared_group
+                    and item.thread is None
+                    and not await self._ask.addressed(word)
+                ):
+                    if word.lower() in (_ASK, _ADMIN):
+                        await self._ask.offer(item)
+                else:
+                    await self._ask.handle(item, component)
             return
         if name == _OPEN:
             await self._open.handle(item, component)

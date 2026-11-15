@@ -250,4 +250,5 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         )""",
     ),
     ("ALTER TABLE conversations ADD COLUMN ending_at TEXT",),
+    ("ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'expert'",),
 )

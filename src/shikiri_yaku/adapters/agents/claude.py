@@ -17,13 +17,12 @@ from shikiri_yaku.adapters.agents.common import (
     CliRung,
 )
 from shikiri_yaku.domain.classification import CallRecord
-from shikiri_yaku.domain.expert import ExpertAnswer  # noqa: TC001 -- pydantic reads the field type
 from shikiri_yaku.ports import ExpertError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from shikiri_yaku.domain.expert import ExpertRequest
+    from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest
     from shikiri_yaku.ports import CommandResult
 
 NAME: Final = "claude"
@@ -49,7 +48,7 @@ class _ExpertEnvelope(BaseModel):
 
     is_error: bool
     session_id: str
-    structured_output: ExpertAnswer | None
+    structured_output: dict[str, object] | None
     duration_api_ms: int | None = None
     total_cost_usd: float | None = None
     usage: dict[str, object] | None = None
@@ -162,14 +161,14 @@ class ClaudeExpert(CliExpert):
 
     @override
     def _answer(
-        self, result: CommandResult, answer_file: Path
+        self, result: CommandResult, answer_file: Path, model: type[ExpertAnswer]
     ) -> tuple[ExpertAnswer, str, CallRecord | None]:
         envelope = _ExpertEnvelope.model_validate_json(result.stdout)
         if envelope.is_error or envelope.structured_output is None or not envelope.session_id:
             msg = f"{self.name}: no structured answer or session"
             raise ExpertError(msg)
         return (
-            envelope.structured_output,
+            model.model_validate(envelope.structured_output),
             envelope.session_id,
             CallRecord(
                 duration_ms=envelope.duration_api_ms,

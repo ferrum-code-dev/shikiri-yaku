@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import reject_all_data, submit_all_data
-from shikiri_yaku.domain.expert import ExpertAnswer, ExpertTask
+from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT, ExpertAnswer, ExpertTask
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import ShikiruClient, ShikiruError
 
 OWNER: Final = 1001
+ADMIN: Final = 1002
 CHAT: Final = -100123
 THREAD: Final = 22
 CHANNEL: Final = "telegram"
@@ -156,7 +158,15 @@ class FlakyFinal(JournalFinalEdits):
 
 
 class Harness:
-    def __init__(self, clients: Mapping[str, FakeShikiru]) -> None:
+    def __init__(
+        self,
+        clients: Mapping[str, FakeShikiru],
+        *,
+        mode: str = MODE_EXPERT,
+        admins: frozenset[int] = frozenset(),
+    ) -> None:
+        self.mode = mode
+        self.admins = admins
         self.database = Database.open(":memory:")
         _DATABASES.append(self.database)
         self.conversations = Conversations(self.database)
@@ -178,6 +188,7 @@ class Harness:
             channel=CHANNEL,
             group_id=CHAT,
             final=self.final,
+            access=AdminAccess(self.conversations, Clock(), admins=self.admins),
         )
 
     def answer(
@@ -196,7 +207,13 @@ class Harness:
         """
         if update_id == FIRST:
             self.conversations.create(
-                update_id, chat=CHAT, thread=None, text="ask", scope=list(self.clients), now=NOW
+                update_id,
+                chat=CHAT,
+                thread=None,
+                text="ask",
+                scope=list(self.clients),
+                now=NOW,
+                mode=self.mode,
             )
             self.conversations.opened(update_id, THREAD)
             conversation = self.conversations.get(update_id)
@@ -287,12 +304,12 @@ class Harness:
         ).fetchall()
         return [json.loads(row["body"])["text"] for row in rows if row["body"]]
 
-    def tap(self, update_id: int, data: str, *, ref: str = FIRST_REF) -> None:
+    def tap(self, update_id: int, data: str, *, ref: str = FIRST_REF, sender: int = OWNER) -> None:
         """Tap a button on the message `ref`; the answer of FIRST by default."""
         item = Inbound(
             update_id=update_id,
             kind=InboundKind.TAP,
-            sender=OWNER,
+            sender=sender,
             chat=CHAT,
             message_ref=ref,
             data=data,
@@ -337,6 +354,24 @@ def test_settling_edits_the_action_message_and_never_the_answer(settle: str) -> 
     )
     assert final_answer == 0
     assert final_action == 1
+
+
+def test_only_a_listed_admin_may_settle_proposals_of_an_admin_conversation() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.answer(FIRST, [("alpha", "first")])
+    harness.tap(2, submit_all_data(FIRST))
+    harness.tap(3, reject_all_data(FIRST))
+    assert alpha.requests == []
+    assert harness.said() == 0
+    harness.admins = frozenset()
+    harness.proposals = harness.restart()
+    harness.tap(4, submit_all_data(FIRST), sender=ADMIN)
+    assert alpha.requests == []
+    harness.admins = frozenset({ADMIN})
+    harness.proposals = harness.restart()
+    harness.tap(5, submit_all_data(FIRST), sender=ADMIN)
+    assert alpha.requests == ["first"]
 
 
 def test_a_second_tap_submits_nothing_and_says_so() -> None:

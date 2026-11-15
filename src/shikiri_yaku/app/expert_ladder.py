@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from shikiri_yaku.domain.expert import ExpertAnswer
 from shikiri_yaku.ports import ExpertError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime, timedelta
 
-    from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
+    from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest, ExpertResult
     from shikiri_yaku.ports import Clock, ExpertRung
 
 
@@ -65,7 +64,7 @@ class LadderExpert:
             try:
                 async with asyncio.timeout(self._timeout_s):
                     result = await rung.turn(request, session_id=session_id, handoff=handoff)
-                answer = ExpertAnswer.model_validate(result.answer.model_dump())
+                answer = type(result.answer).model_validate(result.answer.model_dump())
                 _validate_scope(answer, request, rung.name)
                 return replace(result, answer=answer, session=replace(result.session, rung=index))
             except (ExpertError, TimeoutError, ValidationError) as error:

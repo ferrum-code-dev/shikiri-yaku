@@ -13,12 +13,21 @@ from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
+from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.outbox_sender import OutboxSender
-from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
+from shikiri_yaku.domain.expert import (
+    MODE_ADMIN,
+    MODE_EXPERT,
+    AdminAnswer,
+    ExpertAnswer,
+    ExpertResult,
+    ExpertSession,
+    stored_answer,
+)
 from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
@@ -106,7 +115,7 @@ class Topics:
             raise ChannelRefusedError(message)
 
     async def addressed(self, word: str) -> bool:
-        return word.lower() == "/ask@bot"
+        return word.lower() in ("/ask@bot", "/admin@bot")
 
     async def bot_name(self) -> str:
         return "bot"
@@ -165,6 +174,9 @@ class Harness:
         shared: bool = False,
         expert: Expert | None = None,
         clients: dict[str, ShikiruClient] | None = None,
+        admins: frozenset[int] = frozenset(),
+        turn_admins: frozenset[int] | None = None,
+        known_secrets: tuple[str, ...] = (),
     ) -> None:
         self.database = Database.open(":memory:")
         _DATABASES.append(self.database)
@@ -183,6 +195,7 @@ class Harness:
             channel="telegram",
             group_id=-100123,
             retention=timedelta(days=14),
+            admin_idle=timedelta(minutes=15),
             final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
         )
         clients = clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")}
@@ -208,6 +221,8 @@ class Harness:
                 channel="telegram",
                 group_id=-100123,
             ),
+            admins=admins if turn_admins is None else turn_admins,
+            known_secrets=known_secrets,
         )
         self.ask = Ask(
             self.log,
@@ -219,6 +234,7 @@ class Harness:
             scope={name: path / name for name in ("api", "web")},
             channel="telegram",
             final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
+            admins=admins,
         )
         self.commands = Commands(
             self.outbox,
@@ -807,3 +823,277 @@ def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> N
         assert len(expert.requests) == 2
 
     asyncio.run(scenario())
+
+
+ADMIN = 5
+OTHER_OWNER = 6
+
+
+def _admin_text(h: Harness, text: str, sender: int, update_id: int = 1) -> None:
+    item = Inbound(update_id, InboundKind.TEXT, sender, -100123, str(update_id), text=text)
+    asyncio.run(h.commands.handle(item))
+
+
+def _sent_texts(h: Harness) -> list[str]:
+    channel = Channel()
+    asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
+    return [message.text for _, message in channel.sent]
+
+
+@pytest.mark.parametrize(
+    ("admins", "sender", "opened"),
+    [
+        (frozenset[int](), ADMIN, False),
+        (frozenset({ADMIN}), OTHER_OWNER, False),
+        (frozenset({ADMIN}), ADMIN, True),
+    ],
+)
+def test_admin_opens_only_for_a_listed_admin(
+    tmp_path: Path,
+    admins: frozenset[int],
+    sender: int,
+    opened: bool,  # noqa: FBT001
+) -> None:
+    h = Harness(tmp_path, admins=admins)
+    _admin_text(h, "/admin hello", sender)
+    assert bool(h.topics.created) is opened
+    assert bool(h.expert.requests) is opened
+    assert len(h.outbox.pending()) == (3 if opened else 1)
+
+
+def test_admin_conversation_warns_uses_admin_answers_and_survives_duplicates(
+    tmp_path: Path,
+) -> None:
+    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    _admin_text(h, "/admin hello", ADMIN)
+    _admin_text(h, "/admin hello", ADMIN)
+    [request] = h.expert.requests
+    assert request.admin
+    assert len(h.topics.created) == 1
+    conversation = h.log.get(1)
+    assert conversation is not None
+    assert conversation.mode == MODE_ADMIN
+    assert any("not private" in text for text in _sent_texts(h))
+
+
+def test_ordinary_ask_stays_an_expert_conversation(tmp_path: Path) -> None:
+    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    _admin_text(h, "/ask hello", ADMIN)
+    [request] = h.expert.requests
+    assert not request.admin
+    conversation = h.log.get(1)
+    assert conversation is not None
+    assert conversation.mode == MODE_EXPERT
+    assert not any("not private" in text for text in _sent_texts(h))
+
+
+def test_only_a_listed_admin_takes_part_in_an_admin_topic(tmp_path: Path) -> None:
+    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    _admin_text(h, "/admin hello", ADMIN)
+    topic = h.log.get(1)
+    assert topic is not None
+    assert topic.thread_id is not None
+    for update_id, sender in ((2, OTHER_OWNER), (3, ADMIN)):
+        item = Inbound(
+            update_id, InboundKind.TEXT, sender, -100123, str(update_id),
+            text="more", thread=topic.thread_id,
+        )  # fmt: skip
+        asyncio.run(h.turns.handle(item))
+        asyncio.run(h.turns.handle(item))
+    assert [request.message for request in h.expert.requests] == ["hello", "more"]
+
+
+def test_a_removed_admin_cannot_continue_an_admin_topic(tmp_path: Path) -> None:
+    h = Harness(tmp_path, admins=frozenset({ADMIN}), turn_admins=frozenset({OTHER_OWNER}))
+    _admin_text(h, "/admin hello", ADMIN)
+    topic = h.log.get(1)
+    assert topic is not None
+    item = Inbound(2, InboundKind.TEXT, ADMIN, -100123, "2", text="more", thread=topic.thread_id)
+    asyncio.run(h.turns.handle(item))
+    assert len(h.expert.requests) == 1
+
+
+def test_a_shared_group_selection_of_admin_needs_an_admin_tap(tmp_path: Path) -> None:
+    h = Harness(tmp_path, shared=True, admins=frozenset({ADMIN}))
+    original = Inbound(1, InboundKind.TEXT, ADMIN, -100123, "-100123/71", text="/admin hello")
+    JournalInbound(h.database).record_batch("telegram", [original], 2, NOW)
+    asyncio.run(h.commands.handle(original))
+    [offer] = h.outbox.pending()
+    assert offer.message.buttons[0].label == "/admin@bot"
+    asyncio.run(OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick())
+    stranger = Inbound(2, InboundKind.TAP, OTHER_OWNER, -100123, "-100123/1", data="expert:1")
+    assert asyncio.run(h.commands.tap(stranger))
+    assert not h.topics.created
+    tap = Inbound(3, InboundKind.TAP, ADMIN, -100123, "-100123/1", data="expert:1")
+    assert asyncio.run(h.commands.tap(tap))
+    assert asyncio.run(h.commands.tap(tap))
+    assert len(h.topics.created) == len(h.expert.requests) == 1
+
+
+class _Later(Clock):
+    def now(self) -> datetime:
+        return NOW + timedelta(minutes=16)
+
+
+class _DeletableTopics(Topics):
+    async def delete(self, thread_id: int) -> None:
+        del thread_id
+
+
+def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Path) -> None:
+    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    _admin_text(h, "/admin hello", ADMIN, 1)
+    _admin_text(h, "/ask hello", ADMIN, 2)
+    ending = ExpertEnding(
+        h.log,
+        h.runs,
+        _DeletableTopics(),
+        h.outbox,
+        _Later(),
+        directory=tmp_path,
+        channel="telegram",
+        group_id=-100123,
+        retention=timedelta(days=14),
+        admin_idle=timedelta(minutes=15),
+        final=JournalFinalEdits(h.database, cast("JournalReplies", None)),
+    )
+    asyncio.run(ending.sweep())
+    admin, expert = h.log.get(1), h.log.get(2)
+    assert admin is None or admin.state != "open"
+    assert expert is not None
+    assert expert.state == "open"
+
+
+def test_a_command_in_an_admin_answer_is_stored_but_never_acted_on(tmp_path: Path) -> None:
+    class Proposing(Expert):
+        async def turn(self, request: ExpertRequest) -> ExpertResult:
+            self.requests.append(request)
+            answer = AdminAnswer(
+                reply="answer", title="t", tasks=[], findings="f", command="ls", reason="look"
+            )
+            return ExpertResult(answer, ExpertSession(0, "fake", "session", "f"), None)
+
+    h = Harness(tmp_path, admins=frozenset({ADMIN}), expert=Proposing())
+    _admin_text(h, "/admin hello", ADMIN)
+    assert "answer" in _sent_texts(h)
+    assert all(
+        not message.buttons or message.buttons[0].url
+        for message in (pending.message for pending in h.outbox.pending())
+    )
+
+
+@pytest.mark.parametrize("command", ["/admin", "/admin@bot"])
+def test_an_unlisted_owner_gets_no_reply_to_admin_in_a_shared_group(
+    tmp_path: Path, command: str
+) -> None:
+    listed = Harness(tmp_path / "listed", shared=True, admins=frozenset({ADMIN}))
+    other = Harness(tmp_path / "other", shared=True, admins=frozenset({OTHER_OWNER}))
+    unconfigured = Harness(tmp_path / "none", shared=True)
+    original = Inbound(1, InboundKind.TEXT, ADMIN, -100123, "-100123/71", text=f"{command} hello")
+    for instance in (listed, other, unconfigured):
+        JournalInbound(instance.database).record_batch("telegram", [original], 2, NOW)
+        asyncio.run(instance.commands.handle(original))
+    assert listed.outbox.pending()
+    assert not other.outbox.pending()
+    assert not unconfigured.outbox.pending()
+
+
+def test_an_admin_answer_with_a_secret_is_withheld_and_never_kept(tmp_path: Path) -> None:
+    secret = "ghp_" + "a" * 36
+
+    class Leaking(Expert):
+        async def turn(self, request: ExpertRequest) -> ExpertResult:
+            self.requests.append(request)
+            answer = AdminAnswer(
+                reply="answer", title="t", tasks=[], findings="f", command=f"echo {secret}",
+                reason="r",
+            )  # fmt: skip
+            return ExpertResult(answer, ExpertSession(0, "fake", "session", "f"), None)
+
+    h = Harness(tmp_path, admins=frozenset({ADMIN}), expert=Leaking())
+    _admin_text(h, "/admin hello", ADMIN)
+    assert not any(secret in text for text in _sent_texts(h))
+    dump = "\n".join(h.database.connection.iterdump())
+    assert secret not in dump
+    turn = h.log.turn(1)
+    assert turn is not None
+    assert turn.answer is not None
+    assert stored_answer(turn.answer).reply != "answer"
+
+
+@pytest.mark.parametrize("field", ["command", "reason", "findings", "session"])
+def test_loaded_secret_is_not_stored_or_given_to_another_provider(
+    tmp_path: Path, field: str
+) -> None:
+    secret = "synthetic-unusual-value"  # noqa: S105 -- a made-up value
+
+    class Rung:
+        def __init__(self, provider: str) -> None:
+            self.provider = self.name = provider
+            self.calls: list[tuple[ExpertRequest, str | None]] = []
+            self.down = False
+
+        async def probe(self) -> None:
+            pass
+
+        async def turn(
+            self, request: ExpertRequest, *, session_id: str | None, handoff: str | None
+        ) -> ExpertResult:
+            del session_id
+            self.calls.append((request, handoff))
+            if self.down:
+                raise ExpertError(_RETRY_LATER)
+            values = {"command": "ls", "reason": "look", "findings": "facts"}
+            if len(self.calls) == 2 and field != "session":
+                values[field] = secret
+            answer = AdminAnswer(reply="answer", title="title", tasks=[], **values)
+            findings = secret if len(self.calls) == 2 and field == "session" else answer.findings
+            return ExpertResult(answer, ExpertSession(0, self.provider, "session", findings), None)
+
+    first, second = Rung("first"), Rung("second")
+    ladder = LadderExpert(
+        [first, second],
+        Clock(),
+        cooldown=timedelta(minutes=1),
+        max_parallel=1,
+        handoff_turns=2,
+        timeout_s=10,
+    )
+    h = Harness(
+        tmp_path, admins=frozenset({ADMIN}), expert=cast("Expert", ladder), known_secrets=(secret,)
+    )
+    _admin_text(h, "/admin hello", ADMIN)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    assert conversation.thread_id is not None
+    assert conversation.session is not None
+    asyncio.run(
+        h.turns.handle(
+            Inbound(
+                2, InboundKind.TEXT, ADMIN, -100123, "2", text="next", thread=conversation.thread_id
+            )
+        )
+    )
+    conversation = h.log.get(1)
+    assert conversation is not None
+    assert conversation.session is None
+    assert secret not in "\n".join(h.database.connection.iterdump())
+    assert not any(secret in text for text in _sent_texts(h))
+    first.down = True
+    asyncio.run(
+        h.turns.handle(
+            Inbound(
+                3,
+                InboundKind.TEXT,
+                ADMIN,
+                -100123,
+                "3",
+                text="continue",
+                thread=conversation.thread_id,
+            )
+        )
+    )
+    request, handoff = second.calls[0]
+    assert request.session is None
+    assert handoff is None
+    assert secret not in repr(request)

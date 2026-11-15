@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 # keep: the batch is the what-failed key of the Operator's own health signal
 INBOUND_BATCH: Final = "inbound_batch"
-_ASK: Final = "/ask"
+_ASK: Final = ("/ask", "/admin")
 
 
 class InboundService:
@@ -119,7 +119,7 @@ class InboundService:
 def _is_ask(item: Inbound) -> bool:
     words = (item.text or "").split(maxsplit=1)
     return (
-        item.kind == InboundKind.TEXT and bool(words) and words[0].split("@", 1)[0].lower() == _ASK
+        item.kind == InboundKind.TEXT and bool(words) and words[0].split("@", 1)[0].lower() in _ASK
     )
 
 

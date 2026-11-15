@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.app.expert import closed_reply, open_reply_keys
 from shikiri_yaku.app.expert_runs import conversation_directory
+from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
@@ -37,7 +38,7 @@ class EndingLog(Protocol):
 
     def begin_ending(self, conversation_id: int, now: datetime) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
-    def idle_before(self, cutoff: datetime) -> list[ConversationRecord]: ...
+    def idle_before(self, cutoff: datetime, mode: str) -> list[ConversationRecord]: ...
     def ending(self) -> list[ConversationRecord]: ...
     def erase(self, conversation_id: int, *, topic_chat: int) -> None: ...
 
@@ -71,6 +72,7 @@ class ExpertEnding:
         channel: str,
         group_id: int,
         retention: timedelta,
+        admin_idle: timedelta,
         final: FinalEdits,
     ) -> None:
         self._log = log
@@ -82,6 +84,7 @@ class ExpertEnding:
         self._channel = channel
         self._group_id = group_id
         self._retention = retention
+        self._admin_idle = admin_idle
         self._final = final
 
     async def end(self, conversation_id: int) -> None:
@@ -125,12 +128,13 @@ class ExpertEnding:
         self._erase_when_settled(row)
 
     async def sweep(self) -> None:
-        """Retry the deletions not yet done, then end the conversations idle past retention."""
+        """Retry the deletions not yet done, then end the conversations idle past their period."""
         for row in self._log.ending():
             await self.end(row.id)
-        cutoff = self._clock.now() - self._retention
-        for row in self._log.idle_before(cutoff):
-            await self.end(row.id)
+        now = self._clock.now()
+        for mode, idle in ((MODE_EXPERT, self._retention), (MODE_ADMIN, self._admin_idle)):
+            for row in self._log.idle_before(now - idle, mode):
+                await self.end(row.id)
 
     def _close_reply(self, row: ConversationRecord) -> None:
         """Show the fixed ending time and associate any shared-group selection reply."""

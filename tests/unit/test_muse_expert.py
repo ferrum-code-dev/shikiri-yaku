@@ -13,7 +13,7 @@ import pytest
 
 from shikiri_yaku.adapters.agents.muse import MuseExpert
 from shikiri_yaku.app.expert_ladder import LadderExpert
-from shikiri_yaku.domain.expert import ExpertRequest, ExpertSession, ExpertTurn
+from shikiri_yaku.domain.expert import AdminAnswer, ExpertRequest, ExpertSession, ExpertTurn
 from shikiri_yaku.ports import CommandError, CommandResult, ExpertError
 from tests.unit.test_expert import Clock, Rung
 
@@ -35,8 +35,9 @@ def _fixture_result(session: str) -> CommandResult:
 
 
 class Runner:
-    def __init__(self, mode: str = "ok") -> None:
+    def __init__(self, mode: str = "ok", answer: dict[str, object] | None = None) -> None:
         self.mode = mode
+        self.answer = answer
         self.calls: list[list[str]] = []
         self.prompts: list[str] = []
         self.directories: list[Path | None] = []
@@ -69,7 +70,7 @@ class Runner:
             raise CommandError(msg)
         if self.mode == "fixture":
             return _fixture_result(session)
-        answer: dict[str, object] = {
+        answer: dict[str, object] = self.answer or {
             "reply": "ok",
             "title": "title",
             "tasks": [],
@@ -140,6 +141,61 @@ def test_muse_arguments_and_session(tmp_path: Path, session: str | None) -> None
     assert scratch.parent == tmp_path
     assert "hello" in runner.prompts[0]
     assert not scratch.exists()
+
+
+ADMIN_ANSWER: dict[str, object] = {
+    "reply": "ok",
+    "title": "title",
+    "tasks": [],
+    "findings": "facts",
+    "command": "ls -l",
+    "reason": "List the files",
+}
+
+
+def _without_scratch(argv: list[str], scratch: Path, session: str) -> list[str]:
+    return [arg.replace(str(scratch), "<scratch>").replace(session, "<session>") for arg in argv]
+
+
+def test_muse_admin_turn_keeps_the_read_only_arguments_and_returns_a_command(
+    tmp_path: Path,
+) -> None:
+    ordinary, admin = Runner(), Runner(answer=ADMIN_ANSWER)
+    scope = {"api": Path("/component")}
+    asyncio.run(
+        MuseExpert("m", ordinary, effort=None, timeout_s=20).turn(
+            ExpertRequest(tmp_path, scope, "hi"), session_id="s", handoff=None
+        )
+    )
+    result = asyncio.run(
+        MuseExpert("m", admin, effort=None, timeout_s=20).turn(
+            ExpertRequest(tmp_path, scope, "hi", admin=True), session_id="s", handoff=None
+        )
+    )
+    assert _without_scratch(admin.calls[0], admin.scratch[0], "s") == _without_scratch(
+        ordinary.calls[0], ordinary.scratch[0], "s"
+    )
+    assert isinstance(result.answer, AdminAnswer)
+    assert (result.answer.command, result.answer.reason) == ("ls -l", "List the files")
+
+
+@pytest.mark.parametrize(
+    ("admin", "answer"),
+    [
+        (True, None),
+        (True, {**ADMIN_ANSWER, "command": 3}),
+        (False, ADMIN_ANSWER),
+    ],
+)
+def test_muse_command_is_valid_only_in_admin_mode_and_by_schema(
+    tmp_path: Path,
+    admin: bool,  # noqa: FBT001 -- table column
+    answer: dict[str, object] | None,
+) -> None:
+    rung = MuseExpert("m", Runner(answer=answer), effort=None, timeout_s=20)
+    request = ExpertRequest(tmp_path, {"api": Path("/component")}, "hi", admin=admin)
+    with pytest.raises(ExpertError):
+        asyncio.run(rung.turn(request, session_id="s", handoff=None))
 
 
 @pytest.mark.parametrize(

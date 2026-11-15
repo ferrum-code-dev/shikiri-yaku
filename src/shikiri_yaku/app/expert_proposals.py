@@ -20,7 +20,7 @@ from shikiri_yaku.domain.callback import (
     reject_all_data,
     submit_all_data,
 )
-from shikiri_yaku.domain.expert import ExpertAnswer
+from shikiri_yaku.domain.expert import ExpertAnswer, stored_answer
 from shikiri_yaku.domain.outbound import Purpose, fit
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from shikiri_yaku.app.expert import ConversationLog
+    from shikiri_yaku.app.expert_admin import AdminAccess
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.expert import ExpertTask
     from shikiri_yaku.domain.inbound import Inbound
@@ -150,6 +151,7 @@ class ExpertProposals:
         *,
         channel: str,
         group_id: int,
+        access: AdminAccess,
     ) -> None:
         self._log = log
         self._conversations = conversations
@@ -159,6 +161,7 @@ class ExpertProposals:
         self._clock = clock
         self._channel = channel
         self._group_id = group_id
+        self._access = access
 
     def answer_messages(
         self, conversation_id: int, update_id: int, answer: ExpertAnswer
@@ -220,6 +223,9 @@ class ExpertProposals:
             return False
         if tap[0] not in (SUBMIT_ALL_VERB, REJECT_ALL_VERB):
             return False
+        proposal = self._open(tap[1])
+        if proposal is not None and not self._access.admit(proposal.conversation_id, item.sender):
+            return True
         message_key = self._log.bound(self._destination(item), item.message_ref)
         if message_key != action_key(tap[1]):
             if message_key == answer_key(tap[1]):
@@ -313,7 +319,7 @@ class ExpertProposals:
         return _Proposal(
             Destination(self._channel, str(self._group_id), conversation.thread_id),
             conversation.id,
-            ExpertAnswer.model_validate_json(turn.answer),
+            stored_answer(turn.answer),
         )
 
     def _say(self, item: Inbound, opened: _Proposal, state: str | None) -> None:

@@ -138,6 +138,21 @@ directory remains under `~/.local/share/muse/memory/projects/` after the convers
 Supported Codex effort levels depend on the model. No live agent or group verification is included
 in the local test suite.
 
+### `[admin]`
+
+The optional table turns on `/admin` conversations. It needs `[expert]`.
+
+```toml
+[admin]
+admins = [123456789]
+idle_min = 15
+```
+
+`admins` lists Telegram user ids, at least one, and each must also be in
+`channels.telegram.owners`. It is read at start; edit the file and restart to change it. `idle_min`
+(default 15) is how many minutes without a message end an admin conversation. Admin conversations
+use the `[expert]` ladder, timeout and limits.
+
 ## Command line
 
 ```
@@ -239,6 +254,21 @@ Commands work in private chats and in forum topics. Replies go to the chat and t
 | `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component's destination. If none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports its name and lists the commands. |
 | `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
+
+### `/admin`
+
+- **Availability:** `/admin <question>` works only when `[admin]` lists you in `admins`. Without that
+  table it is refused. Only a listed admin can open an admin conversation or write in its topic,
+  also in a shared group, where the selection button of an admin request works only for admins and
+  an instance stays silent to an unaddressed `/admin` from anyone not on its own list. The list is
+  checked on every message and every button of the conversation, such as a web-access decision.
+- **Conversation:** it is an Expert conversation with the same scope, providers and read-only
+  restrictions as `/ask`. Its topic starts with a notice that the chat is not private: members of
+  the group can read it. It ends like an Expert conversation, and also after `idle_min` without a
+  message or button; removing `[admin]` keeps that limit at 15 minutes for conversations already open.
+- **Commands:** the Expert may return a command with a reason, but this version neither shows nor
+  runs it, and nothing can be approved yet. An admin answer that carries a secret, the command
+  included, is withheld and not kept.
 
 ### `/ask`
 

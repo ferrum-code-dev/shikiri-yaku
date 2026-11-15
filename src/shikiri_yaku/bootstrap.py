@@ -47,6 +47,7 @@ from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_proposals import ExpertProposals
@@ -354,6 +355,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         forward_retry_s=settings.operator.forward_retry_s,
     )
     conversations = Conversations(journal)
+    admins = frozenset(() if settings.admin is None else settings.admin.admins)
+    access = AdminAccess(conversations, clock, admins=admins)
     topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
     runs = ConversationRuns()
     ending: ExpertEnding | None = None
@@ -375,6 +378,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             retention=timedelta(days=settings.expert.retention_days),
+            admin_idle=timedelta(minutes=settings.admin_idle_min),
             final=JournalFinalEdits(journal, _journal_replies(journal)),
         )
         proposals = ExpertProposals(
@@ -390,6 +394,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             clock,
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
+            access=access,
         )
         turns = ExpertTurns(
             conversations,
@@ -405,8 +410,15 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             runs=runs,
             ending=ending,
             proposals=proposals,
+            admins=admins,
+            known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
             web=ExpertWebRequests(
-                JournalWeb(journal), outbox, clock, channel=TELEGRAM_CHANNEL, group_id=group_id
+                JournalWeb(journal),
+                outbox,
+                clock,
+                channel=TELEGRAM_CHANNEL,
+                group_id=group_id,
+                access=access,
             ),
         )
     ask = Ask(
@@ -419,6 +431,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         scope={component.name: component.path for component in settings.components},
         channel=TELEGRAM_CHANNEL,
         final=JournalFinalEdits(journal, _journal_replies(journal)),
+        admins=admins,
     )
     assess = None if reasoning is None else reasoning.assessor.assess
     jobs += routing_jobs(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_turns import CREATION_UNCERTAIN, queue_expert_notice
 from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX
+from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT
 from shikiri_yaku.domain.outbound import TIME_FORMAT
 from shikiri_yaku.ports import Button, ChannelError, Message
 
@@ -25,6 +26,10 @@ _OPEN: Final = "open"
 OPEN_REPLY: Final = "Open the Expert conversation."
 _CLOSED: Final = "Conversation closed {when}"
 _CLOSED_TIME: Final = f"%Y-%m-%d {TIME_FORMAT}"
+ADMIN_COMMAND: Final = "/admin"
+ADMIN_OPEN_REPLY: Final = "Open the admin conversation."
+_ADMIN_NOT_CONFIGURED: Final = "Admin mode is not configured."
+_ADMIN_ONLY: Final = "Only a listed admin may use /admin."
 
 
 def open_reply_keys(update_id: int) -> tuple[str, str]:
@@ -49,6 +54,7 @@ class ConversationLog(Protocol):
         text: str,
         scope: list[str],
         now: datetime,
+        mode: str = MODE_EXPERT,
     ) -> bool: ...
     def get(self, update_id: int) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
@@ -62,7 +68,14 @@ class ConversationLog(Protocol):
     def opened(self, update_id: int, thread: int) -> None: ...
     def start(self, update_id: int) -> bool: ...
     def finish(
-        self, update_id: int, answer: str, session: str | None, call: str | None, now: datetime
+        self,
+        update_id: int,
+        answer: str,
+        session: str | None,
+        call: str | None,
+        now: datetime,
+        *,
+        clear_session: bool = False,
     ) -> None: ...
     def touch(self, conversation_id: int, now: datetime) -> None: ...
     def recover_creations(self) -> list[ConversationRecord]: ...
@@ -94,6 +107,7 @@ class Ask:
         scope: Mapping[str, Path],
         channel: str,
         final: FinalEdits | None = None,
+        admins: frozenset[int] = frozenset(),
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -104,26 +118,33 @@ class Ask:
         self._scope = scope
         self._channel = channel
         self._final = final
+        self._admins = admins
 
     async def addressed(self, word: str) -> bool:
         return self._topics is not None and await self._topics.addressed(word)
+
+    def is_admin(self, sender: int) -> bool:
+        return sender in self._admins
 
     async def offer(self, item: Inbound) -> None:
         if not self._configured or self._topics is None:
             return
         words = (item.text or "").split(maxsplit=1)
         text = words[1].strip() if len(words) > 1 else ""
-        reason = self._refusal(text)
+        if _is_admin(item) and item.sender not in self._admins:
+            return
+        reason = self._refusal(item, text)
         if reason:
             await self.handle(item, None)
             return
         name = await self._topics.bot_name()
+        command = ADMIN_COMMAND if _is_admin(item) else "/ask"
         self._outbox.queue_command_reply(
             [item_destination(self._channel, item)],
             [
                 Message(
                     "Choose an Expert.",
-                    (Button(f"/ask@{name}", f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
+                    (Button(f"{command}@{name}", f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
                     reply_to=item.message_ref,
                 )
             ],
@@ -135,6 +156,8 @@ class Ask:
         original = self._outbox.expert_selection(self._channel, item)
         if original is None:
             return False
+        if _is_admin(original) and item.sender not in self._admins:
+            return True
         await self.handle(original, None, selection=True)
         return True
 
@@ -143,7 +166,7 @@ class Ask:
     ) -> None:
         words = (item.text or "").split(maxsplit=1)
         text = words[1].strip() if len(words) > 1 else ""
-        reason = self._refusal(text)
+        reason = self._refusal(item, text)
         if reason:
             queue_command_reply(
                 self._outbox,
@@ -159,7 +182,8 @@ class Ask:
         if row is None or row.state != _OPEN or row.thread_id is None:
             return
         button = Button("Open topic", url=self._topics.link(row.thread_id))
-        message = Message(OPEN_REPLY, (button,))
+        admin = row.mode == MODE_ADMIN
+        message = Message(ADMIN_OPEN_REPLY if admin else OPEN_REPLY, (button,))
         if selection:
             if self._final is not None:
                 _, selection_key = open_reply_keys(item.update_id)
@@ -172,6 +196,8 @@ class Ask:
                 now=self._clock.now(),
                 conversation_id=row.id,
             )
+        if admin:
+            self._turns.warn_admin(row)
         await self._turns.run(row.id, item.update_id)
 
     async def _open(
@@ -185,6 +211,7 @@ class Ask:
             text=text,
             scope=names,
             now=self._clock.now(),
+            mode=MODE_ADMIN if _is_admin(item) else MODE_EXPERT,
         )
         if created:
             try:
@@ -202,9 +229,20 @@ class Ask:
             self._log.opened(item.update_id, thread)
         return self._log.get(item.update_id)
 
-    def _refusal(self, text: str) -> str:
+    def _refusal(self, item: Inbound, text: str) -> str:
         if not self._configured:
             return "The Expert is not configured."
         if self._topics is None:
             return "The Expert requires a forum group."
+        if _is_admin(item):
+            if not self._admins:
+                return _ADMIN_NOT_CONFIGURED
+            if item.sender not in self._admins:
+                return _ADMIN_ONLY
+            return "Provide a question after /admin." if not text else ""
         return "Provide a question after /ask." if not text else ""
+
+
+def _is_admin(item: Inbound) -> bool:
+    words = (item.text or "").split(maxsplit=1)
+    return bool(words) and words[0].split("@", 1)[0].lower() == ADMIN_COMMAND

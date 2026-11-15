@@ -10,10 +10,18 @@ from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_runs import conversation_directory
-from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest, ExpertTurn
+from shikiri_yaku.domain.expert import (
+    MODE_ADMIN,
+    AdminAnswer,
+    ExpertAnswer,
+    ExpertRequest,
+    ExpertTurn,
+    stored_answer,
+)
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     ChannelRefusedError,
     ExpertError,
@@ -36,8 +44,13 @@ if TYPE_CHECKING:
 
 CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
 SUMMARY_PROMPT: Final = "Summarize this conversation in two or three short sentences."
+ADMIN_WARNING: Final = (
+    "This chat is not private: members of the group can read this topic, including any command "
+    "the Expert proposes and its output."
+)
 _INTERRUPTED: Final = "The Expert turn was interrupted. Please ask again."
 _NO_ANSWER: Final = "No Expert agent could answer."
+_WITHHELD_REPLY: Final = "The answer was withheld by secret protection."
 _EFFORT: Final = "/effort"
 _EFFORT_USAGE: Final = "Usage: /effort [level]"
 _SUMMARIZE: Final = "/summarize"
@@ -102,6 +115,8 @@ class ExpertTurns:
         ending: ExpertEnding,
         proposals: ExpertProposals,
         web: ExpertWebRequests | None = None,
+        admins: frozenset[int] = frozenset(),
+        known_secrets: tuple[str, ...] = (),
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -117,6 +132,8 @@ class ExpertTurns:
         self._ending = ending
         self._proposals = proposals
         self._web = web
+        self._admins = admins
+        self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
     def owns(self, item: Inbound) -> bool:
         """Return whether a text, reply or closed topic belongs to an open Expert topic."""
@@ -138,6 +155,8 @@ class ExpertTurns:
         if item.kind is InboundKind.TOPIC_CLOSED:
             await self._ending.end(conversation.id)
             return
+        if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
+            return
         self._log.touch(conversation.id, self._clock.now())
         text = item.text or ""
         words = text.split()
@@ -155,6 +174,17 @@ class ExpertTurns:
             await self._ending.end(conversation.id)
         else:
             self._reply(item, _HELP, conversation.id)
+
+    def warn_admin(self, conversation: ConversationRecord) -> None:
+        """Say in the topic of an admin conversation that the chat is not private."""
+        queue_expert_notice(
+            self._outbox,
+            self._clock,
+            Destination(self._channel, str(self._group_id), conversation.thread_id),
+            ADMIN_WARNING,
+            key=f"admin:warning:{conversation.update_id}",
+            conversation_id=conversation.id,
+        )
 
     async def run(self, conversation_id: int, update_id: int) -> None:
         """Run the turns before this one that are pending, then this one, and send their answers.
@@ -206,13 +236,14 @@ class ExpertTurns:
             scope={name: self._scope[name] for name in conversation.scope},
             message=turn.text,
             update_id=update_id,
+            admin=conversation.mode == MODE_ADMIN,
             context=json.dumps(context),
             effort=conversation.effort,
             session=conversation.session,
             turns=tuple(
                 ExpertTurn(
                     message=past.text,
-                    reply=ExpertAnswer.model_validate_json(past.answer).reply,
+                    reply=stored_answer(past.answer).reply,
                 )
                 for past in self._log.history(conversation.id, before=update_id)
                 if past.answer is not None
@@ -224,12 +255,32 @@ class ExpertTurns:
             answer = ExpertAnswer(reply=_NO_ANSWER, title="", tasks=[], findings="")
             self._log.finish(update_id, answer.model_dump_json(), None, None, self._clock.now())
         else:
+            stored = result.answer
+            texts = (
+                [
+                    *_admin_texts(stored),
+                    result.session.findings,
+                    result.session.session_id,
+                    result.session.provider,
+                ]
+                if isinstance(stored, AdminAnswer)
+                else []
+            )
+            withheld = bool(texts) and (
+                secret_form(texts) is not None
+                or any(secret in text for secret in self._known_secrets for text in texts)
+            )
+            if withheld:
+                stored = AdminAnswer(
+                    reply=_WITHHELD_REPLY, title="", tasks=[], findings="", command=None, reason=""
+                )
             self._log.finish(
                 update_id,
-                result.answer.model_dump_json(),
+                stored.model_dump_json(),
                 json.dumps(asdict(result.session)),
                 None if result.call is None else json.dumps(asdict(result.call)),
                 self._clock.now(),
+                clear_session=withheld,
             )
         return True
 
@@ -241,7 +292,7 @@ class ExpertTurns:
             return
         if turn.state != _DONE or turn.answer is None:
             return
-        answer = ExpertAnswer.model_validate_json(turn.answer)
+        answer = stored_answer(turn.answer)
         self._proposals.queue_answer(update_id)
         if self._web is not None:
             self._web.queue(update_id)
@@ -312,3 +363,16 @@ class ExpertTurns:
             )
         if self._web is not None:
             self._web.queue()
+
+
+def _admin_texts(answer: AdminAnswer) -> list[str]:
+    texts = [answer.reply, answer.title, answer.findings, answer.reason]
+    texts.extend(
+        text
+        for task in answer.tasks
+        for text in task.model_dump().values()
+        if isinstance(text, str)
+    )
+    if answer.command is not None:
+        texts.append(answer.command)
+    return texts

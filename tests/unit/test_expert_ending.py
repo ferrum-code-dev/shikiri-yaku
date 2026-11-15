@@ -196,6 +196,7 @@ class Harness:
             channel=CHANNEL,
             group_id=GROUP_ID,
             retention=RETENTION,
+            admin_idle=timedelta(minutes=15),
             final=self.final,
         )
         clients = {"api": cast("ShikiruClient", client)}

@@ -23,7 +23,7 @@ A1 to A3 execute in order; details and shared constraints are in tasks/plan.md.
 
 ### A2
 
-- [ ] A2. Open opt-in admin conversations
+- [x] A2. Open opt-in admin conversations
 
 ## Acceptance criteria
 

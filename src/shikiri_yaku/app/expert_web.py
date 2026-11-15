@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from datetime import datetime
 
+    from shikiri_yaku.app.expert_admin import AdminAccess
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import Clock, Outbox
 
@@ -23,6 +24,7 @@ class WebRequests(Protocol):
     """The durable web requests and their decisions."""
 
     def pending(self, update_id: int | None = None) -> list[tuple[int, int, int, str]]: ...
+    def conversation_of(self, request_id: int) -> int | None: ...
     def bound(self, channel: str, chat: str, message_ref: str) -> str | None: ...
     def decide(
         self, request_id: int, update_id: int, *, allow: bool, now: datetime
@@ -33,13 +35,21 @@ class ExpertWebRequests:
     """Show each requested host once, and continue the conversation on a decision."""
 
     def __init__(
-        self, log: WebRequests, outbox: Outbox, clock: Clock, *, channel: str, group_id: int
+        self,
+        log: WebRequests,
+        outbox: Outbox,
+        clock: Clock,
+        *,
+        channel: str,
+        group_id: int,
+        access: AdminAccess,
     ) -> None:
         self._log = log
         self._outbox = outbox
         self._clock = clock
         self._channel = channel
         self._group_id = group_id
+        self._access = access
 
     def queue(self, update_id: int | None = None) -> None:
         for request_id, conversation_id, thread_id, host in self._log.pending(update_id):
@@ -71,6 +81,9 @@ class ExpertWebRequests:
             or self._log.bound(self._channel, str(item.chat), item.message_ref)
             != f"expert:web:{tap[1]}"
         ):
+            return True
+        owner = self._log.conversation_of(tap[1])
+        if owner is None or not self._access.admit(owner, item.sender):
             return True
         conversation_id = self._log.decide(
             tap[1], item.update_id, allow=tap[0] == WEB_ALLOW_VERB, now=self._clock.now()

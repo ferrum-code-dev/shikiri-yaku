@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
@@ -31,6 +32,7 @@ def expert_proposals(
     channel: str,
     group_id: int,
     final: FinalEdits | None = None,
+    access: AdminAccess | None = None,
 ) -> ExpertProposals:
     replies = JournalReplies(
         database, SignalStore(database), OpStore(database), channel_name=channel
@@ -46,4 +48,5 @@ def expert_proposals(
         clock,
         channel=channel,
         group_id=group_id,
+        access=access or AdminAccess(conversations, clock, admins=frozenset()),
     )

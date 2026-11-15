@@ -14,6 +14,7 @@ from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.adapters.agents.muse import MuseExpert
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
+from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns
@@ -214,6 +215,7 @@ class Harness:
             channel=CHANNEL,
             group_id=GROUP_ID,
             retention=timedelta(days=14),
+            admin_idle=timedelta(minutes=15),
             final=self.final,
         )
         self.turns = ExpertTurns(
@@ -230,7 +232,12 @@ class Harness:
             runs=self.runs,
             ending=self.ending,
             web=ExpertWebRequests(
-                JournalWeb(self.database), self.outbox, Clock(), channel=CHANNEL, group_id=GROUP_ID
+                JournalWeb(self.database),
+                self.outbox,
+                Clock(),
+                channel=CHANNEL,
+                group_id=GROUP_ID,
+                access=AdminAccess(self.log, Clock(), admins=frozenset()),
             ),
             proposals=expert_proposals(
                 self.database,

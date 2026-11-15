@@ -8,6 +8,7 @@ from typing import Final
 import pytest
 
 from shikiri_yaku.settings import (
+    ADMIN_IDLE_MIN,
     ChannelsSettings,
     Component,
     HandlersSettings,
@@ -114,6 +115,16 @@ _REJECTED: list[tuple[str, tuple[str, ...]]] = [
         _MINIMAL.replace(_TELEGRAM, _TELEGRAM + "shared_group = true\n"),
         ("'shared_group' requires 'group_id'",),
     ),
+]
+
+_ADMIN_EXPERT: Final = f"\n[expert]\n{_LADDER}\n"
+_ADMIN_REJECTED: list[tuple[str, tuple[str, ...]]] = [
+    (_MINIMAL + "\n[admin]\nadmins = [123456789]\n", ("'admin' needs the '[expert]' table",)),
+    (
+        _MINIMAL + _ADMIN_EXPERT + "\n[admin]\nadmins = [42]\n",
+        ("'admin.admins[0]' is not one of 'channels.telegram.owners'",),
+    ),
+    (_MINIMAL + _ADMIN_EXPERT + "\n[admin]\nadmins = []\n", ("'admin.admins'",)),
 ]
 
 _BAD_VALUES: list[tuple[str, str]] = [
@@ -236,7 +247,7 @@ def test_telegram_group_id_is_optional_and_accepts_a_forum_group_id(tmp_path: Pa
     assert settings.telegram.group_id == -1001234567890
 
 
-@pytest.mark.parametrize(("config", "expected"), _REJECTED)
+@pytest.mark.parametrize(("config", "expected"), [*_REJECTED, *_ADMIN_REJECTED])
 def test_a_broken_file_is_rejected_with_the_key_at_fault(
     tmp_path: Path, config: str, expected: tuple[str, ...]
 ) -> None:
@@ -245,6 +256,19 @@ def test_a_broken_file_is_rejected_with_the_key_at_fault(
 
     for fragment in expected:
         assert fragment in str(raised.value)
+
+
+def test_a_listed_admin_who_is_an_owner_loads(tmp_path: Path) -> None:
+    config = _MINIMAL + _ADMIN_EXPERT + "\n[admin]\nadmins = [123456789]\nidle_min = 5\n"
+    settings = load_settings(_write(tmp_path, config))
+    assert settings.admin is not None
+    assert (settings.admin.admins, settings.admin.idle_min) == ((123456789,), 5)
+
+
+def test_the_admin_idle_limit_stays_short_without_the_admin_table(tmp_path: Path) -> None:
+    settings = load_settings(_write(tmp_path, _MINIMAL))
+    assert settings.admin is None
+    assert settings.admin_idle_min == ADMIN_IDLE_MIN
 
 
 @pytest.mark.parametrize(("key", "config"), _BAD_VALUES)

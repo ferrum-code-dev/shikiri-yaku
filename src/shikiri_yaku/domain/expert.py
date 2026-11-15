@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,6 +32,26 @@ class ExpertAnswer(BaseModel):
     findings: str
 
 
+class AdminAnswer(ExpertAnswer):
+    """An admin answer adds the optional command text and its reason, both model-written."""
+
+    command: str | None
+    reason: str
+
+
+COMMAND_FIELD: Final = "command"
+
+
+def stored_answer(text: str) -> ExpertAnswer:
+    """Read a journaled answer: an admin answer has a command key, an ordinary one has none."""
+    model = AdminAnswer if COMMAND_FIELD in json.loads(text) else ExpertAnswer
+    return model.model_validate_json(text)
+
+
+MODE_EXPERT: Final = "expert"
+MODE_ADMIN: Final = "admin"
+
+
 @dataclass(frozen=True, slots=True)
 class ExpertSession:
     rung: int
@@ -51,6 +72,7 @@ class ConversationRecord:
     effort: str | None
     session: ExpertSession | None
     ending_at: datetime | None
+    mode: str = MODE_EXPERT
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +101,7 @@ class ExpertRequest:
     session: ExpertSession | None = None
     turns: tuple[ExpertTurn, ...] = ()
     update_id: int = 0
+    admin: bool = False
 
 
 @dataclass(frozen=True, slots=True)

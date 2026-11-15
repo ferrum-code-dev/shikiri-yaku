@@ -48,6 +48,14 @@ class JournalWeb:
         ).fetchall()
         return [(r["id"], r["conversation_id"], r["thread_id"], r["host"]) for r in rows]
 
+    def conversation_of(self, request_id: int) -> int | None:
+        row = self._database.connection.execute(
+            "SELECT t.conversation_id FROM web_requests w "
+            "JOIN turns t ON t.update_id = w.update_id WHERE w.id = ?",
+            (request_id,),
+        ).fetchone()
+        return None if row is None else row["conversation_id"]
+
     def bound(self, channel: str, chat: str, message_ref: str) -> str | None:
         row = self._database.connection.execute(
             "SELECT notice_key FROM messages WHERE channel = ? AND chat = ? "

@@ -15,6 +15,7 @@ from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.adapters.agents.codex import CodexExpert
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.domain.expert import (
+    AdminAnswer,
     ExpertAnswer,
     ExpertRequest,
     ExpertResult,
@@ -151,6 +152,66 @@ def test_fixed_cli_arguments(provider: str, resume: bool, tmp_path: Path) -> Non
     assert server["args"][0] == "_expert-web"
     assert "hello" in runner.stdin
     assert result.session.session_id == "session"
+
+
+ADMIN_ANSWER: dict[str, object] = {**ANSWER, "command": "ls -l", "reason": "List the files"}
+
+
+def _arguments_without_schema(argv: list[str]) -> list[str]:
+    """The argument list with the schema and the paths of this call removed."""
+    return [
+        "<schema>" if "schema" in argv[max(index - 1, 0)] or arg.startswith("{") else arg
+        for index, arg in enumerate(argv)
+        if not arg.endswith(("schema.json", "answer.json"))
+    ]
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_admin_turn_keeps_the_read_only_arguments_and_returns_a_command(
+    provider: str, tmp_path: Path
+) -> None:
+    ordinary = Runner(provider)
+    admin = Runner(provider, ADMIN_ANSWER)
+    scope = {"api": tmp_path / "api"}
+    asyncio.run(
+        EXPERTS[provider]("m", ordinary, effort=None, timeout_s=20).turn(
+            ExpertRequest(tmp_path, scope, "hi"), session_id=None, handoff=None
+        )
+    )
+    result = asyncio.run(
+        EXPERTS[provider]("m", admin, effort=None, timeout_s=20).turn(
+            ExpertRequest(tmp_path, scope, "hi", admin=True), session_id=None, handoff=None
+        )
+    )
+    assert _arguments_without_schema(admin.argv) == _arguments_without_schema(ordinary.argv)
+    assert isinstance(result.answer, AdminAnswer)
+    assert (result.answer.command, result.answer.reason) == ("ls -l", "List the files")
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+@pytest.mark.parametrize(
+    ("admin", "answer"),
+    [
+        (True, ANSWER),
+        (True, {**ADMIN_ANSWER, "command": 3}),
+        (False, ADMIN_ANSWER),
+    ],
+)
+def test_command_is_valid_only_in_admin_mode_and_by_schema(
+    provider: str,
+    admin: bool,  # noqa: FBT001 -- table column
+    answer: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    rung = EXPERTS[provider]("m", Runner(provider, answer), effort=None, timeout_s=20)
+    with pytest.raises(ExpertError):
+        asyncio.run(
+            rung.turn(
+                ExpertRequest(tmp_path, {"api": tmp_path}, "hi", admin=admin),
+                session_id=None,
+                handoff=None,
+            )
+        )
 
 
 @pytest.mark.parametrize("session", [None, "old"])

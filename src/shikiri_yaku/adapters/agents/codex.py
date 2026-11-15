@@ -19,13 +19,12 @@ from shikiri_yaku.adapters.agents.common import (
     CliRung,
 )
 from shikiri_yaku.domain.classification import CallRecord
-from shikiri_yaku.domain.expert import ExpertAnswer
 from shikiri_yaku.ports import ExpertError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from shikiri_yaku.domain.expert import ExpertRequest
+    from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest
     from shikiri_yaku.ports import CommandResult
 
 NAME: Final = "codex"
@@ -141,7 +140,7 @@ class CodexExpert(CliExpert):
 
     @override
     def _answer(
-        self, result: CommandResult, answer_file: Path
+        self, result: CommandResult, answer_file: Path, model: type[ExpertAnswer]
     ) -> tuple[ExpertAnswer, str, CallRecord | None]:
         events = [_CodexEvent.model_validate_json(line) for line in result.stdout.splitlines()]
         session = next((event.thread_id for event in events if event.type == THREAD_STARTED), None)
@@ -149,7 +148,7 @@ class CodexExpert(CliExpert):
             msg = f"{self.name}: no session"
             raise ExpertError(msg)
         return (
-            ExpertAnswer.model_validate_json(answer_file.read_text(encoding="utf-8")),
+            model.model_validate_json(answer_file.read_text(encoding="utf-8")),
             session,
             _token_call(result),
         )

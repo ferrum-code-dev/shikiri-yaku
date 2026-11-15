@@ -137,6 +137,7 @@ was sent.
 | `/help` | Lists the commands. Free text also returns this list. |
 | `/goal <component> <request>` | Submits a request to that component's Shikiru project. |
 | `/ask <question>` | Opens an Expert topic and answers the question. |
+| `/admin <question>` | Opens an admin Expert topic, for admins listed in `[admin]`. The chat is not private. |
 
 In a component topic, the topic names the component, so write `/goal <request>` there:
 

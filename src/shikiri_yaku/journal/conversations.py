@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.expert import ConversationRecord, ExpertSession, TurnRecord
+from shikiri_yaku.domain.expert import (
+    MODE_EXPERT,
+    ConversationRecord,
+    ExpertSession,
+    TurnRecord,
+)
 from shikiri_yaku.journal.database import parse_stamp, stamp
 
 if TYPE_CHECKING:
@@ -47,6 +52,7 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
         effort=row["effort"],
         session=None if session is None else ExpertSession(**json.loads(session)),
         ending_at=parse_stamp(row["ending_at"]),
+        mode=row["mode"],
     )
 
 
@@ -76,15 +82,16 @@ class Conversations:
         text: str,
         scope: list[str],
         now: datetime,
+        mode: str = MODE_EXPERT,
     ) -> bool:
         with self._database.transaction() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO conversations
-                    (update_id, chat, origin_thread, scope, state, last_activity)
-                VALUES (?, ?, ?, ?, 'creating', ?) ON CONFLICT(update_id) DO NOTHING
+                    (update_id, chat, origin_thread, scope, state, last_activity, mode)
+                VALUES (?, ?, ?, ?, 'creating', ?, ?) ON CONFLICT(update_id) DO NOTHING
                 """,
-                (update_id, chat, thread, json.dumps(scope), stamp(now)),
+                (update_id, chat, thread, json.dumps(scope), stamp(now), mode),
             )
             if cursor.rowcount != 1:
                 return False
@@ -202,6 +209,8 @@ class Conversations:
         session: str | None,
         call: str | None,
         now: datetime,
+        *,
+        clear_session: bool = False,
     ) -> None:
         # keep: a turn that failed before the agent answered keeps the session of the turns before
         with self._database.transaction() as connection:
@@ -211,10 +220,12 @@ class Conversations:
             )
             connection.execute(
                 """
-                UPDATE conversations SET session = COALESCE(?, session), last_activity = ?
+                UPDATE conversations SET
+                    session = CASE WHEN ? THEN NULL ELSE COALESCE(?, session) END,
+                    last_activity = ?
                 WHERE id = (SELECT conversation_id FROM turns WHERE update_id = ?)
                 """,
-                (session, stamp(now), update_id),
+                (clear_session, session, stamp(now), update_id),
             )
 
     def touch(self, conversation_id: int, now: datetime) -> None:
@@ -237,11 +248,11 @@ class Conversations:
             ).fetchone()
             return None if row is None else _record(row)
 
-    def idle_before(self, cutoff: datetime) -> list[ConversationRecord]:
-        """Return the open conversations whose last message is older than the cutoff."""
+    def idle_before(self, cutoff: datetime, mode: str = MODE_EXPERT) -> list[ConversationRecord]:
+        """Return the open conversations of a mode whose last message is older than the cutoff."""
         rows = self._database.connection.execute(
-            "SELECT * FROM conversations WHERE state = 'open' AND last_activity < ?",
-            (stamp(cutoff),),
+            "SELECT * FROM conversations WHERE state = 'open' AND mode = ? AND last_activity < ?",
+            (mode, stamp(cutoff)),
         ).fetchall()
         return [_record(row) for row in rows]
 

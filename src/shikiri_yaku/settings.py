@@ -88,6 +88,7 @@ EXPERT_RETENTION_DAYS: Final = 14
 EXPERT_WEB_TIMEOUT_S: Final = 20
 EXPERT_WEB_MAX_BYTES: Final = 1000000
 EXPERT_WEB_MAX_REDIRECTS: Final = 10
+ADMIN_IDLE_MIN: Final = 15
 _RUNG_PARTS: Final = ("adapter", "model", "effort")
 _MIN_RUNG_PARTS: Final = 2
 
@@ -262,6 +263,11 @@ class ExpertSettings(_FrozenModel):
     web_max_redirects: PositiveInt = EXPERT_WEB_MAX_REDIRECTS
 
 
+class AdminSettings(_FrozenModel):
+    admins: Annotated[tuple[StrictInt, ...], _AT_LEAST_ONE]
+    idle_min: PositiveInt = ADMIN_IDLE_MIN
+
+
 class ChannelsSettings(_FrozenModel):
     telegram: TelegramSettings
 
@@ -276,10 +282,16 @@ class Settings(_FrozenModel):
     handlers: HandlersSettings = Field(default_factory=HandlersSettings)
     reasoner: ReasonerSettings | None = None
     expert: ExpertSettings | None = None
+    admin: AdminSettings | None = None
 
     @property
     def telegram(self) -> TelegramSettings:
         return self.channels.telegram
+
+    @property
+    def admin_idle_min(self) -> int:
+        """The idle limit of admin conversations, which stays short if `[admin]` is removed."""
+        return ADMIN_IDLE_MIN if self.admin is None else self.admin.idle_min
 
     @model_validator(mode="after")
     def _names_are_unique(self) -> Self:
@@ -288,6 +300,19 @@ class Settings(_FrozenModel):
             if name in names[:index]:
                 message = "'components[{index}].name' repeats the component name '{name}'"
                 raise PydanticCustomError(_RULE, message, {"index": index, "name": name})
+        return self
+
+    @model_validator(mode="after")
+    def _admins_are_owners_of_an_expert_instance(self) -> Self:
+        if self.admin is None:
+            return self
+        if self.expert is None:
+            message = "'admin' needs the '[expert]' table"
+            raise PydanticCustomError(_RULE, message)
+        for index, admin in enumerate(self.admin.admins):
+            if admin not in self.telegram.owners:
+                message = "'admin.admins[{index}]' is not one of 'channels.telegram.owners'"
+                raise PydanticCustomError(_RULE, message, {"index": index})
         return self
 
 

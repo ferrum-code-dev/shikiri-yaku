@@ -8,7 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Final
+from pathlib import Path
+from typing import Final
 
 import httpx
 import pytest
@@ -16,9 +17,6 @@ import pytest
 from shikiri_yaku.adapters.telegram_http import NO_REPLY, NO_TOKEN, HttpBotApi
 from shikiri_yaku.ports import ChannelError
 from tests.support.telegram_bot import FIXTURES
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 TOKEN: Final = "42:a-token-that-only-this-test-uses"  # noqa: S105 -- made up for this test
 TIMEOUT_S: Final = 5
@@ -28,6 +26,15 @@ HTTP_TOO_MANY_REQUESTS: Final = 429
 HTTP_BAD_GATEWAY: Final = 502
 PAYLOAD: Final = {"chat_id": "1001", "text": "S1 · Which way?"}
 SEND_URL: Final = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+
+def test_loaded_token_is_available_for_secret_screening(monkeypatch: pytest.MonkeyPatch) -> None:
+    def read_text(*_args: object, **_kwargs: object) -> str:
+        return "  synthetic-value  "
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    api = HttpBotApi(Path("unused"), TIMEOUT_S)
+    assert api.known_secrets == ("synthetic-value",)
 
 
 def _token_file(home: Path) -> Path:

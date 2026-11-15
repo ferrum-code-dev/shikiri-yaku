@@ -20,11 +20,10 @@ from shikiri_yaku.adapters.agents.common import (
     CliRung,
 )
 from shikiri_yaku.domain.classification import CallRecord
-from shikiri_yaku.domain.expert import ExpertAnswer
 from shikiri_yaku.ports import ExpertError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.domain.expert import ExpertRequest
+    from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest
     from shikiri_yaku.ports import CommandResult
 
 NAME: Final = "muse"
@@ -221,7 +220,7 @@ class MuseExpert(CliExpert):
 
     @override
     def _answer(
-        self, result: CommandResult, answer_file: Path
+        self, result: CommandResult, answer_file: Path, model: type[ExpertAnswer]
     ) -> tuple[ExpertAnswer, str, CallRecord | None]:
         records = [_Record.model_validate_json(line) for line in result.stdout.splitlines()]
         terminal = _last(records, _TERMINALS)
@@ -234,7 +233,7 @@ class MuseExpert(CliExpert):
         if len(sessions) != 1 or not (session := next(iter(sessions))):
             msg = f"{self.name}: no unique session"
             raise ExpertError(msg)
-        answer = ExpertAnswer.model_validate_json(_Terminal.model_validate(terminal.payload).text)
+        answer = model.model_validate_json(_Terminal.model_validate(terminal.payload).text)
         return answer, session, _call_of(_last(records, _USAGE_TYPES))
 
     @override

@@ -54,6 +54,12 @@ class HttpBotApi:
             raise ChannelUnavailableError(NO_REPLY) from None
         return reply
 
+    @property
+    def known_secrets(self) -> tuple[str, ...]:
+        """Return the nonempty secret values loaded by this transport."""
+        token = "" if self._base_url is None else self._base_url.removeprefix(API_URL.split("{")[0])
+        return (token,) if token else ()
+
 
 def _base_url(token_file: Path) -> str | None:
     """Return the API URL with the token in it, or None when the token file cannot be read."""
