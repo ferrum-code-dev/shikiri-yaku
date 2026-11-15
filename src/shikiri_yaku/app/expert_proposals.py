@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from shikiri_yaku.app.expert import ConversationLog
-    from shikiri_yaku.app.expert_admin import AdminAccess
+    from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.expert import ExpertTask
     from shikiri_yaku.domain.inbound import Inbound
@@ -180,6 +180,7 @@ class ExpertProposals:
         group_id: int,
         access: AdminAccess,
         approval_expiry_min: int = ADMIN_APPROVAL_EXPIRY_MIN,
+        admin_executor: AdminExecutor | None = None,
     ) -> None:
         self._log = log
         self._conversations = conversations
@@ -191,6 +192,7 @@ class ExpertProposals:
         self._group_id = group_id
         self._access = access
         self._admin_expiry = timedelta(minutes=approval_expiry_min)
+        self.admin_executor = admin_executor
 
     def answer_messages(
         self, conversation_id: int, update_id: int, answer: ExpertAnswer
@@ -281,7 +283,10 @@ class ExpertProposals:
         self._log.expire_admin(now - self._admin_expiry, now)
 
     async def admin_tap(  # noqa: C901, PLR0911, PLR0912 -- each refusal is a distinct decision
-        self, item: Inbound, run: Callable[[int, int], Awaitable[None]]
+        self,
+        item: Inbound,
+        run: Callable[[int, int], Awaitable[None]],
+        run_admin: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> bool:
         try:
             tap = decode_callback(item.data or "")
@@ -332,7 +337,11 @@ class ExpertProposals:
                 cutoff=now - self._admin_expiry,
             ):
                 self._access.admit(conversation_id, item.sender)
-                if not approved:
+                if approved and run_admin is not None:
+                    await run_admin(tap[1], conversation_id)
+                elif approved and self.admin_executor is not None:
+                    await self.admin_executor.execute(tap[1], run)
+                elif not approved:
                     await run(conversation_id, item.update_id)
                 return True
             reason = "Proposal is no longer pending."

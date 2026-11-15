@@ -147,13 +147,16 @@ The optional table turns on `/admin` conversations. It needs `[expert]`.
 admins = [123456789]
 idle_min = 15
 approval_expiry_min = 10
+command_timeout_s = 120
+output_max_bytes = 65536
 ```
 
 `admins` lists Telegram user ids, at least one, and each must also be in
 `channels.telegram.owners`. It is read at start; edit the file and restart to change it. `idle_min`
 (default 15) is how many minutes without a message end an admin conversation.
 `approval_expiry_min` (default 10) is the time allowed to approve a command after it is journaled.
-Admin conversations use the `[expert]` ladder, timeout and limits.
+`command_timeout_s` (default 120) limits its run time; `output_max_bytes` (default 65536) limits
+its captured output. Admin conversations use the `[expert]` ladder, timeout and limits.
 
 ## Command line
 
@@ -269,9 +272,13 @@ Commands work in private chats and in forum topics. Replies go to the chat and t
   the group can read it. It ends like an Expert conversation, and also after `idle_min` without a
   message or button; removing `[admin]` keeps that limit at 15 minutes for conversations already open.
 - **Commands:** the Expert may propose a command and reason, both marked as model-written. A listed
-  admin can tap **Run** or **Decline** before the approval expires. This version records the decision
-  but does not execute the command. A newer proposal voids the pending one. Proposals with known
-  secrets, characters that cannot be shown exactly, or text too long for one message are refused.
+  admin can tap **Run** or **Decline** before the approval expires. **Run** records the approval
+  and executes the exact command once in the instance directory as the service user, with closed
+  stdin. Its output is limited, known loaded secrets are hidden, and the tail is posted and given
+  to the Expert. Other secrets may still reach the chat. A newer proposal voids the pending one.
+  Proposals with known secrets, characters that cannot be shown exactly, or text too long for one
+  message are refused. After a restart, an approved command that never issued is void; one issued
+  without a recorded result is unknown and never retried. Check the host after either notice.
 
 ### `/ask`
 

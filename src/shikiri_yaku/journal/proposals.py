@@ -15,6 +15,8 @@ from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.ports import Message, ProposalStatus, SubmitStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.ops import OpStore
@@ -127,6 +129,68 @@ class JournalProposals:
                     (update_id, op_id),
                 )
             return changed == 1
+
+    def issue_admin(self, op_id: int, now: datetime) -> tuple[int, str] | None:
+        """Claim an approved command before it starts."""
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "UPDATE ops SET state = 'issued', updated_at = ? "
+                "WHERE id = ? AND kind = 'admin' AND state = 'approved' RETURNING payload",
+                (stamp(now), op_id),
+            ).fetchone()
+            if row is None:
+                return None
+            payload = json.loads(row["payload"])
+            return payload["conversation_id"], payload["command"]
+
+    def finish_admin(
+        self,
+        op_id: int,
+        now: datetime,
+        output: str,
+        code: int | None,
+        duration: float,
+        *,
+        cut: bool,
+        notice: Callable[[], None] | None = None,
+    ) -> int | None:
+        """Record the result, output notice, and Expert turn atomically."""
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "UPDATE ops SET state = ?, updated_at = ?, "
+                "payload = json_set(payload, '$.exit_code', ?, '$.duration_s', ?, '$.cut', ?) "
+                "WHERE id = ? AND kind = 'admin' AND state = 'issued' RETURNING payload",
+                ("failed" if code is None else "confirmed", stamp(now), code, duration, cut, op_id),
+            ).fetchone()
+            if row is None:
+                return None
+            conversation_id = json.loads(row["payload"])["conversation_id"]
+            row = connection.execute("SELECT MIN(update_id) FROM turns").fetchone()
+            turn_id = min(-1, (row[0] or 0) - 1)
+            inserted = connection.execute(
+                "INSERT INTO turns (conversation_id, update_id, text, state) "
+                "SELECT id, ?, ?, 'pending' FROM conversations WHERE id = ? AND state = 'open'",
+                (turn_id, output, conversation_id),
+            ).rowcount
+            if not inserted:
+                return None
+            if notice is not None:
+                notice()
+            return turn_id
+
+    def recover_admin(self, now: datetime) -> list[tuple[int, int, str]]:
+        """Settle uncertain commands once, without replaying them."""
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                "UPDATE ops SET state = CASE state WHEN 'approved' THEN 'void' ELSE 'unknown' END, "
+                "updated_at = ? WHERE kind = 'admin' AND state IN ('approved', 'issued') "
+                "RETURNING id, payload, state",
+                (stamp(now),),
+            ).fetchall()
+            return [
+                (row["id"], json.loads(row["payload"])["conversation_id"], row["state"])
+                for row in rows
+            ]
 
     def admin_op(self, op_id: int) -> tuple[int, str, datetime] | None:
         """Return the conversation, state and proposal time of an admin operation."""

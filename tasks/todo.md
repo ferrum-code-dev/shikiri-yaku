@@ -47,7 +47,7 @@ A1 to A5 execute in order; details and shared constraints are in tasks/plan.md.
 
 ### A4
 
-- [ ] A4. Run approved admin commands
+- [x] A4. Run approved admin commands
 
 ## Acceptance criteria
 

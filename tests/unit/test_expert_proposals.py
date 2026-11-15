@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.app.expert_admin import AdminAccess
+from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import reject_all_data, submit_all_data
@@ -36,6 +36,7 @@ from shikiri_yaku.ports import (
     MESSAGE_TEXT_LIMIT,
     Ack,
     AckStatus,
+    AdminCommandResult,
     ChannelRefusedError,
     Message,
     ShikiruLinkDownError,
@@ -44,7 +45,8 @@ from shikiri_yaku.ports import (
 from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Generator, Mapping, Sequence
+    from pathlib import Path
 
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.domain.schedule import Destination
@@ -1006,3 +1008,318 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
         "SELECT final_body FROM messages WHERE id = ?", (message_id,)
     ).fetchone()[0]
     assert json.loads(final)["buttons"] == []
+
+
+def test_admin_issue_and_recovery_never_repeat() -> None:
+    database = Database.open(":memory:")
+    _DATABASES.append(database)
+    conversations = Conversations(database)
+    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.opened(1, THREAD)
+    conversation = conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
+    ops: list[int] = []
+    for update in (10, 20, 30, 40):
+        op, _ = journal.intend_admin(conversation.id, update, "echo test", "reason", NOW)
+        assert journal.decide_admin(
+            op,
+            update + 1,
+            ADMIN,
+            admin=True,
+            approve=True,
+            now=NOW,
+            cutoff=NOW - timedelta(minutes=1),
+        )
+        ops.append(op)
+    assert journal.issue_admin(ops[0], NOW) == (conversation.id, "echo test")
+    assert journal.issue_admin(ops[0], NOW) is None
+    turn = journal.finish_admin(ops[0], NOW, "safe output", 4, 0.1, cut=True)
+    assert turn is not None
+    recorded = conversations.turn(turn)
+    assert recorded is not None
+    assert recorded.text == "safe output"
+    assert journal.issue_admin(ops[3], NOW) is not None
+    assert journal.finish_admin(ops[3], NOW, "timed out", None, 1.0, cut=False) is not None
+    failed = journal.admin_op(ops[3])
+    assert failed is not None
+    assert failed[1] == "failed"
+    assert journal.issue_admin(ops[1], NOW) is not None
+    assert journal.recover_admin(NOW) == [
+        (ops[1], conversation.id, "unknown"),
+        (ops[2], conversation.id, "void"),
+    ]
+    assert journal.recover_admin(NOW) == []
+    assert journal.issue_admin(ops[1], NOW) is None
+    assert journal.issue_admin(ops[2], NOW) is None
+    row = database.connection.execute(
+        "SELECT state, payload FROM ops WHERE id = ?", (ops[0],)
+    ).fetchone()
+    assert row["state"] == "confirmed"
+    assert json.loads(row["payload"])["exit_code"] == 4
+    assert json.loads(row["payload"])["cut"] == 1
+
+
+def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
+    tmp_path: Path,
+) -> None:
+
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    ops: list[int] = []
+    for update in (10, 20):
+        op, _ = journal.intend_admin(conversation.id, update, f"echo {update}", "reason", NOW)
+        assert journal.decide_admin(
+            op,
+            update + 1,
+            ADMIN,
+            admin=True,
+            approve=True,
+            now=NOW,
+            cutoff=NOW - timedelta(minutes=1),
+        )
+        ops.append(op)
+
+    async def scenario() -> None:
+        class Lock:
+            def __init__(self) -> None:
+                self.lock = asyncio.Lock()
+
+            def hold(self) -> asyncio.Lock:
+                return self.lock
+
+        class Runner:
+            def __init__(self) -> None:
+                self.calls: list[tuple[list[str], Path]] = []
+                self.active = 0
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def run_admin(
+                self,
+                argv: Sequence[str],
+                *,
+                timeout_s: float,
+                cwd: Path,
+                max_bytes: int,
+                secrets: Sequence[str],
+            ) -> AdminCommandResult:
+                assert timeout_s == 1
+                assert max_bytes == 100
+                assert not secrets
+                self.active += 1
+                assert self.active == 1
+                self.calls.append((list(argv), cwd))
+                self.started.set()
+                await self.release.wait()
+                self.active -= 1
+                return AdminCommandResult(returncode=7, output="safe", cut=False)
+
+        runner = Runner()
+        executor = AdminExecutor(  # noqa: S604 -- fake runner
+            journal,
+            harness.conversations,
+            runner,
+            Lock(),
+            harness.outbox,
+            Clock(),
+            directory=tmp_path,
+            shell="/bin/sh",
+            timeout_s=1,
+            max_bytes=100,
+            secrets=(),
+            channel=CHANNEL,
+            group_id=CHAT,
+        )
+        turns: list[tuple[int, int]] = []
+
+        async def run(conversation_id: int, turn: int) -> None:
+            turns.append((conversation_id, turn))
+
+        tasks = [asyncio.create_task(executor.execute(op, run)) for op in (ops[0], ops[0], ops[1])]
+        await runner.started.wait()
+        assert len(runner.calls) == 1
+        runner.release.set()
+        await asyncio.gather(*tasks)
+        assert runner.calls == [
+            (["/bin/sh", "-l", "-c", "echo 10"], tmp_path),
+            (["/bin/sh", "-l", "-c", "echo 20"], tmp_path),
+        ]
+        assert len(turns) == 2
+        for _, turn in turns:
+            recorded = harness.conversations.turn(turn)
+            assert recorded is not None
+            assert recorded.text == "safe"
+
+    asyncio.run(scenario())
+
+
+def test_admin_restart_notices_are_not_replayed() -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    ops: list[int] = []
+    for update in (10, 20):
+        op, _ = journal.intend_admin(conversation.id, update, "echo test", "reason", NOW)
+        assert journal.decide_admin(
+            op,
+            update + 1,
+            ADMIN,
+            admin=True,
+            approve=True,
+            now=NOW,
+            cutoff=NOW - timedelta(minutes=1),
+        )
+        ops.append(op)
+    assert journal.issue_admin(ops[0], NOW) is not None
+    channel = FakeChannel()
+    asyncio.run(
+        recover_admin(
+            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
+        )
+    )
+    asyncio.run(
+        recover_admin(
+            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
+        )
+    )
+    assert len(channel.sent) == 2
+    issued = journal.admin_op(ops[0])
+    approved = journal.admin_op(ops[1])
+    assert issued is not None
+    assert approved is not None
+    assert issued[1] == "unknown"
+    assert approved[1] == "void"
+
+
+@pytest.mark.parametrize("crash", [False, True])
+def test_admin_output_is_redacted_before_journal_topic_and_expert(
+    tmp_path: Path, *, crash: bool
+) -> None:
+    from shikiri_yaku.adapters.commands import ProcessCommandRunner  # noqa: PLC0415
+
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(
+        conversation.id, 10, "printf xx; printf SEC; printf RET; printf extra", "reason", NOW
+    )
+    assert journal.decide_admin(
+        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+    )
+
+    async def scenario() -> None:
+        class Lock:
+            def __init__(self) -> None:
+                self.lock = asyncio.Lock()
+
+            def hold(self) -> asyncio.Lock:
+                return self.lock
+
+        executor = AdminExecutor(  # noqa: S604 -- harmless printf through CommandRunner
+            journal,
+            harness.conversations,
+            ProcessCommandRunner(),
+            Lock(),
+            harness.outbox,
+            Clock(),
+            directory=tmp_path,
+            shell="/bin/sh",
+            timeout_s=10,
+            max_bytes=5,
+            secrets=("SECRET",),
+            channel=CHANNEL,
+            group_id=CHAT,
+        )
+        turns: list[int] = []
+
+        async def run(_conversation_id: int, turn: int) -> None:
+            turns.append(turn)
+            if crash:
+                raise CrashError
+
+        if crash:
+            with pytest.raises(CrashError):
+                await executor.execute(op, run)
+        else:
+            await executor.execute(op, run)
+        assert len(turns) == 1
+        turn = harness.conversations.turn(turns[0])
+        assert turn is not None
+        assert turn.text == "xx***"
+        assert turn.state == "pending"
+        assert harness.conversations.pending_admin_followups() == [
+            (conversation.id, turn.update_id)
+        ]
+        message = harness.database.connection.execute(
+            "SELECT body FROM messages WHERE notice_key = ?", (f"admin:result:{op}",)
+        ).fetchone()
+        assert json.loads(message["body"])["text"] == turn.text
+        row = harness.database.connection.execute(
+            "SELECT payload FROM ops WHERE id = ?", (op,)
+        ).fetchone()
+        assert "SECRET" not in row["payload"]
+        assert "SECRET" not in message["body"]
+        assert json.loads(row["payload"])["cut"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_admin_result_and_output_notice_roll_back_together() -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(conversation.id, 10, "echo safe", "reason", NOW)
+    assert journal.decide_admin(
+        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+    )
+    assert journal.issue_admin(op, NOW) is not None
+
+    def crash() -> None:
+        from shikiri_yaku.domain.outbound import Purpose  # noqa: PLC0415
+        from shikiri_yaku.domain.schedule import Destination  # noqa: PLC0415
+
+        harness.outbox.queue(
+            None,
+            Purpose.EXPERT,
+            [Destination(CHANNEL, str(CHAT), THREAD)],
+            Message("safe"),
+            key=f"admin:result:{op}",
+            now=NOW,
+            conversation_id=conversation.id,
+        )
+        raise CrashError
+
+    with pytest.raises(CrashError):
+        journal.finish_admin(op, NOW, "safe", 0, 1.0, cut=False, notice=crash)
+    state = journal.admin_op(op)
+    assert state is not None
+    assert state[1] == "issued"
+    assert harness.conversations.pending_admin_followups() == []
+    assert (
+        harness.database.connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE notice_key = ?", (f"admin:result:{op}",)
+        ).fetchone()[0]
+        == 0
+    )

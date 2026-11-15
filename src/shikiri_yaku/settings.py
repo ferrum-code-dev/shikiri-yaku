@@ -90,6 +90,9 @@ EXPERT_WEB_MAX_BYTES: Final = 1000000
 EXPERT_WEB_MAX_REDIRECTS: Final = 10
 ADMIN_IDLE_MIN: Final = 15
 ADMIN_APPROVAL_EXPIRY_MIN: Final = 10
+ADMIN_COMMAND_TIMEOUT_S: Final = 120
+ADMIN_OUTPUT_MAX_BYTES: Final = 65536
+ADMIN_OUTPUT_READ_BYTES: Final = 65536
 _RUNG_PARTS: Final = ("adapter", "model", "effort")
 _MIN_RUNG_PARTS: Final = 2
 
@@ -268,6 +271,8 @@ class AdminSettings(_FrozenModel):
     admins: Annotated[tuple[StrictInt, ...], _AT_LEAST_ONE]
     idle_min: PositiveInt = ADMIN_IDLE_MIN
     approval_expiry_min: PositiveInt = ADMIN_APPROVAL_EXPIRY_MIN
+    command_timeout_s: PositiveInt = ADMIN_COMMAND_TIMEOUT_S
+    output_max_bytes: PositiveInt = ADMIN_OUTPUT_MAX_BYTES
 
 
 class ChannelsSettings(_FrozenModel):

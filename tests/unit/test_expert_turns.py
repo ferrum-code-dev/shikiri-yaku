@@ -824,3 +824,36 @@ def test_decline_replay_delivers_finished_turn_once(
         h.database.connection.execute("SELECT count(*) FROM ops WHERE kind = 'admin'").fetchone()[0]
         == 2
     )
+
+
+def test_restart_resumes_pending_admin_output_before_new_turns(
+    build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shikiri_yaku.journal.proposals import JournalProposals  # noqa: PLC0415
+
+    monkeypatch.setitem(ANSWER, "command", None)
+    monkeypatch.setitem(ANSWER, "reason", "")
+    runner = Runner()
+    h = build(ladder(runner))
+    now = Clock().now()
+    h.log.create(1, chat=CHAT, thread=None, text="question", scope=[], now=now, mode="admin")
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    journal = JournalProposals(h.database, OpStore(h.database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(conversation.id, 10, "echo safe", "reason", now)
+    assert journal.decide_admin(
+        op, 11, OWNER, admin=True, approve=True, now=now, cutoff=now - timedelta(minutes=1)
+    )
+    assert journal.issue_admin(op, now) is not None
+    output_turn = journal.finish_admin(op, now, "safe output", 0, 1.0, cut=False)
+    assert output_turn is not None
+    h.turns.recover()
+    asyncio.run(h.turns.resume_admin_followups())
+    asyncio.run(h.turns.resume_admin_followups())
+    assert len(runner.calls) == 1
+    assert "safe output" in runner.stdin[0]
+    turn = h.log.turn(output_turn)
+    assert turn is not None
+    assert turn.state == "done"
+    assert h.log.pending_admin_followups() == []

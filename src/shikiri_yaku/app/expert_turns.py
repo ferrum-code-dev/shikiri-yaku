@@ -205,29 +205,38 @@ class ExpertTurns:
         A turn that is already done only sends its answer again, which the outbox keeps once.
         """
         async with self._runs.lock(conversation_id):
-            while (turn := self._log.oldest_pending(conversation_id)) is not None:
-                if turn.update_id < 0 or turn.update_id >= update_id:
-                    break
-                if not await self._execute(conversation_id, turn.update_id):
-                    return
-                await self._deliver(conversation_id, turn.update_id)
-            own = self._log.turn(update_id)
-            awaits_run = own is not None and own.state == _PENDING
-            if awaits_run and not await self._execute(conversation_id, update_id):
+            await self._run_locked(conversation_id, update_id)
+
+    async def _run_locked(self, conversation_id: int, update_id: int) -> None:
+        while (turn := self._log.oldest_pending(conversation_id)) is not None:
+            if turn.update_id < 0 or turn.update_id >= update_id:
+                break
+            if not await self._execute(conversation_id, turn.update_id):
                 return
-            await self._deliver(conversation_id, update_id)
-            # keep: a generated turn may be done but undelivered after a stop, so each is delivered
-            delivered: set[int] = set()
-            while followup := next(
-                (t for t in self._log.followups(conversation_id) if t.update_id not in delivered),
-                None,
+            await self._deliver(conversation_id, turn.update_id)
+        own = self._log.turn(update_id)
+        awaits_run = own is not None and own.state == _PENDING
+        if awaits_run and not await self._execute(conversation_id, update_id):
+            return
+        await self._deliver(conversation_id, update_id)
+        # keep: a generated turn may be done but undelivered after a stop, so each is delivered
+        delivered: set[int] = set()
+        while followup := next(
+            (t for t in self._log.followups(conversation_id) if t.update_id not in delivered),
+            None,
+        ):
+            if followup.state == _PENDING and not await self._execute(
+                conversation_id, followup.update_id
             ):
-                if followup.state == _PENDING and not await self._execute(
-                    conversation_id, followup.update_id
-                ):
-                    return
-                await self._deliver(conversation_id, followup.update_id)
-                delivered.add(followup.update_id)
+                return
+            await self._deliver(conversation_id, followup.update_id)
+            delivered.add(followup.update_id)
+
+    async def _run_admin(self, op_id: int, conversation_id: int) -> None:
+        async with self._runs.lock(conversation_id):
+            executor = self._proposals.admin_executor
+            if executor is not None:
+                await executor.execute(op_id, self._run_locked)
 
     async def _execute(self, conversation_id: int, update_id: int) -> bool:
         """Run one pending turn in a task of its own; False when it did not run because it ends."""
@@ -360,7 +369,7 @@ class ExpertTurns:
 
     async def web_tap(self, item: Inbound) -> bool:
         """Apply a web grant decision if this is a web request tap."""
-        if await self._proposals.admin_tap(item, self.run):
+        if await self._proposals.admin_tap(item, self.run, self._run_admin):
             return True
         return self._web is not None and await self._web.tap(item, self.run)
 
@@ -383,6 +392,11 @@ class ExpertTurns:
             now=self._clock.now(),
             conversation_id=conversation_id,
         )
+
+    async def resume_admin_followups(self) -> None:
+        """Resume generated admin turns left pending before a restart."""
+        for conversation_id, update_id in self._log.pending_admin_followups():
+            await self.run(conversation_id, update_id)
 
     def recover(self) -> None:
         """Tell topics about creations left uncertain and turns a restart interrupted."""

@@ -181,6 +181,16 @@ class Conversations:
         ).fetchone()
         return None if row is None else _turn(row)
 
+    def pending_admin_followups(self) -> list[tuple[int, int]]:
+        """Return generated admin turns left pending at startup in their original order."""
+        rows = self._database.connection.execute(
+            "SELECT t.conversation_id, t.update_id FROM turns t "
+            "JOIN conversations c ON c.id = t.conversation_id "
+            "WHERE c.mode = 'admin' AND c.state = 'open' AND t.state = 'pending' "
+            "AND t.update_id < 0 ORDER BY t.id"
+        ).fetchall()
+        return [(row["conversation_id"], row["update_id"]) for row in rows]
+
     def followups(self, conversation_id: int) -> list[TurnRecord]:
         """Return the generated turns of a conversation, pending or done, in the order made."""
         rows = self._database.connection.execute(

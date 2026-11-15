@@ -172,3 +172,80 @@ def test_a_command_whose_group_reports_not_permitted_returns_its_result(
     result = _run(["echo", "hello"])
 
     assert (result.returncode, result.stdout) == (0, "hello\n")
+
+
+def test_admin_capture_redacts_across_cutoff_and_drains_output(tmp_path: Path) -> None:
+    result = asyncio.run(
+        ProcessCommandRunner().run_admin(
+            [sys.executable, "-c", "import sys; sys.stdout.write('abSECRET' + 'x' * 200000)"],
+            timeout_s=_TIMEOUT_S,
+            cwd=tmp_path,
+            max_bytes=5,
+            secrets=("SECRET",),
+        )
+    )
+    assert result.output == "ab***"
+    assert result.cut
+    assert result.returncode == 0
+
+
+def test_admin_timeout_kills_group_and_redacts_output(tmp_path: Path) -> None:
+    result = asyncio.run(
+        ProcessCommandRunner().run_admin(
+            ["/bin/sh", "-c", 'printf SECRET; sleep 60 & child=$!; printf %s "$child"; wait'],
+            timeout_s=_GROUP_TIMEOUT_S,
+            cwd=tmp_path,
+            max_bytes=100,
+            secrets=("SECRET",),
+        )
+    )
+    assert result.returncode is None
+    assert result.output.startswith("******")
+    child = int(result.output.removeprefix("******"))
+    for _ in range(_CHILD_PID_ATTEMPTS):
+        if not _alive(child):
+            break
+        threading.Event().wait(_CHILD_PID_WAIT_S)
+    else:
+        os.kill(child, signal.SIGKILL)
+        pytest.fail("child survived the timeout")
+    assert not result.cut
+
+
+def test_admin_capture_redacts_secret_split_between_writes(tmp_path: Path) -> None:
+    program = (
+        "import sys, time; sys.stdout.write('SE'); sys.stdout.flush(); "
+        "time.sleep(0.1); sys.stderr.write('CRET'); sys.stderr.flush()"
+    )
+    result = asyncio.run(
+        ProcessCommandRunner().run_admin(
+            [sys.executable, "-c", program],
+            timeout_s=_TIMEOUT_S,
+            cwd=tmp_path,
+            max_bytes=100,
+            secrets=("SECRET",),
+        )
+    )
+    assert result.output == "******"
+    assert not result.cut
+
+
+def test_admin_capture_drains_concurrent_stdout_and_stderr(tmp_path: Path) -> None:
+    program = (
+        "import os, threading; "
+        "a = threading.Thread(target=os.write, args=(1, b'a' * 200000)); "
+        "b = threading.Thread(target=os.write, args=(2, b'b' * 200000)); "
+        "a.start(); b.start(); a.join(); b.join()"
+    )
+    result = asyncio.run(
+        ProcessCommandRunner().run_admin(
+            [sys.executable, "-c", program],
+            timeout_s=_TIMEOUT_S,
+            cwd=tmp_path,
+            max_bytes=100,
+            secrets=(),
+        )
+    )
+    assert result.returncode == 0
+    assert len(result.output) == 100
+    assert result.cut

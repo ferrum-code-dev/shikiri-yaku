@@ -175,7 +175,8 @@ runs that exact command on the Operator host, and only after you tap it. **Decli
 Approvals expire after 24 hours.
 
 In an admin conversation, the Expert may propose a command for a listed admin to approve or
-decline. This version records the decision but does not execute the command.
+decline. **Run** executes the exact command as the service user on the host. Review it and its
+effects before approving; the group can read the command and its output.
 
 The Operator acts on its own only in these cases. Everything else reaches you as a question:
 

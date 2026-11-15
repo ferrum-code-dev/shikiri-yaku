@@ -1167,6 +1167,13 @@ class CommandResult:
     stderr: str
 
 
+@dataclass(frozen=True, slots=True)
+class AdminCommandResult:
+    returncode: int | None
+    output: str
+    cut: bool
+
+
 class HostLock(Protocol):
     """The lock under which one host command runs at a time, across instances.
 
@@ -1193,6 +1200,20 @@ class CommandRunner(Protocol):
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
     ) -> CommandResult: ...
+
+
+class AdminCommandRunner(Protocol):
+    """Run an approved command with bounded, redacted output."""
+
+    async def run_admin(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path,
+        max_bytes: int,
+        secrets: Sequence[str],
+    ) -> AdminCommandResult: ...
 
 
 class ExpertCommandRunner(Protocol):

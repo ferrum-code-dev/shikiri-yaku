@@ -2084,3 +2084,51 @@ def test_a_ladder_that_names_an_adapter_without_its_rung_is_refused_before_anyth
 
     with pytest.raises(SettingsError, match=re.escape(problem)):
         compose(load_settings(directory), directory, clock=NapClock())
+
+
+def test_admin_operations_settle_after_admin_mode_is_disabled(tmp_path: Path) -> None:
+    from shikiri_yaku.journal.conversations import Conversations  # noqa: PLC0415
+    from shikiri_yaku.journal.proposals import JournalProposals  # noqa: PLC0415
+
+    directory = _instance(tmp_path, group_id=_GROUP)
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    conversations = Conversations(database)
+    now = _NOW
+    conversations.create(1, chat=_OWNER, thread=None, text="q", scope=[], now=now, mode="admin")
+    conversations.opened(1, _TOPIC)
+    conversation = conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(database, OpStore(database), channel_name="telegram")
+    ops: list[int] = []
+    for update in (10, 20):
+        op, _ = journal.intend_admin(conversation.id, update, "echo safe", "reason", now)
+        assert journal.decide_admin(
+            op,
+            update + 1,
+            _OWNER,
+            admin=True,
+            approve=True,
+            now=now,
+            cutoff=now - timedelta(minutes=1),
+        )
+        ops.append(op)
+    assert journal.issue_admin(ops[0], now) is not None
+    database.close()
+    bot = _ForumBot([])
+    composition = compose(load_settings(directory), directory, bot=lambda _settings: bot)
+    try:
+        composition.recover()
+        composition.recover()
+        journal = JournalProposals(
+            composition.journal, OpStore(composition.journal), channel_name="telegram"
+        )
+        issued = journal.admin_op(ops[0])
+        approved = journal.admin_op(ops[1])
+        assert issued is not None
+        assert approved is not None
+        assert issued[1] == "unknown"
+        assert approved[1] == "void"
+        notices = _in_topic(bot, "check the host")
+        assert len(notices) == 2
+    finally:
+        composition.close()

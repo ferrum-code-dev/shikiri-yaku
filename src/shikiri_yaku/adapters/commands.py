@@ -11,9 +11,10 @@ import contextlib
 import os
 import signal
 import tempfile
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
-from shikiri_yaku.ports import CommandError, CommandResult
+from shikiri_yaku.ports import AdminCommandResult, CommandError, CommandResult
+from shikiri_yaku.settings import ADMIN_OUTPUT_READ_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -70,6 +71,73 @@ class ProcessCommandRunner:
                 stdout=_read(stdout),
                 stderr=_read(stderr),
             )
+
+    async def run_admin(  # noqa: C901 -- capture, timeout, and redaction share state
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path,
+        max_bytes: int,
+        secrets: Sequence[str],
+    ) -> AdminCommandResult:
+        values = tuple(value.encode() for value in secrets if value)
+        lookahead = max((len(value) for value in values), default=1) - 1
+        captured = bytearray()
+        total = 0
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                cwd=cwd,
+            )
+        except OSError:
+            return AdminCommandResult(returncode=None, output="", cut=False)
+
+        async def drain() -> None:
+            nonlocal total
+            if process.stdout is None:
+                return
+            while chunk := await process.stdout.read(ADMIN_OUTPUT_READ_BYTES):
+                total += len(chunk)
+                captured.extend(chunk[: max(0, max_bytes + lookahead - len(captured))])
+
+        reader = asyncio.create_task(drain())
+        try:
+            await asyncio.wait_for(_wait_for_group(process), timeout_s)
+        except TimeoutError:
+            _close_admin_pipe(process)
+            await _kill_group(process)
+            code = None
+        except asyncio.CancelledError:
+            _close_admin_pipe(process)
+            await _kill_group(process)
+            reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader
+            raise
+        else:
+            code = process.returncode
+        await reader
+        raw = bytes(captured)
+        masked = bytearray(raw[:max_bytes])
+        for value in values:
+            start = 0
+            while (index := raw.find(value, start)) != -1:
+                end = min(index + len(value), max_bytes)
+                if index < end:
+                    masked[index:end] = b"*" * (end - index)
+                start = index + 1
+        return AdminCommandResult(code, masked.decode(errors="replace"), total > max_bytes)
+
+
+def _close_admin_pipe(process: asyncio.subprocess.Process) -> None:
+    # keep: a process outside the group may still hold the pipe after the group is killed
+    if process.stdout is not None:
+        cast("asyncio.ReadTransport", getattr(process.stdout, "_transport")).close()  # noqa: B009
 
 
 async def _kill_group(process: asyncio.subprocess.Process) -> None:

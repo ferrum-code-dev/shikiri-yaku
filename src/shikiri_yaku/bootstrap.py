@@ -47,7 +47,7 @@ from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
-from shikiri_yaku.app.expert_admin import AdminAccess
+from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_proposals import ExpertProposals
@@ -148,6 +148,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.extension import Extension, Handler
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
+        AdminCommandRunner,
         Channel,
         ChannelCheck,
         Clock,
@@ -237,6 +238,13 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     before the journal is opened.
     """
     _check_adapters(settings)
+    if settings.admin is not None:
+        instance = directory.resolve()
+        if any((parent / ".git").exists() for parent in (instance, *instance.parents)) or any(
+            instance.is_relative_to(component.path.resolve()) for component in settings.components
+        ):
+            message = "Admin commands require an instance directory outside repositories"
+            raise CompositionError(message)
     try:
         journal = Database.open(directory / JOURNAL_FILE_NAME)
     except JournalError as error:
@@ -382,6 +390,23 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             admin_idle=timedelta(minutes=settings.admin_idle_min),
             final=JournalFinalEdits(journal, _journal_replies(journal)),
         )
+        admin_executor = None
+        if settings.admin is not None:
+            admin_executor = AdminExecutor(
+                JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+                conversations,
+                cast("AdminCommandRunner", commands),
+                host_lock,
+                outbox,
+                clock,
+                directory=directory,
+                shell=install_shell,
+                timeout_s=settings.admin.command_timeout_s,
+                max_bytes=settings.admin.output_max_bytes,
+                secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+                channel=TELEGRAM_CHANNEL,
+                group_id=group_id,
+            )
         proposals = ExpertProposals(
             JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
             conversations,
@@ -396,6 +421,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             access=access,
+            admin_executor=admin_executor,
             approval_expiry_min=(
                 settings.admin.approval_expiry_min
                 if settings.admin is not None
@@ -463,25 +489,30 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         destinations,
         shared_group=settings.telegram.shared_group,
     )
-    jobs.append(
-        inbound_job(
-            settings,
-            journal,
-            outbox,
-            clock,
-            clients=clients,
-            reshower=forwarder,
-            forwarder=forwarder,
-            bot_api=bot_api,
-            goal=goal,
-            destinations=destinations,
-            ladder=None if reasoning is None else reasoning.ladder,
-            install_runner=install_executor,
-            ask=ask,
-            turns=turns,
-            proposals=proposals,
-        )
+    inbound = inbound_job(
+        settings,
+        journal,
+        outbox,
+        clock,
+        clients=clients,
+        reshower=forwarder,
+        forwarder=forwarder,
+        bot_api=bot_api,
+        goal=goal,
+        destinations=destinations,
+        ladder=None if reasoning is None else reasoning.ladder,
+        install_runner=install_executor,
+        ask=ask,
+        turns=turns,
+        proposals=proposals,
     )
+
+    async def inbound_after_admin_recovery() -> None:
+        if turns is not None:
+            await turns.resume_admin_followups()
+        await inbound()
+
+    jobs.append(inbound_after_admin_recovery)
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
     jobs += copy_jobs(settings, journal, reporter, channel, clock)
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
@@ -506,6 +537,16 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         # keep: operator health signals belong to no component; a restart must not close them
         SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
+        asyncio.run(
+            recover_admin(
+                JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+                conversations,
+                clock,
+                channel,
+                channel_name=TELEGRAM_CHANNEL,
+                group_id=group_id,
+            )
+        )
         if turns is not None:
             turns.recover()
         asyncio.run(destinations.prepare())
