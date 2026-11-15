@@ -1,5 +1,21 @@
 # Task plan
 
+## Planned work: Expert task proposal settle (T-165)
+
+### E1. Stop the false refusal notice after a proposal settles
+
+## Acceptance criteria
+
+- Settling a submitted or rejected proposal queues no final edit for its answer message; its action message still gets its final edit.
+- The crash-on-restart tests in tests/unit/test_expert_proposals.py still pass; uv run poe check passes.
+
+### E2. Show how many proposed tasks were submitted
+
+## Acceptance criteria
+
+- A submitted proposal's action message reads 'Submitted: N of M tasks.' with N the confirmed tasks; the too-long anchor reads the same line ending '; results follow.'. Rejected, superseded and interrupted lines are unchanged.
+- Offline tests cover all tasks confirmed and a partial case with one failed or unknown task, checking the count only; docs/reference.md describes the line; uv run poe check passes.
+
 ## Planned work: opt-in admin mode (T-161)
 
 ### A1. Document the admin command exception

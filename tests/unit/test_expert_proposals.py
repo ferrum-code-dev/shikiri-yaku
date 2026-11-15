@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, cast
 
@@ -28,6 +29,8 @@ from shikiri_yaku.ports import (
     AckStatus,
     ChannelRefusedError,
     Message,
+    ShikiruLinkDownError,
+    ShikiruRejectedError,
 )
 from tests.support.expert_proposals import expert_proposals
 
@@ -36,7 +39,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import ShikiruClient
+    from shikiri_yaku.ports import ShikiruClient, ShikiruError
 
 OWNER: Final = 1001
 CHAT: Final = -100123
@@ -77,16 +80,27 @@ class CrashError(RuntimeError):
 
 
 class FakeShikiru:
-    """A fake Shikiru: it records each request, and crashes on the call numbered `crash_on`."""
+    """A fake Shikiru: it records each request, crashes on the call numbered `crash_on`, and
+    raises `error` on the call numbered `error_on`."""
 
-    def __init__(self, *, crash_on: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        crash_on: int | None = None,
+        error_on: int | None = None,
+        error: type[ShikiruError] = ShikiruRejectedError,
+    ) -> None:
         self.requests: list[str] = []
         self._crash_on = crash_on
+        self._error_on = error_on
+        self._error = error
 
     async def submit_task(self, request: str) -> Ack:
         self.requests.append(request)
         if len(self.requests) == self._crash_on:
             raise CrashError
+        if len(self.requests) == self._error_on:
+            raise self._error
         return Ack(
             id=len(self.requests),
             status=AckStatus.DONE,
@@ -306,6 +320,23 @@ def test_submit_all_sends_each_task_once_to_the_component_it_names() -> None:
         action_key(FIRST),
     )
     assert final == 1
+
+
+@pytest.mark.parametrize("settle", [submit_all_data(FIRST), reject_all_data(FIRST)])
+def test_settling_edits_the_action_message_and_never_the_answer(settle: str) -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first")])
+    harness.tap(2, settle)
+    final_answer = harness.count(
+        "SELECT COUNT(*) FROM messages WHERE notice_key = ? AND final_body IS NOT NULL",
+        answer_key(FIRST),
+    )
+    final_action = harness.count(
+        "SELECT COUNT(*) FROM messages WHERE notice_key = ? AND final_body IS NOT NULL",
+        action_key(FIRST),
+    )
+    assert final_answer == 0
+    assert final_action == 1
 
 
 def test_a_second_tap_submits_nothing_and_says_so() -> None:
@@ -572,6 +603,30 @@ def test_a_long_task_id_is_shown_without_truncation() -> None:
     harness.answer(FIRST, [("alpha", task)])
     harness.tap(2, submit_all_data(FIRST))
     assert f"submitted as task T-{task}" in harness.final_body(FIRST)
+
+
+def submitted_count(text: str) -> tuple[int, int]:
+    """Return the confirmed and total task counts that the submitted line shows."""
+    match = re.search(r"(\d+) of (\d+) tasks", text)
+    assert match is not None
+    return int(match[1]), int(match[2])
+
+
+def test_the_submitted_count_is_every_task_when_all_are_confirmed() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first"), ("alpha", "second")])
+    harness.tap(2, submit_all_data(FIRST))
+    assert submitted_count(harness.final_body(FIRST)) == (2, 2)
+
+
+@pytest.mark.parametrize("error", [ShikiruRejectedError, ShikiruLinkDownError])
+def test_the_submitted_count_leaves_out_a_task_that_failed_or_is_unknown(
+    error: type[ShikiruError],
+) -> None:
+    harness = Harness({"alpha": FakeShikiru(error_on=2, error=error)})
+    harness.answer(FIRST, [("alpha", "first"), ("alpha", "second")])
+    harness.tap(2, submit_all_data(FIRST))
+    assert submitted_count(harness.final_body(FIRST)) == (1, 2)
 
 
 def test_a_task_id_longer_than_a_message_is_shown_in_full_across_result_messages() -> None:

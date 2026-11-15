@@ -1,5 +1,12 @@
 # Todo
 
+## Planned work: Expert task proposal settle (T-165)
+
+E1 and E2 execute in order; details are in tasks/plan.md.
+
+- [x] E1. Stop the false refusal notice after a proposal settles
+- [x] E2. Show how many proposed tasks were submitted
+
 ## Planned work: opt-in admin mode (T-161)
 
 A1 to A3 execute in order; details and shared constraints are in tasks/plan.md.

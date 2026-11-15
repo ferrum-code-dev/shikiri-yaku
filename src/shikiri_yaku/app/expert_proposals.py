@@ -50,7 +50,6 @@ _REJECT_ALL: Final = "Reject all"
 _REJECTED: Final = "Rejected. Nothing submitted."
 _SUPERSEDED: Final = "Superseded by a newer proposal. Nothing submitted."
 _INTERRUPTED: Final = "Interrupted by a restart. Check the tasks marked unknown first."
-_SUBMITTED: Final = "Submitted; task results follow."
 _RESULTS: Final = "Task results:"
 _ACTION_PROMPT: Final = "All task details are above. Choose an action."
 _NOT_OPEN: Final[dict[str | None, str]] = {
@@ -65,7 +64,7 @@ _NOT_OPEN: Final[dict[str | None, str]] = {
     ProposalStatus.OFFERED: "Nothing submitted: use the buttons after the task details.",
     None: "Nothing submitted: this proposal is no longer open.",
 }
-_STATUSES: Final = (_REJECTED, _SUPERSEDED, _INTERRUPTED, _SUBMITTED)
+_STATUSES: Final = (_REJECTED, _SUPERSEDED, _INTERRUPTED)
 _STATUS_RESERVE: Final = max(len(status) for status in _STATUSES) + len(BLOCK_SEPARATOR)
 _FINAL: Final = (
     ProposalStatus.SUBMITTED,
@@ -279,10 +278,6 @@ class ExpertProposals:
             opened = self._open(proposal_id)
             if opened is None:
                 continue
-            if secret_form([opened.answer.reply, *_task_lines(opened.answer.tasks)]) is None:
-                self._final.settle_notice(
-                    answer_key(proposal_id), _initial_messages(opened.answer)[0]
-                )
             self.queue_answer(proposal_id)
         for proposal_id, state in self._log.decided():
             self._settle(proposal_id)
@@ -332,14 +327,13 @@ class ExpertProposals:
         )
 
     def _settle(self, proposal_id: int) -> None:
-        """Edit the answer and queue any result messages before they are sent."""
+        """Edit the action message to its final state and queue any result messages."""
         state = self._log.state(proposal_id)
         opened = self._open(proposal_id)
         if opened is None or state not in _FINAL:
             return
         messages = _settled_messages(state, opened.answer, self._log.ops(proposal_id))
-        if secret_form([opened.answer.reply, *_task_lines(opened.answer.tasks)]) is None:
-            self._final.settle_notice(answer_key(proposal_id), _initial_messages(opened.answer)[0])
+        # keep: the channel refuses an edit to unchanged text, which the PO reads as a refusal
         self._final.settle_notice(action_key(proposal_id), messages[0])
         for index, message in enumerate(messages[1:], 1):
             self._outbox.queue(
@@ -374,7 +368,6 @@ def _settled_messages(
 ) -> tuple[Message, ...]:
     """Return the edited action message and results that show every complete task id."""
     if state in (ProposalStatus.SUBMITTED, ProposalStatus.INTERRUPTED):
-        status = _INTERRUPTED if state == ProposalStatus.INTERRUPTED else ""
         outcomes = _outcome_lines(answer.tasks, ops)
         if secret_form(outcomes) is not None:
             return (
@@ -382,10 +375,15 @@ def _settled_messages(
                     _render(answer.reply, "", "Task results were withheld by secret protection.")
                 ),
             )
+        if state == ProposalStatus.INTERRUPTED:
+            status = anchor_status = _INTERRUPTED
+        else:
+            status = _submitted_line(ops, ".")
+            anchor_status = _submitted_line(ops, "; results follow.")
         complete = _render(answer.reply, outcomes, status)
         if len(complete) <= MESSAGE_TEXT_LIMIT:
             return (Message(complete),)
-        anchor = _render(answer.reply, "", status or _SUBMITTED)
+        anchor = _render(answer.reply, "", anchor_status)
         return (Message(anchor), *_result_messages(outcomes))
     if state in (ProposalStatus.REJECTED, ProposalStatus.VOIDED):
         if secret_form(_task_lines(answer.tasks)) is not None:
@@ -393,6 +391,11 @@ def _settled_messages(
         status = _REJECTED if state == ProposalStatus.REJECTED else _SUPERSEDED
         return (Message(status),)
     return _initial_messages(answer)
+
+
+def _submitted_line(ops: list[SubmitOp], ending: str) -> str:
+    confirmed = sum(op.status == SubmitStatus.CONFIRMED for op in ops)
+    return f"Submitted: {confirmed} of {len(ops)} tasks{ending}"
 
 
 def _result_messages(lines: list[str]) -> tuple[Message, ...]:
