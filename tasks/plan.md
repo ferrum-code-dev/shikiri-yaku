@@ -40,19 +40,40 @@ After A1, add separate admin-list configuration and admin conversations using th
 - Existing non-admin Expert conversations and owner commands retain their behavior; offline tests cover authorization, providers, expiry and duplicate delivery.
 - uv run poe check passes; unrelated failures are reported with evidence.
 
-### A3. Approve and run proposed admin commands
+### A3. Propose, show, approve or decline admin commands
 
-After A2, implement the complete durable proposal, approval, decline, execution, result and recovery flow for admin conversations. Use the exact stored command displayed to the admin and retain read-only Expert isolation. Tick only A3.
+After A2. The Operator's design for admin mode was reduced after a first attempt at A3 grew a sudo attestation, replay of notices and delivery-time expiry that the request never asked for. Read the Admin mode section of docs/design.md as the whole contract and add nothing beyond it. Keep the code small: reuse the existing op, outbox, callback and Expert-turn paths instead of adding a module per concern. Do not run anything in this task. Tick only A3.
 
 ## Acceptance criteria
 
-- A proposed command and reason are journaled and displayed in full as model-written with Run and Decline; a command that cannot be displayed in full is refused.
-- Only an explicit Run tap from a listed admin approves a proposal; non-admins including ordinary owners cannot approve, duplicate or expired taps cannot run it, and each approval permits at most one execution.
-- The exact displayed command is recorded before execution and run once; execution is serialized, has a process-group-killing timeout and bounded output, and prevents sudo and password prompts.
-- Approval, decline and result are journaled; a decline becomes an Expert turn, and a result with known secrets hidden is posted and becomes the next Expert turn.
-- After a restart an uncertain execution is never rerun automatically and the admin is asked to check; offline tests cover crash points, authorization, concurrency and replay using fakes and harmless commands.
-- The Expert has no execution capability; existing host actions retain their fixed recipes and existing behavior.
-- uv run poe check passes; unrelated failures are reported with evidence.
+- A proposed command and reason are journaled as an `admin` op in state `intended` before the message is sent, and shown in full as model-written with Run and Decline; a proposal with a known secret, a character that cannot be shown exactly or a size that does not fit one message is refused without keeping its text, and the Expert gets a turn saying so.
+- Only a Run tap from a listed admin on an `intended` op of an open conversation, within `admin.approval_expiry_min` of journaling, moves it to `approved` in one conditional change; non-admin owners, duplicate taps, duplicate updates and expired taps change nothing and get the reason.
+- A new proposal voids the pending one and edits its message; an unapproved one expires and loses its buttons; Decline ends the op `declined` and gives the Expert a turn saying so.
+- Approval, decline, expiry and voiding are journaled with the approver and update id; nothing executes in this task.
+- Offline tests cover authorization, the conditional approval under duplicate delivery, expiry, voiding and decline using fakes; uv run poe check passes; unrelated failures are reported with evidence.
+
+### A4. Run approved admin commands
+
+After A3. Implement Execution, Secrets and Restart of the Admin mode section of docs/design.md. Use the existing process runner and host lock. Do not add a sudo check, an attestation or any policy gate: `sudo` is reported only by doctor in A5. Tick only A4.
+
+## Acceptance criteria
+
+- An approved op moves to `issued` and is recorded before the stored text runs once as `<shell> -l -c <text>` in the instance directory, outside every repository, under the host lock, with a closed stdin and no terminal; one approval never produces a second run.
+- After `admin.command_timeout_s` the whole process group is killed and the op ends `failed`; output beyond `admin.output_max_bytes` is dropped and the record says so; the exit code, duration and cut flag are recorded and the op ends `confirmed` or `failed`.
+- Secret values loaded at start are hidden from the output before it is written, posted or given to the Expert; the raw output is never journaled.
+- The tail of the output is posted in the topic and becomes the next Expert turn.
+- After a restart an `approved` op that never issued becomes `void`, an `issued` op with no result becomes `unknown` and is never run again, and the admin is told once to check the host.
+- Offline tests use fakes and harmless commands through `CommandRunner` and cover one run per approval, the timeout kill, the output cut, secret hiding, concurrency under the lock, and void and unknown after a restart; uv run poe check passes; unrelated failures are reported with evidence.
+
+### A5. Report passwordless sudo in doctor
+
+After A4. Add one check to `doctor` that runs `sudo -n true` through `CommandRunner` and fails when it succeeds, naming that an approved admin command would run as root. Run only when `[admin]` is configured. It does not change admin behavior. Document the check in docs/reference.md and the README admin note, including that whether the service user may use `sudo` is host configuration. Tick only A5.
+
+## Acceptance criteria
+
+- With `[admin]` configured, doctor reports an *admin sudo* check that passes when `sudo -n true` fails or sudo is absent and fails when it succeeds, in both text and JSON output; without `[admin]` no check is added.
+- Run, approval and execution do not read the result of the check.
+- Offline tests use a fake runner for the three outcomes; no test runs `sudo`; uv run poe check passes; unrelated failures are reported with evidence.
 
 ## Planned work: closed Expert replies (T-158)
 
