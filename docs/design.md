@@ -15,7 +15,7 @@ The first release has four handlers:
 * **Review**: sends the PO the link of a pull request that waits for review (Shikiru's pull-request integration mode).
 * **Notice**: tells the PO that a task is done, or that the Operator itself has a problem.
 
-The Operator also answers the PO's own questions about the product. The **Expert** is a read-only agent the PO talks to in the chat: it reads the repositories of the components, looks things up on the web within what the PO has granted, and answers at product level. When an idea needs work, it proposes one task per component, and the PO submits them with one tap. The Expert removes the planning a PO would otherwise do by hand before a goal that spans several components.
+The Operator also answers the PO's own questions about the product. The **Expert** is a read-only agent the PO talks to in the chat: it reads the repositories of the components, looks things up on the web within what the PO has granted, and answers at product level. When an idea needs work, it proposes one task per component, and the PO submits them with one tap. The Expert removes the planning a PO would otherwise do by hand before a goal that spans several components. In admin mode, which the PO opts into, the Expert may also propose one shell command that a listed admin can approve and the Operator then runs ([Admin mode](#admin-mode)).
 
 The Operator exists to remove idle time: work waiting for a person who is not watching, and problems a person would have fixed with one command. The `stats` command prints the figures of the journal that show it.
 
@@ -24,7 +24,7 @@ The Operator exists to remove idle time: work waiting for a person who is not wa
 1. **Shikiru is the source of truth.** Tasks, escalations, their state and history live in Shikiru and are read and changed through its MCP server only (plus the `start` and `doctor` commands of its CLI). The Operator keeps no copy of the backlog and never touches Shikiru's database.
 2. **A small fixed core, growth by extension.** Watching, sorting, routing, replying and journaling are the core. Categories, handlers, actions, Reasoner jobs and channels are extensions, wired in one place.
 3. **Every route ends at the PO.** An unknown signal, an unsure classification, a failed or exhausted handler, or a model that is down all mean *forward to the PO*. Nothing is dropped, and a new extension can never do worse than plain forwarding.
-4. **Agents propose, code acts.** The Reasoner may look things up with read-only tools but cannot change anything, and returns typed data. Code validates it, builds every host command from fixed recipes, and runs only what the PO has approved. A model never writes a shell command. The Expert follows the same rule: it reads and proposes, and code submits the tasks the PO approved.
+4. **Agents propose, code acts.** The Reasoner may look things up with read-only tools but cannot change anything, and returns typed data. Outside admin mode, code validates it, builds every host command from fixed recipes, and runs only what the PO has approved; a model never writes a shell command there. The one deliberate, opt-in exception is admin mode: the read-only Expert may propose command text, which runs only when a listed admin approves that exact text ([Admin mode](#admin-mode)). The Expert otherwise follows the same rule: it reads and proposes, and code submits the tasks the PO approved.
 5. **Journal before acting, check after.** Every effect (a Shikiru command, a host command, a message) is recorded before it happens, and success is checked by observation, not assumed.
 6. **No model is needed to stay useful.** Watching, rule-based sorting, forwarding and replies are plain code. With every model down the Operator still forwards everything. With every model down `/ask` says so, and `/goal` still works.
 7. **Nothing of the Operator is stored in the managed repositories,** just as Shikiru keeps its own state out of them.
@@ -241,7 +241,7 @@ A thin module: an interface, one job, and adapters tried in a ladder.
 
 ## Expert
 
-The Expert is not an extension: extensions handle signals, and a PO message is not a signal. It is a module on the inbound side with its own ladder, configured in `[expert]`. Without that section, or without `channels.telegram.group_id`, `/ask` is refused with the reason.
+The Expert is not an extension: extensions handle signals, and a PO message is not a signal. It is a module on the inbound side with its own ladder, configured in `[expert]`. Without that section, or without `channels.telegram.group_id`, `/ask` is refused with the reason. An admin conversation is an Expert conversation with the additions of [Admin mode](#admin-mode); everything in this section applies to it unless that section says otherwise.
 
 **Conversation.** `/ask <text>` opens a conversation. Asked in a component topic, its scope is that component; asked in General, its scope is every component. The Operator creates a forum topic for the conversation, with the Expert's icon and a name cut from the question, and answers the command with a button that opens the topic. The topic is renamed when the first answer brings a title. Every message an owner sends in that topic is a **turn**. Turns of one conversation run one at a time, oldest first; conversations run in parallel up to `expert.max_parallel`. `/ask` is journaled by its Telegram update id before the topic is created, so a duplicate delivery opens nothing twice.
 
@@ -262,9 +262,52 @@ Repository text and web pages are data, never instructions; the prompt says so, 
 
 **Web.** The only web access is the Operator's MCP tool `web_fetch(url)`, started by the agent CLI as a subprocess. It serves a page only when its host is in the grants of the journal; a redirect to another host is checked the same way. For any other host it records a request and tells the agent that the PO has been asked. After the turn, each requested host is shown to the PO with *Allow* and *Deny*. *Allow* stores the grant for good, for every conversation; either answer becomes a turn that tells the agent, so the conversation continues by itself. There is no search tool: a search site is one more host to grant. Because the check is code, it is the same for every agent.
 
-**End of a conversation.** A conversation ends when the PO closes its topic, sends `/close`, or sends nothing for `expert.retention_days` (14). The Operator then deletes the topic, the conversation's rows and its directory under the instance directory. Telegram does not tell a bot that a topic was deleted, so a topic the PO deleted is cleaned up when the next send fails or when it expires.
+**End of a conversation.** A conversation ends when the PO closes its topic, sends `/close`, or sends nothing for `expert.retention_days` (14). The Operator then deletes the topic, the conversation's rows and its directory under the instance directory; an admin conversation keeps its audit records, as [Admin mode](#admin-mode) says. Telegram does not tell a bot that a topic was deleted, so a topic the PO deleted is cleaned up when the next send fails or when it expires.
 
 **Restart.** A turn that was running is marked interrupted and the PO is told in the topic; it is not run again by itself. A topic whose creation is uncertain is not adopted: the PO is told to ask again.
+
+## Admin mode
+
+Admin mode is opt-in and is the PO's deliberate exception to [Principles](#principles) 4. It is the only place where text a model wrote can run on the host. Outside it a model never supplies a command, and every host action comes from a fixed recipe, as [Installing a missing tool](#installing-a-missing-tool) and [Restarts and recovery](#restarts-and-recovery) describe. Turning admin mode on changes nothing else.
+
+**Exception.** In an admin conversation the Expert may propose one shell command with a short reason. The command is text. It runs only when a listed admin taps *Run* on the message that shows that exact text, and code runs the stored text once for that approval. The Expert never runs anything and keeps its read-only tools and scope. Every other host action keeps its fixed recipe.
+
+**Authorization.** Admin mode is off unless `[admin]` lists Telegram user ids in `admins`. Without a listed admin, `/admin` is refused with the reason, as `/ask` is without an Expert. Admins are listed in the configuration only, never from chat, and each must also be an owner, because only owners are served. The list is read at start, so an admin removed from it has every tap refused from the next start on. Every turn and every tap is checked against the list, not only the `/admin` that opened the conversation. Owners who are not admins may see admin topics but cannot approve anything. In a shared group, `/admin` follows the rules of `/ask`, and an instance replies only to senders on its own list.
+
+**Conversation.** `/admin <text>` opens an admin conversation the way `/ask` opens an Expert conversation: the same scope, its own topic, and journaling by update id before the topic is created. It uses the Expert's providers, ladder, read-only tool restrictions, `expert.timeout_s` and `expert.max_parallel`. Its opening message says that the chat is not private: members of the group can read the topic, the commands and the output. An admin conversation ends when its topic is closed, when `/close` is sent, or when no message or tap arrives for `admin.idle_min` (15 minutes). Ending it voids its pending proposal and deletes its topic, turns, findings and output file. Its audit records stay (see Audit below).
+
+**Proposal.** An admin answer's schema adds an optional `command` and a `reason`, both marked as model-written. Code refuses a proposal, tells the admin in the topic, and gives the Expert a turn saying so, when the command or reason:
+
+* contains a known secret (see Secrets below);
+* contains a character the display cannot show exactly: a control character other than tab or newline, or an invisible or bidirectional formatting character;
+* does not fit in one message, since there is no *Details* button for a command;
+* names `sudo`. This is an early refusal aid, not an execution boundary; shell expansion, a script or a host service can invoke it indirectly.
+
+A refused proposal's text is not kept. An accepted one is journaled as an `admin` op in state `intended`, with its exact command, before its message is sent. The message shows the reason, then the command verbatim and unformatted, then *Run* and *Decline*. Button data carries only the op number. A conversation holds one pending proposal: a new one voids the old, and the old message is edited to say so.
+
+**Approval.** A *Run* tap approves the op only if one conditional change succeeds: the tapper is on the admin list, the op is still `intended`, the conversation is open, and the proposal was sent less than `admin.approval_expiry_min` (10 minutes) ago. The change moves the op to `approved` and journals the approver's Telegram user id and update id with it. Any other tap changes nothing and is answered with the reason. A proposal not approved by its expiry moves to `expired` and its buttons are removed. *Decline* moves the op to `declined`, and the Expert gets a turn saying that the admin declined.
+
+**Execution.** Code moves the op from `approved` to `issued`, records it, and then runs the stored text only when the host's `sudo` prohibition has been verified. Until A3 establishes that policy, *Run* is unavailable and no admin command executes. Its limits:
+
+* one run per approval: an approved op is never run twice;
+* one admin command at a time, under the host lock that installs and engine starts also use;
+* the user's login shell is started as `<shell> -l -c <stored text>`, so it evaluates the exact displayed text in the instance directory and outside every repository, as the Operator's service user with that user's normal host access. Approved commands may make persistent host changes and activate host services; no disposable sandbox, writable-path allowlist or ban on service activation is part of this design;
+* `sudo` is prohibited. The proposal text check is only an early refusal aid: it cannot prevent a shell expansion, script or host service from invoking `sudo`. A3 must establish and verify an OS-enforced policy that blocks `sudo` for the service user across direct, indirect and service-triggered execution. Until that policy is verified on a host, *Run* remains unavailable there. This design does not assume that no-new-privileges, a closed stdin or removed askpass variables enforce the prohibition;
+* the directly launched command has no terminal, stdin is closed, askpass variables (`SUDO_ASKPASS`, `SSH_ASKPASS`) are removed, and no GUI authentication environment is passed. These measures do not by themselves control a host service the command activates; A3 must also ensure that neither such work nor the command can produce a password prompt;
+* after `admin.command_timeout_s` (120 seconds) the whole process group is killed and the op ends `failed`;
+* output is kept up to `admin.output_max_bytes` (65536); the rest is dropped and the record says so.
+
+When the process exits, code records the exit code, the duration and whether the output was cut, and the op ends `confirmed`. A command that could not start, or was killed at the timeout, ends `failed`. The exit code is part of the result, not a success check. The tail of the output goes to the topic, and the same output becomes the next Expert turn.
+
+**Secrets.** The chat rule holds: a message from an admin that carries a secret is refused and its body is not kept. The Operator hides every secret value it loaded at start, such as the Telegram bot token, from command output before the output is written, posted or given to the Expert, and the raw output is never journaled. A proposal that contains one of those values is refused as above. The Operator cannot know a secret it did not load, so a secret that the Expert reads from a repository and writes into a command or its output reaches the chat ([Known limits](#known-limits)).
+
+**Audit.** Each step is journaled before it happens: the proposal (`intended`, with its command and reason), a refusal (with its reason but not its text), approval, decline, expiry, voiding, issue and result. When a conversation ends, its turns, findings and output file are deleted, but its `admin` op records stay: the command, the reason, the approver, the times, the state and the exit code. The retention job does not delete them.
+
+**Restart.** Start-up settles the admin ops before any new turn runs:
+
+* an `intended` op whose conversation has ended is `void`; any other stays pending until its expiry, and a *Run* tap after a restart is handled as above;
+* an `approved` op that was never issued is never run; it becomes `void` and the admin is told that it did not run;
+* an `issued` op with no recorded result is never run again; it becomes `unknown` and the admin is asked to check the host, because the command may have run partly or fully.
 
 ## Journal
 
@@ -275,24 +318,24 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 | `cursors` | Per project: last event id, last lifecycle event, and the id of the last respected clean stop | Resume without losing or replaying events; the liveness rule |
 | `signals` | Id and number, project, kind, reason, text, category and who set it (rule or Reasoner, with its verdict and timing), handler, state, notes, wake-up time | Deferred work, no double handling, misroute review |
 | `messages` | The outbox and every message sent: signal or Expert conversation, channel, chat, platform message id, purpose (`question`, `approval`, `notice` or `expert`), notice key, delivery state, body | Edits, reminders, duplicates recognized |
-| `ops` | Every effect: kind (`resolve`, `start`, `submit`, `install`, `wait`), identity or Telegram update id, project, task, reason, payload (for an install: the exact argument list), state, Shikiru's command id, output path, timestamps | Safe restart, the loop guard, approvals that run exactly what was shown |
-| `conversations` | Each Expert conversation: number, scope, topic, effort, provider and session id, findings, state, last activity | The topic, the session and the handoff survive a restart |
+| `ops` | Every effect: kind (`resolve`, `start`, `submit`, `install`, `wait`, `admin`), identity or Telegram update id, project, task, reason, payload (for an install: the exact argument list; for an admin command: the exact command text and the approver), state, Shikiru's command id, output path, timestamps | Safe restart, the loop guard, approvals that run exactly what was shown, the admin audit |
+| `conversations` | Each Expert or admin conversation: mode, number, scope, topic, effort, provider and session id, findings, state, last activity | The topic, the session and the handoff survive a restart |
 | `turns` | Each Expert turn: conversation, Telegram update id, text, answer, rung, state, call record | A turn is never run twice, and an interrupted one is reported |
 | `web_grants` | Each granted host and when it was granted | A grant lasts for good |
 | `web_requests` | Each host an Expert turn asked for, and its state | A request waits for the PO's answer across restarts |
 
-A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install also passes `approved` and may end `declined`, `expired` or `void`.
+A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install and an admin command also pass `approved` and may end `declined`, `expired` or `void`.
 
 The other tables hold the Telegram poll offset (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component and of each Expert conversation (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
 
-Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert conversations.
+Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert and admin conversations, except the admin `ops` records, which are the audit ([Admin mode](#admin-mode)).
 
 ## Restarts and recovery
 
 Start-up runs in this order (`cli._run` and `bootstrap.compose`):
 
 1. The settings are loaded, the instance lock is taken, the composition root is built and the Telegram channel is verified.
-2. `recover()` closes the signals of removed components, asks the PO about any `/goal` an earlier process left unknown (it is not resubmitted), marks the Expert turns that were running as interrupted and prepares the forum topics.
+2. `recover()` closes the signals of removed components, asks the PO about any `/goal` an earlier process left unknown (it is not resubmitted), marks the Expert turns that were running as interrupted, settles the admin commands as [Admin mode](#admin-mode) describes, and prepares the forum topics.
 3. The engine-start reconciler runs first. Until it settles, the project sources, the Dispatcher, the Scheduler and install recovery wait on its gate, so no signal is acted on while an earlier start is unknown. An unsettled start is confirmed from `status.engine_up` or failed, and it is never run again.
 4. Resolves that were issued but not confirmed are settled by observation: the escalation's state and events decide, and a lost one is shown to the PO again. Installs are settled by their check, and the PO is asked again if the tool is still missing. Outbox messages whose delivery was not confirmed are sent again, carrying their stable reference (`S41`), so a duplicate is recognizable.
 5. Parked signals whose wake-up time has passed are dispatched, and `new` and `handling` signals are handled again. A handler may therefore run twice for one signal, so its effects are keyed by the signal (an op identity, a message per signal).
@@ -365,14 +408,14 @@ shikiri-yaku/
 * Failures cross a port as typed exceptions. Only the Router turns them into `Forward`; no other code swallows them.
 * Numbers are settings with defaults in one settings object (see the [configuration reference](../README.md#configuration-reference)), not literals in handlers.
 
-**Verification.** The guarantees above are protected by tests with fakes for the ports: the classifier and the liveness rule as tables, the Reasoner ladder and its cooldown, the Router fallback and loop guard, install name validation, recipes, check-before and approval, the process runner's timeout and process-group kill, and crash-point restarts against the journal. Telegram payloads are tested against fixtures. The Expert's guarantees are protected the same way: the argument list of each adapter for a first and a resumed turn, as a table; the ladder with fake rungs (it stays on the rung that answered, resumes within a provider, hands off across providers, skips a cooled-down rung and reports when no rung answers); an answer outside the schema or the scope is never returned; a page is served only for a granted host, and a redirect is checked the same way; a duplicate `/ask` opens one conversation and one topic; and each crash point after `/ask` opens no second topic and runs no turn twice. The check that needs a real Shikiru engine is the contract job of CI; anything that needs a real chat, host or agent CLI the owner does by hand.
+**Verification.** The guarantees above are protected by tests with fakes for the ports: the classifier and the liveness rule as tables, the Reasoner ladder and its cooldown, the Router fallback and loop guard, install name validation, recipes, check-before and approval, the process runner's timeout and process-group kill, and crash-point restarts against the journal. Telegram payloads are tested against fixtures. The Expert's guarantees are protected the same way: the argument list of each adapter for a first and a resumed turn, as a table; the ladder with fake rungs (it stays on the rung that answered, resumes within a provider, hands off across providers, skips a cooled-down rung and reports when no rung answers); an answer outside the schema or the scope is never returned; a page is served only for a granted host, and a redirect is checked the same way; a duplicate `/ask` opens one conversation and one topic; and each crash point after `/ask` opens no second topic and runs no turn twice. Admin mode's guarantees are protected the same way, with fakes for the ports and harmless commands through `CommandRunner`: authorization on every turn and tap, refusal of a command that cannot be shown exactly, one run per approval, expiry, the state of each op at every crash point, and an issued command with no recorded result never run again. The check that needs a real Shikiru engine is the contract job of CI; anything that needs a real chat, host or agent CLI the owner does by hand.
 
 ## Known limits
 
 1. **Classification from text.** A `decision_required` signal costs a model call and can be misrouted. That is bounded by "unsure means product", by approval before any host change, and by reviewing verdicts.
 2. **Models run outside Shikiru.** The Reasoner makes a few cheap calls. The Expert's calls are neither few nor cheap: they read repositories. Both are logged by the Operator, not in Shikiru's ledger.
 3. **Typed install recipes.** Only the user-level package managers listed in the [README](../README.md#install-approval) are covered; system managers that need `sudo` are forwarded as instructions.
-4. **The PO approves what code built.** The approval shows commands built from validated names, not a review of model-written shell.
+4. **The PO approves what code built.** Outside admin mode the approval shows commands built from validated names, not a review of model-written shell. In admin mode an admin approves model-written text, shown in full ([Admin mode](#admin-mode)).
 5. **Retries may fail.** Shikiru retries within its own budgets before it escalates, and the loop guard bounds the Operator's own retries.
 6. **Tasks of one plan are submitted together.** The Expert plans across components, but nothing orders the tasks: Shikiru runs them independently.
 7. **A stale engine environment.** An engine keeps the environment it was started with, so a tool installed into a new directory may stay invisible to its agents until the engine restarts. The success message gives the full path.
@@ -383,3 +426,6 @@ shikiri-yaku/
 12. **A Codex rung is not confined to the scope.** It can read any file the user can. It has no way to send what it reads anywhere except to a granted host and to the PO's chat.
 13. **A granted host is trusted.** A page of a granted host can carry text that steers the agent, and a request to a granted host can carry data out in its URL.
 14. **Agent sessions stay in the agent's own store.** Deleting a conversation deletes the Operator's data; the session files the CLIs keep under their own directories are not touched.
+15. **Admin commands have the service user's host access.** With a verified `sudo` prohibition, an approved command may still make persistent host changes and activate host services; there is no disposable sandbox or writable-path allowlist. The text filter does not enforce the `sudo` prohibition. Until A3 establishes and verifies an OS-enforced policy that covers direct, indirect and service-triggered execution, *Run* remains unavailable. An approved command can damage or disclose any data the service user can access.
+16. **Admin topics are readable by the group.** Members of a shared group can read proposals and their output; only listed admins can approve.
+17. **Unknown secrets reach the chat.** Only the secret values the Operator loaded are hidden. A secret the Expert reads from a repository and puts into a command or its output is shown.

@@ -13,7 +13,7 @@ A1 to A3 execute in order; details and shared constraints are in tasks/plan.md.
 
 ### A1
 
-- [ ] A1. Document the admin command exception
+- [x] A1. Document the admin command exception
 
 ## Acceptance criteria
 
