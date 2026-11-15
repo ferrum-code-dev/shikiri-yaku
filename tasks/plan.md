@@ -1,5 +1,43 @@
 # Task plan
 
+## Planned work: opt-in admin mode (T-161)
+
+### A1. Document the admin command exception
+
+Update docs/design.md first: define the opt-in admin mode and its deliberate exception allowing a read-only Expert to suggest command text, an admin to approve exactly what is displayed, and code to execute it. The request explicitly authorizes this design edit despite the general AGENTS.md prohibition. Define authorization, display, expiry, execution limits, journaling, secret handling, conversation lifetime and uncertain-restart behavior from the request; retain the fixed-recipe rule for existing host actions. Tick only A1.
+
+## Acceptance criteria
+
+- The design describes the model-suggested command exception, exact human approval and code execution, while retaining existing fixed-recipe rules for other host actions.
+- The design specifies the requested opt-in authorization, full display, one-use expiry, execution limits, audit, secret handling, idle expiry and uncertain restart behavior.
+- The documentation diff is reviewed and git diff --check passes.
+
+### A2. Open opt-in admin conversations
+
+After A1, add separate admin-list configuration and admin conversations using the existing Expert providers and read-only tool restrictions. Keep command execution unavailable in this task; finish the approval path in A3. Document configuration and usage. Tick only A2.
+
+## Acceptance criteria
+
+- Without a configured admin list /admin is unavailable; only listed admins can open and participate in admin conversations, including in shared groups and across duplicate updates.
+- Admin conversations use each configured Expert provider with unchanged read-only tool restrictions, warn that chat is not private, and end after a short configurable idle period.
+- The Expert can return a schema-validated optional command and short reason in admin mode, but no command can execute or be approved in this task.
+- Existing non-admin Expert conversations and owner commands retain their behavior; offline tests cover authorization, providers, expiry and duplicate delivery.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
+### A3. Approve and run proposed admin commands
+
+After A2, implement the complete durable proposal, approval, decline, execution, result and recovery flow for admin conversations. Use the exact stored command displayed to the admin and retain read-only Expert isolation. Tick only A3.
+
+## Acceptance criteria
+
+- A proposed command and reason are journaled and displayed in full as model-written with Run and Decline; a command that cannot be displayed in full is refused.
+- Only an explicit Run tap from a listed admin approves a proposal; non-admins including ordinary owners cannot approve, duplicate or expired taps cannot run it, and each approval permits at most one execution.
+- The exact displayed command is recorded before execution and run once; execution is serialized, has a process-group-killing timeout and bounded output, and prevents sudo and password prompts.
+- Approval, decline and result are journaled; a decline becomes an Expert turn, and a result with known secrets hidden is posted and becomes the next Expert turn.
+- After a restart an uncertain execution is never rerun automatically and the admin is asked to check; offline tests cover crash points, authorization, concurrency and replay using fakes and harmless commands.
+- The Expert has no execution capability; existing host actions retain their fixed recipes and existing behavior.
+- uv run poe check passes; unrelated failures are reported with evidence.
+
 ## Planned work: closed Expert replies (T-158)
 
 ### X5a. Close the `/ask` reply when its conversation ends (normal)
