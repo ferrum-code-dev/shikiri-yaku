@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -14,14 +14,22 @@ from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import reject_all_data, submit_all_data
-from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT, ExpertAnswer, ExpertTask
+from shikiri_yaku.domain.expert import (
+    MODE_ADMIN,
+    MODE_EXPERT,
+    AdminAnswer,
+    ExpertAnswer,
+    ExpertTask,
+)
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
+from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.ops import OpStore
 from shikiri_yaku.journal.outbox import JournalOutbox
+from shikiri_yaku.journal.proposals import JournalProposals
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.ports import (
@@ -755,3 +763,246 @@ def test_a_crash_while_recovering_is_made_up_on_the_next_restart() -> None:
         == 1
     )
     assert alpha.requests == ["one", "two"]
+
+
+def test_admin_op_decisions_are_conditional_and_duplicate_safe() -> None:
+    database = Database.open(":memory:")
+    _DATABASES.append(database)
+    conversations = Conversations(database)
+    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.opened(1, THREAD)
+    conversation = conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
+    op, voided = journal.intend_admin(conversation.id, 1, "echo test", "reason", NOW)
+    assert not voided
+    cutoff = NOW - timedelta(minutes=10)
+    assert not journal.decide_admin(op, 2, OWNER, admin=False, approve=True, now=NOW, cutoff=cutoff)
+    assert journal.decide_admin(op, 3, ADMIN, admin=True, approve=True, now=NOW, cutoff=cutoff)
+    assert not journal.decide_admin(op, 3, ADMIN, admin=True, approve=True, now=NOW, cutoff=cutoff)
+    row = database.connection.execute(
+        "SELECT state, payload FROM ops WHERE id = ?", (op,)
+    ).fetchone()
+    assert row["state"] == "approved"
+    assert json.loads(row["payload"])["approver"] == ADMIN
+    assert json.loads(row["payload"])["update_id"] == 3
+    expired, _ = journal.intend_admin(conversation.id, 4, "echo old", "reason", NOW)
+    assert not journal.decide_admin(
+        expired, 5, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW
+    )
+    new, replaced = journal.intend_admin(conversation.id, 6, "echo new", "reason", NOW)
+    assert replaced == [expired]
+    assert journal.decide_admin(new, 7, ADMIN, admin=True, approve=False, now=NOW, cutoff=cutoff)
+    assert not journal.decide_admin(
+        new, 8, ADMIN, admin=True, approve=False, now=NOW, cutoff=cutoff
+    )
+
+
+def test_admin_expiry_only_changes_pending_operations() -> None:
+    database = Database.open(":memory:")
+    _DATABASES.append(database)
+    conversations = Conversations(database)
+    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.opened(1, THREAD)
+    conversation = conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(conversation.id, 1, "echo test", "reason", NOW)
+    assert journal.expire_admin(NOW - timedelta(seconds=1), NOW) == []
+    assert journal.expire_admin(NOW, NOW) == [op]
+    assert journal.expire_admin(NOW, NOW) == []
+    assert not journal.decide_admin(
+        op, 2, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+    )
+
+
+@pytest.mark.parametrize("verb", ["u", "v"])
+def test_admin_proposal_delivery_and_decision(verb: str) -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.answer(FIRST, [])
+    answer = AdminAnswer(
+        reply="Ready", title="", tasks=[], findings="", command="echo hi", reason="test"
+    )
+    harness.database.connection.execute(
+        "UPDATE turns SET answer = ? WHERE update_id = ?", (answer.model_dump_json(), FIRST)
+    )
+    harness.proposals.queue_admin(FIRST)
+    op = harness.database.connection.execute(
+        "SELECT id, state FROM ops WHERE kind = 'admin'"
+    ).fetchone()
+    assert op["state"] == "intended"
+    key = f"admin:proposal:{op['id']}"
+    message = harness.database.connection.execute(
+        "SELECT id, body FROM messages WHERE notice_key = ?", (key,)
+    ).fetchone()
+    body = json.loads(message["body"])
+    assert body["text"].endswith("echo hi")
+    assert [button["data"] for button in body["buttons"]] == [f"u:{op['id']}", f"v:{op['id']}"]
+    harness.messages.confirm_delivery(message["id"], "admin-ref")
+    called: list[tuple[int, int]] = []
+
+    async def run(conversation_id: int, update_id: int) -> None:
+        called.append((conversation_id, update_id))
+        harness.database.connection.execute(
+            "UPDATE turns SET state = 'done' WHERE update_id = ?", (update_id,)
+        )
+
+    async def tap(update_id: int, sender: int) -> None:
+        item = Inbound(
+            update_id,
+            InboundKind.TAP,
+            sender,
+            CHAT,
+            "admin-ref",
+            data=f"{verb}:{op['id']}",
+            thread=THREAD,
+        )
+        assert await harness.proposals.admin_tap(item, run)
+
+    asyncio.run(tap(2, OWNER))
+    assert (
+        harness.database.connection.execute(
+            "SELECT state FROM ops WHERE id = ?", (op["id"],)
+        ).fetchone()[0]
+        == "intended"
+    )
+    asyncio.run(tap(3, ADMIN))
+    asyncio.run(tap(3, ADMIN))
+    state = harness.database.connection.execute(
+        "SELECT state FROM ops WHERE id = ?", (op["id"],)
+    ).fetchone()[0]
+    assert state == ("approved" if verb == "u" else "declined")
+    # keep: the replay of a decline tap resumes its turn, which may be done and still undelivered
+    cid = harness.conversation_id
+    assert called == ([] if verb == "u" else [(cid, 3), (cid, 3)])
+    final = harness.database.connection.execute(
+        "SELECT final_body FROM messages WHERE notice_key = ?", (key,)
+    ).fetchone()[0]
+    assert json.loads(final)["buttons"] == []
+
+
+def test_new_admin_proposal_voids_previous_message_and_expiry_removes_buttons() -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.answer(FIRST, [])
+    answer = AdminAnswer(
+        reply="Ready", title="", tasks=[], findings="", command="echo first", reason="test"
+    )
+    harness.database.connection.execute(
+        "UPDATE turns SET answer = ? WHERE update_id = ?", (answer.model_dump_json(), FIRST)
+    )
+    harness.proposals.queue_admin(FIRST)
+    first = harness.database.connection.execute(
+        "SELECT id FROM ops WHERE kind = 'admin'"
+    ).fetchone()[0]
+    harness.conversations.add_turn(harness.conversation_id, 2, "again", NOW)
+    harness.conversations.start(2)
+    answer.command = "echo second"
+    harness.conversations.finish(2, answer.model_dump_json(), None, None, NOW)
+    harness.proposals.queue_admin(2)
+    rows = harness.database.connection.execute(
+        "SELECT id, state FROM ops WHERE kind = 'admin' ORDER BY id"
+    ).fetchall()
+    assert [row["state"] for row in rows] == ["void", "intended"]
+    message = harness.database.connection.execute(
+        "SELECT final_body FROM messages WHERE notice_key = ?", (f"admin:proposal:{first}",)
+    ).fetchone()
+    assert json.loads(message[0])["buttons"] == []
+    old = (NOW - timedelta(minutes=10)).isoformat()
+    harness.database.connection.execute(
+        "UPDATE ops SET created_at = ? WHERE id = ?", (old, rows[1]["id"])
+    )
+    harness.proposals.expire_admin()
+    row = harness.database.connection.execute(
+        "SELECT state FROM ops WHERE id = ?", (rows[1]["id"],)
+    ).fetchone()
+    assert row[0] == "expired"
+    message = harness.database.connection.execute(
+        "SELECT final_body FROM messages WHERE notice_key = ?", (f"admin:proposal:{rows[1]['id']}",)
+    ).fetchone()
+    assert json.loads(message[0])["buttons"] == []
+
+
+@pytest.mark.parametrize("action", ["void", "expire", "approve", "decline", "close", "idle"])
+def test_admin_state_and_final_edit_commit_together(action: str) -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.answer(FIRST, [])
+    answer = AdminAnswer(
+        reply="Ready", title="", tasks=[], findings="", command="echo first", reason="test"
+    )
+    harness.database.connection.execute(
+        "UPDATE turns SET answer = ? WHERE update_id = ?", (answer.model_dump_json(), FIRST)
+    )
+    harness.proposals.queue_admin(FIRST)
+    row = harness.database.connection.execute("SELECT id FROM ops WHERE kind = 'admin'").fetchone()
+    op_id = row["id"]
+    key = f"admin:proposal:{op_id}"
+    message_id = harness.database.connection.execute(
+        "SELECT id FROM messages WHERE notice_key = ?", (key,)
+    ).fetchone()[0]
+    harness.messages.confirm_delivery(message_id, "admin-ref")
+    item = Inbound(2, InboundKind.TEXT, ADMIN, CHAT, "2", text="new", thread=THREAD)
+    JournalInbound(harness.database).record_batch(CHANNEL, [item], 3, NOW)
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+
+    def change() -> None:
+        if action == "void":
+            journal.intend_admin(harness.conversation_id, 2, "echo next", "test", NOW)
+        elif action == "expire":
+            journal.expire_admin(NOW, NOW)
+        elif action == "close":
+            harness.conversations.begin_ending(
+                harness.conversation_id, NOW, sender=ADMIN, update_id=2
+            )
+        elif action == "idle":
+            harness.conversations.begin_ending(harness.conversation_id, NOW)
+        else:
+            journal.decide_admin(
+                op_id,
+                2,
+                ADMIN,
+                admin=True,
+                approve=action == "approve",
+                now=NOW,
+                cutoff=NOW - timedelta(minutes=1),
+            )
+
+    harness.database.connection.execute(
+        "CREATE TRIGGER crash_edit BEFORE UPDATE OF final_body ON messages "
+        "BEGIN SELECT RAISE(ABORT, 'interrupted'); END"
+    )
+    with pytest.raises(Exception, match="interrupted"):
+        change()
+    row = harness.database.connection.execute(
+        "SELECT state FROM ops WHERE id = ?", (op_id,)
+    ).fetchone()
+    assert row["state"] == "intended"
+    assert (
+        harness.database.connection.execute(
+            "SELECT final_body FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()[0]
+        is None
+    )
+    harness.database.connection.execute("DROP TRIGGER crash_edit")
+    change()
+    row = harness.database.connection.execute(
+        "SELECT state, payload FROM ops WHERE id = ?", (op_id,)
+    ).fetchone()
+    assert (
+        row["state"]
+        == {
+            "void": "void",
+            "expire": "expired",
+            "approve": "approved",
+            "decline": "declined",
+            "close": "void",
+            "idle": "void",
+        }[action]
+    )
+    audit = json.loads(row["payload"])
+    assert audit["update_id"] == (None if action in ("expire", "idle") else 2)
+    assert audit["actor"] == (None if action in ("expire", "idle") else ADMIN)
+    assert audit["approver"] == (ADMIN if action in ("approve", "decline") else None)
+    final = harness.database.connection.execute(
+        "SELECT final_body FROM messages WHERE id = ?", (message_id,)
+    ).fetchone()[0]
+    assert json.loads(final)["buttons"] == []

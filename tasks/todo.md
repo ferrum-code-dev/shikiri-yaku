@@ -35,7 +35,7 @@ A1 to A5 execute in order; details and shared constraints are in tasks/plan.md.
 
 ### A3
 
-- [ ] A3. Propose, show, approve or decline admin commands
+- [x] A3. Propose, show, approve or decline admin commands
 
 ## Acceptance criteria
 

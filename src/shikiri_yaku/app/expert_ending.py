@@ -18,6 +18,7 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime, timedelta
     from pathlib import Path
 
@@ -36,7 +37,14 @@ _CONVERSATION_CLOSING: Final = "closing"
 class EndingLog(Protocol):
     """The durable state an ending reads and removes."""
 
-    def begin_ending(self, conversation_id: int, now: datetime) -> ConversationRecord | None: ...
+    def begin_ending(
+        self,
+        conversation_id: int,
+        now: datetime,
+        *,
+        sender: int | None = None,
+        update_id: int | None = None,
+    ) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
     def idle_before(self, cutoff: datetime, mode: str) -> list[ConversationRecord]: ...
     def ending(self) -> list[ConversationRecord]: ...
@@ -86,10 +94,15 @@ class ExpertEnding:
         self._retention = retention
         self._admin_idle = admin_idle
         self._final = final
+        self.admin_expiry: Callable[[], None] | None = None
 
-    async def end(self, conversation_id: int) -> None:
+    async def end(
+        self, conversation_id: int, *, sender: int | None = None, update_id: int | None = None
+    ) -> None:
         """End the conversation: its topic is deleted now, or retried by `sweep` if refused."""
-        row = self._log.begin_ending(conversation_id, self._clock.now())
+        row = self._log.begin_ending(
+            conversation_id, self._clock.now(), sender=sender, update_id=update_id
+        )
         if row is None or row.state != _CONVERSATION_CLOSING:
             return
         self._close_reply(row)
@@ -129,6 +142,8 @@ class ExpertEnding:
 
     async def sweep(self) -> None:
         """Retry the deletions not yet done, then end the conversations idle past their period."""
+        if self.admin_expiry is not None:
+            self.admin_expiry()
         for row in self._log.ending():
             await self.end(row.id)
         now = self._clock.now()

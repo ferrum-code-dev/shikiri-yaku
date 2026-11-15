@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Final
 from pydantic import ValidationError
 
 from shikiri_yaku.domain.callback import (
+    ADMIN_DECLINE_VERB,
+    ADMIN_RUN_VERB,
     EXPERT_SELECTION_PREFIX,
     WEB_ALLOW_VERB,
     WEB_DENY_VERB,
@@ -127,7 +129,12 @@ def _is_web_tap(item: Inbound) -> bool:
     if item.kind != InboundKind.TAP:
         return False
     try:
-        return decode_callback(item.data or "")[0] in (WEB_ALLOW_VERB, WEB_DENY_VERB)
+        return decode_callback(item.data or "")[0] in (
+            WEB_ALLOW_VERB,
+            WEB_DENY_VERB,
+            ADMIN_RUN_VERB,
+            ADMIN_DECLINE_VERB,
+        )
     except ValidationError:
         return False
 

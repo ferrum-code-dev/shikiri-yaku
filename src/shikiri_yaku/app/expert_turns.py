@@ -7,6 +7,8 @@ import json
 from contextlib import suppress
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Final
+from unicodedata import category
+from unicodedata import name as unicode_name
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.app.expert_runs import conversation_directory
@@ -16,6 +18,7 @@ from shikiri_yaku.domain.expert import (
     ExpertAnswer,
     ExpertRequest,
     ExpertTurn,
+    admin_message_text,
     stored_answer,
 )
 from shikiri_yaku.domain.inbound import InboundKind
@@ -23,6 +26,7 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
+    MESSAGE_TEXT_LIMIT,
     ChannelRefusedError,
     ExpertError,
     Message,
@@ -51,6 +55,7 @@ ADMIN_WARNING: Final = (
 _INTERRUPTED: Final = "The Expert turn was interrupted. Please ask again."
 _NO_ANSWER: Final = "No Expert agent could answer."
 _WITHHELD_REPLY: Final = "The answer was withheld by secret protection."
+_REFUSED_COMMAND: Final = "The proposed command could not be shown exactly and was refused."
 _EFFORT: Final = "/effort"
 _EFFORT_USAGE: Final = "Usage: /effort [level]"
 _SUMMARIZE: Final = "/summarize"
@@ -65,6 +70,14 @@ _PENDING: Final = "pending"
 _DONE: Final = "done"
 _ESCALATION_OPEN: Final = "open"
 _CONVERSATION_OPEN: Final = "open"
+_DISPLAY_CONTROL_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Cn", "Zl", "Zp", "Zs"})
+_DISPLAY_WHITESPACE: Final = " \n\t"
+_INVISIBLE_NAMES: Final = (
+    "VARIATION SELECTOR",
+    "COMBINING GRAPHEME JOINER",
+    "FILLER",
+    "BRAILLE PATTERN BLANK",
+)
 
 
 def queue_expert_notice(
@@ -153,7 +166,7 @@ class ExpertTurns:
         if conversation is None:
             return
         if item.kind is InboundKind.TOPIC_CLOSED:
-            await self._ending.end(conversation.id)
+            await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
             return
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
             return
@@ -171,7 +184,7 @@ class ExpertTurns:
             self._log.add_turn(conversation.id, item.update_id, SUMMARY_PROMPT, self._clock.now())
             await self.run(conversation.id, item.update_id)
         elif name == _CLOSE:
-            await self._ending.end(conversation.id)
+            await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
         else:
             self._reply(item, _HELP, conversation.id)
 
@@ -193,7 +206,7 @@ class ExpertTurns:
         """
         async with self._runs.lock(conversation_id):
             while (turn := self._log.oldest_pending(conversation_id)) is not None:
-                if turn.update_id >= update_id:
+                if turn.update_id < 0 or turn.update_id >= update_id:
                     break
                 if not await self._execute(conversation_id, turn.update_id):
                     return
@@ -203,6 +216,18 @@ class ExpertTurns:
             if awaits_run and not await self._execute(conversation_id, update_id):
                 return
             await self._deliver(conversation_id, update_id)
+            # keep: a generated turn may be done but undelivered after a stop, so each is delivered
+            delivered: set[int] = set()
+            while followup := next(
+                (t for t in self._log.followups(conversation_id) if t.update_id not in delivered),
+                None,
+            ):
+                if followup.state == _PENDING and not await self._execute(
+                    conversation_id, followup.update_id
+                ):
+                    return
+                await self._deliver(conversation_id, followup.update_id)
+                delivered.add(followup.update_id)
 
     async def _execute(self, conversation_id: int, update_id: int) -> bool:
         """Run one pending turn in a task of its own; False when it did not run because it ends."""
@@ -270,9 +295,24 @@ class ExpertTurns:
                 secret_form(texts) is not None
                 or any(secret in text for secret in self._known_secrets for text in texts)
             )
-            if withheld:
+            refused = (
+                isinstance(stored, AdminAnswer)
+                and stored.command is not None
+                and not _showable_command(stored.command, stored.reason)
+            )
+            refused_proposal = (
+                isinstance(stored, AdminAnswer)
+                and stored.command is not None
+                and (withheld or refused)
+            )
+            if withheld or refused:
                 stored = AdminAnswer(
-                    reply=_WITHHELD_REPLY, title="", tasks=[], findings="", command=None, reason=""
+                    reply=_WITHHELD_REPLY if withheld else _REFUSED_COMMAND,
+                    title="",
+                    tasks=[],
+                    findings="",
+                    command=None,
+                    reason="",
                 )
             self._log.finish(
                 update_id,
@@ -280,7 +320,8 @@ class ExpertTurns:
                 json.dumps(asdict(result.session)),
                 None if result.call is None else json.dumps(asdict(result.call)),
                 self._clock.now(),
-                clear_session=withheld,
+                clear_session=withheld or refused,
+                refused=refused_proposal,
             )
         return True
 
@@ -294,6 +335,7 @@ class ExpertTurns:
             return
         answer = stored_answer(turn.answer)
         self._proposals.queue_answer(update_id)
+        self._proposals.queue_admin(update_id)
         if self._web is not None:
             self._web.queue(update_id)
         if answer.title and not self._log.history(conversation_id, before=update_id):
@@ -318,6 +360,8 @@ class ExpertTurns:
 
     async def web_tap(self, item: Inbound) -> bool:
         """Apply a web grant decision if this is a web request tap."""
+        if await self._proposals.admin_tap(item, self.run):
+            return True
         return self._web is not None and await self._web.tap(item, self.run)
 
     def _effort(self, item: Inbound, conversation: ConversationRecord, args: list[str]) -> None:
@@ -376,3 +420,15 @@ def _admin_texts(answer: AdminAnswer) -> list[str]:
     if answer.command is not None:
         texts.append(answer.command)
     return texts
+
+
+def _showable_command(command: str, reason: str) -> bool:
+    text = admin_message_text(command, reason)
+    return len(text) <= MESSAGE_TEXT_LIMIT and all(
+        character in _DISPLAY_WHITESPACE
+        or (
+            category(character) not in _DISPLAY_CONTROL_CATEGORIES
+            and not any(part in unicode_name(character, "") for part in _INVISIBLE_NAMES)
+        )
+        for character in text
+    )

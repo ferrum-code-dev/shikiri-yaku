@@ -39,6 +39,11 @@ class AdminAnswer(ExpertAnswer):
     reason: str
 
 
+def admin_message_text(command: str, reason: str) -> str:
+    """Return the exact model-written proposal text shown for approval."""
+    return f"Model-written reason: {reason}\n\nModel-written command:\n{command}"
+
+
 COMMAND_FIELD: Final = "command"
 
 

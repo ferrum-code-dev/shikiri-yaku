@@ -10,6 +10,7 @@ type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
 type SubmitAllTap = tuple[Literal["p"], PositiveInt]
 type RejectAllTap = tuple[Literal["r"], PositiveInt]
 type WebTap = tuple[Literal["w", "n"], PositiveInt]
+type AdminTap = tuple[Literal["u", "v"], PositiveInt]
 type Callback = (
     AnswerTap
     | DetailsTap
@@ -19,9 +20,12 @@ type Callback = (
     | SubmitAllTap
     | RejectAllTap
     | WebTap
+    | AdminTap
 )
 
 EXPERT_SELECTION_PREFIX: Final = "expert:"
+ADMIN_RUN_VERB: Final = "u"
+ADMIN_DECLINE_VERB: Final = "v"
 WEB_ALLOW_VERB: Final = "w"
 WEB_DENY_VERB: Final = "n"
 STOP_REMINDERS_VERB: Final = "k"

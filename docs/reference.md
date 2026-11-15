@@ -146,12 +146,14 @@ The optional table turns on `/admin` conversations. It needs `[expert]`.
 [admin]
 admins = [123456789]
 idle_min = 15
+approval_expiry_min = 10
 ```
 
 `admins` lists Telegram user ids, at least one, and each must also be in
 `channels.telegram.owners`. It is read at start; edit the file and restart to change it. `idle_min`
-(default 15) is how many minutes without a message end an admin conversation. Admin conversations
-use the `[expert]` ladder, timeout and limits.
+(default 15) is how many minutes without a message end an admin conversation.
+`approval_expiry_min` (default 10) is the time allowed to approve a command after it is journaled.
+Admin conversations use the `[expert]` ladder, timeout and limits.
 
 ## Command line
 
@@ -266,9 +268,10 @@ Commands work in private chats and in forum topics. Replies go to the chat and t
   restrictions as `/ask`. Its topic starts with a notice that the chat is not private: members of
   the group can read it. It ends like an Expert conversation, and also after `idle_min` without a
   message or button; removing `[admin]` keeps that limit at 15 minutes for conversations already open.
-- **Commands:** the Expert may return a command with a reason, but this version neither shows nor
-  runs it, and nothing can be approved yet. An admin answer that carries a secret, the command
-  included, is withheld and not kept.
+- **Commands:** the Expert may propose a command and reason, both marked as model-written. A listed
+  admin can tap **Run** or **Decline** before the approval expires. This version records the decision
+  but does not execute the command. A newer proposal voids the pending one. Proposals with known
+  secrets, characters that cannot be shown exactly, or text too long for one message are refused.
 
 ### `/ask`
 

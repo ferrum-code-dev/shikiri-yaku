@@ -17,6 +17,8 @@ from shikiri_yaku.ports import (
 )
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.replies import JournalReplies
     from shikiri_yaku.ports import RecordedResolution
@@ -32,6 +34,25 @@ _SHOWS_BUTTONS = """
         SELECT 1 FROM json_each(:endings) AS ending
         WHERE substr(messages.notice_key, 1, length(ending.value)) = ending.value))
 """
+
+
+def settle_notice(
+    connection: sqlite3.Connection,
+    notice_key: str,
+    message: Message,
+    *,
+    conversation_id: int | None = None,
+) -> None:
+    """Record the final edit in the caller's transaction."""
+    body = _BODY.dump_json(message).decode()
+    connection.execute(
+        """
+        UPDATE messages SET final_body = ?, final_line = NULL, final_edited = 0, refusal = NULL,
+            conversation_id = COALESCE(?, conversation_id)
+        WHERE notice_key = ? AND direction = ? AND (final_body IS NULL OR final_body <> ?)
+        """,
+        (body, conversation_id, notice_key, Direction.OUT, body),
+    )
 
 
 class JournalFinalEdits:
@@ -106,14 +127,8 @@ class JournalFinalEdits:
         self, notice_key: str, message: Message, *, conversation_id: int | None = None
     ) -> None:
         # keep: a text already settled is not edited again, so settling after a restart is harmless
-        body = _BODY.dump_json(message).decode()
-        self._database.connection.execute(
-            """
-            UPDATE messages SET final_body = ?, final_line = NULL, final_edited = 0, refusal = NULL,
-                conversation_id = COALESCE(?, conversation_id)
-            WHERE notice_key = ? AND direction = ? AND (final_body IS NULL OR final_body <> ?)
-            """,
-            (body, conversation_id, notice_key, Direction.OUT, body),
+        settle_notice(
+            self._database.connection, notice_key, message, conversation_id=conversation_id
         )
 
     def pending_for(self, conversation_id: int) -> bool:

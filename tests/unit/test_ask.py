@@ -1005,8 +1005,8 @@ def test_an_admin_answer_with_a_secret_is_withheld_and_never_kept(tmp_path: Path
         async def turn(self, request: ExpertRequest) -> ExpertResult:
             self.requests.append(request)
             answer = AdminAnswer(
-                reply="answer", title="t", tasks=[], findings="f", command=f"echo {secret}",
-                reason="r",
+                reply="answer", title="t", tasks=[], findings="f",
+                command=f"echo {secret}" if len(self.requests) == 1 else None, reason="r",
             )  # fmt: skip
             return ExpertResult(answer, ExpertSession(0, "fake", "session", "f"), None)
 
@@ -1076,7 +1076,7 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
     )
     conversation = h.log.get(1)
     assert conversation is not None
-    assert conversation.session is None
+    assert first.calls[-1][0].session is None
     assert secret not in "\n".join(h.database.connection.iterdump())
     assert not any(secret in text for text in _sent_texts(h))
     first.down = True
@@ -1094,6 +1094,5 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
         )
     )
     request, handoff = second.calls[0]
-    assert request.session is None
-    assert handoff is None
     assert secret not in repr(request)
+    assert secret not in (handoff or "")

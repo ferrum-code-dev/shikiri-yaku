@@ -8,19 +8,22 @@ A tap counts only when it comes from the action message sent after the task list
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import ValidationError
 
 from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.domain.callback import (
+    ADMIN_DECLINE_VERB,
+    ADMIN_RUN_VERB,
     REJECT_ALL_VERB,
     SUBMIT_ALL_VERB,
     decode_callback,
     reject_all_data,
     submit_all_data,
 )
-from shikiri_yaku.domain.expert import ExpertAnswer, stored_answer
+from shikiri_yaku.domain.expert import AdminAnswer, ExpertAnswer, admin_message_text, stored_answer
 from shikiri_yaku.domain.outbound import Purpose, fit
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
@@ -35,8 +38,10 @@ from shikiri_yaku.ports import (
     join_blocks,
     text_room,
 )
+from shikiri_yaku.settings import ADMIN_APPROVAL_EXPIRY_MIN
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from datetime import datetime
 
     from shikiri_yaku.app.expert import ConversationLog
@@ -46,6 +51,11 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox, SubmitOp
 
+_ADMIN_INTENDED: Final = "intended"
+_ADMIN_DECLINED: Final = "declined"
+_TURN_PENDING: Final = "pending"
+_TURN_DONE: Final = "done"
+_CONVERSATION_OPEN: Final = "open"
 _SUBMIT_ALL: Final = "Submit all"
 _REJECT_ALL: Final = "Reject all"
 _REJECTED: Final = "Rejected. Nothing submitted."
@@ -87,6 +97,23 @@ def action_key(update_id: int) -> str:
 
 class ProposalLog(Protocol):
     """Expert task proposals in the journal; each move is guarded on the state it expects."""
+
+    def intend_admin(
+        self, conversation_id: int, update_id: int, command: str, reason: str, now: datetime
+    ) -> tuple[int, list[int]]: ...
+    def admin_op(self, op_id: int) -> tuple[int, str, datetime] | None: ...
+    def decide_admin(
+        self,
+        op_id: int,
+        update_id: int,
+        sender: int,
+        *,
+        admin: bool,
+        approve: bool,
+        now: datetime,
+        cutoff: datetime,
+    ) -> bool: ...
+    def expire_admin(self, cutoff: datetime, now: datetime) -> list[int]: ...
 
     def offer(self, conversation_id: int, update_id: int, *, offered: bool) -> list[int]:
         """Record an answer's proposal and void the offered ones of its conversation.
@@ -152,6 +179,7 @@ class ExpertProposals:
         channel: str,
         group_id: int,
         access: AdminAccess,
+        approval_expiry_min: int = ADMIN_APPROVAL_EXPIRY_MIN,
     ) -> None:
         self._log = log
         self._conversations = conversations
@@ -162,6 +190,7 @@ class ExpertProposals:
         self._channel = channel
         self._group_id = group_id
         self._access = access
+        self._admin_expiry = timedelta(minutes=approval_expiry_min)
 
     def answer_messages(
         self, conversation_id: int, update_id: int, answer: ExpertAnswer
@@ -211,6 +240,120 @@ class ExpertProposals:
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
             )
+
+    def queue_admin(self, update_id: int) -> None:
+        """Journal an admin proposal and queue its exact text."""
+        opened = self._open(update_id)
+        if opened is None or not isinstance(opened.answer, AdminAnswer):
+            return
+        answer = opened.answer
+        conversation = self._conversations.conversation(opened.conversation_id)
+        if (
+            answer.command is None
+            or conversation is None
+            or conversation.state != _CONVERSATION_OPEN
+        ):
+            return
+        op_id, _ = self._log.intend_admin(
+            opened.conversation_id, update_id, answer.command, answer.reason, self._clock.now()
+        )
+        op = self._log.admin_op(op_id)
+        if op is None or op[1] != _ADMIN_INTENDED:
+            return
+        self._outbox.queue(
+            None,
+            Purpose.EXPERT,
+            [opened.destination],
+            Message(
+                admin_message_text(answer.command, answer.reason),
+                (
+                    Button("Run", f"{ADMIN_RUN_VERB}:{op_id}"),
+                    Button("Decline", f"{ADMIN_DECLINE_VERB}:{op_id}"),
+                ),
+            ),
+            key=f"admin:proposal:{op_id}",
+            now=self._clock.now(),
+            conversation_id=opened.conversation_id,
+        )
+
+    def expire_admin(self) -> None:
+        now = self._clock.now()
+        self._log.expire_admin(now - self._admin_expiry, now)
+
+    async def admin_tap(  # noqa: C901, PLR0911, PLR0912 -- each refusal is a distinct decision
+        self, item: Inbound, run: Callable[[int, int], Awaitable[None]]
+    ) -> bool:
+        try:
+            tap = decode_callback(item.data or "")
+        except ValidationError:
+            return False
+        if tap[0] not in (ADMIN_RUN_VERB, ADMIN_DECLINE_VERB):
+            return False
+        op = self._log.admin_op(tap[1])
+        if op is None:
+            self._admin_reply(item, "Proposal is no longer available.")
+            return True
+        conversation_id, state, created = op
+        conversation = self._conversations.conversation(conversation_id)
+        if conversation is None or conversation.thread_id is None:
+            self._admin_reply(item, "Conversation is closed.")
+            return True
+        destination = Destination(self._channel, str(self._group_id), conversation.thread_id)
+        if self._log.bound(self._destination(item), item.message_ref) != f"admin:proposal:{tap[1]}":
+            return True
+        now = self._clock.now()
+        admin = self._access.is_admin(item.sender)
+        if not admin:
+            reason = "Only a listed admin may decide."
+        elif state != _ADMIN_INTENDED:
+            # keep: a done decline turn may be undelivered after a stop, and run only delivers it
+            turn = self._conversations.turn(item.update_id)
+            if (
+                state == _ADMIN_DECLINED
+                and turn is not None
+                and turn.state in (_TURN_PENDING, _TURN_DONE)
+                and turn.conversation_id == conversation_id
+            ):
+                await run(conversation_id, item.update_id)
+            reason = f"Proposal is {state}."
+        elif conversation.state != _CONVERSATION_OPEN:
+            reason = "Conversation is closed."
+        elif created <= now - self._admin_expiry:
+            reason = "Proposal has expired."
+        else:
+            approved = tap[0] == ADMIN_RUN_VERB
+            if self._log.decide_admin(
+                tap[1],
+                item.update_id,
+                item.sender,
+                admin=admin,
+                approve=approved,
+                now=now,
+                cutoff=now - self._admin_expiry,
+            ):
+                self._access.admit(conversation_id, item.sender)
+                if not approved:
+                    await run(conversation_id, item.update_id)
+                return True
+            reason = "Proposal is no longer pending."
+        queue_command_reply(
+            self._outbox,
+            [destination],
+            reason,
+            key=f"admin:decision:{item.update_id}",
+            now=now,
+            conversation_id=conversation_id,
+        )
+        return True
+
+    def _admin_reply(self, item: Inbound, reason: str) -> None:
+        queue_command_reply(
+            self._outbox,
+            [self._destination(item)],
+            reason,
+            key=f"admin:decision:{item.update_id}",
+            now=self._clock.now(),
+        )
 
     async def tap(self, item: Inbound) -> bool:
         """Handle a Submit all or Reject all tap; False when the tap is not one of these.

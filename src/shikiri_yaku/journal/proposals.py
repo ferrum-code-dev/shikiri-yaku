@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from typing import TYPE_CHECKING, Final
 
+from shikiri_yaku.domain.expert import MODE_ADMIN
+from shikiri_yaku.journal.database import stamp
+from shikiri_yaku.journal.final_edits import settle_notice
 from shikiri_yaku.journal.messages import Delivery, Direction
+from shikiri_yaku.journal.ops import NewOp
 from shikiri_yaku.journal.submits import JournalSubmits
-from shikiri_yaku.ports import ProposalStatus, SubmitStatus
+from shikiri_yaku.ports import Message, ProposalStatus, SubmitStatus
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.ops import OpStore
@@ -38,7 +42,119 @@ class JournalProposals:
 
     def __init__(self, database: Database, ops: OpStore, *, channel_name: str) -> None:
         self._database = database
+        self._ops = ops
         self._submits = JournalSubmits(database, ops, channel_name=channel_name)
+
+    def intend_admin(
+        self, conversation_id: int, update_id: int, command: str, reason: str, now: datetime
+    ) -> tuple[int, list[int]]:
+        """Record one proposal and void earlier pending proposals atomically."""
+        with self._database.transaction() as connection:
+            inserted = self._ops.intend(
+                NewOp(
+                    identity=f"admin:{update_id}",
+                    kind=MODE_ADMIN,
+                    project="",
+                    reason=reason,
+                    payload=json.dumps({"conversation_id": conversation_id, "command": command}),
+                ),
+                now,
+            )
+            if not inserted.is_new:
+                return inserted.row_id, []
+            voided = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM ops WHERE kind = 'admin' AND state = 'intended' "
+                    "AND json_extract(payload, '$.conversation_id') = ? AND id <> ?",
+                    (conversation_id, inserted.row_id),
+                )
+            ]
+            for op_id in voided:
+                connection.execute(
+                    "UPDATE ops SET state = 'void', updated_at = ?, "
+                    "payload = json_set(payload, '$.update_id', ?, '$.actor', "
+                    "(SELECT sender FROM messages WHERE update_id = ?), '$.approver', NULL) "
+                    "WHERE id = ?",
+                    (stamp(now), update_id, update_id, op_id),
+                )
+                settle_notice(connection, f"admin:proposal:{op_id}", Message("Proposal voided."))
+            return inserted.row_id, voided
+
+    def decide_admin(
+        self,
+        op_id: int,
+        update_id: int,
+        sender: int,
+        *,
+        admin: bool,
+        approve: bool,
+        now: datetime,
+        cutoff: datetime,
+    ) -> bool:
+        """Decide once only while the conversation and the approval are open."""
+        with self._database.transaction() as connection:
+            changed = connection.execute(
+                "UPDATE ops SET state = ?, updated_at = ?, "
+                "payload = json_set(payload, '$.approver', ?, '$.actor', ?, '$.update_id', ?) "
+                "WHERE id = ? AND kind = 'admin' AND state = 'intended' "
+                "AND ? AND created_at > ? AND EXISTS "
+                "(SELECT 1 FROM conversations WHERE id = "
+                "json_extract(ops.payload, '$.conversation_id') AND state = 'open')",
+                (
+                    "approved" if approve else "declined",
+                    stamp(now),
+                    sender,
+                    sender,
+                    update_id,
+                    op_id,
+                    admin,
+                    stamp(cutoff),
+                ),
+            ).rowcount
+            if changed:
+                settle_notice(
+                    connection,
+                    f"admin:proposal:{op_id}",
+                    Message("Approved." if approve else "Declined."),
+                )
+            if changed and not approve:
+                connection.execute(
+                    "INSERT INTO turns (conversation_id, update_id, text, state) "
+                    "SELECT json_extract(payload, '$.conversation_id'), ?, "
+                    "'The admin declined the proposed command.', 'pending' FROM ops WHERE id = ? "
+                    "ON CONFLICT(update_id) DO NOTHING",
+                    (update_id, op_id),
+                )
+            return changed == 1
+
+    def admin_op(self, op_id: int) -> tuple[int, str, datetime] | None:
+        """Return the conversation, state and proposal time of an admin operation."""
+        row = self._database.connection.execute(
+            "SELECT payload, state, created_at FROM ops WHERE id = ? AND kind = 'admin'",
+            (op_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        created = datetime.fromisoformat(row["created_at"])
+        return json.loads(row["payload"])["conversation_id"], row["state"], created
+
+    def expire_admin(self, cutoff: datetime, now: datetime) -> list[int]:
+        """Expire pending admin proposals whose approval period has elapsed."""
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                "UPDATE ops SET state = 'expired', updated_at = ?, "
+                "payload = json_set(payload, '$.approver', NULL, '$.actor', NULL, "
+                "'$.update_id', NULL) "
+                "WHERE kind = 'admin' AND state = 'intended' AND created_at <= ? "
+                "RETURNING id",
+                (stamp(now), stamp(cutoff)),
+            ).fetchall()
+            for row in rows:
+                settle_notice(
+                    connection, f"admin:proposal:{row['id']}", Message("Proposal expired.")
+                )
+            return [row["id"] for row in rows]
 
     def offer(self, conversation_id: int, update_id: int, *, offered: bool) -> list[int]:
         """Record an answer's proposal and void the offered ones of its conversation.

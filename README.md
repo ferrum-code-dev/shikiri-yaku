@@ -169,10 +169,13 @@ Details are in [Chat commands](docs/reference.md#chat-commands) and
 An escalation arrives with its question and the choices Shikiru offers. Tap a choice to apply it.
 Open questions are reminded after 4 hours, then every 24 hours.
 
-**Install approvals** show the tool, the exact command and its effect. The model cannot write a
-command. Code builds it from a fixed recipe, such as `uv tool install` or `brew install`. **Install**
+**Install approvals** show the tool, the exact command and its effect. Code builds the install
+command from a fixed recipe, such as `uv tool install` or `brew install`. **Install**
 runs that exact command on the Operator host, and only after you tap it. **Decline** runs nothing.
 Approvals expire after 24 hours.
+
+In an admin conversation, the Expert may propose a command for a listed admin to approve or
+decline. This version records the decision but does not execute the command.
 
 The Operator acts on its own only in these cases. Everything else reaches you as a question:
 

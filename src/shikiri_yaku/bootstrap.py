@@ -129,6 +129,7 @@ from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import CompositionError
 from shikiri_yaku.settings import (
+    ADMIN_APPROVAL_EXPIRY_MIN,
     SHIKIRU_EXECUTABLE,
     CliSettings,
     SettingsError,
@@ -395,7 +396,13 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             access=access,
+            approval_expiry_min=(
+                settings.admin.approval_expiry_min
+                if settings.admin is not None
+                else ADMIN_APPROVAL_EXPIRY_MIN
+            ),
         )
+        ending.admin_expiry = proposals.expire_admin
         turns = ExpertTurns(
             conversations,
             outbox,

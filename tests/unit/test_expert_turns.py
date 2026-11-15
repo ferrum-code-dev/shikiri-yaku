@@ -66,6 +66,7 @@ ANSWER: Final[dict[str, object]] = {
     "tasks": [],
     "findings": "Useful facts",
 }
+STORED: Final = json.dumps({**ANSWER, "reply": "Stored reply"})
 MESSAGES: Final = ("question one", "question two", "question three")
 
 
@@ -190,7 +191,13 @@ def ladder(runner: Runner, *, muse: bool = False) -> LadderExpert:
 
 class Harness:
     def __init__(
-        self, path: Path, expert: Expert, client: Client | None = None, *, muse: bool = False
+        self,
+        path: Path,
+        expert: Expert,
+        client: Client | None = None,
+        *,
+        muse: bool = False,
+        admins: frozenset[int] = frozenset(),
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
@@ -247,6 +254,7 @@ class Harness:
                 clients,
                 channel=CHANNEL,
                 group_id=GROUP_ID,
+                access=AdminAccess(self.log, Clock(), admins=admins),
             ),
         )
         self.ask = Ask(
@@ -276,8 +284,14 @@ class Harness:
 def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
     made: list[Harness] = []
 
-    def make(expert: Expert, client: Client | None = None, *, muse: bool = False) -> Harness:
-        harness = Harness(tmp_path, expert, client, muse=muse)
+    def make(
+        expert: Expert,
+        client: Client | None = None,
+        *,
+        muse: bool = False,
+        admins: frozenset[int] = frozenset(),
+    ) -> Harness:
+        harness = Harness(tmp_path, expert, client, muse=muse, admins=admins)
         made.append(harness)
         return harness
 
@@ -614,3 +628,199 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
     assert h.log.turn(3) is None
     assert web.granted("docs.example")
     assert log.pending() == []
+
+
+@pytest.mark.parametrize(
+    ("command", "reason"),
+    [
+        ("echo bad\x1btext", "reason"),
+        ("echo ok", "bad\u202ereason"),
+        ("echo bad\u034ftext", "reason"),
+        ("echo bad\u2800text", "reason"),
+        ("echo bad\u115ftext", "reason"),
+        ("echo bad\u2007text", "reason"),
+        ("echo ok", "bad\u2800reason"),
+        ("x" * 4096, "reason"),
+    ],
+)
+def test_admin_command_that_cannot_be_shown_is_not_stored(
+    build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch, command: str, reason: str
+) -> None:
+    monkeypatch.setitem(ANSWER, "command", command)
+    monkeypatch.setitem(ANSWER, "reason", reason)
+
+    class RefusalRunner(Runner):
+        async def run(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout_s: float,
+            cwd: Path | None = None,
+            env: Mapping[str, str] | None = None,
+            stdin: str | None = None,
+        ) -> CommandResult:
+            result = await super().run(argv, timeout_s=timeout_s, cwd=cwd, env=env, stdin=stdin)
+            monkeypatch.setitem(ANSWER, "command", None)
+            return result
+
+    runner = RefusalRunner()
+    h = build(ladder(runner))
+    h.log.create(
+        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+    )
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+
+    asyncio.run(h.turns.run(conversation.id, 1))
+
+    turn = h.log.turn(1)
+    assert turn is not None
+    assert turn.answer is not None
+    assert command not in turn.answer
+    assert json.loads(turn.answer)["command"] is None
+    assert len(runner.calls) == 2
+    assert "was refused" in runner.stdin[1]
+
+
+def test_consecutive_refused_commands_each_get_an_expert_turn(
+    build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(ANSWER, "command", "echo bad\u2800first")
+    monkeypatch.setitem(ANSWER, "reason", "reason")
+
+    class RepeatedRefusalRunner(Runner):
+        async def run(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout_s: float,
+            cwd: Path | None = None,
+            env: Mapping[str, str] | None = None,
+            stdin: str | None = None,
+        ) -> CommandResult:
+            result = await super().run(argv, timeout_s=timeout_s, cwd=cwd, env=env, stdin=stdin)
+            monkeypatch.setitem(
+                ANSWER, "command", "echo bad\u2800second" if len(self.calls) == 1 else None
+            )
+            return result
+
+    runner = RepeatedRefusalRunner()
+    h = build(ladder(runner))
+    h.log.create(
+        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+    )
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    asyncio.run(h.turns.run(conversation.id, 1))
+    assert len(runner.calls) == 3
+    assert all("was refused" in prompt for prompt in runner.stdin[1:])
+    assert h.log.oldest_pending(conversation.id) is None
+    dump = "\n".join(h.database.connection.iterdump())
+    assert "echo bad" not in dump
+
+
+def test_refusal_follow_up_keeps_conversation_order_in_history(
+    build: Callable[..., Harness],
+) -> None:
+    h = build(ladder(Runner()))
+    now = Clock().now()
+    h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    h.log.add_turn(conversation.id, 5, "two", now)
+    for update_id in (1, 5):
+        h.log.start(update_id)
+        h.log.finish(update_id, STORED, None, None, now)
+    followup = h.log.refuse_admin(conversation.id, 5, now)
+    assert followup is not None
+    h.log.start(followup)
+    h.log.finish(followup, STORED, None, None, now)
+    h.log.add_turn(conversation.id, 9, "three", now)
+    h.log.start(9)
+    h.log.finish(9, STORED, None, None, now)
+
+    assert [t.update_id for t in h.log.history(conversation.id, before=followup)] == [1, 5]
+    assert [t.update_id for t in h.log.history(conversation.id, before=9)] == [1, 5, followup]
+
+
+def test_done_refusal_follow_up_is_delivered_on_replay(build: Callable[..., Harness]) -> None:
+    h = build(ladder(Runner()))
+    now = Clock().now()
+    h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    h.log.start(1)
+    h.log.finish(1, STORED, None, None, now)
+    followup = h.log.refuse_admin(conversation.id, 1, now)
+    assert followup is not None
+    h.log.start(followup)
+    h.log.finish(followup, STORED, None, None, now)
+
+    asyncio.run(h.turns.run(conversation.id, 1))
+
+    assert [p.message.text for p in h.outbox.pending()].count("Stored reply") == 2
+
+
+def test_decline_replay_delivers_finished_turn_once(
+    build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner), admins=frozenset({OWNER}))
+    monkeypatch.setitem(ANSWER, "command", "echo first")
+    monkeypatch.setitem(ANSWER, "reason", "first reason")
+    h.log.create(
+        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+    )
+    h.log.opened(1, THREAD)
+    conversation = h.log.get(1)
+    assert conversation is not None
+    asyncio.run(h.turns.run(conversation.id, 1))
+    op = h.database.connection.execute("SELECT id FROM ops WHERE kind = 'admin'").fetchone()[0]
+    message = h.database.connection.execute(
+        "SELECT id FROM messages WHERE notice_key = ?", (f"admin:proposal:{op}",)
+    ).fetchone()
+    MessageStore(h.database, Reporter()).confirm_delivery(message[0], "admin-ref")
+    tap = Inbound(2, InboundKind.TAP, OWNER, CHAT, "admin-ref", data=f"v:{op}", thread=THREAD)
+    monkeypatch.setitem(ANSWER, "reply", "Decline answer")
+    monkeypatch.setitem(ANSWER, "command", "echo replacement")
+    monkeypatch.setitem(ANSWER, "reason", "replacement reason")
+
+    async def stop_before_delivery(
+        _self: ExpertTurns, _conversation_id: int, _update_id: int
+    ) -> None:
+        message = "stopped before delivery"
+        raise RuntimeError(message)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ExpertTurns, "_deliver", stop_before_delivery)
+        with pytest.raises(RuntimeError, match="stopped before delivery"):
+            asyncio.run(h.turns.web_tap(tap))
+
+    turn = h.log.turn(2)
+    assert turn is not None
+    assert turn.state == "done"
+    assert turn.answer is not None
+    assert json.loads(turn.answer)["command"] == "echo replacement"
+    assert len(runner.calls) == 2
+    assert all(p.message.text != "Decline answer" for p in h.outbox.pending())
+    assert (
+        h.database.connection.execute("SELECT count(*) FROM ops WHERE kind = 'admin'").fetchone()[0]
+        == 1
+    )
+
+    assert asyncio.run(h.turns.web_tap(tap))
+    assert asyncio.run(h.turns.web_tap(tap))
+    assert len(runner.calls) == 2
+    messages = [p.message for p in h.outbox.pending()]
+    assert sum(message.text == "Decline answer" for message in messages) == 1
+    proposals = [message for message in messages if message.text.endswith("echo replacement")]
+    assert len(proposals) == 1
+    assert [button.label for button in proposals[0].buttons] == ["Run", "Decline"]
+    assert (
+        h.database.connection.execute("SELECT count(*) FROM ops WHERE kind = 'admin'").fetchone()[0]
+        == 2
+    )

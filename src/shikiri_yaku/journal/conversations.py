@@ -14,6 +14,8 @@ from shikiri_yaku.domain.expert import (
     TurnRecord,
 )
 from shikiri_yaku.journal.database import parse_stamp, stamp
+from shikiri_yaku.journal.final_edits import settle_notice
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     import sqlite3
@@ -119,6 +121,30 @@ class Conversations:
             )
             return cursor.rowcount == 1
 
+    def refuse_admin(self, conversation_id: int, update_id: int, now: datetime) -> int | None:
+        """Record a refused proposal without its text and schedule the Expert's next turn."""
+        with self._database.transaction() as connection:
+            inserted = connection.execute(
+                "INSERT INTO ops (identity, kind, project, reason, state, created_at, updated_at) "
+                "VALUES (?, 'admin', '', 'proposal refused', 'failed', ?, ?) "
+                "ON CONFLICT(identity) DO NOTHING",
+                (f"admin:refused:{update_id}", stamp(now), stamp(now)),
+            ).rowcount
+            if not inserted:
+                return None
+            row = connection.execute("SELECT MIN(update_id) FROM turns").fetchone()
+            next_id = min(-1, row[0] - 1)
+            connection.execute(
+                "INSERT INTO turns (conversation_id, update_id, text, state) "
+                "VALUES (?, ?, ?, 'pending')",
+                (
+                    conversation_id,
+                    next_id,
+                    "The proposed command was refused because it cannot be shown safely.",
+                ),
+            )
+            return next_id
+
     def get(self, update_id: int) -> ConversationRecord | None:
         row = self._database.connection.execute(
             "SELECT * FROM conversations WHERE update_id = ?", (update_id,)
@@ -155,14 +181,27 @@ class Conversations:
         ).fetchone()
         return None if row is None else _turn(row)
 
+    def followups(self, conversation_id: int) -> list[TurnRecord]:
+        """Return the generated turns of a conversation, pending or done, in the order made."""
+        rows = self._database.connection.execute(
+            f"""
+            {_TURN_SELECT}
+            WHERE t.conversation_id = ? AND t.update_id < 0 AND t.state IN ('pending', 'done')
+            ORDER BY t.id
+            """,
+            (conversation_id,),
+        ).fetchall()
+        return [_turn(row) for row in rows]
+
     def history(self, conversation_id: int, *, before: int) -> list[TurnRecord]:
         rows = self._database.connection.execute(
             f"""
             {_TURN_SELECT}
-            WHERE t.conversation_id = ? AND t.state = 'done' AND t.update_id < ?
-            ORDER BY t.update_id
+            JOIN turns later ON later.update_id = ?
+            WHERE t.conversation_id = ? AND t.state = 'done' AND t.id < later.id
+            ORDER BY t.id
             """,
-            (conversation_id, before),
+            (before, conversation_id),
         ).fetchall()
         return [_turn(row) for row in rows]
 
@@ -211,6 +250,7 @@ class Conversations:
         now: datetime,
         *,
         clear_session: bool = False,
+        refused: bool = False,
     ) -> None:
         # keep: a turn that failed before the agent answered keeps the session of the turns before
         with self._database.transaction() as connection:
@@ -227,6 +267,12 @@ class Conversations:
                 """,
                 (clear_session, session, stamp(now), update_id),
             )
+            if refused:
+                row = connection.execute(
+                    "SELECT conversation_id FROM turns WHERE update_id = ?", (update_id,)
+                ).fetchone()
+                if row is not None:
+                    self.refuse_admin(row["conversation_id"], update_id, now)
 
     def touch(self, conversation_id: int, now: datetime) -> None:
         with self._database.transaction() as connection:
@@ -235,7 +281,14 @@ class Conversations:
                 (stamp(now), conversation_id),
             )
 
-    def begin_ending(self, conversation_id: int, now: datetime) -> ConversationRecord | None:
+    def begin_ending(
+        self,
+        conversation_id: int,
+        now: datetime,
+        *,
+        sender: int | None = None,
+        update_id: int | None = None,
+    ) -> ConversationRecord | None:
         """Mark an open conversation as ending and keep that first time for recovery."""
         with self._database.transaction() as connection:
             connection.execute(
@@ -243,6 +296,15 @@ class Conversations:
                 WHERE id = ? AND state IN ('open', 'closing')""",
                 (stamp(now), conversation_id),
             )
+            voided = connection.execute(
+                "UPDATE ops SET state = 'void', updated_at = ?, "
+                "payload = json_set(payload, '$.approver', NULL, '$.actor', ?, '$.update_id', ?) "
+                "WHERE kind = 'admin' AND state = 'intended' "
+                "AND json_extract(payload, '$.conversation_id') = ? RETURNING id",
+                (stamp(now), sender, update_id, conversation_id),
+            ).fetchall()
+            for op in voided:
+                settle_notice(connection, f"admin:proposal:{op['id']}", Message("Proposal voided."))
             row = connection.execute(
                 "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
             ).fetchone()
