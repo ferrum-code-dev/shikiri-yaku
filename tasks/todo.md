@@ -9,7 +9,7 @@ E1 and E2 execute in order; details are in tasks/plan.md.
 
 ## Planned work: opt-in admin mode (T-161)
 
-A1 to A5 execute in order; details and shared constraints are in tasks/plan.md.
+A1 to A5 execute in order, and A4a follows A4; details and shared constraints are in tasks/plan.md.
 
 ### A1
 
@@ -57,6 +57,17 @@ A1 to A5 execute in order; details and shared constraints are in tasks/plan.md.
 - The tail of the output is posted in the topic and becomes the next Expert turn.
 - After a restart an `approved` op that never issued becomes `void`, an `issued` op with no result becomes `unknown` and is never run again, and the admin is told once to check the host.
 - Offline tests use fakes and harmless commands through `CommandRunner` and cover one run per approval, the timeout kill, the output cut, secret hiding, concurrency under the lock, and void and unknown after a restart; uv run poe check passes; unrelated failures are reported with evidence.
+
+### A4a
+
+- [x] A4a. Show the result status of an admin command
+
+## Acceptance criteria
+
+- The posted result and the Expert turn each begin with a status line that carries the exit code, the duration, a timeout when killed, and the cut flag; the output tail follows and the whole text fits one message.
+- `admin_tap` has one execution path and `ExpertProposals` has no `admin_executor` attribute.
+- Offline tests, table-driven over clean exit, non-zero exit, timeout and cut output, check that the exit code, the timeout and the cut reach both the notice and the Expert turn, without asserting the exact wording; existing admin tests still pass.
+- docs/reference.md mentions the status line in one sentence; uv run poe check passes; unrelated failures are reported with evidence.
 
 ### A5
 

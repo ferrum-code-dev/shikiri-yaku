@@ -18,7 +18,17 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert import ConversationLog
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.ports import AdminCommandRunner, Channel, Clock, HostLock, Outbox
+    from shikiri_yaku.ports import (
+        AdminCommandResult,
+        AdminCommandRunner,
+        Channel,
+        Clock,
+        HostLock,
+        Outbox,
+    )
+
+_CUT_NOTE = " Cut output."
+_WHOLE_NOTE = " All output."
 
 
 class AdminConversations(Protocol):
@@ -119,20 +129,21 @@ class AdminExecutor:
                 secrets=self._secrets,
             )
             now = self._clock.now()
-            output = result.output[-MESSAGE_TEXT_LIMIT:] or "(no output)"
+            duration = (now - started).total_seconds()
+            text = _result_text(result, duration)
             conversation = self._conversations.conversation(conversation_id)
             thread = None if conversation is None else conversation.thread_id
             notice = (
                 None
                 if thread is None
-                else partial(self._notice, op_id, conversation_id, thread, output)
+                else partial(self._notice, op_id, conversation_id, thread, text)
             )
             turn = self._log.finish_admin(
                 op_id,
                 now,
-                output,
+                text,
                 result.returncode,
-                (now - started).total_seconds(),
+                duration,
                 cut=result.cut,
                 notice=notice,
             )
@@ -149,6 +160,19 @@ class AdminExecutor:
             now=self._clock.now(),
             conversation_id=conversation_id,
         )
+
+
+def _result_text(result: AdminCommandResult, duration: float) -> str:
+    if result.returncode is None:
+        exit_code = "Exit code unavailable: killed at timeout or did not start"
+    else:
+        exit_code = f"Exit code {result.returncode}"
+    head = f"{exit_code} after {duration:.1f} s."
+    body = result.output or "(no output)"
+    # keep: both notes have the same length, so the tail budget does not depend on the choice
+    cut = result.cut or len(head) + len(_CUT_NOTE) + 1 + len(body) > MESSAGE_TEXT_LIMIT
+    status = head + (_CUT_NOTE if cut else _WHOLE_NOTE)
+    return f"{status}\n{body[-(MESSAGE_TEXT_LIMIT - len(status) - 1) :]}"
 
 
 async def recover_admin(

@@ -65,6 +65,17 @@ After A3. Implement Execution, Secrets and Restart of the Admin mode section of 
 - After a restart an `approved` op that never issued becomes `void`, an `issued` op with no result becomes `unknown` and is never run again, and the admin is told once to check the host.
 - Offline tests use fakes and harmless commands through `CommandRunner` and cover one run per approval, the timeout kill, the output cut, secret hiding, concurrency under the lock, and void and unknown after a restart; uv run poe check passes; unrelated failures are reported with evidence.
 
+### A4a. Show the result status of an admin command
+
+After A4. The Admin mode design says the exit code is part of the result and that the output becomes the next Expert turn, but A4 posts only the raw output tail, so a failure, a timeout or a cut reads like a clean run. Add one status line in front of the output, in both the topic notice and the Expert turn, built in `AdminExecutor.execute`: the exit code and duration, a timeout when the process group was killed, and whether the output was cut. Remove the second execution path in `ExpertProposals.admin_tap`: `ExpertTurns` passes the run callable and owns the executor. Do not change execution, approval, recovery or the journal schema. Tick only A4a.
+
+## Acceptance criteria
+
+- The posted result and the Expert turn each begin with a status line that carries the exit code, the duration, a timeout when killed, and the cut flag; the output tail follows and the whole text fits one message.
+- `admin_tap` has one execution path and `ExpertProposals` has no `admin_executor` attribute.
+- Offline tests, table-driven over clean exit, non-zero exit, timeout and cut output, check that the exit code, the timeout and the cut reach both the notice and the Expert turn, without asserting the exact wording; existing admin tests still pass.
+- docs/reference.md mentions the status line in one sentence; uv run poe check passes; unrelated failures are reported with evidence.
+
 ### A5. Report passwordless sudo in doctor
 
 After A4. Add one check to `doctor` that runs `sudo -n true` through `CommandRunner` and fails when it succeeds, naming that an approved admin command would run as root. Run only when `[admin]` is configured. It does not change admin behavior. Document the check in docs/reference.md and the README admin note, including that whether the service user may use `sudo` is host configuration. Tick only A5.

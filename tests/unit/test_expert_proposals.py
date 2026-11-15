@@ -1155,9 +1155,110 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
         for _, turn in turns:
             recorded = harness.conversations.turn(turn)
             assert recorded is not None
-            assert recorded.text == "safe"
+            assert recorded.text.endswith("\nsafe")
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("returncode", "output", "runner_cut", "shown_cut", "killed"),
+    [
+        (0, "done", False, False, False),
+        (3, "boom", False, False, False),
+        (None, "partial", False, False, True),
+        (0, "tail", True, True, False),
+        (0, "x" * MESSAGE_TEXT_LIMIT + "END", False, True, False),
+    ],
+)
+def test_admin_result_status_reaches_notice_and_expert_turn(
+    tmp_path: Path,
+    *,
+    returncode: int | None,
+    output: str,
+    runner_cut: bool,
+    shown_cut: bool,
+    killed: bool,
+) -> None:
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(conversation.id, 10, "run it", "reason", NOW)
+    assert journal.decide_admin(
+        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+    )
+
+    class Lock:
+        def __init__(self) -> None:
+            self.lock = asyncio.Lock()
+
+        def hold(self) -> asyncio.Lock:
+            return self.lock
+
+    class Runner:
+        async def run_admin(
+            self,
+            argv: Sequence[str],
+            *,
+            timeout_s: float,
+            cwd: Path,
+            max_bytes: int,
+            secrets: Sequence[str],
+        ) -> AdminCommandResult:
+            del argv, timeout_s, cwd, max_bytes, secrets
+            return AdminCommandResult(returncode=returncode, output=output, cut=runner_cut)
+
+    turns: list[int] = []
+
+    async def run(_conversation_id: int, turn: int) -> None:
+        turns.append(turn)
+
+    executor = AdminExecutor(  # noqa: S604 -- fake runner
+        journal,
+        harness.conversations,
+        Runner(),
+        Lock(),
+        harness.outbox,
+        Clock(),
+        directory=tmp_path,
+        shell="/bin/sh",
+        timeout_s=1,
+        max_bytes=100,
+        secrets=(),
+        channel=CHANNEL,
+        group_id=CHAT,
+    )
+    asyncio.run(executor.execute(op, run))
+    assert len(turns) == 1
+    turn = harness.conversations.turn(turns[0])
+    assert turn is not None
+    message = harness.database.connection.execute(
+        "SELECT body FROM messages WHERE notice_key = ?", (f"admin:result:{op}",)
+    ).fetchone()
+    assert message is not None
+    texts = (turn.text, json.loads(message["body"])["text"])
+    for text in texts:
+        assert len(text) <= MESSAGE_TEXT_LIMIT
+        status, _, body = text.partition("\n")
+        assert output.endswith(body)
+        assert re.search(r"exit code", status, re.IGNORECASE)
+        if returncode is None:
+            assert re.search(r"unavailable", status, re.IGNORECASE)
+        else:
+            assert re.search(rf"\b{returncode}\b", status)
+        assert bool(re.search(r"timeout|killed", status, re.IGNORECASE)) == killed
+        if shown_cut:
+            assert re.search(r"\b(cut|trimmed|truncated)\b", status, re.IGNORECASE)
+        else:
+            assert re.search(
+                r"\b(all|complete|entire|full|whole|uncut|untrimmed|not cut|no cut)\b",
+                status,
+                re.IGNORECASE,
+            )
 
 
 def test_admin_restart_notices_are_not_replayed() -> None:
@@ -1262,7 +1363,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
         assert len(turns) == 1
         turn = harness.conversations.turn(turns[0])
         assert turn is not None
-        assert turn.text == "xx***"
+        assert turn.text.endswith("\nxx***")
         assert turn.state == "pending"
         assert harness.conversations.pending_admin_followups() == [
             (conversation.id, turn.update_id)

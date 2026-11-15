@@ -280,7 +280,8 @@ Commands work in private chats and in forum topics. Replies go to the chat and t
   admin can tap **Run** or **Decline** before the approval expires. **Run** records the approval
   and executes the exact command once in the instance directory as the service user, with closed
   stdin. Its output is limited, known loaded secrets are hidden, and the tail is posted and given
-  to the Expert. Other secrets may still reach the chat. A newer proposal voids the pending one.
+  to the Expert after a status line with the exit code (or that it is unavailable), the duration, a timeout when it was killed
+  and whether the output was cut or all of it is shown. Other secrets may still reach the chat. A newer proposal voids the pending one.
   Proposals with known secrets, characters that cannot be shown exactly, or text too long for one
   message are refused. After a restart, an approved command that never issued is void; one issued
   without a recorded result is unknown and never retried. Check the host after either notice.

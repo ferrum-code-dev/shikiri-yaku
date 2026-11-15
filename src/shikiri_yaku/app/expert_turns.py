@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.app.expert import ConversationLog, ExpertTopics
+    from shikiri_yaku.app.expert_admin import AdminExecutor
     from shikiri_yaku.app.expert_ending import ExpertEnding
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.expert_runs import ConversationRuns
@@ -130,8 +131,10 @@ class ExpertTurns:
         web: ExpertWebRequests | None = None,
         admins: frozenset[int] = frozenset(),
         known_secrets: tuple[str, ...] = (),
+        admin_executor: AdminExecutor | None = None,
     ) -> None:
         self._log = log
+        self._admin_executor = admin_executor
         self._outbox = outbox
         self._clock = clock
         self._expert = expert
@@ -234,9 +237,8 @@ class ExpertTurns:
 
     async def _run_admin(self, op_id: int, conversation_id: int) -> None:
         async with self._runs.lock(conversation_id):
-            executor = self._proposals.admin_executor
-            if executor is not None:
-                await executor.execute(op_id, self._run_locked)
+            if self._admin_executor is not None:
+                await self._admin_executor.execute(op_id, self._run_locked)
 
     async def _execute(self, conversation_id: int, update_id: int) -> bool:
         """Run one pending turn in a task of its own; False when it did not run because it ends."""

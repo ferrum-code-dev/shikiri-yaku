@@ -421,7 +421,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             access=access,
-            admin_executor=admin_executor,
             approval_expiry_min=(
                 settings.admin.approval_expiry_min
                 if settings.admin is not None
@@ -445,6 +444,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             proposals=proposals,
             admins=admins,
             known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+            admin_executor=admin_executor,
             web=ExpertWebRequests(
                 JournalWeb(journal),
                 outbox,
