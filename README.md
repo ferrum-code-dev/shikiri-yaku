@@ -176,7 +176,9 @@ Approvals expire after 24 hours.
 
 In an admin conversation, the Expert may propose a command for a listed admin to approve or
 decline. **Run** executes the exact command as the service user on the host. Review it and its
-effects before approving; the group can read the command and its output.
+effects before approving; the group can read the command and its output. `doctor` fails its
+*admin sudo* check when the service user can run `sudo` without a password, since an approved
+command would then run as root. Whether the service user may use `sudo` is host configuration.
 
 The Operator acts on its own only in these cases. Everything else reaches you as a question:
 

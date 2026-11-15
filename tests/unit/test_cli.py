@@ -313,6 +313,11 @@ def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
 
 
 _SHIKIRU_SUPPORTED: Final = CommandResult(returncode=0, stdout="0.1.0\n", stderr="")
+_SUDO_PASSWORD_NEEDED: Final = CommandResult(
+    returncode=1, stdout="", stderr="sudo: a password is required\n"
+)
+_SUDO_PASSWORDLESS: Final = CommandResult(returncode=0, stdout="", stderr="")
+_SUDO_ABSENT: Final = CommandError("sudo: command not found")
 
 
 def _shikiru_says(stdout: str, returncode: int = 0) -> CommandResult:
@@ -322,16 +327,19 @@ def _shikiru_says(stdout: str, returncode: int = 0) -> CommandResult:
 class _Clis(CommandRunner):
     """Runs the CLIs' version flags, and fails to start each CLI named in `missing`.
 
-    `shikiru` is what `shikiru --version` answers, or the error it raises.
+    `shikiru` is what `shikiru --version` answers, or the error it raises. `sudo` is what
+    `sudo -n true` answers, or the error it raises.
     """
 
     def __init__(
         self,
         missing: frozenset[str] = frozenset(),
         shikiru: CommandResult | CommandError = _SHIKIRU_SUPPORTED,
+        sudo: CommandResult | CommandError = _SUDO_PASSWORD_NEEDED,
     ) -> None:
         self._missing = missing
         self._shikiru = shikiru
+        self._sudo = sudo
 
     @override
     async def run(
@@ -350,6 +358,10 @@ class _Clis(CommandRunner):
             if isinstance(self._shikiru, CommandError):
                 raise self._shikiru
             return self._shikiru
+        if argv[0] == "sudo":
+            if isinstance(self._sudo, CommandError):
+                raise self._sudo
+            return self._sudo
         return CommandResult(returncode=0, stdout="", stderr="")
 
 
@@ -357,6 +369,15 @@ def _with_reasoner(directory: Path) -> None:
     config = directory / "config.toml"
     config.write_text(
         config.read_text(encoding="utf-8") + '\n[reasoner]\nladder = ["claude:haiku"]\n',
+        encoding="utf-8",
+    )
+
+
+def _with_admin(directory: Path) -> None:
+    config = directory / "config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + '\n[expert]\nladder = ["claude:haiku"]\n\n[admin]\nadmins = [123456789]\n',
         encoding="utf-8",
     )
 
@@ -370,6 +391,7 @@ def _run_doctor(
     *,
     json_output: bool = False,
     shikiru: CommandResult | CommandError = _SHIKIRU_SUPPORTED,
+    sudo: CommandResult | CommandError = _SUDO_PASSWORD_NEEDED,
 ) -> int:
     composed = partial(compose, link=lambda _executable, _project: link, bot=bot, commands=commands)
     product_option = [] if product is None else ["--product", product]
@@ -380,7 +402,7 @@ def _run_doctor(
         stats_measures,
         adopt_topic,
         forget_topic,
-        commands=_Clis(shikiru=shikiru),
+        commands=_Clis(shikiru=shikiru, sudo=sudo),
         clock=NapClock(),
         cli_settings=_CLI_SETTINGS,
     )
@@ -467,6 +489,64 @@ def test_doctor_json_names_the_shikiru_version_it_found_and_the_minimum(
     assert check["passed"] is False
     assert "0.0.9" in check["detail"]
     assert "0.1.0" in check["detail"]
+
+
+@pytest.mark.parametrize(
+    ("sudo", "expected"),
+    [
+        pytest.param(_SUDO_ABSENT, 0, id="sudo-absent"),
+        pytest.param(_SUDO_PASSWORD_NEEDED, 0, id="sudo-asks-for-a-password"),
+        pytest.param(_SUDO_PASSWORDLESS, 1, id="passwordless-sudo"),
+    ],
+)
+def test_doctor_reports_passwordless_sudo_in_an_admin_instance(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    sudo: CommandResult | CommandError,
+    expected: int,
+) -> None:
+    _instance(tmp_path)
+    _with_admin(_directory(tmp_path))
+
+    assert _run_doctor(tmp_path, commands=_Clis(), sudo=sudo) == expected
+    output = capsys.readouterr().out
+    assert "admin sudo" in output.lower()
+    assert _failed(output) == (set() if expected == 0 else {"admin sudo"})
+
+
+@pytest.mark.parametrize(
+    ("sudo", "passed"),
+    [
+        pytest.param(_SUDO_ABSENT, True, id="sudo-absent"),
+        pytest.param(_SUDO_PASSWORDLESS, False, id="passwordless-sudo"),
+    ],
+)
+def test_doctor_json_names_the_admin_sudo_check(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    sudo: CommandResult | CommandError,
+    passed: bool,
+) -> None:
+    _instance(tmp_path)
+    _with_admin(_directory(tmp_path))
+
+    assert _run_doctor(tmp_path, commands=_Clis(), json_output=True, sudo=sudo) == (
+        0 if passed else 1
+    )
+    document = json.loads(capsys.readouterr().out)
+    (check,) = [check for check in document["checks"] if check["name"] == "admin sudo"]
+    assert check["passed"] is passed
+
+
+def test_doctor_adds_no_admin_sudo_check_without_admin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _instance(tmp_path)
+
+    assert _run_doctor(tmp_path, sudo=_SUDO_PASSWORDLESS) == 0
+    assert "admin sudo" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

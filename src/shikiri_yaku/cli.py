@@ -90,6 +90,10 @@ _ALERT: Final = "#e3a0a0"
 _SHIKIRU_CHECK: Final = "Shikiru version"
 _SHIKIRU_VERSION_FLAG: Final = "--version"
 _MINIMUM: Final = tuple(int(part) for part in SHIKIRU_MINIMUM.split("."))
+_ADMIN_SUDO_CHECK: Final = "admin sudo"
+_SUDO_PROBE: Final = ("sudo", "-n", "true")
+_NO_PASSWORDLESS_SUDO: Final = "no passwordless sudo"
+_PASSWORDLESS_SUDO: Final = "passwordless sudo works; an approved admin command would run as root"
 
 
 class Lifecycle(Protocol):
@@ -483,11 +487,14 @@ def _doctor(directory: Path, compose: Compose, commands: CommandRunner, *, as_js
         settings = load_settings(directory)
     except SettingsError as error:
         return _report([_Check("config", str(error))], as_json=as_json)
-    version = asyncio.run(_shikiru_version_check(commands, settings.operator.link_call_timeout_s))
+    timeout_s = settings.operator.link_call_timeout_s
+    version = asyncio.run(_shikiru_version_check(commands, timeout_s))
+    admin = [] if settings.admin is None else [asyncio.run(_admin_sudo_check(commands, timeout_s))]
     return _report(
         [
             _Check("components", _components_problem(settings)),
             version,
+            *admin,
             _lock_check(directory),
             *_composed_checks(settings, directory, compose),
         ],
@@ -513,6 +520,17 @@ async def _shikiru_version_check(commands: CommandRunner, timeout_s: float) -> _
     if number >= _MINIMUM:
         return _Check(_SHIKIRU_CHECK, status=found)
     return _Check(_SHIKIRU_CHECK, f"found {found}; {needed}")
+
+
+async def _admin_sudo_check(commands: CommandRunner, timeout_s: float) -> _Check:
+    # keep: an approved admin command runs as the service user, so passwordless sudo makes it root
+    try:
+        result = await commands.run(_SUDO_PROBE, timeout_s=timeout_s)
+    except CommandError:
+        return _Check(_ADMIN_SUDO_CHECK, status=_NO_PASSWORDLESS_SUDO)
+    if result.returncode == 0:
+        return _Check(_ADMIN_SUDO_CHECK, _PASSWORDLESS_SUDO)
+    return _Check(_ADMIN_SUDO_CHECK, status=_NO_PASSWORDLESS_SUDO)
 
 
 def _report(checks: Sequence[_Check], *, as_json: bool) -> int:

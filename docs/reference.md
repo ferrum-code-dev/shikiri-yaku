@@ -158,6 +158,11 @@ output_max_bytes = 65536
 `command_timeout_s` (default 120) limits its run time; `output_max_bytes` (default 65536) limits
 its captured output. Admin conversations use the `[expert]` ladder, timeout and limits.
 
+With `[admin]`, `doctor` also runs `sudo -n true` and reports an *admin sudo* check. It fails when
+that succeeds, because an approved command runs as the service user and would then run as root. It
+passes when `sudo` asks for a password or is absent. The check is advice: `run`, approval and
+execution do not read it. Whether the service user may use `sudo` is host configuration.
+
 ## Command line
 
 ```
@@ -490,7 +495,7 @@ Changes made after that backup are lost.
 
 ### Doctor and stats
 
-- `shikiri-yaku --product shop doctor` checks the configuration and component paths, the instance lock, the journal, Telegram readiness, each Shikiru MCP link, and each configured Reasoner CLI. Run it after setup or a configuration change. It may contact Telegram and Shikiru. A failed check gives exit code 1.
+- `shikiri-yaku --product shop doctor` checks the configuration and component paths, the instance lock, the journal, Telegram readiness, each Shikiru MCP link, each configured Reasoner CLI, and with `[admin]` the *admin sudo* check. Run it after setup or a configuration change. It may contact Telegram and Shikiru. A failed check gives exit code 1.
 - For machine-readable output, put `--json` before the command: `shikiri-yaku --json --product shop doctor`.
 - `stats` reads the local journal and summarizes completed and queued work, waits, reasons, verdicts and install outcomes. It does not contact Shikiru.
 

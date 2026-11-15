@@ -60,7 +60,7 @@ A1 to A5 execute in order; details and shared constraints are in tasks/plan.md.
 
 ### A5
 
-- [ ] A5. Report passwordless sudo in doctor
+- [x] A5. Report passwordless sudo in doctor
 
 ## Acceptance criteria
 
