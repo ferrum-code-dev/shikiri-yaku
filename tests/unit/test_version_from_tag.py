@@ -55,8 +55,9 @@ def _copy_working_tree(target: Path) -> None:
 
 def _snapshot(tmp_path: Path) -> Path:
     checkout = tmp_path / "checkout"
+    # keep: an agent sandbox that protects .git refuses the hard links of a local clone
     cloned = subprocess.run(
-        ["git", "clone", "--local", str(REPO), str(checkout)],
+        ["git", "clone", "--local", "--no-hardlinks", str(REPO), str(checkout)],
         capture_output=True,
         text=True,
         check=False,
