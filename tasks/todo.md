@@ -1,5 +1,11 @@
 # Todo
 
+## Planned work: Telegram command rename (T-175)
+
+- [x] T-175a. Rename the three commands, preserve upgrade behavior, and update README.md and docs/reference.md.
+- [x] T-175b. Document the default menu and configured scope and language overrides, including shared-group coordination.
+- [ ] T-175c. Update docs/design.md as requested; prohibited by AGENTS.md, so report the conflict.
+
 ## Planned work: Expert task proposal settle (T-165)
 
 E1 and E2 execute in order; details are in tasks/plan.md.

@@ -801,7 +801,7 @@ def _open_install(
 ) -> tuple[str, int]:
     update = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text())["result"][0]
     update["update_id"] = 800
-    update["message"]["text"] = "/open"
+    update["message"]["text"] = "/pending"
     bot = _RestartBot([update])
     _deliver_install(
         directory,
@@ -827,13 +827,13 @@ def _open_install(
     try:
         row = database.connection.execute(
             "SELECT platform_message_id FROM messages WHERE notice_key = ?",
-            (f"install:{op_id}:open:800",),
+            (f"install:{op_id}:pending:800",),
         ).fetchone()
     finally:
         database.close()
     assert row is not None
     _, _, message_id = row["platform_message_id"].partition("/")
-    # keep: /open re-shows the approval as a newer copy of its slot, so the copy it replaces is gone
+    # keep: /pending re-shows the approval as a newer copy of its slot
     assert _live_copies(directory, Purpose.APPROVAL, _deleted(bot)) == [int(message_id)]
     return buttons[0]["callback_data"], int(message_id)
 
@@ -1039,10 +1039,10 @@ def test_a_reply_to_the_prompt_resolves_the_escalation_with_its_text(tmp_path: P
 
 
 def _goal_update() -> dict[str, Any]:
-    """Return the owner's `/goal` as a text update, from the fixture's text message."""
+    """Return the owner's `/submit` as a text update, from the fixture's text message."""
     updates = json.loads((TELEGRAM_FIXTURES / "get_updates_ok.json").read_text(encoding="utf-8"))
     update = updates["result"][0]
-    update["message"]["text"] = "/goal api Add the export"
+    update["message"]["text"] = "/submit api Add the export"
     update["message"]["from"]["id"] = _OWNER
     update["message"]["chat"]["id"] = _OWNER
     return update
@@ -1099,7 +1099,7 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
     try:
         row = database.connection.execute(
             "SELECT COUNT(*) AS asked FROM messages WHERE notice_key = ?",
-            (f"goal:{interrupted.id}",),
+            (f"submit:{interrupted.id}",),
         ).fetchone()
     finally:
         database.close()

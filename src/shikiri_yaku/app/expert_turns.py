@@ -409,7 +409,7 @@ class ExpertTurns:
                 self._clock,
                 Destination(self._channel, str(row.chat), row.origin_thread),
                 CREATION_UNCERTAIN,
-                key=f"ask:creation:{row.update_id}",
+                key=f"expert:creation:{row.update_id}",
                 conversation_id=row.id,
             )
         for turn in self._log.recover_turns():
@@ -418,7 +418,7 @@ class ExpertTurns:
                 self._clock,
                 Destination(self._channel, str(self._group_id), turn.thread_id),
                 _INTERRUPTED,
-                key=f"ask:interrupted:{turn.update_id}",
+                key=f"expert:interrupted:{turn.update_id}",
                 conversation_id=turn.conversation_id,
             )
         if self._web is not None:

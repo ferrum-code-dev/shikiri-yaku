@@ -1,4 +1,4 @@
-"""/open: shows open escalations and pending approvals again, with their buttons."""
+"""/pending: shows pending escalations and approvals again, with their buttons."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ _NOTHING_IN: Final = "Nothing is waiting for you in {component}."
 
 
 def _done_key(update_id: int) -> str:
-    return f"open:{update_id}:done"
+    return f"pending:{update_id}:done"
 
 
 def _nothing(component: str | None) -> str:
@@ -52,6 +52,8 @@ class OpenCommand:
     from that view too, and each copy's key names the op and the update, so the Confirm of every
     copy approves the same op. Nothing is created, approved or issued here: a tap does that. When
     nothing was shown and every project answered, the sender is told that nothing is waiting.
+
+    The reply groups the shown items under Questions and Approvals headings.
 
     A command sent in a thread that names a component asks only that component's Shikiru, so only
     its items are shown and only its name is reported.
@@ -88,36 +90,40 @@ class OpenCommand:
         if self._outbox.command_reply_queued(_done_key(item.update_id)):
             return
         listed, unreachable = await self._listed(component)
-        shown = await self._reshow_questions(item.update_id, listed)
-        shown += self._queue_approvals(item.update_id, listed)
-        shown += self._queue_install_approvals(item.update_id, listed)
+        questions = await self._reshow_questions(item.update_id, listed)
+        approvals = self._queue_approvals(item.update_id, listed)
+        installs = self._queue_install_approvals(item.update_id, listed)
+        if questions or approvals or installs:
+            self._reply(
+                item,
+                _grouped(questions, approvals, installs),
+                f"pending:{item.update_id}:summary",
+            )
+        elif not unreachable:
+            self._reply(item, _nothing(component), f"pending:{item.update_id}:nothing")
         if unreachable:
             self._reply(
                 item,
                 f"Shikiru did not answer for {', '.join(unreachable)}.",
-                f"open:{item.update_id}:unreachable",
+                f"pending:{item.update_id}:unreachable",
             )
-        elif shown == 0:
-            self._reply(item, _nothing(component), f"open:{item.update_id}:nothing")
         self._complete(item)
 
     async def _reshow_questions(
         self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
-    ) -> int:
-        """Re-show each forwarded question that Shikiru still lists; return how many were queued."""
-        shown = 0
+    ) -> list[int]:
+        shown: list[int] = []
         for number, signal in self._log.forwarded():
             if (signal.project, signal.escalation_id) not in listed:
                 continue
-            if await self._reshower.reshow(number, signal, "", key=f"open:{update_id}:{number}"):
-                shown += 1
+            if await self._reshower.reshow(number, signal, "", key=f"pending:{update_id}:{number}"):
+                shown.append(number)
         return shown
 
     def _queue_approvals(
         self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
-    ) -> int:
-        """Queue each approval that Shikiru still offers; return how many were queued."""
-        queued = 0
+    ) -> list[tuple[int, str]]:
+        shown: list[tuple[int, str]] = []
         for approval in self._log.pending_approvals():
             view = listed.get((approval.project, approval.escalation_id))
             option = None if view is None else _option(view, approval.kind)
@@ -133,15 +139,15 @@ class OpenCommand:
                 key=confirm_key(approval.op_id, update_id),
                 slot=confirm_key(approval.op_id),
             )
-            queued += 1
-        return queued
+            shown.append((approval.number, approval.kind))
+        return shown
 
     def _queue_install_approvals(
         self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
-    ) -> int:
+    ) -> list[int]:
         if self._install_approval is None or self._approval_expiry_h is None:
-            return 0
-        queued = 0
+            return []
+        shown: list[int] = []
         now = self._clock.now()
         for operation in self._log.pending_install_approvals():
             payload = operation.payload
@@ -156,11 +162,11 @@ class OpenCommand:
                 operation.project,
                 Purpose.APPROVAL,
                 self._install_approval.render(operation.id, payload),
-                key=f"install:{operation.id}:open:{update_id}",
+                key=f"install:{operation.id}:pending:{update_id}",
                 slot=INSTALL_SLOT,
             )
-            queued += 1
-        return queued
+            shown.append(payload.number)
+        return shown
 
     def _reply(self, item: Inbound, text: str, key: str) -> None:
         queue_command_reply(
@@ -172,7 +178,6 @@ class OpenCommand:
         )
 
     def _complete(self, item: Inbound) -> None:
-        """Journal that the update's answer is whole; a claim with no parts marks it."""
         self._outbox.queue_command_reply(
             [], [], key=_done_key(item.update_id), now=self._clock.now()
         )
@@ -180,11 +185,6 @@ class OpenCommand:
     async def _listed(
         self, component: str | None
     ) -> tuple[dict[tuple[str, str], EscalationView], list[str]]:
-        """Return the open escalations by project and id, and the projects that did not answer.
-
-        Only the scoped component's client is asked when a component is given. Questions and
-        approvals are matched against this listing by project, so they are scoped by it too.
-        """
         listed: dict[tuple[str, str], EscalationView] = {}
         unreachable: list[str] = []
         for project, client in self._clients.items():
@@ -221,8 +221,18 @@ class OpenCommand:
         )
 
 
+def _grouped(questions: list[int], approvals: list[tuple[int, str]], installs: list[int]) -> str:
+    parts: list[str] = []
+    if questions:
+        parts.append("Questions:\n" + "\n".join(f"S{n}" for n in questions))
+    approval_lines = [f"S{n} · {kind}" for n, kind in approvals]
+    approval_lines.extend(f"S{n} · install" for n in installs)
+    if approval_lines:
+        parts.append("Approvals:\n" + "\n".join(approval_lines))
+    return "\n\n".join(parts)
+
+
 def _option(view: EscalationView, kind: str) -> int | None:
-    """Return the number of the resolution of the kind in the view, or None if it is not offered."""
     return next(
         (
             choice.number

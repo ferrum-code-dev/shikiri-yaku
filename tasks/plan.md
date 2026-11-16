@@ -1,5 +1,17 @@
 # Task plan
 
+## Planned work: Telegram command rename (T-175)
+
+Rename the three Telegram commands to `/pending`, `/expert` and `/submit`, with no aliases. Keep `/status`, `/help` and `/admin` unchanged. Preserve command behavior, including grouped pending questions and approvals, Expert selection in shared groups, component-scoped task submission, and pre-upgrade buttons and replies. Update the user documentation and document a coordinated command-menu migration for every bot in a shared group. Update the default menu and configured narrower or language-specific scopes, or remove overrides so they inherit. Leave `docs/design.md` unchanged because `AGENTS.md` prohibits editing it; report that conflict.
+
+## Acceptance criteria
+
+- The new commands retain their existing behavior in private chats, General and component topics; the former names are unknown commands with no aliases.
+- Existing approval and Expert buttons continue to work after upgrade, and `/pending` groups only the items it actually re-shows.
+- README.md and docs/reference.md describe the new commands; the reference documents setting the default Telegram menu and checking all configured overrides, including shared-group coordination.
+- The release notes mark the rename as breaking. `docs/design.md` remains unchanged under the repository rule and is reported as an outstanding documentation conflict.
+- `uv run poe check` passes for code changes; documentation-only changes pass `git diff --check`.
+
 ## Planned work: Expert task proposal settle (T-165)
 
 ### E1. Stop the false refusal notice after a proposal settles

@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
-COMMANDS = ("/status", "/open", "/goal", "/help")
+COMMANDS = ("/status", "/pending", "/submit", "/help")
 NOTHING = "Nothing is waiting for you."
 DONE = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 API_TOPIC: Final = 77
@@ -222,8 +222,8 @@ def test_free_text_and_help_get_the_list_of_commands(h: Harness, text: str | Non
     [
         ("/stats", "Unknown command /stats."),
         ("/start", "Unknown command /start."),
-        ("/Open", NOTHING),
-        ("/open@bot", NOTHING),
+        ("/Pending", NOTHING),
+        ("/pending@bot", NOTHING),
     ],
 )
 def test_a_slash_message_is_answered_by_the_command_it_names(
@@ -242,6 +242,15 @@ def test_an_unknown_command_is_followed_by_the_list_of_commands(h: Harness) -> N
     assert all(command in pending.message.text for command in COMMANDS)
 
 
+@pytest.mark.parametrize("text", ["/open", "/ask", "/goal"])
+def test_old_command_names_are_reported_as_unknown(h: Harness, text: str) -> None:
+    h.send(text)
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text.startswith(f"Unknown command {text}.")
+    assert all(command in pending.message.text for command in COMMANDS)
+
+
 def test_a_long_unknown_name_is_cut_to_the_limit(h: Harness) -> None:
     text = "/" + "x" * COMMAND_NAME_MAX_CHARS * 3
     h.send(text)
@@ -257,8 +266,8 @@ def test_a_long_unknown_name_is_cut_to_the_limit(h: Harness) -> None:
 def test_open_with_nothing_open_is_answered_once_and_a_repeat_of_the_update_is_not(
     h: Harness,
 ) -> None:
-    h.send("/open", update=700)
-    h.send("/open", update=700)
+    h.send("/pending", update=700)
+    h.send("/pending", update=700)
 
     [pending] = h.outbox.pending()
     assert pending.message.text == NOTHING
@@ -273,7 +282,7 @@ def test_the_same_update_delivered_twice_queues_one_reply(h: Harness) -> None:
 
 def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> None:
     h.client.answer = ShikiruLinkDownError("link down")
-    h.send("/goal api Add the export")
+    h.send("/submit api Add the export")
     [question] = h.outbox.pending()
     [button] = question.message.buttons
     h.outbox.confirm(question.message_id, "1001/44")
@@ -286,7 +295,7 @@ def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> 
 
 @pytest.mark.parametrize(
     "text",
-    ["/status", "/open", "/help", "/goal", "/goal api Add the export"],
+    ["/status", "/pending", "/help", "/submit", "/submit api Add the export"],
 )
 def test_with_a_shared_group_a_command_in_another_instances_topic_gets_no_reply(
     shared: Harness, text: str
@@ -344,7 +353,7 @@ def test_with_a_shared_group_status_in_general_reports_this_instances_components
 def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_reply(
     shared: Harness,
 ) -> None:
-    shared.send("/goal web Add the export")
+    shared.send("/submit web Add the export")
 
     assert shared.outbox.pending() == []
     assert shared.client.requests == []
@@ -353,7 +362,7 @@ def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_rep
 def test_with_a_shared_group_a_goal_for_this_component_in_general_is_submitted(
     shared: Harness,
 ) -> None:
-    shared.send("/goal api Add the export")
+    shared.send("/submit api Add the export")
 
     [pending] = shared.outbox.pending()
     assert "T-9" in pending.message.text

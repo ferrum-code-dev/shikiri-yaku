@@ -105,7 +105,7 @@ class JournalOutbox:
         row = self._database.connection.execute(
             """SELECT original.* FROM messages AS offered
             JOIN messages AS original
-              ON offered.notice_key = 'ask:select:' || original.update_id || ':0'
+              ON offered.notice_key = 'expert:select:' || original.update_id || ':0'
             WHERE offered.direction = 'out' AND offered.delivery = 'sent'
               AND offered.channel = ? AND offered.chat = ? AND offered.platform_message_id = ?
               AND original.direction = 'in' AND original.kind = 'text'
@@ -159,7 +159,7 @@ class JournalOutbox:
         notice_key = pending["notice_key"]
         if (
             notice_key is None
-            or not notice_key.startswith("ask:answer:")
+            or not notice_key.startswith("expert:answer:")
             or not notice_key.endswith(":actions")
         ):
             return True

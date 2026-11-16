@@ -86,7 +86,7 @@ _FINAL: Final = (
 
 def answer_key(update_id: int) -> str:
     """Return the notice key of the message that shows an Expert answer."""
-    return f"ask:answer:{update_id}"
+    return f"expert:answer:{update_id}"
 
 
 def action_key(update_id: int) -> str:
@@ -448,7 +448,7 @@ class ExpertProposals:
                 Purpose.EXPERT,
                 [opened.destination],
                 message,
-                key=f"ask:proposal:{proposal_id}:interrupted{suffix}",
+                key=f"expert:proposal:{proposal_id}:interrupted{suffix}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
             )
@@ -494,7 +494,7 @@ class ExpertProposals:
                 Purpose.EXPERT,
                 [opened.destination],
                 message,
-                key=f"ask:proposal:{proposal_id}:result:{index}",
+                key=f"expert:proposal:{proposal_id}:result:{index}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
             )

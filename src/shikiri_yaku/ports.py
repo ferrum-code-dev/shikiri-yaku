@@ -1674,7 +1674,7 @@ class PendingApproval:
 
 
 class OpenLog(Protocol):
-    """What /open shows again: the forwarded questions and the approvals awaiting Confirm."""
+    """What /pending shows again: the forwarded questions and the approvals awaiting Confirm."""
 
     def forwarded(self) -> list[tuple[int, Signal]]:
         """Return the forwarded signals with an escalation and their numbers, oldest first."""
@@ -1685,7 +1685,7 @@ class OpenLog(Protocol):
         ...
 
     def pending_install_approvals(self) -> list[InstallOp]:
-        """Return intended install ops, oldest first, for `/open` to re-show from their payload."""
+        """Return intended install ops, oldest first, for `/pending`."""
         ...
 
 

@@ -33,12 +33,12 @@ _ADMIN_ONLY: Final = "Only a listed admin may use /admin."
 
 
 def open_reply_keys(update_id: int) -> tuple[str, str]:
-    """Return the notice keys of a conversation's /ask reply: the open and the selection one."""
-    return f"ask:open:{update_id}:0", f"ask:select:{update_id}:0"
+    """Return the notice keys of a conversation's /expert reply: the open and the selection one."""
+    return f"expert:open:{update_id}:0", f"expert:select:{update_id}:0"
 
 
 def closed_reply(closed_at: datetime) -> Message:
-    """Return the /ask reply of an ended conversation: its text shows the time, and no button."""
+    """Return the /expert reply of an ended conversation: its text shows the time, and no button."""
     return Message(_CLOSED.format(when=closed_at.astimezone(UTC).strftime(_CLOSED_TIME)))
 
 
@@ -142,7 +142,7 @@ class Ask:
             await self.handle(item, None)
             return
         name = await self._topics.bot_name()
-        command = ADMIN_COMMAND if _is_admin(item) else "/ask"
+        command = ADMIN_COMMAND if _is_admin(item) else "/expert"
         self._outbox.queue_command_reply(
             [item_destination(self._channel, item)],
             [
@@ -152,7 +152,7 @@ class Ask:
                     reply_to=item.message_ref,
                 )
             ],
-            key=f"ask:select:{item.update_id}",
+            key=f"expert:select:{item.update_id}",
             now=self._clock.now(),
         )
 
@@ -176,7 +176,7 @@ class Ask:
                 self._outbox,
                 [item_destination(self._channel, item)],
                 reason,
-                key=f"ask:refusal:{item.update_id}",
+                key=f"expert:refusal:{item.update_id}",
                 now=self._clock.now(),
             )
             return
@@ -196,7 +196,7 @@ class Ask:
             self._outbox.queue_command_reply(
                 [item_destination(self._channel, item)],
                 [Message(message.text, message.buttons, reply_to=item.message_ref)],
-                key=f"ask:open:{item.update_id}",
+                key=f"expert:open:{item.update_id}",
                 now=self._clock.now(),
                 conversation_id=row.id,
             )
@@ -227,7 +227,7 @@ class Ask:
                     self._clock,
                     item_destination(self._channel, item),
                     CREATION_UNCERTAIN,
-                    key=f"ask:creation:{item.update_id}",
+                    key=f"expert:creation:{item.update_id}",
                 )
                 return None
             self._log.opened(item.update_id, thread)
@@ -244,7 +244,7 @@ class Ask:
             if item.sender not in self._admins:
                 return _ADMIN_ONLY
             return "Provide a question after /admin." if not text else ""
-        return "Provide a question after /ask." if not text else ""
+        return "Provide a question after /expert." if not text else ""
 
 
 def _is_admin(item: Inbound) -> bool:

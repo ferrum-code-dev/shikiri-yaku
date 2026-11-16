@@ -109,8 +109,8 @@ _TOPIC_SHAPES: Final = [
         id="command in group without topics",
     ),
     pytest.param(
-        {"message_id": 86, **_IN_GROUP, "message_thread_id": GENERAL, "text": "/ask@bot hello"},
-        Inbound(716, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/86", text="/ask@bot hello"),
+        {"message_id": 86, **_IN_GROUP, "message_thread_id": GENERAL, "text": "/expert@bot hello"},
+        Inbound(716, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/86", text="/expert@bot hello"),
         id="command in the General topic on the wire",
     ),
 ]

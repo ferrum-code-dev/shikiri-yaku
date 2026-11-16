@@ -338,6 +338,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     Repairs(journal).adopt_legacy_standing(
         [copy for extension in extensions for copy in extension.legacy_copies]
     )
+    # keep: renamed keys are rewritten before any tap or reply looks one up
+    Repairs(journal).rename_keys()
     forwarder = ProductForwarder(
         settings.handlers.product.message_title_max_chars,
         clients,
@@ -983,7 +985,7 @@ def goal_command(
     *,
     shared_group: bool = False,
 ) -> GoalCommand:
-    """Return the /goal command, which journals its submits and replies."""
+    """Return the /submit command, which journals its submits and replies."""
     submitter = Submitter(
         JournalSubmits(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL), clients, clock
     )

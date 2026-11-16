@@ -309,7 +309,7 @@ class Harness:
                 answer_key(update_id),
                 action_key(update_id),
                 f"{answer_key(update_id)}:part:%",
-                f"ask:proposal:{update_id}:result:%",
+                f"expert:proposal:{update_id}:result:%",
             ),
         ).fetchall()
         return [json.loads(row["body"])["text"] for row in rows if row["body"]]
@@ -421,7 +421,7 @@ def test_a_crash_leaves_the_rest_unsent_and_tells_the_po() -> None:
     assert (
         harness.count(
             "SELECT COUNT(*) FROM messages WHERE notice_key = ?",
-            f"ask:proposal:{FIRST}:interrupted",
+            f"expert:proposal:{FIRST}:interrupted",
         )
         == 1
     )
@@ -732,7 +732,7 @@ def test_a_task_id_longer_than_a_message_is_shown_in_full_across_result_messages
     harness.tap(2, submit_all_data(FIRST))
     rows = harness.database.connection.execute(
         "SELECT json_extract(body, '$.text') FROM messages WHERE notice_key LIKE ? ORDER BY id",
-        (f"ask:proposal:{FIRST}:result:%",),
+        (f"expert:proposal:{FIRST}:result:%",),
     ).fetchall()
     result = "".join(str(row[0]) for row in rows).removeprefix("Task results:\n")
     assert f"submitted as task T-{task}" in result
@@ -810,7 +810,7 @@ def test_a_crash_while_recovering_is_made_up_on_the_next_restart() -> None:
     assert (
         harness.count(
             "SELECT COUNT(*) FROM messages WHERE notice_key = ?",
-            f"ask:proposal:{FIRST}:interrupted",
+            f"expert:proposal:{FIRST}:interrupted",
         )
         == 1
     )

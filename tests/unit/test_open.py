@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final, cast
 
 import pytest
@@ -12,6 +13,7 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import JournalFinalEdits, JournalReplacements
 from shikiri_yaku.journal.signals import NewSignal, SignalState
 from shikiri_yaku.ports import EscalationStatus, ShikiruClient, ShikiruLinkDownError
+from shikiri_yaku.settings import InfrastructureSettings
 from tests.support.destinations import FixedDestinations
 from tests.unit.test_replies import NOW, Client, Clock, Harness
 
@@ -71,19 +73,19 @@ def h() -> Generator[Harness]:
     harness.database.close()
 
 
-def _open(h: Harness, update: int = 700, thread: int | None = None) -> None:
+def _open(h: Harness, update: int = 700, thread: int | None = None, at: datetime = NOW) -> None:
     replies = Replies(
         h.log(),
         h.outbox,
-        Clock(NOW),
+        Clock(at),
         h.clients,
         channel="telegram",
-        commands=h.commands(NOW, TOPICS),
-        goal=goal_command(h.database, h.clients, h.outbox, Clock(NOW), FixedDestinations()),
+        commands=h.commands(at, TOPICS),
+        goal=goal_command(h.database, h.clients, h.outbox, Clock(at), FixedDestinations()),
     )
     asyncio.run(
         replies.handle(
-            Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open", thread=thread)
+            Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/pending", thread=thread)
         )
     )
 
@@ -111,6 +113,15 @@ def _deliver(h: Harness) -> list[str]:
     return refs
 
 
+def _summaries(h: Harness) -> list[str]:
+    """Return the texts of the /pending summaries, which open with their heading."""
+    return [
+        pending.message.text
+        for pending in h.outbox.pending()
+        if pending.message.text.startswith(("Questions:", "Approvals:"))
+    ]
+
+
 def _stored(h: Harness) -> list[tuple[int | None, Purpose | None]]:
     return [(stored.signal_number, stored.purpose) for stored in h.messages.unconfirmed()]
 
@@ -125,7 +136,7 @@ def test_replaying_the_same_open_update_re_shows_nothing_new(h: Harness) -> None
     _deliver(h)
     _open(h, update=700)
     _open(h, update=700)
-    assert len(h.outbox.pending()) == 2
+    assert len(h.outbox.pending()) == 3
 
 
 def test_a_replayed_open_update_answers_nothing_more_after_its_question_is_resolved(
@@ -134,7 +145,7 @@ def test_a_replayed_open_update_answers_nothing_more_after_its_question_is_resol
     _open(h, update=700)
     h.resolve_in_shikiru()
     _open(h, update=700)
-    assert _stored(h) == [(h.number, Purpose.QUESTION)]
+    assert _stored(h) == [(h.number, Purpose.QUESTION), (None, Purpose.NOTICE)]
 
 
 def test_a_replayed_open_update_does_not_add_a_question_opened_after_its_nothing_answer(
@@ -160,19 +171,22 @@ def test_an_open_interrupted_before_it_is_answered_is_finished_by_its_replay(
         _open(h, update=700)
     monkeypatch.setattr(h.outbox, "queue", queue)
     _open(h, update=700)
-    assert _stored(h) == [(h.number, Purpose.QUESTION)]
+    assert _stored(h) == [(h.number, Purpose.QUESTION), (None, Purpose.NOTICE)]
 
 
 def test_a_later_open_shows_the_open_items_again(h: Harness) -> None:
     _open(h, update=700)
     _deliver(h)
     _open(h, update=701)
-    assert [stored.purpose for stored in h.messages.unconfirmed()] == [Purpose.QUESTION]
+    assert [stored.purpose for stored in h.messages.unconfirmed()] == [
+        Purpose.QUESTION,
+        Purpose.NOTICE,
+    ]
 
 
 def test_a_question_shown_again_by_open_replaces_the_copy_it_repeats(h: Harness) -> None:
     _open(h, update=700)
-    [first] = _deliver(h)
+    first, _ = _deliver(h)
     _open(h, update=701)
     _deliver(h)
     assert JournalReplacements(h.database, h.messages).superseded() == [first]
@@ -227,12 +241,41 @@ def test_a_project_that_does_not_answer_is_skipped_and_the_sender_is_told(h: Har
     assert [(stored.signal_number, stored.purpose) for stored in h.messages.unconfirmed()] == [
         (h.number, Purpose.QUESTION),
         (None, Purpose.NOTICE),
+        (None, Purpose.NOTICE),
     ]
+
+
+def test_items_shown_are_grouped_and_the_unanswered_project_is_still_reported(h: Harness) -> None:
+    h.clients["web"] = cast("ShikiruClient", _Silent())
+
+    _open(h)
+
+    assert _summaries(h) == [f"Questions:\nS{h.number}"]
+    assert [pending.message.text for pending in h.outbox.pending()][-1] == (
+        "Shikiru did not answer for web."
+    )
+
+
+def test_a_live_install_approval_is_listed_under_its_heading(h: Harness) -> None:
+    h.install_replies()
+
+    _open(h)
+
+    assert _summaries(h) == [f"Questions:\nS{h.number}\n\nApprovals:\nS{h.number} · install"]
+
+
+def test_an_expired_install_approval_is_not_listed(h: Harness) -> None:
+    h.install_replies()
+    expiry = InfrastructureSettings().approval_expiry_h
+
+    _open(h, at=NOW + timedelta(hours=expiry))
+
+    assert _summaries(h) == [f"Questions:\nS{h.number}"]
 
 
 def test_a_re_shown_copy_takes_the_final_edit_like_the_original(h: Harness) -> None:
     _open(h)
-    [copy] = _deliver(h)
+    copy, _ = _deliver(h)
     edits = JournalFinalEdits(h.database, h.log())
     edits.settle(h.number, "Resolved in Shikiri: Keep existing behavior")
     assert copy in {edit.message_ref for edit in edits.to_edit()}
@@ -252,9 +295,10 @@ def test_an_approval_left_approved_by_a_crash_is_shown_again_and_issues_once(
     assert [stored.purpose for stored in h.messages.unconfirmed()] == [
         Purpose.QUESTION,
         Purpose.APPROVAL,
+        Purpose.NOTICE,
     ]
     assert h.client.calls == []
-    _, copy = _deliver(h)
+    _, _, copy = _deliver(h)
     first, second = (copy, original) if copy_first else (original, copy)
     h.handle(update=701, ref=first, data="a:1:4")
     h.handle(update=702, ref=second, data="a:1:4")
@@ -295,7 +339,7 @@ def test_open_in_a_component_topic_shows_only_that_components_items(
     numbers = {"api": h.number, "web": web}
     assert {stored.signal_number for stored in h.messages.unconfirmed()} == {
         numbers[project] for project in projects
-    }
+    } | {None}
 
 
 def test_open_in_a_component_topic_with_nothing_open_for_it_says_so_by_its_name(
@@ -335,4 +379,4 @@ def test_a_repeated_open_in_a_component_topic_queues_nothing_more(h: Harness) ->
     _open(h, update=700, thread=API_TOPIC)
     _open(h, update=700, thread=API_TOPIC)
 
-    assert len(h.outbox.pending()) == 1
+    assert len(h.outbox.pending()) == 2

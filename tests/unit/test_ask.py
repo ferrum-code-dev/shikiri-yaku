@@ -115,7 +115,7 @@ class Topics:
             raise ChannelRefusedError(message)
 
     async def addressed(self, word: str) -> bool:
-        return word.lower() in ("/ask@bot", "/admin@bot")
+        return word.lower() in ("/expert@bot", "/admin@bot")
 
     async def bot_name(self) -> str:
         return "bot"
@@ -249,7 +249,7 @@ class Harness:
             ask=self.ask,
         )
 
-    def send(self, text: str = "/ask hello", thread: int | None = None) -> None:
+    def send(self, text: str = "/expert hello", thread: int | None = None) -> None:
         asyncio.run(
             self.commands.handle(
                 Inbound(1, InboundKind.TEXT, 5, -100123, "1", text=text, thread=thread)
@@ -275,14 +275,14 @@ def test_scope_and_duplicate(tmp_path: Path, thread: int | None, expected: set[s
 @pytest.mark.parametrize(
     ("enabled", "group", "text", "shared", "thread", "replies"),
     [
-        (False, True, "/ask hello", False, None, 1),
-        (True, False, "/ask hello", False, None, 1),
-        (True, True, "/ask", False, None, 1),
-        (True, True, "/ask hello", True, None, 1),
-        (True, True, "/ask@bot hello", True, None, 2),
-        (True, True, "/ask@another hello", True, None, 0),
-        (True, True, "/ask hello", True, 77, 2),
-        (True, True, "/ask hello", True, 78, 0),
+        (False, True, "/expert hello", False, None, 1),
+        (True, False, "/expert hello", False, None, 1),
+        (True, True, "/expert", False, None, 1),
+        (True, True, "/expert hello", True, None, 1),
+        (True, True, "/expert@bot hello", True, None, 2),
+        (True, True, "/expert@another hello", True, None, 0),
+        (True, True, "/expert hello", True, 77, 2),
+        (True, True, "/expert hello", True, 78, 0),
     ],
 )
 def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
@@ -298,9 +298,9 @@ def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
     h.send(text, thread)
     pending = h.outbox.pending()
     assert len(pending) == replies
-    if replies == 1 and shared and text == "/ask hello" and thread is None:
+    if replies == 1 and shared and text == "/expert hello" and thread is None:
         assert pending[0].message.reply_to == "1"
-        assert pending[0].message.buttons[0].label == "/ask@bot"
+        assert pending[0].message.buttons[0].label == "/expert@bot"
     elif replies == 1:
         reason = "configured" if not enabled else "group" if not group else "question"
         assert reason in pending[0].message.text.lower()
@@ -382,7 +382,7 @@ def test_independent_asks_run_concurrently_and_are_not_scheduled_twice(tmp_path:
 
         log = InboundLog(h.database)
         items = [
-            Inbound(update, InboundKind.TEXT, 5, -100123, str(update), text="/ask hello")
+            Inbound(update, InboundKind.TEXT, 5, -100123, str(update), text="/expert hello")
             for update in (1, 2)
         ]
         log.record_batch("telegram", items, 3, NOW)
@@ -450,7 +450,7 @@ def test_expert_answer_is_linked_to_its_conversation(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.send()
     row = h.database.connection.execute(
-        "SELECT purpose, conversation_id FROM messages WHERE notice_key = 'ask:answer:1'"
+        "SELECT purpose, conversation_id FROM messages WHERE notice_key = 'expert:answer:1'"
     ).fetchone()
     assert row["purpose"] == "expert"
     conversation = h.log.get(1)
@@ -468,7 +468,7 @@ def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path
                 5,
                 -100123,
                 "1",
-                text="/ask hello",
+                text="/expert hello",
                 thread=77,
             ),
             "api",
@@ -515,7 +515,7 @@ def test_refused_topic_rename_does_not_prevent_answer(tmp_path: Path) -> None:
 
 def _ask(update_id: int, message_ref: str) -> Inbound:
     return Inbound(
-        update_id, InboundKind.TEXT, 5, -100123, message_ref, text=f"/ask question {update_id}"
+        update_id, InboundKind.TEXT, 5, -100123, message_ref, text=f"/expert question {update_id}"
     )
 
 
@@ -639,7 +639,7 @@ class _Signalled:
 
 @pytest.mark.parametrize(
     ("shared", "text"),
-    [(False, "/ask hello"), (True, "/ask@bot hello"), (True, "/ask hello")],
+    [(False, "/expert hello"), (True, "/expert@bot hello"), (True, "/expert hello")],
 )
 def test_ask_in_general_through_the_inbound_service(
     tmp_path: Path,
@@ -649,7 +649,7 @@ def test_ask_in_general_through_the_inbound_service(
     h = Harness(tmp_path, shared=shared)
     _pump(h, _general_payload(text))
 
-    opened = text == "/ask@bot hello" or not shared
+    opened = text == "/expert@bot hello" or not shared
     assert len(h.topics.created) == (1 if opened else 0)
     assert len(h.expert.requests) == (1 if opened else 0)
     pending = h.outbox.pending()
@@ -670,7 +670,7 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
     asyncio.run(h.commands.handle(original))
     [offer] = h.outbox.pending()
     assert offer.message.reply_to == original.message_ref
-    assert offer.message.buttons[0].label == "/ask@bot"
+    assert offer.message.buttons[0].label == "/expert@bot"
     channel = Channel()
     asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
     tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
@@ -878,7 +878,7 @@ def test_admin_conversation_warns_uses_admin_answers_and_survives_duplicates(
 
 def test_ordinary_ask_stays_an_expert_conversation(tmp_path: Path) -> None:
     h = Harness(tmp_path, admins=frozenset({ADMIN}))
-    _admin_text(h, "/ask hello", ADMIN)
+    _admin_text(h, "/expert hello", ADMIN)
     [request] = h.expert.requests
     assert not request.admin
     conversation = h.log.get(1)
@@ -943,7 +943,7 @@ class _DeletableTopics(Topics):
 def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Path) -> None:
     h = Harness(tmp_path, admins=frozenset({ADMIN}))
     _admin_text(h, "/admin hello", ADMIN, 1)
-    _admin_text(h, "/ask hello", ADMIN, 2)
+    _admin_text(h, "/expert hello", ADMIN, 2)
     ending = ExpertEnding(
         h.log,
         h.runs,

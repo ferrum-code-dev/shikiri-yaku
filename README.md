@@ -105,7 +105,7 @@ see [Service](#service).
 
 To enable the Reasoner, add a `[reasoner]` table. See [Reasoner settings](docs/reference.md#reasoner).
 
-To add Expert agents, set the optional `[expert]` table. `/ask` needs a forum group. See
+To add Expert agents, set the optional `[expert]` table. `/expert` needs a forum group. See
 [Expert settings](docs/reference.md#expert).
 
 Every key and default is in the [reference](docs/reference.md#configuration).
@@ -133,27 +133,27 @@ was sent.
 | Command | What it does |
 | --- | --- |
 | `/status` | Shows each component's engine state, task counts, quota blocks and Reasoner health. |
-| `/open` | Re-shows open questions and pending approvals. |
+| `/pending` | Re-shows open questions and pending approvals. |
 | `/help` | Lists the commands. Free text also returns this list. |
-| `/goal <component> <request>` | Submits a request to that component's Shikiru project. |
-| `/ask <question>` | Opens an Expert topic and answers the question. |
+| `/submit <component> <request>` | Submits a request to that component's Shikiru project. |
+| `/expert <question>` | Opens an Expert topic and answers the question. |
 | `/admin <question>` | Opens an admin Expert topic, for admins listed in `[admin]`. The chat is not private. |
 
-In a component topic, the topic names the component, so write `/goal <request>` there:
+In a component topic, the topic names the component, so write `/submit <request>` there:
 
 ```text
-/goal api Add CSV export to the reports page
+/submit api Add CSV export to the reports page
 ```
 
 The request goes to Shikiru as written. If the outcome is uncertain, the bot offers **Submit again**
 and never retries on its own. Check the Shikiru project before you tap it, because the first request
-may have been accepted. Details are in [Goal outcomes](docs/reference.md#goal-outcomes).
+may have been accepted. Details are in [Request outcomes](docs/reference.md#request-outcomes).
 
-### `/ask`
+### `/expert`
 
 - **Scope:** in a component topic, the Expert sees that component. In General, it sees all components.
-- **Shared groups:** an unaddressed `/ask` in General gets a button from each Expert. Tap one, or
-  write `/ask@bot <question>`.
+- **Shared groups:** an unaddressed `/expert` in General gets a button from each Expert. Tap one, or
+  write `/expert@bot <question>`.
 - **Expert topics:** each message there is a follow-up turn. `/effort [level]`, `/summarize` and
   `/help` work there. `/close` ends the conversation.
 - **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed.

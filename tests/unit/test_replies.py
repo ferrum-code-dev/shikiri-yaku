@@ -220,7 +220,7 @@ class Harness:
         )
 
     def open(self, update: int = 700, at: datetime = NOW) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/open")
+        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/pending")
         asyncio.run(self.commands(at).handle(item))
 
     def resolve_in_shikiru(self) -> None:
@@ -414,18 +414,18 @@ def test_open_replays_the_same_intended_install_op_with_new_update_keys(h: Harne
     assert stored is not None
 
     h.open(update=700)
-    [first] = h.outbox.pending()
+    first, _ = h.outbox.pending()
     h.open(update=701)
     h.open(update=700)
     copies = h.outbox.pending()
 
-    assert len(copies) == 2
-    assert copies[0].message.text == copies[1].message.text
-    assert copies[0].message.buttons == copies[1].message.buttons
+    assert len(copies) == 4
+    assert copies[0].message.text == copies[2].message.text
+    assert copies[0].message.buttons == copies[2].message.buttons
     assert f"Command: {' '.join(stored.payload.argv)}" in first.message.text
     assert copies[0].message.buttons[0].data == install_data(h.number, op_id)
     assert h.ops.install_op(op_id) == stored
-    h.outbox.confirm(copies[1].message_id, "1001/44")
+    h.outbox.confirm(copies[2].message_id, "1001/44")
     h.handle(ref="1001/44", data=install_data(h.number, op_id), install_replies=handler)
     decided = h.ops.install_op(op_id)
     assert decided is not None

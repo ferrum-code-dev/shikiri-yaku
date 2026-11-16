@@ -18,6 +18,7 @@ from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.journal import Repairs
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
@@ -312,7 +313,7 @@ async def _topic_gone_on_send(h: Harness, conversation: int, thread: int) -> Non
         Purpose.EXPERT,
         [Destination(CHANNEL, str(GROUP_ID), thread)],
         Message("the answer"),
-        key="ask:answer:501",
+        key="expert:answer:501",
         now=h.clock.now(),
         conversation_id=conversation,
     )
@@ -448,7 +449,9 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
 ) -> None:
     h = build()
     items = [
-        Inbound(CREATED, InboundKind.TEXT, OWNER, PRIVATE_CHAT, str(CREATED), text="/ask question"),
+        Inbound(
+            CREATED, InboundKind.TEXT, OWNER, PRIVATE_CHAT, str(CREATED), text="/expert question"
+        ),
         Inbound(501, InboundKind.TEXT, OWNER, CHAT, "501", text="/help", thread=TARGET_THREAD),
         Inbound(502, InboundKind.TEXT, OWNER, CHAT, "502", text="/help", thread=BYSTANDER_THREAD),
         Inbound(503, InboundKind.TEXT, OWNER, CHAT, "503", text="/close", thread=TARGET_THREAD),
@@ -460,7 +463,7 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
     h.outbox.queue_command_reply(
         [Destination(CHANNEL, str(PRIVATE_CHAT), None)],
         [Message("Open the Expert conversation.")],
-        key=f"ask:open:{CREATED}",
+        key=f"expert:open:{CREATED}",
         now=NOW,
         conversation_id=target,
     )
@@ -485,12 +488,13 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
         == 0
     )
     assert (
-        count("SELECT COUNT(*) FROM messages WHERE notice_key = ?", (f"ask:open:{CREATED}:0",)) == 0
+        count("SELECT COUNT(*) FROM messages WHERE notice_key = ?", (f"expert:open:{CREATED}:0",))
+        == 0
     )
     assert (
         count(
             "SELECT COUNT(*) FROM command_replies WHERE reply_key IN (?, ?)",
-            (f"ask:open:{CREATED}", "expert:command:501"),
+            (f"expert:open:{CREATED}", "expert:command:501"),
         )
         == 0
     )
@@ -648,14 +652,16 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
     assert h.remaining(conversation) == 0
 
 
-def _queue_ask_reply(h: Harness, reply: str, conversation: int | None, update_id: int) -> str:
-    """Queue the /ask reply of a conversation as its handler does, and return its notice key."""
+def _queue_ask_reply(
+    h: Harness, reply: str, conversation: int | None, update_id: int, prefix: str = "expert"
+) -> str:
+    """Queue the /expert reply of a conversation as its handler does, and return its notice key."""
     if reply == "open":
-        key = f"ask:open:{update_id}"
+        key = f"{prefix}:open:{update_id}"
         message = Message(OPEN_REPLY, (Button("Open topic", url="https://t.me/c/1/22"),))
     else:
-        key = f"ask:select:{update_id}"
-        message = Message("Choose an Expert.", (Button("/ask@bot", data=f"expert:{update_id}"),))
+        key = f"{prefix}:select:{update_id}"
+        message = Message("Choose an Expert.", (Button("/expert@bot", data=f"expert:{update_id}"),))
     h.outbox.queue_command_reply(
         [Destination(CHANNEL, str(PRIVATE_CHAT), None)],
         [message],
@@ -668,21 +674,25 @@ def _queue_ask_reply(h: Harness, reply: str, conversation: int | None, update_id
 
 @pytest.mark.parametrize("end", _ENDINGS, ids=_ENDING_IDS)
 @pytest.mark.parametrize("reply", ["open", "select"])
+@pytest.mark.parametrize("prefix", ["expert", "ask"])
 def test_each_ending_closes_its_ask_reply_and_no_other(
     build: Callable[..., Harness],
     end: Callable[[Harness, int, int], Awaitable[None]],
     reply: str,
+    prefix: str,
 ) -> None:
+    """A reply queued before the rename carries the old prefix; startup renames it before an end."""
     h = build()
     target = h.open_conversation(CREATED, TARGET_THREAD)
     bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
-    target_key = _queue_ask_reply(h, reply, target, CREATED)
-    bystander_key = _queue_ask_reply(h, "open", bystander, CREATED + 100)
+    target_key = _queue_ask_reply(h, reply, target, CREATED, prefix)
+    bystander_key = _queue_ask_reply(h, "open", bystander, CREATED + 100, prefix)
     h.log.touch(bystander, NOW + timedelta(days=3))
     platform = Platform()
     h.deliver(platform)
     target_ref = h.copy_ref(target_key)
     bystander_ref = h.copy_ref(bystander_key)
+    assert Repairs(h.database).rename_keys() == (0 if prefix == "expert" else 4)
 
     asyncio.run(end(h, target, TARGET_THREAD))
     h.deliver(platform)

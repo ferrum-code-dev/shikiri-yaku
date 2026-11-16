@@ -66,7 +66,7 @@ def confirm_message(number: int, kind: str, data: str) -> Message:
 
 
 def confirm_key(op_id: int, update_id: int | None = None) -> str:
-    """Return the notice key of an approval; a copy /open shows again also names its update."""
+    """Return the notice key of an approval; a copy /pending shows again also names its update."""
     if update_id is None:
         return f"{_CONFIRM}:{op_id}"
     return f"{_CONFIRM}:{op_id}:{update_id}"

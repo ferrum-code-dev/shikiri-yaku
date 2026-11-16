@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
@@ -20,11 +21,16 @@ if TYPE_CHECKING:
 
 # keep: the name the standing repair is recorded under, so a journal is repaired once
 LEGACY_STANDING: Final = "legacy-standing"
+# keep: the name the key rename is recorded under, so a journal is renamed once
+RENAMED_KEYS: Final = "renamed-keys"
 _BODY = TypeAdapter(Message)
+# keep: the commands' old names, as the notice and reply keys they wrote before the rename
+_PREFIX_RENAMES: Final = (("ask:", "expert:"), ("goal:", "submit:"), ("open:", "pending:"))
+_OPEN_INSTALL: Final = re.compile(r"install:(?P<op>\d+):open:(?P<update>\d+)")
 
 
 class Repairs:
-    """Marks the notices sent before the standing flag existed, once per journal."""
+    """Repairs an upgraded journal once: its older notices and replies, under the keys they had."""
 
     def __init__(self, database: Database) -> None:
         self._database = database
@@ -49,6 +55,48 @@ class Repairs:
             )
             connection.execute("INSERT INTO repairs (name) VALUES (?)", (LEGACY_STANDING,))
         return len(found)
+
+    def rename_keys(self) -> int:
+        """Rename the notice and reply keys of the old command names, and return how many.
+
+        A tap, a settle or a replay looks up a key, so a copy or reply sent before the rename needs
+        its new key to keep its buttons, its final edit and its duplicate guard. The rename and its
+        record are one transaction, and a later call renames nothing.
+        """
+        with self._database.transaction() as connection:
+            done = connection.execute(
+                "SELECT 1 FROM repairs WHERE name = ?", (RENAMED_KEYS,)
+            ).fetchone()
+            if done is not None:
+                return 0
+            notices = [
+                (row["id"], row["notice_key"])
+                for row in connection.execute(
+                    "SELECT id, notice_key FROM messages WHERE notice_key IS NOT NULL"
+                )
+            ]
+            replies = [
+                row["reply_key"]
+                for row in connection.execute("SELECT reply_key FROM command_replies")
+            ]
+            notice_moves = [
+                (_renamed_key(key), row_id) for row_id, key in notices if _renamed_key(key) != key
+            ]
+            reply_moves = [(_renamed_key(key), key) for key in replies if _renamed_key(key) != key]
+            connection.executemany("UPDATE messages SET notice_key = ? WHERE id = ?", notice_moves)
+            connection.executemany(
+                "UPDATE command_replies SET reply_key = ? WHERE reply_key = ?", reply_moves
+            )
+            connection.execute("INSERT INTO repairs (name) VALUES (?)", (RENAMED_KEYS,))
+        return len(notice_moves) + len(reply_moves)
+
+
+def _renamed_key(key: str) -> str:
+    for old, new in _PREFIX_RENAMES:
+        if key.startswith(old):
+            return new + key.removeprefix(old)
+    match = _OPEN_INSTALL.fullmatch(key)
+    return key if match is None else f"install:{match['op']}:pending:{match['update']}"
 
 
 def _recognized(connection: sqlite3.Connection, copy: LegacyCopy) -> list[int]:

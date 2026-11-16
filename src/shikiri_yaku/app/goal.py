@@ -1,4 +1,4 @@
-"""Answers `/goal <component> <request>`: submits the goal and reports the outcome."""
+"""Answers `/submit <component> <request>`: submits the request and reports the outcome."""
 
 from __future__ import annotations
 
@@ -33,14 +33,15 @@ _SUBMIT_AGAIN: Final = "Submit again"
 
 
 class GoalCommand:
-    """Submits a goal and reports its outcome in the chat and thread it was sent from.
+    """Submits a request and reports its outcome in the chat and thread it was sent from.
 
-    The destination is stored with the goal, so the outcome and any question go where the goal was
-    sent. A goal sent in a thread that names a component implies that component. An unknown outcome
-    is asked about with *Submit again*; only that tap retries the goal.
+    The destination is stored with the request, so the outcome and any question go
+    where the request was sent. A request sent in a thread that names a component
+    implies that component. An unknown outcome is asked about with *Submit again*;
+    only that tap retries the request.
 
-    With `shared_group`, a goal that names a component this instance does not have belongs to
-    another instance, so it gets no reply.
+    With `shared_group`, a request that names a component this instance does not
+    have belongs to another instance, so it gets no reply.
     """
 
     def __init__(
@@ -74,8 +75,8 @@ class GoalCommand:
             queue_command_reply(
                 self._outbox,
                 [destination],
-                f"Usage: /goal <component> <request>. Components: {names}.",
-                key=f"goal:usage:{item.update_id}",
+                f"Usage: /submit <component> <request>. Components: {names}.",
+                key=f"submit:usage:{item.update_id}",
                 now=self._clock.now(),
             )
             return
@@ -83,7 +84,7 @@ class GoalCommand:
         self._report(await self._submitter.submit(item.update_id, payload))
 
     async def tap(self, item: Inbound) -> None:
-        """Retry the goal of a *Submit again* that was offered in the chat of the tap."""
+        """Retry the request of a *Submit again* that was offered in the chat of the tap."""
         destination = Destination(self._channel, str(item.chat))
         message = self._log.sent_message(destination, item.message_ref)
         if message is None or not item.data:
@@ -101,15 +102,15 @@ class GoalCommand:
             self._report(op)
 
     def recover(self) -> None:
-        """Ask about each goal an earlier process left unknown; it runs before any inbound item."""
+        """Ask about each request an earlier process left unknown."""
         for op in self._submitter.recover():
             self._report(op)
 
     def _parse(self, item: Inbound) -> tuple[str | None, str | None]:
-        """Return the component and request of a goal; a part the text lacks is None.
+        """Return the component and request of a submit; a part the text lacks is None.
 
-        In a thread that names a component the whole text after `/goal` is the request; elsewhere
-        the text is `/goal <component> <request>`.
+        In a thread that names a component the whole text after `/submit` is the request; elsewhere
+        the text is `/submit <component> <request>`.
         """
         implied = self._destinations.component_of(item.thread)
         if implied is not None:
@@ -121,13 +122,13 @@ class GoalCommand:
 
     def _report(self, op: SubmitOp) -> None:
         destinations = [op.payload.destination]
-        key = f"goal:{op.id}"
+        key = f"submit:{op.id}"
         now = self._clock.now()
         if op.status == SubmitStatus.CONFIRMED:
-            text = f"Goal submitted as task {op.task_id}."
+            text = f"Request submitted as task {op.task_id}."
             queue_command_reply(self._outbox, destinations, text, key=key, now=now)
         elif op.status == SubmitStatus.FAILED:
-            text = "Shikiru did not take this goal; it was not submitted."
+            text = "Shikiru did not take this request; it was not submitted."
             queue_command_reply(self._outbox, destinations, text, key=key, now=now)
         elif op.status == SubmitStatus.UNKNOWN:
             room = MESSAGE_TEXT_LIMIT - len(_ASK_HEAD) - len(_ASK_TAIL)

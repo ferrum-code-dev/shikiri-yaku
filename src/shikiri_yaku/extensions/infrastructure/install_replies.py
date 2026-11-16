@@ -179,7 +179,7 @@ def _install_key(key: str | None, op_id: int) -> bool:
     original = f"install:{op_id}"
     if key == original:
         return True
-    prefix = f"{original}:open:"
+    prefix = f"{original}:pending:"
     update_id = "" if key is None else key.removeprefix(prefix)
     return (
         key is not None and key.startswith(prefix) and update_id.isascii() and update_id.isdecimal()

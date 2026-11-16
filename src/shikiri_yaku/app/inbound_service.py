@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 # keep: the batch is the what-failed key of the Operator's own health signal
 INBOUND_BATCH: Final = "inbound_batch"
-_ASK: Final = ("/ask", "/admin")
+_EXPERT: Final = ("/expert", "/admin")
 
 
 class InboundService:
@@ -36,7 +36,7 @@ class InboundService:
 
     A transport failure is tried again on the next tick. A batch that cannot be read opens one
     `health` signal, which the next readable batch closes. An item whose Shikiru call fails stays
-    pending, and ordinary items after it wait. Independent `/ask` requests, Expert selections,
+    pending, and ordinary items after it wait. Independent `/expert` requests, Expert selections,
     web decisions and messages in Expert topics run concurrently and remain pending until their
     work finishes; the Expert orders the turns of each conversation itself.
     """
@@ -92,7 +92,7 @@ class InboundService:
 
     def _background(self, item: Inbound) -> bool:
         return (
-            _is_ask(item)
+            _is_expert(item)
             or _is_expert_selection(item)
             or (self._expert is not None and (self._expert.owns(item) or _is_web_tap(item)))
         )
@@ -118,10 +118,12 @@ class InboundService:
             self._health.source_recovered(self._health_scope)
 
 
-def _is_ask(item: Inbound) -> bool:
+def _is_expert(item: Inbound) -> bool:
     words = (item.text or "").split(maxsplit=1)
     return (
-        item.kind == InboundKind.TEXT and bool(words) and words[0].split("@", 1)[0].lower() in _ASK
+        item.kind == InboundKind.TEXT
+        and bool(words)
+        and words[0].split("@", 1)[0].lower() in _EXPERT
     )
 
 

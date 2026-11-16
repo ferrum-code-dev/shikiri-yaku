@@ -85,11 +85,11 @@ Replace the placeholders with model and effort values that the installed CLI acc
 
 The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude`, `codex` and `muse`, as the
 Reasoner does.
-`doctor` probes each configured Expert CLI with its version flag. `/ask <question>` requires a
+`doctor` probes each configured Expert CLI with its version flag. `/expert <question>` requires a
 forum group and opens a topic, scoped to the component topic or all components in General. In a
 shared group, each configured Expert replies to an unaddressed General request with its own
 selection button; tap it to open that Expert’s conversation. You can also address a bot directly as
-`/ask@bot <question>`. The **Open topic** button replies to its `/ask`, so concurrent requests
+`/expert@bot <question>`. The **Open topic** button replies to its `/expert`, so concurrent requests
 keep their own buttons. An uncertain topic creation is not
 retried; ask again. An interrupted turn is reported and is not repeated.
 
@@ -224,9 +224,11 @@ Several instances can share one forum group. Each instance needs its own bot, to
 Give every instance the same `group_id`, and set `shared_group = true` in each `[channels.telegram]` table. `shared_group` requires `group_id`. With it:
 
 - A message in a topic that is neither General nor this instance's component topic nor this instance's Expert topic gets no reply from this instance.
-- `/goal <component> <request>` in General is submitted only when `<component>` belongs to this instance. For another instance's component, it gets no reply.
-- `/status` and `/open` in General cover only this instance's components.
-- `/help`, free text, and a `/goal` without a component are answered by every instance's bot only in General. The group receives one list per instance.
+- `/submit <component> <request>` in General is submitted only when `<component>` belongs to this instance. For another instance's component, it gets no reply.
+- `/status` and `/pending` in General cover only this instance's components.
+- `/help`, free text, and a `/submit` without a component are answered by every instance's bot only in General. The group receives one list per instance.
+
+All bot instances in a shared group must be updated together. When the chat commands change, upgrade every instance in the group at the same time, so the help lists stay consistent across the group.
 
 Every instance's bot must be an administrator of the group, with the manage-topics right, and with `[expert]` the delete-messages right (`can_delete_messages`). Start-up reads the administrators, including the other bots. It admits the owners, this bot, and the other administrator bots. It refuses any other member, and any bot that is not an administrator. To admit an instance's bot, make it an administrator.
 
@@ -258,14 +260,56 @@ If start-up reports an uncertain topic creation, check the forum yourself. Then 
 
 Commands work in private chats and in forum topics. Replies go to the chat and topic where the command was sent.
 
-Telegram's command menu is scoped by chat, not by forum topic, so it cannot show different lists per topic. The Operator does not configure the Telegram command menu (a bot may already have commands configured externally); `/help` is the context-specific presentation: it lists the global commands outside Expert topics and the topic commands (`/effort`, `/summarize`, `/close`, `/help`) inside them.
+Telegram's command menu is scoped by chat, not by forum topic, so it cannot show different lists per topic. The menu is set on the bot outside this code; see [Command menu](#command-menu). `/help` is the context-specific presentation: it lists the global commands outside Expert topics and the topic commands (`/effort`, `/summarize`, `/close`, `/help`) inside them.
 
 | Command | What it does |
 | --- | --- |
 | `/status` | Shows each component's engine state, running, queued and escalated task counts, quota blocks, and Reasoner rung health. In a component topic, it shows only that component, without the Reasoner rungs. |
-| `/open` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component's destination. If none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items. |
+| `/pending` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component's destination. If none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports its name and lists the commands. |
-| `/goal <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
+| `/submit <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
+
+### Command menu
+
+The bot's code does not set the Telegram command menu. The menu is per bot, so every instance's bot needs these steps. Use the bot token from the token file; do not paste it into a chat or log. Telegram has no Bot API method to list which scopes or languages have command lists configured, so check the bot's deployment records or BotFather configuration for that inventory.
+
+The menu entries, which must match the table above:
+
+| Name | Description |
+| --- | --- |
+| `status` | Shows the engine state and task counts. |
+| `pending` | Re-shows open questions and pending approvals. |
+| `expert` | Opens an Expert topic with a question. |
+| `submit` | Submits a task request to a component. |
+| `admin` | Opens an admin Expert topic, for listed admins only. |
+| `help` | Lists the commands. |
+
+For each bot in the group:
+
+1. Set the default list to the six entries above, even if no default list is currently configured. A narrower scope replaces the broader list for the users it covers. For the affected group, check every configured scope that can override the default: `all_group_chats`, `all_chat_administrators`, `chat`, `chat_administrators` and `chat_member`. Also check any configured command lists by `language_code`. In a private chat, the corresponding scopes are `all_private_chats` and `chat`. `getMyCommands` reads only the exact scope and language requested; an empty result means no commands were returned for that query, not that no broader list applies. It does not show the effective list. For example, read the default and the group-wide scopes with:
+
+   ```sh
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands"
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"all_group_chats"}}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"all_chat_administrators"}}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"chat","chat_id":<group_id>}}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"chat_administrators","chat_id":<group_id>}}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"chat_member","chat_id":<group_id>,"user_id":<user_id>}}'
+   ```
+
+   Use the `all_private_chats` and `chat` scopes too if they are configured for private chats. Repeat reads with each configured `language_code`. See [Telegram's command scope rules](https://core.telegram.org/bots/api#botcommandscope) for the scope fields and precedence.
+
+2. Set the complete new list in the default scope. For each narrower scope or language-specific list that is configured, either set the same complete list there or delete that override so it inherits the updated list. `setMyCommands` replaces the whole list for its scope and language:
+
+   ```sh
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/setMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"default"},"commands":[{"command":"status","description":"Shows the engine state and task counts."},{"command":"pending","description":"Re-shows open questions and pending approvals."},{"command":"expert","description":"Opens an Expert topic with a question."},{"command":"submit","description":"Submits a task request to a component."},{"command":"admin","description":"Opens an admin Expert topic, for listed admins only."},{"command":"help","description":"Lists the commands."}]}'
+   ```
+
+   For another configured scope, pass that exact `scope` and `language_code` with the same command array. To remove an override instead, call `deleteMyCommands` with that scope and language. For example, to set the group-specific list, add `"scope":{"type":"chat","chat_id":<group_id>}` to the same body.
+
+3. Read each configured scope and language again. Each set list must contain exactly the six names above. A deleted override should return an empty list; inspect the command menu in Telegram as a regular group member and as a group administrator to verify the inherited list, and check any configured member-specific and language-specific cases.
+
+Shared group: upgrade every instance first, then update each bot's menu, in one window. Until an instance has the new names, a command typed from its menu gets the unknown-command reply from that instance. Keeping the window short limits that to a few minutes. The release notes mark the rename as breaking.
 
 ### `/admin`
 
@@ -275,7 +319,7 @@ Telegram's command menu is scoped by chat, not by forum topic, so it cannot show
   an instance stays silent to an unaddressed `/admin` from anyone not on its own list. The list is
   checked on every message and every button of the conversation, such as a web-access decision.
 - **Conversation:** it is an Expert conversation with the same scope, providers and read-only
-  restrictions as `/ask`. Its topic starts with a notice that the chat is not private: members of
+  restrictions as `/expert`. Its topic starts with a notice that the chat is not private: members of
   the group can read it. It ends like an Expert conversation, and also after `idle_min` without a
   message or button; removing `[admin]` keeps that limit at 15 minutes for conversations already open.
 - **Commands:** the Expert may propose a command and reason, both marked as model-written. A listed
@@ -288,13 +332,13 @@ Telegram's command menu is scoped by chat, not by forum topic, so it cannot show
   message are refused. After a restart, an approved command that never issued is void; one issued
   without a recorded result is unknown and never retried. Check the host after either notice.
 
-### `/ask`
+### `/expert`
 
-- **Scope:** `/ask` opens an Expert topic. In a component topic the Expert sees only that component;
-  in General it sees all components. `/ask` needs a forum group.
-- **Shared groups:** in a shared group, an unaddressed `/ask` in General gets one selection button per
-  configured Expert. Tap a button, or address a bot directly as `/ask@bot <question>`. The **Open
-  topic** button replies to its `/ask`, so concurrent questions keep their own buttons.
+- **Scope:** `/expert` opens an Expert topic. In a component topic the Expert sees only that component;
+  in General it sees all components. `/expert` needs a forum group.
+- **Shared groups:** in a shared group, an unaddressed `/expert` in General gets one selection button per
+  configured Expert. Tap a button, or address a bot directly as `/expert@bot <question>`. The **Open
+  topic** button replies to its `/expert`, so concurrent questions keep their own buttons.
 - **Expert topics:** each message is a follow-up turn. `/effort [level]`, `/summarize` and `/help`
   work there; other commands do not, and Expert commands do not work elsewhere. `/close` ends the
   conversation, as described in [`[expert]`](#expert).
@@ -303,15 +347,15 @@ Telegram's command menu is scoped by chat, not by forum topic, so it cannot show
 - **Interrupted or uncertain:** an interrupted turn is reported and not repeated. If topic creation is
   uncertain, ask again.
 
-### `/goal`
+### `/submit`
 
-The request goes to Shikiru as written. It is not split across components or rewritten into a plan. In a component topic, the topic names the component, so write `/goal <request>` there:
+The request goes to Shikiru as written. It is not split across components or rewritten into a plan. In a component topic, the topic names the component, so write `/submit <request>` there:
 
 ```text
-/goal api Add CSV export to the reports page
+/submit api Add CSV export to the reports page
 ```
 
-### Goal outcomes
+### Request outcomes
 
 The outcome depends on what Shikiru reports:
 
@@ -361,7 +405,7 @@ An open escalation arrives with its question and the choices Shikiru offers. Tap
 
 - **Text answers:** a choice that asks for text prompts a reply to the bot's message. Reply in the same chat and topic.
 - **Confirmation:** **Accept** and **Cancel task** need a second **Confirm** tap before Shikiru receives the choice.
-- **Show again:** `/open` re-shows open questions.
+- **Show again:** `/pending` re-shows open questions.
 - **Details:** when a question is shortened to fit Telegram's message limit, it includes **Details**. That button requests the escalation packet from Shikiru and sends it in more messages. Details can contain project data. A packet that matches a secret pattern is refused and not sent.
 
 ### Reminders
@@ -387,7 +431,7 @@ The model cannot supply a command. The code builds the argument list from one of
 
 - **Install:** tap only when you approve that exact command and its effect. The command runs on the Operator host, outside the component repositories, and only after the approval is recorded. It may update the dependencies of the installed tool.
 - **Decline:** runs nothing and forwards the original escalation to you.
-- **Expiry:** an approval expires after 24 hours by default (`approval_expiry_h`). `/open` shows only approvals that are still valid and open.
+- **Expiry:** an approval expires after 24 hours by default (`approval_expiry_h`). `/pending` shows only approvals that are still valid and open.
 
 ## Automatic actions
 

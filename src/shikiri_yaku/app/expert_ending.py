@@ -60,7 +60,7 @@ class TopicDeletion(Protocol):
 class ExpertEnding:
     """Every way a conversation ends: its topic closed, /close, expiry, or a topic that is gone.
 
-    The conversation is marked ending first, so nothing new reaches it. Its /ask reply is closed
+    The conversation is marked ending first, so nothing new reaches it. Its /expert reply is closed
     before that, so the chat shows the closed reply. Its running agent call is stopped and its
     queued work drained before its topic is deleted. A refused deletion keeps the rows and is tried
     again by `sweep`; the PO is told once. The rows and directory of this conversation are erased

@@ -209,7 +209,7 @@ def test_an_over_limit_status_is_sent_in_parts_that_together_hold_its_whole_text
 
 def test_an_over_limit_unreachable_notice_is_sent_in_parts_that_name_every_project() -> None:
     with _Stack(_SilentClient) as stack:
-        stack.command("/open")
+        stack.command("/pending")
         stack.deliver()
         sent = stack.sent()
 
@@ -219,7 +219,7 @@ def test_an_over_limit_unreachable_notice_is_sent_in_parts_that_name_every_proje
     assert all(name in joined for name in _names())
 
 
-@pytest.mark.parametrize(("text", "client"), [("/status", _Client), ("/open", _SilentClient)])
+@pytest.mark.parametrize(("text", "client"), [("/status", _Client), ("/pending", _SilentClient)])
 def test_replaying_an_update_queues_no_part_again(text: str, client: type[_Client]) -> None:
     with _Stack(client) as stack:
         stack.command(text)

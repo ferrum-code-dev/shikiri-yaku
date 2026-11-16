@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = Destination("telegram", "1001")
-GOAL: Final = "/goal api Add the export"
+SUBMIT: Final = "/submit api Add the export"
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 GROUP: Final = -1005
 TOPIC: Final = 77
@@ -58,8 +58,8 @@ class _Client:
         return self.answer
 
 
-class _Goal:
-    """The /goal path over an in-memory journal and a fake Shikiru client."""
+class _Submit:
+    """The /submit path over an in-memory journal and a fake Shikiru client."""
 
     def __init__(self, database: Database, *, shared_group: bool = False) -> None:
         self.client = _Client()
@@ -103,145 +103,149 @@ class _Goal:
 
 
 @pytest.fixture
-def goal() -> Generator[_Goal]:
+def submit() -> Generator[_Submit]:
     database = Database.open(":memory:")
-    yield _Goal(database)
+    yield _Submit(database)
     database.close()
 
 
 @pytest.fixture
-def shared_goal() -> Generator[_Goal]:
+def shared_submit() -> Generator[_Submit]:
     database = Database.open(":memory:")
-    yield _Goal(database, shared_group=True)
+    yield _Submit(database, shared_group=True)
     database.close()
 
 
-def _unknown_goal(goal: _Goal, chat: int = 1001) -> tuple[int, str]:
-    """Send a goal whose outcome is unknown and flush its question; return the op id and ref."""
-    goal.client.answer = ShikiruLinkDownError("link down")
-    goal.send(GOAL, chat=chat)
-    [op] = goal.submits.unfinished()
-    [ref] = goal.flush()
-    goal.client.answer = DONE
+def _unknown_submit(submit: _Submit, chat: int = 1001) -> tuple[int, str]:
+    """Send a request whose outcome is unknown and flush its question; return the op id and ref."""
+    submit.client.answer = ShikiruLinkDownError("link down")
+    submit.send(SUBMIT, chat=chat)
+    [op] = submit.submits.unfinished()
+    [ref] = submit.flush()
+    submit.client.answer = DONE
     return op.id, ref
 
 
-def test_a_goal_is_submitted_once_and_its_task_id_is_reported(goal: _Goal) -> None:
-    goal.send(GOAL)
-    [pending] = goal.outbox.pending()
+def test_a_submit_is_submitted_once_and_its_task_id_is_reported(submit: _Submit) -> None:
+    submit.send(SUBMIT)
+    [pending] = submit.outbox.pending()
     assert pending.destination == OWNER
     assert "T-9" in pending.message.text
-    assert goal.client.requests == ["Add the export"]
+    assert submit.client.requests == ["Add the export"]
 
 
-def test_a_duplicate_update_submits_once_and_replies_once(goal: _Goal) -> None:
-    goal.send(GOAL)
-    goal.send(GOAL)
-    assert goal.client.requests == ["Add the export"]
-    assert len(goal.outbox.pending()) == 1
+def test_a_duplicate_update_submits_once_and_replies_once(submit: _Submit) -> None:
+    submit.send(SUBMIT)
+    submit.send(SUBMIT)
+    assert submit.client.requests == ["Add the export"]
+    assert len(submit.outbox.pending()) == 1
 
 
-@pytest.mark.parametrize("text", ["/goal", "/goal api", "/goal nope Add it", "/goal api   "])
-def test_a_goal_without_a_known_component_and_request_gets_usage_and_submits_nothing(
-    goal: _Goal, text: str
+@pytest.mark.parametrize(
+    "text", ["/submit", "/submit api", "/submit nope Add it", "/submit api   "]
+)
+def test_a_submit_without_a_known_component_and_request_gets_usage_and_submits_nothing(
+    submit: _Submit, text: str
 ) -> None:
-    goal.send(text)
-    [pending] = goal.outbox.pending()
-    assert "/goal" in pending.message.text
+    submit.send(text)
+    [pending] = submit.outbox.pending()
+    assert "/submit" in pending.message.text
     assert pending.message.buttons == ()
-    assert goal.client.requests == []
-    assert goal.submits.unfinished() == []
+    assert submit.client.requests == []
+    assert submit.submits.unfinished() == []
 
 
-def test_a_rejected_goal_is_reported_as_not_submitted_and_never_asked_about(goal: _Goal) -> None:
-    goal.client.answer = ShikiruRejectedError("no such component")
-    goal.send(GOAL)
-    [pending] = goal.outbox.pending()
+def test_a_rejected_submit_is_reported_as_not_submitted_and_never_asked_about(
+    submit: _Submit,
+) -> None:
+    submit.client.answer = ShikiruRejectedError("no such component")
+    submit.send(SUBMIT)
+    [pending] = submit.outbox.pending()
     assert pending.message.buttons == ()
-    assert goal.submits.unfinished() == []
+    assert submit.submits.unfinished() == []
 
 
-def test_an_unknown_outcome_is_asked_about_with_a_submit_again_button(goal: _Goal) -> None:
-    goal.client.answer = ShikiruLinkDownError("link down")
-    goal.send(GOAL)
-    [op] = goal.submits.unfinished()
-    [message] = goal.flush().values()
+def test_an_unknown_outcome_is_asked_about_with_a_submit_again_button(submit: _Submit) -> None:
+    submit.client.answer = ShikiruLinkDownError("link down")
+    submit.send(SUBMIT)
+    [op] = submit.submits.unfinished()
+    [message] = submit.flush().values()
     assert [button.data for button in message.buttons] == [f"s:{op.id}"]
-    assert goal.client.requests == ["Add the export"]
+    assert submit.client.requests == ["Add the export"]
 
 
-def test_submit_again_retries_the_unknown_goal_and_reports_its_task(goal: _Goal) -> None:
-    prompt, ref = _unknown_goal(goal)
-    goal.tap(f"s:{prompt}", ref)
-    [pending] = goal.outbox.pending()
+def test_submit_again_retries_the_unknown_submit_and_reports_its_task(submit: _Submit) -> None:
+    prompt, ref = _unknown_submit(submit)
+    submit.tap(f"s:{prompt}", ref)
+    [pending] = submit.outbox.pending()
     assert "T-9" in pending.message.text
-    assert goal.client.requests == ["Add the export"] * 2
-    original = goal.submits.get(prompt)
+    assert submit.client.requests == ["Add the export"] * 2
+    original = submit.submits.get(prompt)
     assert original is not None
     assert original.status == SubmitStatus.UNKNOWN
-    assert goal.submits.unfinished() == []
+    assert submit.submits.unfinished() == []
 
 
-def test_a_duplicate_delivery_of_one_tap_retries_once_and_replies_once(goal: _Goal) -> None:
-    prompt, ref = _unknown_goal(goal)
-    goal.tap(f"s:{prompt}", ref)
-    goal.tap(f"s:{prompt}", ref)
-    assert goal.client.requests == ["Add the export"] * 2
-    assert len(goal.outbox.pending()) == 1
+def test_a_duplicate_delivery_of_one_tap_retries_once_and_replies_once(submit: _Submit) -> None:
+    prompt, ref = _unknown_submit(submit)
+    submit.tap(f"s:{prompt}", ref)
+    submit.tap(f"s:{prompt}", ref)
+    assert submit.client.requests == ["Add the export"] * 2
+    assert len(submit.outbox.pending()) == 1
 
 
-def test_a_tap_that_was_never_offered_retries_nothing(goal: _Goal) -> None:
-    prompt, ref = _unknown_goal(goal)
-    goal.tap(f"s:{prompt}", "M-missing", update=2)
-    goal.tap(f"s:{prompt}", ref, update=3, chat=2002)
-    goal.tap("s:999", ref, update=4)
-    assert goal.client.requests == ["Add the export"]
+def test_a_tap_that_was_never_offered_retries_nothing(submit: _Submit) -> None:
+    prompt, ref = _unknown_submit(submit)
+    submit.tap(f"s:{prompt}", "M-missing", update=2)
+    submit.tap(f"s:{prompt}", ref, update=3, chat=2002)
+    submit.tap("s:999", ref, update=4)
+    assert submit.client.requests == ["Add the export"]
 
 
-def test_submit_again_tapped_in_the_group_retries_and_reports_in_the_group(goal: _Goal) -> None:
-    prompt, ref = _unknown_goal(goal, chat=GROUP)
-    goal.tap(f"s:{prompt}", ref, chat=GROUP)
-    [pending] = goal.outbox.pending()
+def test_submit_again_tapped_in_the_group_retries_and_reports_in_the_group(submit: _Submit) -> None:
+    prompt, ref = _unknown_submit(submit, chat=GROUP)
+    submit.tap(f"s:{prompt}", ref, chat=GROUP)
+    [pending] = submit.outbox.pending()
     assert "T-9" in pending.message.text
     assert pending.destination == Destination("telegram", str(GROUP))
-    assert goal.client.requests == ["Add the export"] * 2
+    assert submit.client.requests == ["Add the export"] * 2
 
 
-def test_a_goal_in_a_component_topic_is_submitted_to_that_component_in_that_topic(
-    goal: _Goal,
+def test_a_submit_in_a_component_topic_is_submitted_to_that_component_in_that_topic(
+    submit: _Submit,
 ) -> None:
-    goal.topics.save("api", TOPIC, TOPIC_OPEN)
-    goal.send("/goal Add the export", chat=GROUP, thread=TOPIC)
-    [pending] = goal.outbox.pending()
+    submit.topics.save("api", TOPIC, TOPIC_OPEN)
+    submit.send("/submit Add the export", chat=GROUP, thread=TOPIC)
+    [pending] = submit.outbox.pending()
     assert pending.destination == Destination("telegram", str(GROUP), TOPIC)
-    assert goal.client.requests == ["Add the export"]
+    assert submit.client.requests == ["Add the export"]
 
 
-def test_a_goal_in_the_general_topic_without_a_component_gets_usage_and_submits_nothing(
-    goal: _Goal,
+def test_a_submit_in_the_general_topic_without_a_component_gets_usage_and_submits_nothing(
+    submit: _Submit,
 ) -> None:
-    goal.send("/goal fix the export", chat=GROUP)
-    [pending] = goal.outbox.pending()
-    assert "/goal" in pending.message.text
+    submit.send("/submit fix the export", chat=GROUP)
+    [pending] = submit.outbox.pending()
+    assert "/submit" in pending.message.text
     assert pending.destination == Destination("telegram", str(GROUP))
-    assert goal.client.requests == []
+    assert submit.client.requests == []
 
 
-@pytest.mark.parametrize("text", ["/goal web Add the export", "/goal web"])
-def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_reply(
-    shared_goal: _Goal, text: str
+@pytest.mark.parametrize("text", ["/submit web Add the export", "/submit web"])
+def test_with_a_shared_group_a_submit_for_another_component_in_general_gets_no_reply(
+    shared_submit: _Submit, text: str
 ) -> None:
-    shared_goal.send(text, chat=GROUP)
+    shared_submit.send(text, chat=GROUP)
 
-    assert shared_goal.outbox.pending() == []
-    assert shared_goal.client.requests == []
+    assert shared_submit.outbox.pending() == []
+    assert shared_submit.client.requests == []
 
 
-def test_with_a_shared_group_a_goal_for_this_component_in_general_is_submitted(
-    shared_goal: _Goal,
+def test_with_a_shared_group_a_submit_for_this_component_in_general_is_submitted(
+    shared_submit: _Submit,
 ) -> None:
-    shared_goal.send(GOAL, chat=GROUP)
+    shared_submit.send(SUBMIT, chat=GROUP)
 
-    [pending] = shared_goal.outbox.pending()
+    [pending] = shared_submit.outbox.pending()
     assert "T-9" in pending.message.text
-    assert shared_goal.client.requests == ["Add the export"]
+    assert shared_submit.client.requests == ["Add the export"]

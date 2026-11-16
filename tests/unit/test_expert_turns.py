@@ -373,7 +373,7 @@ def test_messages_during_a_running_turn_are_answered_in_order_once(
     h = build(ladder(runner))
 
     async def scenario() -> None:
-        first = asyncio.create_task(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+        first = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
         await asyncio.wait_for(runner.started.wait(), timeout=1)
         second = asyncio.create_task(h.turns.handle(_item(2, MESSAGES[1], thread=THREAD)))
         third = asyncio.create_task(h.turns.handle(_item(3, MESSAGES[2], thread=THREAD)))
@@ -384,13 +384,13 @@ def test_messages_during_a_running_turn_are_answered_in_order_once(
     asyncio.run(scenario())
 
     _assert_prompts_in_order(runner, MESSAGES)
-    assert _answer_keys(h) == ["ask:answer:1", "ask:answer:2", "ask:answer:3"]
+    assert _answer_keys(h) == ["expert:answer:1", "expert:answer:2", "expert:answer:3"]
 
 
 def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     reply = Inbound(
         2,
         InboundKind.REPLY,
@@ -420,7 +420,7 @@ def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> 
     asyncio.run(scenario())
 
     _assert_prompts_in_order(runner, MESSAGES[:2])
-    assert _answer_keys(h) == ["ask:answer:1", "ask:answer:2"]
+    assert _answer_keys(h) == ["expert:answer:1", "expert:answer:2"]
 
 
 def test_a_private_origin_ends_through_the_expert_group_topic(
@@ -432,7 +432,7 @@ def test_a_private_origin_ends_through_the_expert_group_topic(
     async def scenario() -> None:
         ask_log = _Log(h.database, expected=1)
         ask_log.record_batch(
-            CHANNEL, [_item(1, f"/ask {MESSAGES[0]}", chat=OWNER)], 2, Clock().now()
+            CHANNEL, [_item(1, f"/expert {MESSAGES[0]}", chat=OWNER)], 2, Clock().now()
         )
         ask_service = InboundService(
             cast("InboundPoller", _Poller()),
@@ -482,14 +482,14 @@ def test_a_later_message_waits_for_the_retry_of_a_turn_whose_context_failed(
 
     async def scenario() -> None:
         with pytest.raises(ShikiruLinkDownError):
-            await h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None)
+            await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
         await h.turns.handle(_item(2, MESSAGES[1], thread=THREAD))
-        await h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None)
+        await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
 
     asyncio.run(scenario())
 
     _assert_prompts_in_order(runner, MESSAGES[:2])
-    assert _answer_keys(h) == ["ask:answer:1", "ask:answer:2"]
+    assert _answer_keys(h) == ["expert:answer:1", "expert:answer:2"]
 
 
 def test_second_turn_resumes_the_session_and_takes_the_effort(
@@ -499,7 +499,7 @@ def test_second_turn_resumes_the_session_and_takes_the_effort(
     h = build(ladder(runner))
 
     async def scenario() -> None:
-        await h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None)
+        await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
         await h.turns.handle(_item(2, "/effort high", thread=THREAD))
         await h.turns.handle(_item(3, MESSAGES[1], thread=THREAD))
 
@@ -517,7 +517,7 @@ def test_second_turn_resumes_the_session_and_takes_the_effort(
 def test_a_non_owner_in_an_expert_topic_starts_nothing(build: Callable[..., Harness]) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     journal = JournalInbound(h.database)
     stranger = _item(2, MESSAGES[1], thread=THREAD, sender=STRANGER)
     poller = InboundPoller(
@@ -541,7 +541,7 @@ def test_expert_topic_answers_other_commands_with_its_own_help(
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     asyncio.run(h.turns.handle(_item(2, "/status", thread=THREAD)))
 
     assert h.outbox.command_reply_queued("expert:command:2")
@@ -552,12 +552,12 @@ def test_expert_topic_answers_other_commands_with_its_own_help(
 @pytest.mark.parametrize(
     "text",
     [
-        "/ask hello",
+        "/expert hello",
         "/admin hello",
         "/submit all",
         "/status",
-        "/open",
-        "/goal api Add the export",
+        "/pending",
+        "/submit api Add the export",
         "/unknowncmd",
     ],
 )
@@ -566,14 +566,14 @@ def test_other_commands_in_expert_topic_get_expert_help_and_start_no_turn(
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     asyncio.run(h.turns.handle(_item(2, text, thread=THREAD)))
 
     assert h.outbox.command_reply_queued("expert:command:2")
     pending = h.outbox.pending()
     help_reply = next(p for p in pending if "/effort" in p.message.text)
     assert "/close" in help_reply.message.text
-    assert "/ask" not in help_reply.message.text
+    assert "/expert" not in help_reply.message.text
     assert "/admin" not in help_reply.message.text
     assert "/status" not in help_reply.message.text
     assert h.log.turn(2) is None
@@ -585,7 +585,7 @@ def test_expert_topic_close_ends_conversation_and_starts_no_turn(
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     asyncio.run(h.turns.handle(_item(2, "/close", thread=THREAD)))
 
     assert h.log.turn(2) is None
@@ -602,14 +602,14 @@ def test_expert_topic_help_lists_only_expert_commands(
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     asyncio.run(h.turns.handle(_item(2, "/help", thread=THREAD)))
 
     help_reply = next(p for p in h.outbox.pending() if "/effort" in p.message.text)
     assert "/summarize" in help_reply.message.text
     assert "/close" in help_reply.message.text
     assert "/help" in help_reply.message.text
-    assert "/ask" not in help_reply.message.text
+    assert "/expert" not in help_reply.message.text
     assert "/admin" not in help_reply.message.text
     assert "/status" not in help_reply.message.text
     assert h.log.turn(2) is None
@@ -621,7 +621,7 @@ def test_expert_commands_have_leading_space_tolerance(
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     asyncio.run(h.turns.handle(_item(2, "  /help", thread=THREAD)))
 
     assert h.outbox.command_reply_queued("expert:command:2")
@@ -634,7 +634,7 @@ def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_co
 ) -> None:
     runner = Runner()
     h = build(ladder(runner))
-    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     command_in_expert = _item(2, "/status", thread=THREAD)
     command_outside = _item(3, "/help", thread=77)
 
@@ -680,7 +680,7 @@ def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_co
     global_reply = next(
         p for p in pending if "/status" in p.message.text and "/close" not in p.message.text
     )
-    assert "/goal" in global_reply.message.text
+    assert "/submit" in global_reply.message.text
 
 
 @pytest.mark.parametrize("text", ["hello", "/help"])
@@ -691,7 +691,7 @@ def test_shared_group_inbound_routing_in_foreign_expert_topic(
     other_runner = Runner()
     owner = build(ladder(owner_runner), shared_group=True)
     other = build(ladder(other_runner), shared_group=True)
-    asyncio.run(owner.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(owner.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     item = _item(10, text, thread=THREAD)
 
     assert owner.turns.owns(item)
@@ -771,7 +771,7 @@ def test_close_and_effort_outside_expert_are_unknown(
         pending for pending in h.outbox.pending() if "Unknown command" in pending.message.text
     ]
     assert reply.message.text.startswith("Unknown command")
-    assert "/ask" in reply.message.text
+    assert "/expert" in reply.message.text
     help_body = reply.message.text.split("\n", 1)[-1]
     assert "/close" not in help_body
     assert not runner.calls
