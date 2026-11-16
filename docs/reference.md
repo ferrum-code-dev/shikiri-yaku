@@ -223,10 +223,10 @@ Several instances can share one forum group. Each instance needs its own bot, to
 
 Give every instance the same `group_id`, and set `shared_group = true` in each `[channels.telegram]` table. `shared_group` requires `group_id`. With it:
 
-- A command (text that starts with `/`) in a topic that is neither General nor this instance's component topic gets no reply from this instance.
+- A message in a topic that is neither General nor this instance's component topic nor this instance's Expert topic gets no reply from this instance.
 - `/goal <component> <request>` in General is submitted only when `<component>` belongs to this instance. For another instance's component, it gets no reply.
 - `/status` and `/open` in General cover only this instance's components.
-- `/help`, free text, and a `/goal` without a component are answered by every instance's bot. The group receives one list per instance.
+- `/help`, free text, and a `/goal` without a component are answered by every instance's bot only in General. The group receives one list per instance.
 
 Every instance's bot must be an administrator of the group, with the manage-topics right, and with `[expert]` the delete-messages right (`can_delete_messages`). Start-up reads the administrators, including the other bots. It admits the owners, this bot, and the other administrator bots. It refuses any other member, and any bot that is not an administrator. To admit an instance's bot, make it an administrator.
 

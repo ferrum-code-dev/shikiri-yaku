@@ -297,17 +297,32 @@ def test_with_a_shared_group_a_command_in_another_instances_topic_gets_no_reply(
     assert shared.client.requests == []
 
 
-def test_with_a_shared_group_free_text_in_another_instances_topic_gets_the_list(
-    shared: Harness,
+@pytest.mark.parametrize("text", ["hello", None])
+def test_with_a_shared_group_free_text_in_another_instances_topic_gets_no_reply(
+    shared: Harness, text: str | None
 ) -> None:
-    shared.send("hello", thread=UNNAMED_TOPIC)
+    shared.send(text, thread=UNNAMED_TOPIC)
 
-    assert len(shared.outbox.pending()) == 1
+    assert shared.outbox.pending() == []
+
+
+def test_without_a_shared_group_free_text_in_other_topic_gets_the_list(
+    h: Harness,
+) -> None:
+    h.send("hello", thread=UNNAMED_TOPIC)
+
+    assert len(h.outbox.pending()) == 1
 
 
 @pytest.mark.parametrize(
     ("thread", "text"),
-    [(None, "/status"), (API_TOPIC, "/status"), (None, "/help")],
+    [
+        (None, "/status"),
+        (API_TOPIC, "/status"),
+        (None, "/help"),
+        (None, "hello"),
+        (API_TOPIC, "hello"),
+    ],
 )
 def test_with_a_shared_group_text_in_general_or_an_own_topic_is_answered(
     shared: Harness, thread: int | None, text: str

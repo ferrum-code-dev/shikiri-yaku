@@ -198,6 +198,7 @@ class Harness:
         *,
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
+        shared_group: bool = False,
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
@@ -276,6 +277,7 @@ class Harness:
             destinations=FixedDestinations(topics={77: "api"}),
             channel=CHANNEL,
             name_max_chars=40,
+            shared_group=shared_group,
             ask=self.ask,
         )
 
@@ -290,8 +292,11 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         *,
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
+        shared_group: bool = False,
     ) -> Harness:
-        harness = Harness(tmp_path, expert, client, muse=muse, admins=admins)
+        harness = Harness(
+            tmp_path, expert, client, muse=muse, admins=admins, shared_group=shared_group
+        )
         made.append(harness)
         return harness
 
@@ -676,6 +681,64 @@ def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_co
         p for p in pending if "/status" in p.message.text and "/close" not in p.message.text
     )
     assert "/goal" in global_reply.message.text
+
+
+@pytest.mark.parametrize("text", ["hello", "/help"])
+def test_shared_group_inbound_routing_in_foreign_expert_topic(
+    build: Callable[..., Harness], text: str
+) -> None:
+    owner_runner = Runner()
+    other_runner = Runner()
+    owner = build(ladder(owner_runner), shared_group=True)
+    other = build(ladder(other_runner), shared_group=True)
+    asyncio.run(owner.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    item = _item(10, text, thread=THREAD)
+
+    assert owner.turns.owns(item)
+    assert not other.turns.owns(item)
+
+    async def route(h: Harness) -> None:
+        log = _Log(h.database, expected=1)
+        log.record_batch(CHANNEL, [item], 11, Clock().now())
+        replies = Replies(
+            JournalReplies(
+                h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
+            ),
+            h.outbox,
+            Clock(),
+            {},
+            channel=CHANNEL,
+            commands=h.commands,
+            goal=cast("GoalCommand", None),
+            expert_turns=h.turns,
+        )
+        service = InboundService(
+            cast("InboundPoller", _Poller()),
+            log,
+            replies,
+            cast("HealthSource", _Health()),
+            Clock(),
+            interval_s=1,
+            expert=h.turns,
+        )
+        await service.tick()
+        await asyncio.wait_for(log.handled.wait(), timeout=1)
+
+    asyncio.run(route(owner))
+    asyncio.run(route(other))
+
+    assert len(other_runner.calls) == 0
+    assert other.log.turn(10) is None
+    assert other.outbox.pending() == []
+    assert not other.outbox.command_reply_queued("command:10")
+    assert not other.outbox.command_reply_queued("expert:command:10")
+    if text == "/help":
+        assert owner.outbox.command_reply_queued("expert:command:10")
+        assert owner.log.turn(10) is None
+        assert len(owner_runner.calls) == 1
+    else:
+        assert owner.log.turn(10) is not None
+        assert len(owner_runner.calls) == 2
 
 
 @pytest.mark.parametrize("text", ["/effort high", "/summarize"])
