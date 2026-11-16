@@ -258,6 +258,8 @@ If start-up reports an uncertain topic creation, check the forum yourself. Then 
 
 Commands work in private chats and in forum topics. Replies go to the chat and topic where the command was sent.
 
+Telegram's command menu is scoped by chat, not by forum topic, so it cannot show different lists per topic. The Operator does not configure the Telegram command menu (a bot may already have commands configured externally); `/help` is the context-specific presentation: it lists the global commands outside Expert topics and the topic commands (`/effort`, `/summarize`, `/close`, `/help`) inside them.
+
 | Command | What it does |
 | --- | --- |
 | `/status` | Shows each component's engine state, running, queued and escalated task counts, quota blocks, and Reasoner rung health. In a component topic, it shows only that component, without the Reasoner rungs. |

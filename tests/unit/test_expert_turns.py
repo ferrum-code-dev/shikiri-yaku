@@ -544,6 +544,140 @@ def test_expert_topic_answers_other_commands_with_its_own_help(
     assert len(runner.calls) == 1
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/ask hello",
+        "/admin hello",
+        "/submit all",
+        "/status",
+        "/open",
+        "/goal api Add the export",
+        "/unknowncmd",
+    ],
+)
+def test_other_commands_in_expert_topic_get_expert_help_and_start_no_turn(
+    build: Callable[..., Harness], text: str
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.turns.handle(_item(2, text, thread=THREAD)))
+
+    assert h.outbox.command_reply_queued("expert:command:2")
+    pending = h.outbox.pending()
+    help_reply = next(p for p in pending if "/effort" in p.message.text)
+    assert "/close" in help_reply.message.text
+    assert "/ask" not in help_reply.message.text
+    assert "/admin" not in help_reply.message.text
+    assert "/status" not in help_reply.message.text
+    assert h.log.turn(2) is None
+    assert len(runner.calls) == 1
+
+
+def test_expert_topic_close_ends_conversation_and_starts_no_turn(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.turns.handle(_item(2, "/close", thread=THREAD)))
+
+    assert h.log.turn(2) is None
+    assert len(runner.calls) == 1
+    from tests.support.copies import Platform, deliver  # noqa: PLC0415
+
+    deliver(h.outbox, h.final, Clock(), Platform(), gone=h.ending)
+    asyncio.run(h.ending.sweep())
+    assert h.log.get(1) is None
+
+
+def test_expert_topic_help_lists_only_expert_commands(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.turns.handle(_item(2, "/help", thread=THREAD)))
+
+    help_reply = next(p for p in h.outbox.pending() if "/effort" in p.message.text)
+    assert "/summarize" in help_reply.message.text
+    assert "/close" in help_reply.message.text
+    assert "/help" in help_reply.message.text
+    assert "/ask" not in help_reply.message.text
+    assert "/admin" not in help_reply.message.text
+    assert "/status" not in help_reply.message.text
+    assert h.log.turn(2) is None
+    assert len(runner.calls) == 1
+
+
+def test_expert_commands_have_leading_space_tolerance(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    asyncio.run(h.turns.handle(_item(2, "  /help", thread=THREAD)))
+
+    assert h.outbox.command_reply_queued("expert:command:2")
+    assert h.log.turn(2) is None
+    assert len(runner.calls) == 1
+
+
+def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_commands(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.ask.handle(_item(1, f"/ask {MESSAGES[0]}"), None))
+    command_in_expert = _item(2, "/status", thread=THREAD)
+    command_outside = _item(3, "/help", thread=77)
+
+    assert h.turns.owns(command_in_expert)
+    assert not h.turns.owns(command_outside)
+
+    async def scenario() -> None:
+        log = _Log(h.database, expected=2)
+        log.record_batch(CHANNEL, [command_in_expert, command_outside], 4, Clock().now())
+        replies = Replies(
+            JournalReplies(
+                h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
+            ),
+            h.outbox,
+            Clock(),
+            {},
+            channel=CHANNEL,
+            commands=h.commands,
+            goal=cast("GoalCommand", None),
+            expert_turns=h.turns,
+        )
+        service = InboundService(
+            cast("InboundPoller", _Poller()),
+            log,
+            replies,
+            cast("HealthSource", _Health()),
+            Clock(),
+            interval_s=1,
+            expert=h.turns,
+        )
+        await service.tick()
+        await asyncio.wait_for(log.handled.wait(), timeout=1)
+
+    asyncio.run(scenario())
+    assert h.outbox.command_reply_queued("expert:command:2")
+    assert h.outbox.command_reply_queued("command:3")
+    assert h.log.turn(2) is None
+    assert h.log.turn(3) is None
+    assert len(runner.calls) == 1
+    pending = h.outbox.pending()
+    expert_reply = next(p for p in pending if "/close" in p.message.text)
+    assert "/effort" in expert_reply.message.text
+    global_reply = next(
+        p for p in pending if "/status" in p.message.text and "/close" not in p.message.text
+    )
+    assert "/goal" in global_reply.message.text
+
+
 @pytest.mark.parametrize("text", ["/effort high", "/summarize"])
 @pytest.mark.parametrize("thread", [None, 77])
 def test_expert_commands_are_unavailable_outside_expert_topics(
@@ -560,6 +694,25 @@ def test_expert_commands_are_unavailable_outside_expert_topics(
     assert reply.message.text.startswith("Unknown command")
     assert h.log.get(2) is None
     assert not runner.calls
+
+
+@pytest.mark.parametrize("text", ["/close", "/effort", "/effort high", "/summarize"])
+@pytest.mark.parametrize("thread", [None, 77])
+def test_close_and_effort_outside_expert_are_unknown(
+    build: Callable[..., Harness], text: str, thread: int | None
+) -> None:
+    runner = Runner()
+    h = build(ladder(runner))
+    asyncio.run(h.commands.handle(_item(2, text, thread=thread)))
+    [reply] = [
+        pending for pending in h.outbox.pending() if "Unknown command" in pending.message.text
+    ]
+    assert reply.message.text.startswith("Unknown command")
+    assert "/ask" in reply.message.text
+    help_body = reply.message.text.split("\n", 1)[-1]
+    assert "/close" not in help_body
+    assert not runner.calls
+    assert h.log.get(2) is None
 
 
 @pytest.mark.parametrize("muse", [False, True])

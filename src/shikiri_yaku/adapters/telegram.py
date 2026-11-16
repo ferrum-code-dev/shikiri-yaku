@@ -1,4 +1,11 @@
-"""The Channel over the Telegram Bot API: send and edit a message in the PO's chat."""
+"""The Channel over the Telegram Bot API: send and edit a message in the PO's chat.
+
+Bot command menus are scoped by chat, not by forum topic (BotCommandScopeChat has only
+chat_id, no message_thread_id), so the Operator does not configure the Telegram command
+menu; a bot may already have commands configured externally. Context-specific presentation
+is /help, which lists the global commands outside Expert topics and the topic commands
+inside them.
+"""
 
 from __future__ import annotations
 

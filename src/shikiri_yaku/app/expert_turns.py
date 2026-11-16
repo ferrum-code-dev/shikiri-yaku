@@ -176,7 +176,7 @@ class ExpertTurns:
         self._log.touch(conversation.id, self._clock.now())
         text = item.text or ""
         words = text.split()
-        if not text.startswith("/"):
+        if not words or not words[0].startswith("/"):
             self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
             await self.run(conversation.id, item.update_id)
             return
