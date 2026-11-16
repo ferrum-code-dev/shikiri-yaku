@@ -674,6 +674,56 @@ def test_the_submitted_count_leaves_out_a_task_that_failed_or_is_unknown(
     assert submitted_count(harness.final_body(FIRST)) == (1, 2)
 
 
+def test_a_submitted_proposal_replaces_the_action_message_without_the_reply() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first")], reply="Plan detail")
+    assert "Plan detail" in "\n".join(harness.texts(FIRST))
+    harness.tap(2, submit_all_data(FIRST))
+    final = harness.final_body(FIRST)
+    assert "1. alpha · first: submitted as task T-first" in final
+    assert "Submitted: 1 of 1 tasks." in final
+    assert "Plan detail" not in final
+    assert "\n".join(harness.texts(FIRST)).count("Plan detail") == 1
+
+
+def test_an_interrupted_proposal_replaces_the_action_message_without_the_reply() -> None:
+    alpha = FakeShikiru(crash_on=2)
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "one"), ("alpha", "two")], reply="Plan detail")
+    with pytest.raises(CrashError):
+        harness.tap(2, submit_all_data(FIRST))
+    harness.proposals = harness.restart()
+    harness.proposals.recover()
+    final = harness.final_body(FIRST)
+    assert "1. alpha · one: submitted as task T-one" in final
+    assert (
+        "2. alpha · two: unknown, it may have reached Shikiru; not sent again, please check"
+        in final
+    )
+    assert "Interrupted by a restart" in final
+    assert "Plan detail" not in final
+    assert "\n".join(harness.texts(FIRST)).count("Plan detail") == 1
+
+
+def test_a_too_long_submitted_result_anchors_without_the_reply() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "x" * 5000)], reply="Plan detail")
+    harness.tap(2, submit_all_data(FIRST))
+    final = harness.final_body(FIRST)
+    assert "Submitted: 1 of 1 tasks; results follow." in final
+    assert "Plan detail" not in final
+
+
+def test_a_rejected_proposal_replaces_the_action_message_without_the_reply() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first")], reply="Plan detail")
+    harness.tap(2, reject_all_data(FIRST))
+    final = harness.final_body(FIRST)
+    assert json.loads(final)["text"] == "Rejected. Nothing submitted."
+    assert "Plan detail" not in final
+
+
 def test_a_task_id_longer_than_a_message_is_shown_in_full_across_result_messages() -> None:
     alpha = FakeShikiru()
     harness = Harness({"alpha": alpha})

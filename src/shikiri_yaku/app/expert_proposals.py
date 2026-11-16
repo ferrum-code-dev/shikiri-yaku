@@ -36,7 +36,6 @@ from shikiri_yaku.ports import (
     SubmitPayload,
     SubmitStatus,
     join_blocks,
-    text_room,
 )
 from shikiri_yaku.settings import ADMIN_APPROVAL_EXPIRY_MIN
 
@@ -524,21 +523,16 @@ def _settled_messages(
     if state in (ProposalStatus.SUBMITTED, ProposalStatus.INTERRUPTED):
         outcomes = _outcome_lines(answer.tasks, ops)
         if secret_form(outcomes) is not None:
-            return (
-                Message(
-                    _render(answer.reply, "", "Task results were withheld by secret protection.")
-                ),
-            )
+            return (Message("Task results were withheld by secret protection."),)
         if state == ProposalStatus.INTERRUPTED:
             status = anchor_status = _INTERRUPTED
         else:
             status = _submitted_line(ops, ".")
             anchor_status = _submitted_line(ops, "; results follow.")
-        complete = _render(answer.reply, outcomes, status)
+        complete = join_blocks("\n".join(outcomes), status)
         if len(complete) <= MESSAGE_TEXT_LIMIT:
             return (Message(complete),)
-        anchor = _render(answer.reply, "", anchor_status)
-        return (Message(anchor), *_result_messages(outcomes))
+        return (Message(anchor_status), *_result_messages(outcomes))
     if state in (ProposalStatus.REJECTED, ProposalStatus.VOIDED):
         if secret_form(_task_lines(answer.tasks)) is not None:
             return (Message("Proposal task details were withheld by secret protection."),)
@@ -654,10 +648,3 @@ def _number_lines(label: str, numbers: list[int]) -> list[str]:
             current = f"{current}{separator}{value}"
     lines.append(current)
     return lines
-
-
-def _render(reply: str, tasks: list[str] | str, status: str) -> str:
-    task_text = "\n".join(tasks) if isinstance(tasks, list) else tasks
-    block = join_blocks(task_text, status)
-    room = text_room(block)
-    return join_blocks(fit(reply, room), block) if room > 0 else block

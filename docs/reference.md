@@ -329,12 +329,13 @@ outcome is shown too. Long outcomes continue in following messages, preserving t
 Shikiru task ids.
 
 - **Submit all:** each task's text goes to its component with `submit_task`, one submit op per task,
-  in the order given, one at a time. The action message is then edited to remove its buttons and
-  show the outcome when it fits, with a line `Submitted: N of M tasks.` that counts the confirmed
-  tasks; otherwise that line ends `; results follow.` and the outcomes continue in result messages.
-  Each outcome includes the full Shikiru task id, "not submitted, Shikiru refused it", or "unknown".
-  The submit stops at the first task that is unknown or whose component is not configured; the
-  tasks after it stay unsent.
+  in the order given, one at a time. The reply itself stays in the earlier answer message; the
+  action message is edited to remove its buttons and show only the final state: one line per task
+  (component, title, and the outcome) followed by `Submitted: N of M tasks.`, which counts the
+  confirmed tasks. When that does not fit, the line ends `; results follow.` and the outcomes
+  continue in result messages. Each outcome includes the full Shikiru task id,
+  "not submitted, Shikiru refused it", or "unknown". The submit stops at the first task that is
+  unknown or whose component is not configured; the tasks after it stay unsent.
 - **Reject all:** nothing is submitted, and the message says so.
 - **Once only:** a tap submits at most once. A second tap, a tap after a restart, and a tap on a
   proposal that a newer answer in the same conversation voided each submit nothing and say why. A
