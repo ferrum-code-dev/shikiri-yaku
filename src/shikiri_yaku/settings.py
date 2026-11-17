@@ -75,6 +75,7 @@ REMINDER_FIRST_H: Final = 4
 REMINDER_REPEAT_H: Final = 24
 MESSAGE_TITLE_MAX_CHARS: Final = 80
 BUTTON_LABEL_MAX_CHARS: Final = 30
+NOTICE_TASKS_MAX: Final = 10
 
 REASONER_TIMEOUT_S: Final = 120
 REASONER_COOLDOWN_MIN: Final = 5
@@ -217,9 +218,14 @@ class ProductHandlerSettings(_FrozenModel):
     button_label_max_chars: PositiveInt = BUTTON_LABEL_MAX_CHARS
 
 
+class NoticeHandlerSettings(_FrozenModel):
+    tasks_max: PositiveInt = NOTICE_TASKS_MAX
+
+
 class HandlersSettings(_FrozenModel):
     infrastructure: InfrastructureSettings = Field(default_factory=InfrastructureSettings)
     product: ProductHandlerSettings = Field(default_factory=ProductHandlerSettings)
+    notice: NoticeHandlerSettings = Field(default_factory=NoticeHandlerSettings)
 
 
 def _split_rung(value: object) -> object:

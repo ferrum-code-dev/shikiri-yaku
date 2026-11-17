@@ -45,6 +45,7 @@ from shikiri_yaku.ports import DoctorCheck, ShikiruLinkDownError, ShikiruRejecte
 from shikiri_yaku.settings import (
     BUTTON_LABEL_MAX_CHARS,
     MESSAGE_TITLE_MAX_CHARS,
+    NOTICE_TASKS_MAX,
     InfrastructureSettings,
 )
 from tests.support.destinations import FixedDestinations
@@ -284,6 +285,7 @@ def test_a_failed_notice_is_information_and_closes_its_signal(h: Harness) -> Non
         Notifier(h.outbox, destinations, clock),
         clock,
         destinations=destinations,
+        tasks_max=NOTICE_TASKS_MAX,
     )
     router = Router(
         RuleClassifier([extension, product_extension()]),

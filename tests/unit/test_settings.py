@@ -14,6 +14,7 @@ from shikiri_yaku.settings import (
     HandlersSettings,
     InfrastructureSettings,
     LadderRung,
+    NoticeHandlerSettings,
     OperatorSettings,
     ProductHandlerSettings,
     ReasonerSettings,
@@ -61,6 +62,9 @@ approval_expiry_h = 24
 [handlers.product]
 reminder_first_h = 4
 reminder_repeat_h = 24
+
+[handlers.notice]
+tasks_max = 10
 """
 
 _HEADER: Final = 'product = "shop"\n'
@@ -174,6 +178,7 @@ _BAD_VALUES: list[tuple[str, str]] = [
         "handlers.product.reminder_repeat_h",
         _edit("reminder_repeat_h = 24", "reminder_repeat_h = 0"),
     ),
+    ("handlers.notice.tasks_max", _edit("tasks_max = 10", "tasks_max = 0")),
     ("reasoner.timeout_s", _edit("timeout_s = 120", "timeout_s = 0")),
     ("reasoner.timeout_s", _edit("timeout_s = 120", "timeout_s = 1.5")),
     ("reasoner.cooldown_min", _edit("cooldown_min = 5", "cooldown_min = 0")),
@@ -213,6 +218,7 @@ def test_the_full_sample_config_loads_with_the_values_it_sets(tmp_path: Path) ->
                 approval_expiry_h=24,
             ),
             product=ProductHandlerSettings(reminder_first_h=4, reminder_repeat_h=24),
+            notice=NoticeHandlerSettings(tasks_max=10),
         ),
         reasoner=ReasonerSettings(
             ladder=(

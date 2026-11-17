@@ -60,6 +60,16 @@ All keys are optional. Every value is a positive integer.
 | `reminder_first_h` | 4 | `reminder_repeat_h` | 24 |
 | `message_title_max_chars` | 80 | `button_label_max_chars` | 30 |
 
+### `[handlers.notice]`
+
+All keys are optional. Every value is a positive integer.
+
+| Setting | Default |
+| --- | ---: |
+| `tasks_max` | 10 |
+
+`tasks_max` is how many tasks the finished-work notice lists before the "+N more" line.
+
 ### `[reasoner]`
 
 The section is optional. Without it, the Reasoner is off, and escalations that need a model assessment go to the Product Owner.
@@ -444,7 +454,7 @@ The Operator acts on its own only in the cases below. Anything else reaches you 
 - **Engine down or faulted** (`engine_down`, `engine_fault`): the bot asks Shikiru to start the engine, waits until it is up, and tells you. If the start is refused, fails or is not confirmed, the bot forwards the failed `shikiru doctor` checks and asks you to run `shikiru start` in that project. An `engine_error` escalation gets the same restart if the engine is down, and is then retried. Restarts are limited to `restart_budget_per_hour` per component, one an hour by default.
 - **Missing tool:** an install runs only after you tap **Install**. See [Install approval](#install-approval).
 - **Pull request ready for review:** when Shikiru reports an open pull request for a task, the bot sends its title, its commit count and an **Open PR** link, with **Stop reminders**. When the pull request is merged, closed unmerged or withdrawn, the message is edited to a final line that says how it ended. The Operator never merges, comments on or reviews a pull request.
-- **Finished work:** when a task and its child tasks have all settled, the bot sends one notice per task family, such as "api · Export invoices integrated (3 tasks)". It has no buttons.
+- **Finished work:** when a task and its child tasks have all settled, the bot sends one notice per task family once, such as "api · Export invoices — 3 of 3 tasks integrated". In a component topic the component name is left out. The headline counts the tasks integrated out of the family total, with "⚠️" in front when not all were integrated. One line per task follows: a status mark (✅ for done, ❌ for cancelled, ❓ for anything else), the Shikiru task id and the title, plus the outcome in parentheses for a task that did not land. A family too large for the short list shows the first `tasks_max` tasks (10 by default, `[handlers.notice]`) and ends with "+N more", so the message stays within Telegram's message limit. The notice has no buttons and no lines, commit counts, timings or summary.
 - **Health:** when every Reasoner rung fails, decisions are forwarded without a suggestion. When a component's Shikiru link stays unreachable for `link_unreachable_min` (10 minutes by default), the bot says so. Either notice has **Stop reminders** and is edited to "Recovered" when the problem clears.
 
 Standing messages (the pull-request message and the health notices) keep their **Stop reminders** button. It silences their reminders without closing the underlying signal.

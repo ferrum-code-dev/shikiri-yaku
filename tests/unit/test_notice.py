@@ -37,7 +37,15 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.topics import TopicStore
-from shikiri_yaku.ports import Button, Message, ShikiruLinkDownError, ShikiruTask, TaskStatus
+from shikiri_yaku.ports import (
+    MESSAGE_TEXT_LIMIT,
+    Button,
+    Message,
+    ShikiruLinkDownError,
+    ShikiruTask,
+    TaskStatus,
+)
+from shikiri_yaku.settings import NOTICE_TASKS_MAX
 from tests.support.destinations import FixedDestinations
 from tests.support.notices import WHERE, journal_notifier, journal_outbox
 
@@ -50,7 +58,19 @@ if TYPE_CHECKING:
 PROJECT: Final = "api"
 NOW: Final = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
 HEALTH_TEXT: Final = "The link to api has been unreachable since 09:00."
-FAMILY_TEXT: Final = "api · Title of T-1 integrated (3 tasks)"
+FAMILY_TEXT: Final = (
+    "api · Title of T-1 — 3 of 3 tasks integrated\n"
+    "✅ T-1 Title of T-1\n"
+    "✅ T-2 Title of T-2\n"
+    "✅ T-3 Title of T-3"
+)
+CANCELLED_TEXT: Final = (
+    "⚠️ api · Title of T-1 — 2 of 3 tasks integrated\n"
+    "✅ T-1 Title of T-1\n"
+    "✅ T-2 Title of T-2\n"
+    "❌ T-3 Title of T-3 (cancelled)"
+)
+SINGLE_TEXT: Final = "api · Title of T-1 — 1 of 1 task integrated\n✅ T-1 Title of T-1"
 
 
 class _Clock:
@@ -102,9 +122,16 @@ def memory() -> Generator[Database]:
     database.close()
 
 
-def _task(task_id: str, status: str, parent: str | None = None) -> ShikiruTask:
+def _task(
+    task_id: str, status: str, parent: str | None = None, *, title: str | None = None
+) -> ShikiruTask:
     return ShikiruTask.model_validate(
-        {"id": task_id, "parent_id": parent, "status": status, "title": f"Title of {task_id}"}
+        {
+            "id": task_id,
+            "parent_id": parent,
+            "status": status,
+            "title": title if title is not None else f"Title of {task_id}",
+        }
     )
 
 
@@ -121,7 +148,9 @@ def _done(database: Database, task_id: str) -> tuple[int, Signal]:
     return number, stored.to_signal()
 
 
-def _handler(database: Database, client: _Tasks) -> NoticeHandler:
+def _handler(
+    database: Database, client: _Tasks, *, tasks_max: int = NOTICE_TASKS_MAX
+) -> NoticeHandler:
     outbox = journal_outbox(database)
     return NoticeHandler(
         {PROJECT: cast("ShikiruClient", client)},
@@ -130,6 +159,7 @@ def _handler(database: Database, client: _Tasks) -> NoticeHandler:
         journal_notifier(outbox, _Clock()),
         _Clock(),
         destinations=FixedDestinations([WHERE]),
+        tasks_max=tasks_max,
     )
 
 
@@ -142,14 +172,14 @@ ANNOUNCED = [
     pytest.param(
         [_task("T-1", TaskStatus.DONE)],
         "T-1",
-        ["api · Title of T-1 integrated (1 task)"],
-        id="a task with no children is announced at once",
+        [SINGLE_TEXT],
+        id="a single-task family lists its only task",
     ),
     pytest.param(
         [*FAMILY_OF_THREE, _task("T-3", TaskStatus.DONE, "T-1")],
         "T-3",
         [FAMILY_TEXT],
-        id="the last of three is announced for the family with the count 3",
+        id="all tasks done are announced with every task listed",
     ),
     pytest.param(
         [*FAMILY_OF_THREE, _task("T-3", TaskStatus.DONE, "T-2")],
@@ -160,8 +190,8 @@ ANNOUNCED = [
     pytest.param(
         [*FAMILY_OF_THREE, _task("T-3", TaskStatus.CANCELLED, "T-1")],
         "T-2",
-        [FAMILY_TEXT],
-        id="a cancelled child neither holds the family back nor leaves the count",
+        [CANCELLED_TEXT],
+        id="a cancelled task is marked with its outcome and the headline warns",
     ),
 ]
 SILENT = [
@@ -210,6 +240,89 @@ def test_a_family_with_an_open_task_stays_silent(
 
     assert outcome == Resolved(WAITING)
     assert _texts(memory) == []
+
+
+def test_a_family_too_large_for_the_short_list_shows_the_first_tasks_and_the_rest_as_more(
+    memory: Database,
+) -> None:
+    tasks = [
+        _task("T-1", TaskStatus.DONE),
+        *[_task(f"T-{n}", TaskStatus.DONE, "T-1") for n in range(2, 13)],
+    ]
+    _, signal = _done(memory, "T-12")
+
+    asyncio.run(_handler(memory, _Tasks(tasks)).handle(signal))
+
+    [text] = _texts(memory)
+    lines = text.splitlines()
+    assert lines[0] == "api · Title of T-1 — 12 of 12 tasks integrated"
+    assert lines[1:11] == [f"✅ T-{n} Title of T-{n}" for n in range(1, 11)]
+    assert lines[-1] == "+2 more"
+    assert len(text) <= MESSAGE_TEXT_LIMIT
+
+
+def test_a_family_with_long_titles_stays_within_the_telegram_limit(memory: Database) -> None:
+    long_title = "x" * 500
+    tasks = [
+        _task("T-1", TaskStatus.DONE, title=long_title),
+        *[
+            _task(f"T-{n}", TaskStatus.DONE, "T-1", title=f"T-{n} {long_title}")
+            for n in range(2, 14)
+        ],
+    ]
+    _, signal = _done(memory, "T-13")
+
+    asyncio.run(_handler(memory, _Tasks(tasks)).handle(signal))
+
+    [text] = _texts(memory)
+    assert len(text) <= MESSAGE_TEXT_LIMIT
+    assert text.splitlines()[-1].startswith("+")
+    assert "13 of 13 tasks integrated" in text
+
+
+def test_the_configured_task_limit_controls_the_short_list(memory: Database) -> None:
+    _, signal = _done(memory, "T-3")
+
+    asyncio.run(
+        _handler(
+            memory,
+            _Tasks(
+                [
+                    _task("T-1", TaskStatus.DONE),
+                    _task("T-2", TaskStatus.DONE, "T-1"),
+                    _task("T-3", TaskStatus.DONE, "T-1"),
+                ]
+            ),
+            tasks_max=2,
+        ).handle(signal)
+    )
+
+    [text] = _texts(memory)
+    assert text.splitlines() == [
+        "api · Title of T-1 — 3 of 3 tasks integrated",
+        "✅ T-1 Title of T-1",
+        "✅ T-2 Title of T-2",
+        "+1 more",
+    ]
+
+
+def test_a_root_title_longer_than_the_message_limit_keeps_the_count_and_the_omission(
+    memory: Database,
+) -> None:
+    tasks = [
+        _task("T-1", TaskStatus.DONE, title="x" * (MESSAGE_TEXT_LIMIT + 1000)),
+        _task("T-2", TaskStatus.DONE, "T-1"),
+        _task("T-3", TaskStatus.DONE, "T-1"),
+    ]
+    _, signal = _done(memory, "T-3")
+
+    asyncio.run(_handler(memory, _Tasks(tasks)).handle(signal))
+
+    [text] = _texts(memory)
+    assert len(text) <= MESSAGE_TEXT_LIMIT
+    assert text.splitlines()[0].endswith(" — 3 of 3 tasks integrated")
+    assert "3 of 3 tasks integrated" in text
+    assert text.splitlines()[-1].startswith("+")
 
 
 def test_replaying_the_events_of_a_finished_family_sends_nothing_more(memory: Database) -> None:
@@ -331,6 +444,7 @@ def _router(database: Database, client: _Tasks, fallback: _Fallback) -> Router:
         journal_notifier(outbox, _Clock()),
         _Clock(),
         destinations=FixedDestinations([WHERE]),
+        tasks_max=NOTICE_TASKS_MAX,
     )
     return Router(
         RuleClassifier([extension, product_extension()]),
@@ -369,7 +483,7 @@ def test_a_finished_task_is_informed_and_its_signal_closes_without_forwarding(
     stored = SignalStore(memory).get(number)
     assert stored is not None
     assert stored.state is SignalState.CLOSED
-    assert _texts(memory) == ["api · Title of T-1 integrated (1 task)"]
+    assert _texts(memory) == [SINGLE_TEXT]
     assert fallback.forwarded == []
 
 
@@ -392,6 +506,7 @@ def test_the_integrated_notice_names_the_component_only_outside_its_topic(
         Notifier(outbox, destinations, _Clock()),
         _Clock(),
         destinations=destinations,
+        tasks_max=NOTICE_TASKS_MAX,
     )
     _, signal = _done(memory, "T-1")
 
@@ -399,4 +514,4 @@ def test_the_integrated_notice_names_the_component_only_outside_its_topic(
 
     [text] = _texts(memory)
     assert text.startswith(f"{PROJECT} · ") == prefixed
-    assert "Title of T-1 integrated (1 task)" in text
+    assert "Title of T-1 — 1 of 1 task integrated" in text

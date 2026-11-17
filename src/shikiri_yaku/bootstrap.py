@@ -332,6 +332,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         numbers=SignalStore(journal),
         outbox=outbox,
         destinations=destinations,
+        notice_tasks_max=settings.handlers.notice.tasks_max,
     )
     # keep: copies of an older journal are marked before any signal is routed or any copy is sent
     Repairs(journal).adopt_legacy_standing(
@@ -714,6 +715,7 @@ def registered_extensions(
     numbers: SignalNumbers,
     outbox: Outbox,
     destinations: Destinations,
+    notice_tasks_max: int,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
     install = InstallAction(
@@ -742,7 +744,15 @@ def registered_extensions(
     review = review_extension(
         clients, numbers, outbox, clock, product=product, destinations=destinations
     )
-    notice = notice_extension(clients, numbers, outbox, notifier, clock, destinations=destinations)
+    notice = notice_extension(
+        clients,
+        numbers,
+        outbox,
+        notifier,
+        clock,
+        destinations=destinations,
+        tasks_max=notice_tasks_max,
+    )
     return [infrastructure, review, notice, product_extension()]
 
 
