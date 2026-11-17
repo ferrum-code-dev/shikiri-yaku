@@ -184,7 +184,7 @@ class Harness:
 
     def commands(self, at: datetime, topics: Mapping[int, str] | None = None) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
-        status = Status(self.clients, sources)
+        status = Status(self.clients, sources, Clock(at), JournalOpen(self.database, self.signals))
         destinations = FixedDestinations([OWNER], topics=topics)
         reshower = ProductForwarder(
             MESSAGE_TITLE_MAX_CHARS,

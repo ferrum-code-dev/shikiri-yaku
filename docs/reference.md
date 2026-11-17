@@ -225,7 +225,7 @@ Give every instance the same `group_id`, and set `shared_group = true` in each `
 
 - A message in a topic that is neither General nor this instance's component topic nor this instance's Expert topic gets no reply from this instance.
 - `/submit <component> <request>` in General is submitted only when `<component>` belongs to this instance. For another instance's component, it gets no reply.
-- `/status` and `/pending` in General cover only this instance's components.
+- `/status`, `/details` and `/pending` in General cover only this instance's components.
 - `/help`, free text, and a `/submit` without a component are answered by every instance's bot only in General. The group receives one list per instance.
 
 All bot instances in a shared group must be updated together. When the chat commands change, upgrade every instance in the group at the same time, so the help lists stay consistent across the group.
@@ -264,7 +264,8 @@ Telegram's command menu is scoped by chat, not by forum topic, so it cannot show
 
 | Command | What it does |
 | --- | --- |
-| `/status` | Shows each component's engine state, running, queued and escalated task counts, quota blocks, and Reasoner rung health. In a component topic, it shows only that component, without the Reasoner rungs. |
+| `/status` | Shows one line per component, those that need attention first, ending with `Full view: /details`. A line starts with ✅ (engine up, nothing escalated or blocked), ⚠️ (a question or install approval waits for you, an agent's quota is exhausted, or the engine was never started) or 🔴 (engine down or Shikiru unreachable). It then gives the engine state (🟢 up, 🔴 down, 🆕 never started, 📡 cannot reach Shikiru), 🏃 the running count, 🙋 the count waiting for you with the hint `→ /pending`, and ⏳ `quota (agent, …)` naming the agents whose quota is exhausted. A healthy component with nothing running shows 💤 idle. Parts that are zero are left out. In a component topic, it shows only that component. |
+| `/details` | Shows each component in full: its engine state and, when it is down or unreachable, the reason; every running, queued and escalated task by ID and title, with no cap; and each agent's quota windows with the percent used and the reset time, as a countdown (`resets in 40 min`) or, when more than a day away, a weekday and time in UTC. Shikiru gives no escalation age or engine uptime, so none is shown. A long reply is sent in several messages. In a component topic, it shows only that component. |
 | `/pending` | Re-shows open questions and pending approvals that Shikiru still reports as open. Each item goes to its component's destination. If none are waiting, the bot says so in the command's chat. In a component topic, it re-shows only that component's items. |
 | `/help` | Lists the supported commands. Free text also returns this list. An unknown slash command reports its name and lists the commands. |
 | `/submit <component> <request>` | Submits a task request to that component's Shikiru project. Use this form in a private chat or the General topic. |
@@ -277,7 +278,8 @@ The menu entries, which must match the table above:
 
 | Name | Description |
 | --- | --- |
-| `status` | Shows the engine state and task counts. |
+| `status` | Shows one line per component. |
+| `details` | Shows every task and quota per component. |
 | `pending` | Re-shows open questions and pending approvals. |
 | `expert` | Opens an Expert topic with a question. |
 | `submit` | Submits a task request to a component. |
@@ -286,7 +288,7 @@ The menu entries, which must match the table above:
 
 For each bot in the group:
 
-1. Set the default list to the six entries above, even if no default list is currently configured. A narrower scope replaces the broader list for the users it covers. For the affected group, check every configured scope that can override the default: `all_group_chats`, `all_chat_administrators`, `chat`, `chat_administrators` and `chat_member`. Also check any configured command lists by `language_code`. In a private chat, the corresponding scopes are `all_private_chats` and `chat`. `getMyCommands` reads only the exact scope and language requested; an empty result means no commands were returned for that query, not that no broader list applies. It does not show the effective list. For example, read the default and the group-wide scopes with:
+1. Set the default list to the seven entries above, even if no default list is currently configured. A narrower scope replaces the broader list for the users it covers. For the affected group, check every configured scope that can override the default: `all_group_chats`, `all_chat_administrators`, `chat`, `chat_administrators` and `chat_member`. Also check any configured command lists by `language_code`. In a private chat, the corresponding scopes are `all_private_chats` and `chat`. `getMyCommands` reads only the exact scope and language requested; an empty result means no commands were returned for that query, not that no broader list applies. It does not show the effective list. For example, read the default and the group-wide scopes with:
 
    ```sh
    curl -s -X POST "https://api.telegram.org/bot<TOKEN>/getMyCommands"
@@ -302,12 +304,12 @@ For each bot in the group:
 2. Set the complete new list in the default scope. For each narrower scope or language-specific list that is configured, either set the same complete list there or delete that override so it inherits the updated list. `setMyCommands` replaces the whole list for its scope and language:
 
    ```sh
-   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/setMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"default"},"commands":[{"command":"status","description":"Shows the engine state and task counts."},{"command":"pending","description":"Re-shows open questions and pending approvals."},{"command":"expert","description":"Opens an Expert topic with a question."},{"command":"submit","description":"Submits a task request to a component."},{"command":"admin","description":"Opens an admin Expert topic, for listed admins only."},{"command":"help","description":"Lists the commands."}]}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/setMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"default"},"commands":[{"command":"status","description":"Shows one line per component."},{"command":"details","description":"Shows every task and quota per component."},{"command":"pending","description":"Re-shows open questions and pending approvals."},{"command":"expert","description":"Opens an Expert topic with a question."},{"command":"submit","description":"Submits a task request to a component."},{"command":"admin","description":"Opens an admin Expert topic, for listed admins only."},{"command":"help","description":"Lists the commands."}]}'
    ```
 
    For another configured scope, pass that exact `scope` and `language_code` with the same command array. To remove an override instead, call `deleteMyCommands` with that scope and language. For example, to set the group-specific list, add `"scope":{"type":"chat","chat_id":<group_id>}` to the same body.
 
-3. Read each configured scope and language again. Each set list must contain exactly the six names above. A deleted override should return an empty list; inspect the command menu in Telegram as a regular group member and as a group administrator to verify the inherited list, and check any configured member-specific and language-specific cases.
+3. Read each configured scope and language again. Each set list must contain exactly the seven names above. A deleted override should return an empty list; inspect the command menu in Telegram as a regular group member and as a group administrator to verify the inherited list, and check any configured member-specific and language-specific cases.
 
 Shared group: upgrade every instance first, then update each bot's menu, in one window. Until an instance has the new names, a command typed from its menu gets the unknown-command reply from that instance. Keeping the window short limits that to a few minutes. The release notes mark the rename as breaking.
 
@@ -567,7 +569,7 @@ The Operator keeps its journal across restarts. It reconciles interrupted work w
 - A clean Shikiru engine stop, seen while the Operator is running, is treated as intentional after `stop_grace_min` (2 minutes by default).
 - If the Operator restarts before that grace period is recorded, a stop not yet recorded as respected may be treated as an engine-down signal on the next run.
 - A stop recorded as respected stays respected across Operator restarts. During a first sync, a clean stop found in Shikiru's history also counts as respected.
-- `/status` shows the current engine state.
+- `/status` and `/details` show the current engine state.
 
 ## Local state
 

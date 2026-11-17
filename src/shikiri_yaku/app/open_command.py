@@ -19,6 +19,7 @@ from shikiri_yaku.ports import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
         Destinations,
         EscalationView,
         InstallApprovalRenderer,
+        InstallOp,
         Message,
         OpenLog,
         Outbox,
@@ -126,7 +128,7 @@ class OpenCommand:
         shown: list[tuple[int, str]] = []
         for approval in self._log.pending_approvals():
             view = listed.get((approval.project, approval.escalation_id))
-            option = None if view is None else _option(view, approval.kind)
+            option = None if view is None else approval_option(view, approval.kind)
             if option is None:
                 continue
             self._queue(
@@ -151,10 +153,8 @@ class OpenCommand:
         now = self._clock.now()
         for operation in self._log.pending_install_approvals():
             payload = operation.payload
-            if (
-                operation.state != INSTALL_INTENDED
-                or (operation.project, payload.escalation_id) not in listed
-                or now - operation.created_at >= timedelta(hours=self._approval_expiry_h)
+            if (operation.project, payload.escalation_id) not in listed or not install_is_pending(
+                operation, now, self._approval_expiry_h
             ):
                 continue
             self._queue(
@@ -232,7 +232,8 @@ def _grouped(questions: list[int], approvals: list[tuple[int, str]], installs: l
     return "\n\n".join(parts)
 
 
-def _option(view: EscalationView, kind: str) -> int | None:
+def approval_option(view: EscalationView, kind: str) -> int | None:
+    """Return the current option for a pending approval, if it can be shown."""
     return next(
         (
             choice.number
@@ -240,4 +241,11 @@ def _option(view: EscalationView, kind: str) -> int | None:
             if isinstance(choice.value, EscalationResolution) and choice.value.kind == kind
         ),
         None,
+    )
+
+
+def install_is_pending(operation: InstallOp, now: datetime, expiry_h: int) -> bool:
+    """Return whether an install approval is still eligible to be shown."""
+    return operation.state == INSTALL_INTENDED and now - operation.created_at < timedelta(
+        hours=expiry_h
     )

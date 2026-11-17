@@ -16,13 +16,15 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, Destinations, Outbox
 
 _STATUS: Final = "/status"
+_DETAILS: Final = "/details"
 _PENDING: Final = "/pending"
 _SUBMIT: Final = "/submit"
 _EXPERT: Final = "/expert"
 _ADMIN: Final = "/admin"
 _HELP_NAME: Final = "/help"
 _HELP: Final = (
-    f"{_STATUS} · each component's engine, tasks and quota blocks; in a component topic, its own\n"
+    f"{_STATUS} · one line per component; in a component topic, its own\n"
+    f"{_DETAILS} · every task and quota of each component; in a component topic, its own\n"
     f"{_PENDING} · pending escalations and approvals, shown again; in a component topic, its own\n"
     f"{_SUBMIT} <component> <request> · submit a request to a component's Shikiru\n"
     f"{_EXPERT} <question> · open an Expert conversation\n"
@@ -34,12 +36,12 @@ _KEY_PREFIX: Final = "command:"
 
 
 class Commands:
-    """Answers `/status` and `/help`, passes `/pending` and `/submit` on.
+    """Answers `/status`, `/details` and `/help`, passes `/pending` and `/submit` on.
 
     Free text gets the command list. A message that starts with `/` and names no known command gets
     the name as typed, cut to `name_max_chars`, and the list. Names match without case (a phone
     keyboard capitalises the first letter) and without the `@bot` of the channel's addressed form.
-    In a thread that names a component, `/status` and `/pending` cover that component only.
+    In a thread that names a component, `/status`, `/details` and `/pending` cover only it.
 
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
@@ -119,6 +121,8 @@ class Commands:
             return _HELP
         if name == _STATUS:
             return await self._status.report(component)
+        if name == _DETAILS:
+            return await self._status.details(component)
         return _UNKNOWN.format(name=fit(word, self._name_max_chars), help=_HELP)
 
 

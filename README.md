@@ -132,7 +132,8 @@ was sent.
 
 | Command | What it does |
 | --- | --- |
-| `/status` | Shows each component's engine state, task counts, quota blocks and Reasoner health. |
+| `/status` | Shows one line per component, those that need attention first: engine state, running count, items waiting for you and exhausted quotas. |
+| `/details` | Shows every running, queued and escalated task, each agent's quota with its reset time, and why a component is down or unreachable. |
 | `/pending` | Re-shows open questions and pending approvals. |
 | `/help` | Lists the commands. Free text also returns this list. |
 | `/submit <component> <request>` | Submits a request to that component's Shikiru project. |

@@ -38,6 +38,7 @@ from shikiri_yaku.ports import (
     EngineStatus,
     Message,
     ShikiruLinkDownError,
+    ShikiruTask,
 )
 from shikiri_yaku.settings import (
     BUTTON_LABEL_MAX_CHARS,
@@ -49,10 +50,11 @@ from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
 
 if TYPE_CHECKING:
-    from shikiri_yaku.ports import EscalationView, ShikiruClient, ShikiruTask
+    from shikiri_yaku.ports import EscalationView, ShikiruClient
 
 NOW = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
+TASKS = 120
 COMPONENTS: Final = 60
 TOKEN: Final = SECRETS["bot_token"]
 
@@ -106,6 +108,18 @@ class _Client:
         return []
 
 
+class _BusyClient(_Client):
+    """A Shikiru client with more running tasks than one message holds."""
+
+    async def list_tasks(self, _statuses: Sequence[str] | None = None) -> list[ShikiruTask]:
+        return [
+            ShikiruTask(
+                id=f"T-{n}", parent_id=None, status="running", title=f"title {n} " + "w" * 80
+            )
+            for n in range(TASKS)
+        ]
+
+
 class _SilentClient(_Client):
     """A Shikiru client that does not answer, so its project is unreachable."""
 
@@ -141,7 +155,9 @@ class _Stack:
         self.outbox = JournalOutbox(self.database, self.messages)
         channel = TelegramChannel(self.bot, _Clock(), self.outbox)
         self.sender = OutboxSender(self.outbox, channel, _Clock(), interval_s=1)
-        self.status = Status(self.clients, self.sources)
+        self.status = Status(
+            self.clients, self.sources, _Clock(), JournalOpen(self.database, self.signals)
+        )
         reshower = ProductForwarder(
             MESSAGE_TITLE_MAX_CHARS,
             self.clients,
@@ -205,6 +221,18 @@ def test_an_over_limit_status_is_sent_in_parts_that_together_hold_its_whole_text
     assert len(sent) > 1
     assert all(len(part) <= MESSAGE_TEXT_LIMIT for part in sent)
     assert " ".join(sent).split() == report.split()
+
+
+def test_an_over_limit_details_view_is_sent_in_parts_that_keep_every_task() -> None:
+    with _Stack(_BusyClient) as stack:
+        stack.command("/details")
+        stack.deliver()
+        sent = stack.sent()
+
+    joined = "\n".join(sent)
+    assert len(sent) > 1
+    assert all(len(part) <= MESSAGE_TEXT_LIMIT for part in sent)
+    assert all(f"- T-{n} title {n} " in joined for n in range(TASKS))
 
 
 def test_an_over_limit_unreachable_notice_is_sent_in_parts_that_name_every_project() -> None:

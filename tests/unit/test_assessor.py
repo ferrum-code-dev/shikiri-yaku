@@ -17,7 +17,6 @@ from shikiri_yaku.app.assessor import REASONER_FAILED_NOTE, Assessor
 from shikiri_yaku.app.health_source import REASONER_SCOPE, HealthSource
 from shikiri_yaku.app.host_facts import HostFacts
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
-from shikiri_yaku.app.status import Status
 from shikiri_yaku.domain.classification import Assessment, InstallProposal, Source, Verdict
 from shikiri_yaku.domain.extension import Extension
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
@@ -349,9 +348,6 @@ def test_a_deadline_interrupted_rung_cools_down_and_recovers_after_the_cooldown(
     assert state.last_failure is not None
     assert "timed out" in state.last_failure
     assert state.cooling_until is not None
-    sources = JournalSources(CursorStore(memory, wiring.signals), wiring.signals)
-    report = asyncio.run(Status({}, sources, wiring.ladder).report())
-    assert "claude:haiku: cooling until" in report
 
     _classify(wiring)
     assert len(wiring.rung.facts) == 1

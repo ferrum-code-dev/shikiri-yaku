@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER = Destination("telegram", "1001")
-COMMANDS = ("/status", "/pending", "/submit", "/help")
+COMMANDS = ("/status", "/details", "/pending", "/submit", "/help")
 NOTHING = "Nothing is waiting for you."
 DONE = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 API_TOPIC: Final = 77
@@ -126,7 +126,7 @@ class Harness:
         commands = Commands(
             self.outbox,
             _Clock(),
-            Status(self.clients, sources),
+            Status(self.clients, sources, _Clock(), JournalOpen(self.database, self.signals)),
             opened,
             goal,
             destinations=FixedDestinations([OWNER], topics=TOPICS),
@@ -191,15 +191,17 @@ def test_status_is_answered_once_in_the_senders_chat_with_no_signal(h: Harness) 
         (WEB_TOPIC, ["web"]),
     ],
 )
+@pytest.mark.parametrize("command", ["/status", "/details"])
 def test_status_reports_the_component_of_its_topic_and_every_component_elsewhere(
-    h: Harness, thread: int | None, sections: list[str]
+    h: Harness, command: str, thread: int | None, sections: list[str]
 ) -> None:
     h.clients["web"] = cast("ShikiruClient", _Client())
 
-    h.send("/status", thread=thread)
+    h.send(command, thread=thread)
 
     [pending] = h.outbox.pending()
-    assert [part.split("\n")[0] for part in pending.message.text.split("\n\n")] == sections
+    text = pending.message.text
+    assert [name for name in ("api", "web") if f" {name}" in text] == sections
 
 
 def test_a_repeated_status_in_a_component_topic_queues_one_reply(h: Harness) -> None:
@@ -295,7 +297,7 @@ def test_submit_again_in_the_chat_retries_the_goal_it_asks_about(h: Harness) -> 
 
 @pytest.mark.parametrize(
     "text",
-    ["/status", "/pending", "/help", "/submit", "/submit api Add the export"],
+    ["/status", "/details", "/pending", "/help", "/submit", "/submit api Add the export"],
 )
 def test_with_a_shared_group_a_command_in_another_instances_topic_gets_no_reply(
     shared: Harness, text: str
@@ -327,6 +329,7 @@ def test_without_a_shared_group_free_text_in_other_topic_gets_the_list(
     ("thread", "text"),
     [
         (None, "/status"),
+        (None, "/details"),
         (API_TOPIC, "/status"),
         (None, "/help"),
         (None, "hello"),
@@ -347,7 +350,8 @@ def test_with_a_shared_group_status_in_general_reports_this_instances_components
     shared.send("/status")
 
     [pending] = shared.outbox.pending()
-    assert [part.split("\n")[0] for part in pending.message.text.split("\n\n")] == ["api"]
+    assert " api" in pending.message.text
+    assert " web" not in pending.message.text
 
 
 def test_with_a_shared_group_a_goal_for_another_component_in_general_gets_no_reply(

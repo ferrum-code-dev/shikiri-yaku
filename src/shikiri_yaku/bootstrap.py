@@ -168,7 +168,6 @@ if TYPE_CHECKING:
         Reporter,
         Reshower,
         RetryLog,
-        RungStates,
         ShikiruClient,
         SignalNumbers,
         StartLog,
@@ -502,7 +501,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         bot_api=bot_api,
         goal=goal,
         destinations=destinations,
-        ladder=None if reasoning is None else reasoning.ladder,
         install_runner=install_executor,
         ask=ask,
         turns=turns,
@@ -894,7 +892,6 @@ def inbound_job(
     bot_api: BotApi,
     goal: GoalCommand,
     destinations: Destinations,
-    ladder: RungStates | None,
     install_runner: InstallRunner,
     ask: Ask | None = None,
     turns: ExpertTurns | None = None,
@@ -913,8 +910,9 @@ def inbound_job(
         wait_s=operator.telegram_poll_wait_s,
     )
     sources = JournalSources(CursorStore(journal, signals), signals)
+    open_log = JournalOpen(journal, signals)
     opened = OpenCommand(
-        JournalOpen(journal, signals),
+        open_log,
         clients,
         reshower,
         outbox,
@@ -927,7 +925,13 @@ def inbound_job(
     commands = Commands(
         outbox,
         clock,
-        Status(clients, sources, ladder),
+        Status(
+            clients,
+            sources,
+            clock,
+            open_log,
+            approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
+        ),
         opened,
         goal,
         destinations=destinations,
