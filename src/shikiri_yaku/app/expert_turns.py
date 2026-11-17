@@ -423,6 +423,7 @@ class ExpertTurns:
             )
         if self._web is not None:
             self._web.queue()
+            self._web.recover()
 
 
 def _admin_texts(answer: AdminAnswer) -> list[str]:

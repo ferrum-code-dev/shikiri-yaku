@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.journal.database import stamp
+from shikiri_yaku.journal.final_edits import settle_notice
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -13,6 +15,12 @@ if TYPE_CHECKING:
 
 
 PENDING = "pending"
+_ALLOWED = "allowed"
+_DENIED = "denied"
+
+
+def _decision_message(host: str, state: str) -> Message:
+    return Message(f"Web access to {host} {state}.")
 
 
 class JournalWeb:
@@ -77,7 +85,7 @@ class JournalWeb:
                 return None
             if row["state"] != PENDING:
                 return row["conversation_id"] if row["decision_update_id"] == update_id else None
-            state = "allowed" if allow else "denied"
+            state = _ALLOWED if allow else _DENIED
             connection.execute(
                 "UPDATE web_requests SET state = ?, decision_update_id = ? WHERE id = ?",
                 (state, update_id, request_id),
@@ -97,8 +105,25 @@ class JournalWeb:
                     f"The Product Owner {state} web access to {row['host']}.",
                 ),
             )
+            settle_notice(
+                connection, f"expert:web:{request_id}", _decision_message(row["host"], state)
+            )
             connection.execute(
                 "UPDATE conversations SET last_activity = ? WHERE id = ?",
                 (stamp(now), row["conversation_id"]),
             )
             return row["conversation_id"]
+
+    def settle_decided(self) -> None:
+        """Settle every decided request again, so a decision left without its edit is made up."""
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                "SELECT id, host, state FROM web_requests WHERE state IN (?, ?) ORDER BY id",
+                (_ALLOWED, _DENIED),
+            ).fetchall()
+            for row in rows:
+                settle_notice(
+                    connection,
+                    f"expert:web:{row['id']}",
+                    _decision_message(row["host"], row["state"]),
+                )

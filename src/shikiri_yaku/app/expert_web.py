@@ -29,6 +29,7 @@ class WebRequests(Protocol):
     def decide(
         self, request_id: int, update_id: int, *, allow: bool, now: datetime
     ) -> int | None: ...
+    def settle_decided(self) -> None: ...
 
 
 class ExpertWebRequests:
@@ -68,6 +69,9 @@ class ExpertWebRequests:
                 now=self._clock.now(),
                 conversation_id=conversation_id,
             )
+
+    def recover(self) -> None:
+        self._log.settle_decided()
 
     async def tap(self, item: Inbound, run: Callable[[int, int], Awaitable[None]]) -> bool:
         try:
