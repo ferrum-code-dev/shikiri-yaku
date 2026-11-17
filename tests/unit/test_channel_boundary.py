@@ -60,7 +60,7 @@ class _NoHostCommands(CommandRunner):
     ) -> CommandResult:
         del timeout_s, cwd, env
         if list(argv) == [SHIKIRU_EXECUTABLE, "--version"]:
-            return CommandResult(returncode=0, stdout="0.1.0\n", stderr="")
+            return CommandResult(returncode=0, stdout="0.1.1\n", stderr="")
         message = f"doctor or run ran a host command: {argv[0]}"
         raise AssertionError(message)
 

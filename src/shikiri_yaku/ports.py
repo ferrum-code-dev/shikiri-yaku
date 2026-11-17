@@ -146,6 +146,7 @@ __all__ = [
     "StartLog",
     "StatsLog",
     "SubmitLog",
+    "SubmitMode",
     "SubmitOp",
     "SubmitPayload",
     "SubmitStatus",
@@ -356,7 +357,7 @@ class ShikiruClient(Protocol):
         self, escalation_id: str, kind: str, text: str | None = None
     ) -> Ack: ...
 
-    async def submit_task(self, request: str) -> Ack: ...
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack: ...
 
     async def start_engine(self) -> None:
         """Run the project's `shikiru start`; the caller confirms with `status().engine_up`.
@@ -1557,6 +1558,13 @@ class StartLog(Protocol):
         ...
 
 
+class SubmitMode:
+    """Task modes Shikiru takes. Shikiru may add more, so these are text."""
+
+    IMPLEMENT: Final = "implement"
+    PLAN: Final = "plan"
+
+
 class SubmitStatus:
     """States of a submit op, as text: ports cannot import the journal's enum."""
 
@@ -1584,7 +1592,8 @@ class SubmitPayload(BaseModel):
 
     `destination` is the chat the outcome is reported in. `retry_of` is the unknown submit that a
     replacement consumed; it is None for a goal the PO sent. `proposal` is the update id of the
-    Expert proposal the task belongs to; it is None for a goal.
+    Expert proposal the task belongs to; it is None for a goal. `mode` is the Shikiru task mode;
+    None leaves the choice to Shikiru, as a goal does.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -1593,6 +1602,7 @@ class SubmitPayload(BaseModel):
     destination: Destination
     retry_of: int | None = None
     proposal: int | None = None
+    mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

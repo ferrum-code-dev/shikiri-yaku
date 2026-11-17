@@ -79,7 +79,8 @@ class _Client:
     async def list_escalations(self) -> list[EscalationView]:
         return []
 
-    async def submit_task(self, request: str) -> Ack:
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack:
+        del mode
         self.requests.append(request)
         if isinstance(self.answer, Exception):
             raise self.answer

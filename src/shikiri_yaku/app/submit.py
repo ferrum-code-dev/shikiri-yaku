@@ -80,7 +80,7 @@ class Submitter:
 
     async def _send(self, client: ShikiruClient, op: SubmitOp, now: datetime) -> SubmitOp:
         try:
-            ack = await client.submit_task(op.payload.request)
+            ack = await client.submit_task(op.payload.request, mode=op.payload.mode)
         except ShikiruRejectedError:
             self._log.fail(op.id, now)
             return replace(op, status=SubmitStatus.FAILED)

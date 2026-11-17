@@ -49,9 +49,11 @@ class _Client:
     def __init__(self) -> None:
         self.answer: Ack | Exception = DONE
         self.requests: list[str] = []
+        self.modes: list[str | None] = []
 
-    async def submit_task(self, request: str) -> Ack:
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack:
         self.requests.append(request)
+        self.modes.append(mode)
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
@@ -107,6 +109,26 @@ def test_a_duplicate_update_id_submits_once_and_returns_the_stored_outcome(
     assert first.id == seeded.row_id
     assert second == first == log.get(first.id)
     assert client.requests == [PAYLOAD.request]
+    assert client.modes == [None]
+
+
+def test_a_planning_payload_is_sent_in_plan_mode(
+    submitter: Submitter, client: _Client, log: JournalSubmits
+) -> None:
+    payload = SubmitPayload(
+        component=PAYLOAD.component,
+        request="Plan this work, then execute it",
+        destination=PAYLOAD.destination,
+        mode="plan",
+    )
+    op = asyncio.run(submitter.submit(UPDATE, payload))
+    assert op.status == SubmitStatus.CONFIRMED
+    assert client.requests == ["Plan this work, then execute it"]
+    assert client.modes == ["plan"]
+    assert log.get(op.id) is not None
+    stored = log.get(op.id)
+    assert stored is not None
+    assert stored.payload.mode == "plan"
 
 
 @pytest.mark.parametrize(

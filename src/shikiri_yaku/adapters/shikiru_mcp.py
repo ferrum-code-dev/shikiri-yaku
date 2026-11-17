@@ -239,8 +239,11 @@ class ShikiruMcpClient:
         arguments = {"escalation_id": escalation_id, "resolution": resolution}
         return _accepted(await self._call("resolve_escalation", arguments, Ack))
 
-    async def submit_task(self, request: str) -> Ack:
-        return _accepted(await self._call("submit_task", {"request": request}, Ack))
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack:
+        arguments: dict[str, Any] = {"request": request}
+        if mode is not None:
+            arguments["mode"] = mode
+        return _accepted(await self._call("submit_task", arguments, Ack))
 
     async def start_engine(self) -> None:
         result = await self._runner.run(self._start_argv, timeout_s=self._start_timeout_s)

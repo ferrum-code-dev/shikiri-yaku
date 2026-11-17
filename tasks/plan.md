@@ -1,5 +1,21 @@
 # Task plan
 
+## Planned work: Submit Expert planning tasks to Shikiru (T-178)
+
+An Expert task can be marked as a planning task. An unmarked task behaves exactly as today. The task list shown to the Product Owner marks planning tasks, and the existing Submit all and Reject all decision stays the single approval. On Submit all, a planning task is submitted in Shikiru's explicit plan mode with a request that tells Shikiru to plan the work and execute the plan by creating the follow-up tasks with their dependencies. Everything else about submitting stays unchanged: the order, the journal and recovery after a restart, no repeated submits, and the result lines per task. A planning marker does not bypass answer validation or the in-scope component check. Out of scope: the summary of Shikiru's decomposition in the topic, dependency links written by the Expert, and any change in Shikiru. Leave `docs/design.md` unchanged because `AGENTS.md` prohibits editing it; report that conflict.
+
+## Acceptance criteria
+
+- Expert tasks can carry a planning marker, while unmarked tasks retain their existing behavior; the Expert instructions distinguish complex work needing decomposition from clear, small changes.
+- The Product Owner can recognize planning tasks in the proposal, with the existing Submit all and Reject all decision as the sole approval and no further approval for Shikiru's follow-up tasks.
+- On Submit all, each planning task is submitted in Shikiru's explicit plan mode with a request to plan and execute the plan by creating dependent follow-up tasks; no Shikiru change is made.
+- The Shikiru contract check submits a planning task to verify the explicit plan mode, and the supported minimum Shikiru version has that capability.
+- Submission order, journal and restart recovery, prevention of repeated submits, and per-task result lines including task IDs remain intact.
+- A planning marker does not bypass answer validation or the requirement that the component is in scope.
+- Offline tests cover ordinary submission, planning-mode submission requesting execution, the marker in the task list, and restart recovery for a proposal containing a planning task, including a crash that interrupts the plan.
+- `docs/design.md` remains unchanged under the repository rule and is reported as an outstanding documentation conflict.
+- `uv run poe check` passes; unrelated failures are reported with evidence.
+
 ## Planned work: Telegram command rename (T-175)
 
 Rename the three Telegram commands to `/pending`, `/expert` and `/submit`, with no aliases. Keep `/status`, `/help` and `/admin` unchanged. Preserve command behavior, including grouped pending questions and approvals, Expert selection in shared groups, component-scoped task submission, and pre-upgrade buttons and replies. Update the user documentation and document a coordinated command-menu migration for every bot in a shared group. Update the default menu and configured narrower or language-specific scopes, or remove overrides so they inherit. Leave `docs/design.md` unchanged because `AGENTS.md` prohibits editing it; report that conflict.

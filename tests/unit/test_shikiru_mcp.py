@@ -480,6 +480,24 @@ def test_a_queued_ack_is_returned_as_queued_and_a_submit_carries_its_task_id() -
         assert (ack.id, ack.status, ack.task_id) == (9, AckStatus.QUEUED, "T-4")
 
     _run(session, scenario)
+    assert session.calls[0][1] == {"request": "add a login page"}
+
+
+def test_a_planning_submit_carries_the_plan_mode() -> None:
+    queued = {
+        "id": 10,
+        "status": "queued",
+        "result": {"task_id": "T-5"},
+        "message": None,
+    }
+    session = FakeSession({"submit_task": _reply(queued)})
+
+    async def scenario(client: ShikiruMcpClient) -> None:
+        ack = await client.submit_task("rework the billing", mode="plan")
+        assert ack.task_id == "T-5"
+
+    _run(session, scenario)
+    assert session.calls[0][1] == {"request": "rework the billing", "mode": "plan"}
 
 
 def test_a_done_ack_with_fields_shikiru_added_is_read() -> None:

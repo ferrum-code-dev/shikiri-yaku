@@ -33,6 +33,7 @@ from shikiri_yaku.ports import (
     Button,
     Message,
     ProposalStatus,
+    SubmitMode,
     SubmitPayload,
     SubmitStatus,
     join_blocks,
@@ -61,6 +62,10 @@ _REJECTED: Final = "Rejected. Nothing submitted."
 _SUPERSEDED: Final = "Superseded by a newer proposal. Nothing submitted."
 _INTERRUPTED: Final = "Interrupted by a restart. Check the tasks marked unknown first."
 _RESULTS: Final = "Task results:"
+_PLANNING_MARKER: Final = " (planning)"
+_PLAN_AND_EXECUTE: Final = (
+    "Plan this work, then execute the plan by creating the follow-up tasks with their dependencies."
+)
 _ACTION_PROMPT: Final = "All task details are above. Choose an action."
 _NOT_OPEN: Final[dict[str | None, str]] = {
     ProposalStatus.VOIDED: "Nothing submitted: a newer proposal in this conversation replaced it.",
@@ -390,15 +395,7 @@ class ExpertProposals:
         opened = self._open(proposal_id)
         if opened is None:
             return
-        payloads = [
-            SubmitPayload(
-                component=task.component,
-                request=task.text,
-                destination=opened.destination,
-                proposal=proposal_id,
-            )
-            for task in opened.answer.tasks
-        ]
+        payloads = [_payload(opened.destination, proposal_id, task) for task in opened.answer.tasks]
         if not self._log.begin(proposal_id, payloads, self._clock.now()):
             self._say(item, opened, self._log.state(proposal_id))
             return
@@ -589,10 +586,28 @@ def _pack_lines(lines: list[str], first_room: int, other_room: int) -> list[str]
     return chunks
 
 
+def _payload(destination: Destination, proposal_id: int, task: ExpertTask) -> SubmitPayload:
+    if task.planning:
+        return SubmitPayload(
+            component=task.component,
+            request=join_blocks(_PLAN_AND_EXECUTE, task.text),
+            destination=destination,
+            proposal=proposal_id,
+            mode=SubmitMode.PLAN,
+        )
+    return SubmitPayload(
+        component=task.component,
+        request=task.text,
+        destination=destination,
+        proposal=proposal_id,
+    )
+
+
 def _task_lines(tasks: list[ExpertTask]) -> list[str]:
     lines: list[str] = []
     for index, task in enumerate(tasks, 1):
-        lines.append(f"{index}. {task.component} · {task.title}")
+        marker = _PLANNING_MARKER if task.planning else ""
+        lines.append(f"{index}. {task.component} · {task.title}{marker}")
     return lines
 
 

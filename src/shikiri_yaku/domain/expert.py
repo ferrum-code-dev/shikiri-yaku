@@ -21,6 +21,7 @@ class ExpertTask(BaseModel):
     component: str
     title: str
     text: str
+    planning: bool = False
 
 
 class ExpertAnswer(BaseModel):

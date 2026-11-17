@@ -51,7 +51,8 @@ class _Client:
         self.answer: Ack | Exception = DONE
         self.requests: list[str] = []
 
-    async def submit_task(self, request: str) -> Ack:
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack:
+        del mode
         self.requests.append(request)
         if isinstance(self.answer, Exception):
             raise self.answer

@@ -7,8 +7,8 @@ Shikiru checkout:
     uv run python .github/scripts/contract_check.py --shikiru-checkout /path/to/shikiru
 
 It builds a temporary project from the checkout's sample project, starts the engine through the
-adapter, lets the fake agent escalate, resolves the escalation twice and prints one line per
-assumption. Exit code 0 means every assumption held.
+adapter, lets the fake agent escalate, resolves the escalation twice, submits a task in the
+explicit plan mode and prints one line per assumption. Exit code 0 means every assumption held.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from typing import Final
 from shikiri_yaku.adapters.clock import SystemClock
 from shikiri_yaku.adapters.commands import ProcessCommandRunner
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, stdio_connector
-from shikiri_yaku.ports import ResolutionKind, ShikiruRejectedError
+from shikiri_yaku.ports import ResolutionKind, ShikiruRejectedError, SubmitMode
 
 TIMEOUT_S: Final = 120
 POLL_S: Final = 1
@@ -215,6 +215,13 @@ async def _scenario(client: ShikiruMcpClient, clock: SystemClock) -> None:
     else:
         rejection = ""
     _expect(rejection, f"a second resolve is rejected ({rejection})")
+
+    planned = await client.submit_task(
+        "Plan and execute the sharding work by creating the follow-up tasks "
+        "with their dependencies",
+        mode=SubmitMode.PLAN,
+    )
+    _expect(planned.task_id, f"submit_task accepts an explicit plan mode ({planned.task_id})")
 
 
 async def _main(checkout: Path) -> int:

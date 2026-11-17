@@ -1,5 +1,10 @@
 # Todo
 
+## Planned work: Submit Expert planning tasks to Shikiru (T-178)
+
+- [x] T-178. Submit planning tasks in Shikiru's plan mode with a plan-and-execute request, and show the planning marker in the task list.
+- [ ] T-178d. Update docs/design.md as requested; prohibited by AGENTS.md, so report the conflict.
+
 ## Planned work: Telegram command rename (T-175)
 
 - [x] T-175a. Rename the three commands, preserve upgrade behavior, and update README.md and docs/reference.md.

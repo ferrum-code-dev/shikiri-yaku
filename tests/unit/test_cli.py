@@ -312,7 +312,7 @@ def _http_bot_on(transport: httpx.AsyncBaseTransport) -> BotFactory:
     )
 
 
-_SHIKIRU_SUPPORTED: Final = CommandResult(returncode=0, stdout="0.1.0\n", stderr="")
+_SHIKIRU_SUPPORTED: Final = CommandResult(returncode=0, stdout="0.1.1\n", stderr="")
 _SUDO_PASSWORD_NEEDED: Final = CommandResult(
     returncode=1, stdout="", stderr="sudo: a password is required\n"
 )
@@ -451,7 +451,8 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
     ("shikiru", "expected"),
     [
         pytest.param(_shikiru_says("0.0.9\n"), 1, id="below-lowest"),
-        pytest.param(_shikiru_says("0.1.0\n"), 0, id="the-minimum"),
+        pytest.param(_shikiru_says("0.1.0\n"), 1, id="before-first-release"),
+        pytest.param(_shikiru_says("0.1.1\n"), 0, id="the-minimum"),
         pytest.param(_shikiru_says("0.1.5\n"), 0, id="later-patch"),
         pytest.param(_shikiru_says("0.1.4.dev3+gabc\n"), 0, id="development-build-of-a-patch"),
         pytest.param(_shikiru_says("0.2.0\n"), 0, id="later-minor"),
@@ -461,7 +462,7 @@ def test_doctor_json_names_the_failed_check_and_exits_non_zero(
         pytest.param(_shikiru_says("0.10.0\n"), 0, id="later-minor-compared-as-numbers"),
         pytest.param(_shikiru_says("shikiru is fine\n"), 1, id="unparseable-output"),
         pytest.param(_shikiru_says(""), 1, id="empty-output"),
-        pytest.param(_shikiru_says("0.1.0\n", returncode=1), 1, id="failing-command"),
+        pytest.param(_shikiru_says("0.1.1\n", returncode=1), 1, id="failing-command"),
         pytest.param(CommandError("shikiru: command not found"), 1, id="cannot-start"),
     ],
 )
@@ -488,7 +489,7 @@ def test_doctor_json_names_the_shikiru_version_it_found_and_the_minimum(
     (check,) = [check for check in document["checks"] if check["name"] == "Shikiru version"]
     assert check["passed"] is False
     assert "0.0.9" in check["detail"]
-    assert "0.1.0" in check["detail"]
+    assert "0.1.1" in check["detail"]
 
 
 @pytest.mark.parametrize(

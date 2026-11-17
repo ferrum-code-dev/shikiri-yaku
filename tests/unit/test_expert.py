@@ -246,7 +246,18 @@ def test_codex_effort_override(
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 @pytest.mark.parametrize(
     "answer",
-    [{"reply": "bad"}, {**ANSWER, "tasks": [{"component": "outside", "title": "x", "text": "x"}]}],
+    [
+        {"reply": "bad"},
+        {**ANSWER, "tasks": [{"component": "outside", "title": "x", "text": "x"}]},
+        {
+            **ANSWER,
+            "tasks": [{"component": "outside", "title": "x", "text": "x", "planning": True}],
+        },
+        {
+            **ANSWER,
+            "tasks": [{"component": "api", "title": "x", "text": "x", "planning": "yes"}],
+        },
+    ],
 )
 def test_invalid_answer_never_escapes(
     provider: str, answer: dict[str, object], tmp_path: Path
@@ -258,6 +269,23 @@ def test_invalid_answer_never_escapes(
                 ExpertRequest(tmp_path, {"api": tmp_path}, "hello"), session_id=None, handoff=None
             )
         )
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_the_prompt_tells_the_expert_when_to_plan(provider: str, tmp_path: Path) -> None:
+    runner = Runner(provider)
+    rung = EXPERTS[provider]("model", runner, effort=None, timeout_s=20)
+    asyncio.run(
+        rung.turn(
+            ExpertRequest(tmp_path, {"api": tmp_path / "api"}, "hello"),
+            session_id=None,
+            handoff=None,
+        )
+    )
+    assert "`planning` to true" in runner.stdin
+    assert "complex" in runner.stdin
+    assert "many steps" in runner.stdin
+    assert "clear, small change" in runner.stdin
 
 
 class Clock:

@@ -103,12 +103,14 @@ class FakeShikiru:
         error: type[ShikiruError] = ShikiruRejectedError,
     ) -> None:
         self.requests: list[str] = []
+        self.modes: list[str | None] = []
         self._crash_on = crash_on
         self._error_on = error_on
         self._error = error
 
-    async def submit_task(self, request: str) -> Ack:
+    async def submit_task(self, request: str, mode: str | None = None) -> Ack:
         self.requests.append(request)
+        self.modes.append(mode)
         if len(self.requests) == self._crash_on:
             raise CrashError
         if len(self.requests) == self._error_on:
@@ -204,7 +206,7 @@ class Harness:
     def answer(
         self,
         update_id: int,
-        tasks: list[tuple[str, str]],
+        tasks: Sequence[tuple[str, str] | tuple[str, str, bool]],
         *,
         title: str = "",
         reply: str = "Plan",
@@ -212,8 +214,8 @@ class Harness:
     ) -> None:
         """Deliver an answer with these (component, text) tasks, as an Expert turn does.
 
-        Each task's title is its text, unless `title` is given. The answer's message is then sent,
-        so that a tap from it counts.
+        A task may add a third element for its planning marker. Each task's title is its text,
+        unless `title` is given. The answer's message is then sent, so that a tap from it counts.
         """
         if update_id == FIRST:
             self.conversations.create(
@@ -235,7 +237,13 @@ class Harness:
             reply=reply,
             title="Idea",
             tasks=[
-                ExpertTask(component=name, title=title or text, text=text) for name, text in tasks
+                ExpertTask(
+                    component=item[0],
+                    title=title or item[1],
+                    text=item[1],
+                    planning=item[2] if len(item) == 3 else False,
+                )
+                for item in tasks
             ],
             findings="",
         )
@@ -1473,4 +1481,88 @@ def test_admin_result_and_output_notice_roll_back_together() -> None:
             "SELECT COUNT(*) FROM messages WHERE notice_key = ?", (f"admin:result:{op}",)
         ).fetchone()[0]
         == 0
+    )
+
+
+def test_an_unmarked_task_is_submitted_as_before() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "first")])
+    harness.tap(2, submit_all_data(FIRST))
+    assert alpha.requests == ["first"]
+    assert alpha.modes == [None]
+    assert "submitted as task T-first" in harness.final_body(FIRST)
+
+
+def test_a_planning_task_is_submitted_in_plan_mode_to_execute_the_plan() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "rework the billing", True)])
+    harness.tap(2, submit_all_data(FIRST))
+    assert alpha.modes == ["plan"]
+    assert len(alpha.requests) == 1
+    request = alpha.requests[0]
+    assert "rework the billing" in request
+    assert "Plan this work" in request
+    assert "execute the plan" in request
+    assert "follow-up tasks" in request
+    assert "dependencies" in request
+    assert "planning-only" not in request
+    assert "do not create" not in request.lower()
+    assert "submitted as task" in harness.final_body(FIRST)
+
+
+def test_planning_tasks_are_marked_in_the_task_list() -> None:
+    harness = Harness({"alpha": FakeShikiru(), "beta": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "small fix"), ("beta", "big migration", True)])
+    shown = "\n".join(harness.texts(FIRST))
+    assert "1. alpha · small fix" in shown
+    assert "2. beta · big migration (planning)" in shown
+    assert "(planning)" not in shown.split("2.")[0]
+
+
+def test_a_submitted_plan_with_a_planning_task_survives_a_restart() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "rework the billing", True)])
+    harness.tap(2, submit_all_data(FIRST))
+    harness.proposals = harness.restart()
+    harness.proposals.recover()
+    harness.tap(3, submit_all_data(FIRST))
+    assert len(alpha.requests) == 1
+    assert alpha.modes == ["plan"]
+    assert "submitted as task" in harness.final_body(FIRST)
+
+
+def test_a_crash_midway_through_a_plan_with_a_planning_task_recovers_without_resubmit() -> None:
+    alpha = FakeShikiru(crash_on=1)
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "rework the billing", True), ("alpha", "second")])
+    with pytest.raises(CrashError):
+        harness.tap(2, submit_all_data(FIRST))
+    harness.proposals = harness.restart()
+    harness.proposals.recover()
+    harness.tap(3, submit_all_data(FIRST))
+    assert len(alpha.requests) == 1
+    assert alpha.modes == ["plan"]
+    modes = [
+        row[0]
+        for row in harness.database.connection.execute(
+            "SELECT json_extract(payload, '$.mode') FROM ops WHERE kind = 'submit' ORDER BY id"
+        ).fetchall()
+    ]
+    assert modes == ["plan", None]
+    final = harness.final_body(FIRST)
+    assert (
+        "1. alpha · rework the billing: unknown, it may have reached Shikiru;"
+        " not sent again, please check" in final
+    )
+    assert "2. alpha · second: not submitted" in final
+    assert "Interrupted by a restart" in final
+    assert (
+        harness.count(
+            "SELECT COUNT(*) FROM messages WHERE notice_key = ?",
+            f"expert:proposal:{FIRST}:interrupted",
+        )
+        == 1
     )

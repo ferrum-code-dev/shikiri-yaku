@@ -33,8 +33,8 @@ CONFIG_FILE_NAME: Final = "config.toml"
 TOKEN_FILE_DEFAULT: Final = "secrets/telegram.token"  # noqa: S105 -- a file name, not a secret
 NAME_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 SHIKIRU_EXECUTABLE: Final = "shikiru"
-# keep: the oldest Shikiru with the commands and MCP tools the Operator calls; newer ones pass.
-SHIKIRU_MINIMUM: Final = "0.1.0"
+# keep: the oldest Shikiru with the commands and MCP tools the Operator calls; newer ones pass
+SHIKIRU_MINIMUM: Final = "0.1.1"
 
 EVENT_WAIT_S: Final = 30
 LIVENESS_INTERVAL_S: Final = 60
