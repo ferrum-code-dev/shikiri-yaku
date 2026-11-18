@@ -1,5 +1,25 @@
 # Task plan
 
+## Planned work: Show why no Expert rung answered (T-183)
+
+`LadderExpert` already collects each rung's failure reason, including cooling-down rungs, but
+`ExpertTurns` stores only a generic reply. Include the bounded reasons in the topic reply, applying
+the existing secret protection before the text is stored. Do not change ladder behavior, cooldowns,
+the journal schema or turn state. Leave `docs/design.md` unchanged as required by `AGENTS.md`; its
+Expert section describes only a generic failure notice, so report that difference.
+
+### Acceptance criteria
+
+- When all rungs fail, the topic message names each rung and its reason.
+- Rung reasons retain their boundaries even when an error contains `; `. Each reason is capped and
+  the complete message never exceeds its limit. Rungs are listed in order; when a long ladder cannot
+  fit, the message says how many rungs were not shown. Detected or configured secrets are withheld
+  before the reply is stored.
+- A focused offline test uses fake failing rungs with long and separator-containing errors and
+  checks that every rung remains represented.
+- No ladder order, cooldown, journal schema or turn-state changes; `uv run poe check` passes.
+- `docs/design.md` remains unchanged and the generic-message difference is reported.
+
 ## Planned work: Expert first answer fails (T-181)
 
 Opening a topic with `/expert` or `/admin` shows "No Expert agent could answer." The answer schema sent to the Expert CLIs declares the planning flag of each task (added in T-178) but leaves it out of `required`, because pydantic omits fields with a default. Read-only evidence from the authorized ferrumcode instance (2026-11-18, sanitized) shows three separate failures, not one. Codex (`gpt-6.1-terra`) rejects that schema: its turns for conversations 24, 25 and 27 end with `required must include declared property "planning"`. This is the code defect, and the fix sends every declared property in `required`. Claude does not reject the schema: it answered with the same schema on 2026-11-17, and on 2026-11-18 its turns failed with "Login expired", an operational cause the owner fixes with `/login` as the service user. Muse (`muse-ember-1.0`, effort `max`) failed its turns with `model_failure`, which the tracing log does not explain. A read-only probe with the adapter's argv and the production answer schema (2026-11-18, 21:23 UTC) failed with `API error 429 ... Subscription quota exhausted. Your usage window resets at 2026-11-23T00:00:00Z (rate_limit_error)`. Muse also succeeded three times on 2026-11-18 (12:38 to 12:43 UTC), so the quota state is intermittent or per window; the 429 is observed, but it is not proven to be the cause of the 06:10 failures. The installed 0.8.1 package on the host predates the fix, so the running service still sends the unfixed schema. Every declared property is required in the schema sent to the agent; the answer model still accepts a task without the flag. The fix changes only the schema text and cannot by itself make `/expert` answer while Claude's login is expired or Muse's quota is exhausted. Out of scope: the ladder's silent failure reasons and the operational state of the configured CLIs on the host. Leave `docs/design.md` unchanged because `AGENTS.md` prohibits editing it.

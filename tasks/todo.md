@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: Show why no Expert rung answered (T-183)
+
+- [x] T-183. Show bounded, secret-screened rung failure reasons in the Expert topic reply.
+
 ## Planned work: Expert first answer fails (T-181)
 
 - [x] T-181. Require every field of the Expert answer schema, which the offline test verifies; Codex has not been checked live since the fix. Claude's expired login, the installed build without the fix and Muse's quota are not fixed by this change (see plan.md).

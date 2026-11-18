@@ -46,11 +46,11 @@ class LadderExpert:
     async def _climb(self, request: ExpertRequest) -> ExpertResult:
         previous = request.session
         start = previous.rung if previous is not None else 0
-        reasons: list[str] = []
+        failures: list[tuple[str, str]] = []
         for index in range(start, len(self._rungs)):
             rung = self._rungs[index]
             if index in self._failed and self._clock.now() < self._failed[index]:
-                reasons.append(f"{rung.name}: cooling down")
+                failures.append((rung.name, "cooling down"))
                 continue
             same = previous is not None and previous.provider == rung.provider
             session_id = previous.session_id if same and previous is not None else None
@@ -69,8 +69,16 @@ class LadderExpert:
                 return replace(result, answer=answer, session=replace(result.session, rung=index))
             except (ExpertError, TimeoutError, ValidationError) as error:
                 self._failed[index] = self._clock.now() + self._cooldown
-                reasons.append(f"{rung.name}: {error}")
-        raise ExpertError("; ".join(reasons) or "no Expert rung available")
+                reason = (
+                    f"timed out after {self._timeout_s}s"
+                    if isinstance(error, TimeoutError)
+                    else str(error)
+                )
+                failures.append((rung.name, reason))
+        raise ExpertError(
+            "; ".join(f"{name}: {text}" for name, text in failures) or "no Expert rung available",
+            rung_failures=tuple(failures),
+        )
 
 
 def _validate_scope(answer: ExpertAnswer, request: ExpertRequest, name: str) -> None:

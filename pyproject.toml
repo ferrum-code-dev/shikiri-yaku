@@ -198,7 +198,7 @@ forbidden_modules = ["shikiri_yaku.bootstrap", "shikiri_yaku.cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 filterwarnings = ["error"]
 timeout = 60
 

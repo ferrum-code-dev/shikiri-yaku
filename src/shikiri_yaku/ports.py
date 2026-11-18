@@ -1105,7 +1105,13 @@ class ExpertRung(Protocol):
 
 
 class ExpertError(Exception):
-    """An Expert rung could not produce a usable answer."""
+    """An Expert rung or ladder could not produce a usable answer."""
+
+    def __init__(
+        self, *args: object, rung_failures: tuple[tuple[str, str], ...] | None = None
+    ) -> None:
+        super().__init__(*args)
+        self.rung_failures = rung_failures
 
 
 class Reasoner(Protocol):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
@@ -38,6 +39,7 @@ from shikiri_yaku.ports import (
     TOPIC_GONE_REASON,
     ChannelRefusedError,
     CommandResult,
+    ExpertError,
     ShikiruLinkDownError,
 )
 from tests.support.copies import Platform
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
+    from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
     from shikiri_yaku.ports import EscalationView, Expert, ShikiruClient, ShikiruTask
 
 OWNER: Final = 1001
@@ -385,6 +388,136 @@ def test_messages_during_a_running_turn_are_answered_in_order_once(
 
     _assert_prompts_in_order(runner, MESSAGES)
     assert _answer_keys(h) == ["expert:answer:1", "expert:answer:2", "expert:answer:3"]
+
+
+_MIXED_RUNG_FAILURES: Final = [
+    ("claude", "login expired; token refused"),
+    ("muse", "rate limit; retry after reset"),
+    ("codex", "schema rejected"),
+    ("claude-backup", "login expired"),
+    ("muse-backup", "quota exhausted"),
+]
+_LONG_LADDER_FAILURES: Final = [
+    (
+        f"claude:some-long-model-name-v{index}",
+        f"claude:some-long-model-name-v{index}: login expired",
+    )
+    for index in range(20)
+]
+_HUGE_LADDER_FAILURES: Final = [
+    (f"muse:model-{index}", f"muse:model-{index}: quota exhausted") for index in range(1000)
+]
+
+
+class _FailedRung:
+    def __init__(self, name: str, reason: str) -> None:
+        self.name = name
+        self.provider = name
+        self.reason = reason
+
+    async def turn(
+        self,
+        request: ExpertRequest,
+        *,
+        session_id: str | None,
+        handoff: str | None,
+    ) -> ExpertResult:
+        del request, session_id, handoff
+        raise ExpertError(self.reason)
+
+    async def probe(self) -> None:
+        pass
+
+
+class _HangingRung(_FailedRung):
+    async def turn(
+        self,
+        request: ExpertRequest,
+        *,
+        session_id: str | None,
+        handoff: str | None,
+    ) -> ExpertResult:
+        del request, session_id, handoff
+        await asyncio.Event().wait()
+        raise ExpertError(self.reason)
+
+
+def _expert_topic_message(build: Callable[..., Harness], expert: LadderExpert) -> str:
+    h = build(expert)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    row = h.database.connection.execute(
+        "SELECT body FROM messages WHERE notice_key = 'expert:answer:1'"
+    ).fetchone()
+    return json.loads(row["body"])["text"]
+
+
+def _ladder(rungs: list[_FailedRung], *, timeout_s: float = 20) -> LadderExpert:
+    return LadderExpert(
+        rungs,
+        Clock(),
+        cooldown=timedelta(minutes=5),
+        max_parallel=1,
+        handoff_turns=3,
+        timeout_s=timeout_s,
+    )
+
+
+def test_each_failed_rung_is_named_with_its_reason_in_the_topic(
+    build: Callable[..., Harness],
+) -> None:
+    message = _expert_topic_message(
+        build,
+        _ladder([_FailedRung(name, reason) for name, reason in _MIXED_RUNG_FAILURES]),
+    )
+
+    assert message == (
+        "No Expert agent could answer.\n"
+        "claude: login expired; token refused\n"
+        "muse: rate limit; retry after reset\n"
+        "codex: schema rejected\n"
+        "claude-backup: login expired\n"
+        "muse-backup: quota exhausted"
+    )
+
+
+def test_a_timed_out_rung_is_named_with_the_timeout_in_the_topic(
+    build: Callable[..., Harness],
+) -> None:
+    message = _expert_topic_message(
+        build,
+        _ladder([_HangingRung("claude", "unused")], timeout_s=0.01),
+    )
+
+    assert message == "No Expert agent could answer.\nclaude: timed out after 0.01s"
+
+
+@pytest.mark.parametrize(
+    ("rung_failures", "first_line"),
+    [
+        (_LONG_LADDER_FAILURES, "claude:some-long-model-name-v0: login expired"),
+        (_HUGE_LADDER_FAILURES, "muse:model-0: quota exhausted"),
+    ],
+    ids=["long-ladder", "huge-ladder"],
+)
+def test_a_long_ladder_shows_its_first_reasons_and_counts_the_rest(
+    build: Callable[..., Harness],
+    rung_failures: list[tuple[str, str]],
+    first_line: str,
+) -> None:
+    message = _expert_topic_message(
+        build,
+        _ladder([_FailedRung(name, reason) for name, reason in rung_failures]),
+    )
+
+    assert len(message) <= 1000
+    lines = message.splitlines()
+    omitted = re.search(r"\+(\d+) more rungs not shown", message)
+    shown = lines[1:-1] if omitted else lines[1:]
+    assert len(shown) + (int(omitted.group(1)) if omitted else 0) == len(rung_failures)
+    assert shown[0] == first_line
+    assert all(len(line) <= 240 for line in shown)
+    for line, (name, reason) in zip(shown, rung_failures, strict=False):
+        assert f"{name}: {reason.removeprefix(name + ': ')}".startswith(line)
 
 
 def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> None:

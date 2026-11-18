@@ -56,6 +56,10 @@ ADMIN_WARNING: Final = (
 _INTERRUPTED: Final = "The Expert turn was interrupted. Please ask again."
 _NO_ANSWER: Final = "No Expert agent could answer."
 _WITHHELD_REPLY: Final = "The answer was withheld by secret protection."
+_EXPERT_FAILURE_REASON_LIMIT: Final = 240
+_EXPERT_FAILURE_MESSAGE_LIMIT: Final = 1000
+_EXPERT_FAILURE_LINE_MINIMUM: Final = 48
+_EXPERT_FAILURE_OMISSION_RESERVE: Final = 32
 _REFUSED_COMMAND: Final = "The proposed command could not be shown exactly and was refused."
 _EFFORT: Final = "/effort"
 _EFFORT_USAGE: Final = "Usage: /effort [level]"
@@ -287,8 +291,13 @@ class ExpertTurns:
         )
         try:
             result = await self._expert.turn(request)
-        except ExpertError:
-            answer = ExpertAnswer(reply=_NO_ANSWER, title="", tasks=[], findings="")
+        except ExpertError as error:
+            answer = ExpertAnswer(
+                reply=_expert_failure_reply(error, self._known_secrets),
+                title="",
+                tasks=[],
+                findings="",
+            )
             self._log.finish(update_id, answer.model_dump_json(), None, None, self._clock.now())
         else:
             stored = result.answer
@@ -437,6 +446,24 @@ def _admin_texts(answer: AdminAnswer) -> list[str]:
     if answer.command is not None:
         texts.append(answer.command)
     return texts
+
+
+def _expert_failure_reply(error: ExpertError, known_secrets: tuple[str, ...]) -> str:
+    lines = [
+        f"{name}: {text.removeprefix(f'{name}: ')}" if name else text
+        for name, text in error.rung_failures or (("", str(error)),)
+    ]
+    if secret_form(lines) is not None or any(
+        secret in line for secret in known_secrets for line in lines
+    ):
+        return _WITHHELD_REPLY
+    budget = _EXPERT_FAILURE_MESSAGE_LIMIT - len(_NO_ANSWER) - _EXPERT_FAILURE_OMISSION_RESERVE
+    shown = min(len(lines), budget // _EXPERT_FAILURE_LINE_MINIMUM)
+    each = min(_EXPERT_FAILURE_REASON_LIMIT, budget // shown - len("\n"))
+    text = _NO_ANSWER + "".join(f"\n{line[:each]}" for line in lines[:shown])
+    if shown < len(lines):
+        text += f"\n+{len(lines) - shown} more rungs not shown"
+    return text
 
 
 def _showable_command(command: str, reason: str) -> bool:
