@@ -12,7 +12,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final, NoReturn, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -207,6 +207,26 @@ class CliRung(ABC):
     ) -> tuple[BlockerAnswer, CallRecord | None]: ...
 
 
+def _required_schema(model: type[ExpertAnswer]) -> str:
+    # keep: strict providers reject a schema whose required omits a field; pydantic omits defaults
+    schema = model.model_json_schema()
+    _require_all(schema)
+    return json.dumps(schema)
+
+
+def _require_all(node: object) -> None:
+    if isinstance(node, dict):
+        fields = cast("dict[str, object]", node)
+        properties = fields.get("properties")
+        if isinstance(properties, dict):
+            fields["required"] = list(cast("dict[str, object]", properties))
+        for child in fields.values():
+            _require_all(child)
+    elif isinstance(node, list):
+        for child in cast("list[object]", node):
+            _require_all(child)
+
+
 class CliExpert(ABC):
     """The turn every Expert rung shares: the prompt, scratch directory, call and checks.
 
@@ -252,7 +272,7 @@ class CliExpert(ABC):
         self, request: ExpertRequest, *, session_id: str | None, handoff: str | None
     ) -> ExpertResult:
         model = AdminAnswer if request.admin else ExpertAnswer
-        schema = json.dumps(model.model_json_schema())
+        schema = _required_schema(model)
         scope = "\n".join(f"{name}: {path}" for name, path in request.scope.items())
         prompt = (
             "Answer for the Product Owner briefly at product level, without code. "

@@ -7,7 +7,7 @@ import json
 import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -41,6 +41,7 @@ class Runner:
         self.answer = ANSWER if answer is None else answer
         self.argv: list[str] = []
         self.stdin = ""
+        self.schema: dict[str, object] = {}
 
     async def run(
         self,
@@ -54,6 +55,7 @@ class Runner:
         del timeout_s, cwd, env
         self.argv = list(argv)
         self.stdin = stdin or ""
+        self.schema = self._schema_of(list(argv))
         if self.provider == "claude":
             return CommandResult(
                 0,
@@ -67,6 +69,16 @@ class Runner:
 
     def _write_answer(self, argv: Sequence[str]) -> None:
         Path(argv[argv.index("--output-last-message") + 1]).write_text(json.dumps(self.answer))
+
+    @staticmethod
+    def _schema_of(argv: list[str]) -> dict[str, object]:
+        if "--json-schema" in argv:
+            return json.loads(argv[argv.index("--json-schema") + 1])
+        if "--output-schema" in argv:
+            return json.loads(
+                Path(argv[argv.index("--output-schema") + 1]).read_text(encoding="utf-8")
+            )
+        return {}
 
 
 EXPERTS = {"claude": ClaudeExpert, "codex": CodexExpert}
@@ -286,6 +298,41 @@ def test_the_prompt_tells_the_expert_when_to_plan(provider: str, tmp_path: Path)
     assert "complex" in runner.stdin
     assert "many steps" in runner.stdin
     assert "clear, small change" in runner.stdin
+
+
+def _assert_required_covers_properties(node: object) -> None:
+    if isinstance(node, dict):
+        fields = cast("dict[str, object]", node)
+        properties = fields.get("properties")
+        if isinstance(properties, dict):
+            required = cast("list[str]", fields.get("required", []))
+            assert sorted(required) == sorted(cast("dict[str, object]", properties))
+        for child in fields.values():
+            _assert_required_covers_properties(child)
+    elif isinstance(node, list):
+        for child in cast("list[object]", node):
+            _assert_required_covers_properties(child)
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+@pytest.mark.parametrize("admin", [False, True])
+def test_schema_requires_every_declared_property(
+    provider: str,
+    admin: bool,  # noqa: FBT001 -- table column
+    tmp_path: Path,
+) -> None:
+    # keep: strict providers reject a schema whose required omits a field with a default.
+    answer = ADMIN_ANSWER if admin else ANSWER
+    runner = Runner(provider, answer)
+    rung = EXPERTS[provider]("model", runner, effort=None, timeout_s=20)
+    asyncio.run(
+        rung.turn(
+            ExpertRequest(tmp_path, {"api": tmp_path}, "hello", admin=admin),
+            session_id=None,
+            handoff=None,
+        )
+    )
+    _assert_required_covers_properties(runner.schema)
 
 
 class Clock:

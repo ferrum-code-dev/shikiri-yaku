@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: Expert first answer fails (T-181)
+
+- [x] T-181. Require every field of the Expert answer schema, which the offline test verifies; Codex has not been checked live since the fix. Claude's expired login, the installed build without the fix and Muse's quota are not fixed by this change (see plan.md).
+
 ## Planned work: Submit Expert planning tasks to Shikiru (T-178)
 
 - [x] T-178. Submit planning tasks in Shikiru's plan mode with a plan-and-execute request, and show the planning marker in the task list.
