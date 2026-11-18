@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -683,6 +684,26 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
     [edit] = final.to_edit()
     assert edit.message_ref == tap.message_ref
     assert edit.message.buttons[0].url == "https://t.me/c/123/22"
+
+
+def test_a_selection_from_an_ask_sent_as_a_reply_opens_once(tmp_path: Path) -> None:
+    h = Harness(tmp_path, shared=True)
+    original = replace(
+        _ask(1, "-100123/71"),
+        kind=InboundKind.REPLY,
+        reply_to_ref="-100123/70",
+    )
+    inbound = JournalInbound(h.database)
+    inbound.record_batch("telegram", [original], 2, NOW)
+    asyncio.run(h.commands.handle(original))
+    [offer] = h.outbox.pending()
+    assert offer.message.buttons[0].label == "/expert@bot"
+    channel = Channel()
+    asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
+    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    assert asyncio.run(h.commands.tap(tap))
+    assert asyncio.run(h.commands.tap(tap))
+    assert len(h.topics.created) == len(h.expert.requests) == 1
 
 
 def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:

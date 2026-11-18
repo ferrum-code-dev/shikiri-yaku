@@ -12,7 +12,7 @@ from shikiri_yaku.domain.callback import (
     STOP_REMINDERS_VERB,
     decode_callback,
 )
-from shikiri_yaku.domain.inbound import InboundKind
+from shikiri_yaku.domain.inbound import InboundKind, is_command
 from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
@@ -113,7 +113,7 @@ class Replies:
         self._expert_turns = expert_turns
 
     async def handle(self, item: Inbound) -> None:
-        if item.kind == InboundKind.TEXT:
+        if item.kind == InboundKind.TEXT or is_command(item.text):
             await self._commands.handle(item)
             return
         reference = item.reply_to_ref if item.kind == InboundKind.REPLY else item.message_ref

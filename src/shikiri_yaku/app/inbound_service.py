@@ -121,7 +121,7 @@ class InboundService:
 def _is_expert(item: Inbound) -> bool:
     words = (item.text or "").split(maxsplit=1)
     return (
-        item.kind == InboundKind.TEXT
+        item.kind in (InboundKind.TEXT, InboundKind.REPLY)
         and bool(words)
         and words[0].split("@", 1)[0].lower() in _EXPERT
     )

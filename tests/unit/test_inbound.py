@@ -99,6 +99,20 @@ _TOPIC_SHAPES: Final = [
         id="reply to a bot message in topic",
     ),
     pytest.param(
+        {"message_id": 87, **_IN_TOPIC, "reply_to_message": _BOT_QUESTION, "text": "/details"},
+        Inbound(
+            717,
+            InboundKind.REPLY,
+            OWNER,
+            GROUP,
+            f"{GROUP}/87",
+            reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
+            text="/details",
+            thread=TOPIC,
+        ),
+        id="command sent as a reply to a bot message in topic",
+    ),
+    pytest.param(
         {"message_id": 83, **_IN_PRIVATE, "text": "/help"},
         Inbound(713, InboundKind.TEXT, OWNER, OWNER, f"{OWNER}/83", text="/help"),
         id="command in private chat",

@@ -28,6 +28,24 @@ if TYPE_CHECKING:
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = 1001
 TAP: Final = Inbound(700, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
+EXPERT_REPLY: Final = Inbound(
+    700,
+    InboundKind.REPLY,
+    OWNER,
+    OWNER,
+    "1001/90",
+    reply_to_ref="1001/42",
+    text="/expert hello",
+)
+PLAIN_REPLY: Final = Inbound(
+    700,
+    InboundKind.REPLY,
+    OWNER,
+    OWNER,
+    "1001/90",
+    reply_to_ref="1001/42",
+    text="Use it",
+)
 CONFLICT: Final[dict[str, Any]] = json.loads(
     (FIXTURES / "get_updates_conflict.json").read_text(encoding="utf-8")
 )
@@ -156,6 +174,25 @@ def test_a_transport_failure_is_retried_without_a_signal(database: Database) -> 
     assert harness.health_signals() == []
     harness.tick()
     assert harness.replies.handled == [700]
+
+
+def test_an_expert_command_sent_as_a_reply_stays_pending_for_its_background_run(
+    database: Database,
+) -> None:
+    async def scenario() -> None:
+        harness = Harness(database, _Updates(Batch(700, (EXPERT_REPLY,)), Batch(None, ())))
+        await harness.service.tick()
+        assert [item.update_id for item in harness.log.pending()] == [700]
+        assert harness.replies.handled == []
+
+    asyncio.run(scenario())
+
+
+def test_an_ordinary_reply_is_handled_in_the_foreground(database: Database) -> None:
+    harness = Harness(database, _Updates(Batch(700, (PLAIN_REPLY,)), Batch(None, ())))
+    harness.tick()
+    assert harness.replies.handled == [700]
+    assert harness.log.pending() == []
 
 
 def test_an_item_stays_pending_while_shikiru_is_down(database: Database) -> None:

@@ -108,7 +108,7 @@ class JournalOutbox:
               ON offered.notice_key = 'expert:select:' || original.update_id || ':0'
             WHERE offered.direction = 'out' AND offered.delivery = 'sent'
               AND offered.channel = ? AND offered.chat = ? AND offered.platform_message_id = ?
-              AND original.direction = 'in' AND original.kind = 'text'
+              AND original.direction = 'in' AND original.kind IN ('text', 'reply')
               AND ? = 'expert:' || original.update_id""",
             (channel, str(item.chat), item.message_ref, item.data),
         ).fetchone()

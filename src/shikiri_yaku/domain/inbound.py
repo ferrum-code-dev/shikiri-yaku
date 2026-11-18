@@ -35,6 +35,12 @@ class Inbound:
     thread: int | None = None
 
 
+def is_command(text: str | None) -> bool:
+    """Return whether text names a chat command, so a reply that does takes the command route."""
+    words = (text or "").split(maxsplit=1)
+    return bool(words) and words[0].startswith("/")
+
+
 @dataclass(frozen=True, slots=True)
 class Batch:
     """Newest update id and readable items; unsupported content advances the id only."""

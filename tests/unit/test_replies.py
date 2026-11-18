@@ -338,6 +338,20 @@ def test_text_reply_to_a_question_answers_and_queues_no_command_reply(h: Harness
     assert h.outbox.pending() == []
 
 
+@pytest.mark.parametrize("text", ["/help", "/stats"])
+def test_a_command_reply_to_a_question_runs_as_a_command_and_does_not_answer_it(
+    h: Harness, text: str
+) -> None:
+    h.handle(text=text)
+
+    assert h.client.calls == []
+    [pending] = h.outbox.pending()
+    if text == "/help":
+        assert "/status" in pending.message.text
+    else:
+        assert pending.message.text.startswith("Unknown command /stats.")
+
+
 def test_install_tap_approves_a_stored_op_once(h: Harness) -> None:
     handler, op_id = h.install_replies()
     data = install_data(h.number, op_id)

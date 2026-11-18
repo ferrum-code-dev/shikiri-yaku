@@ -150,8 +150,17 @@ class Harness:
             goal=goal,
         )
 
-    def send(self, text: str | None, update: int = 700, thread: int | None = None) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text=text, thread=thread)
+    def send(
+        self,
+        text: str | None,
+        update: int = 700,
+        thread: int | None = None,
+        reply_to: str | None = None,
+    ) -> None:
+        kind = InboundKind.REPLY if reply_to is not None else InboundKind.TEXT
+        item = Inbound(
+            update, kind, 1001, 1001, "1001/90", reply_to_ref=reply_to, text=text, thread=thread
+        )
         asyncio.run(self.replies().handle(item))
 
     def tap(self, data: str, ref: str, update: int = 800) -> None:
@@ -203,6 +212,65 @@ def test_status_reports_the_component_of_its_topic_and_every_component_elsewhere
     [pending] = h.outbox.pending()
     text = pending.message.text
     assert [name for name in ("api", "web") if f" {name}" in text] == sections
+
+
+@pytest.mark.parametrize(
+    ("thread", "sections"),
+    [
+        (None, ["api", "web"]),
+        (API_TOPIC, ["api"]),
+    ],
+)
+@pytest.mark.parametrize("command", ["/status", "/details", "/pending", "/help"])
+def test_a_command_sent_as_a_reply_runs_where_it_was_sent(
+    h: Harness, command: str, thread: int | None, sections: list[str]
+) -> None:
+    h.clients["web"] = cast("ShikiruClient", _Client())
+
+    h.send(command, thread=thread, reply_to="1001/42")
+
+    [pending] = h.outbox.pending()
+    text = pending.message.text
+    assert pending.destination == Destination("telegram", "1001", thread)
+    if command in ("/status", "/details"):
+        assert [name for name in ("api", "web") if f" {name}" in text] == sections
+    elif command == "/pending":
+        assert text == (NOTHING if thread is None else "Nothing is waiting for you in api.")
+    else:
+        assert all(name in text for name in COMMANDS)
+
+
+def test_a_submit_sent_as_a_reply_submits_its_request(h: Harness) -> None:
+    h.send("/submit api Add the export", reply_to="1001/42")
+
+    [pending] = h.outbox.pending()
+    assert "T-9" in pending.message.text
+    assert h.client.requests == ["Add the export"]
+
+
+def test_an_unknown_command_sent_as_a_reply_is_reported_as_unknown(h: Harness) -> None:
+    h.send("/stats", reply_to="1001/42")
+
+    [pending] = h.outbox.pending()
+    assert pending.message.text.startswith("Unknown command /stats.")
+    assert all(command in pending.message.text for command in COMMANDS)
+
+
+def test_the_same_command_reply_delivered_twice_queues_one_reply(h: Harness) -> None:
+    h.send("/status", update=700, reply_to="1001/42")
+    h.send("/status", update=700, reply_to="1001/42")
+
+    assert len(h.outbox.pending()) == 1
+
+
+@pytest.mark.parametrize("text", ["/status", "/details", "/submit api Add the export"])
+def test_with_a_shared_group_a_command_reply_in_another_instances_topic_gets_no_reply(
+    shared: Harness, text: str
+) -> None:
+    shared.send(text, thread=UNNAMED_TOPIC, reply_to="1001/42")
+
+    assert shared.outbox.pending() == []
+    assert shared.client.requests == []
 
 
 def test_a_repeated_status_in_a_component_topic_queues_one_reply(h: Harness) -> None:
