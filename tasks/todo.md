@@ -4,7 +4,7 @@
 
 ### F1. Resolve the file-transfer design
 
-- [ ] F1. Resolve the design conflict and specify file transfers after explicit authorization.
+- [x] F1. Resolve the design conflict and specify file transfers after explicit authorization.
 
 ## Acceptance criteria
 - Authorization is obtained before any design edit; otherwise the conflict is reported and implementation remains blocked.
