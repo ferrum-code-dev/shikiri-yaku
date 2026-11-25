@@ -10,21 +10,13 @@
 - Authorization is obtained before any design edit; otherwise the conflict is reported and implementation remains blocked.
 - The design specifies file transfer, security, lifecycle, failures, recovery and detection limits; `git diff --check` passes.
 
-### F2. Receive files in Expert conversations
+### F2. Attach files to tasks and draw sketches
 
-- [ ] F2. Receive attachments in Expert conversations after F1.
-
-## Acceptance criteria
-- Authorized Expert turns accept supported files and notify the PO of failures; other conversations do not accept them.
-- Offline tests cover limits, authorization, duplicate delivery, recovery and cleanup; `uv run poe check` passes or unrelated failures are reported.
-
-### F3. Send screened files from Expert conversations
-
-- [ ] F3. Send screened files in Expert conversations after F2.
+- [ ] F2. Attach files to submitted tasks and draw sketches on request, after F1.
 
 ## Acceptance criteria
-- Supported generated files reach the same conversation; sensitive files, detected secrets and screening failures are blocked and failures are reported to the PO.
-- Documentation states detection limits; offline tests cover delivery, screening, authorization and recovery; `uv run poe check` passes or unrelated failures are reported.
+- Attached files reach the Expert and are named by absolute path in submitted tasks; a requested sketch reaches the topic; failures are reported to the PO.
+- The README states the limits; offline tests pass with `uv run poe check`, or unrelated failures are reported.
 
 ## Planned work: Show why no Expert rung answered (T-183)
 

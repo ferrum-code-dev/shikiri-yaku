@@ -2,7 +2,7 @@
 
 ## Planned work: Expert conversation files (T-184)
 
-The request adds incoming and outgoing files only within Expert conversations. The current design permits the Expert to read files and nothing else, specifies only text answers, and describes no file transfer or secret detection for files. `AGENTS.md` forbids changing the design and building undescribed cases. Resolve that conflict with explicit authorization and an updated design before implementation; do not silently override it. Use the caveman and ponytail skills during implementation. The following tasks run in order; each owns its matching checklist entry.
+Files serve two cases only: the PO attaches a file that a task needs, and the PO asks the Expert for a sketch. The first design (T-185) and its implementation (T-186) covered much more and were reverted; do not restore that code. The PO authorized replacing that design with the section "Conversation files" in `docs/design.md`. The following tasks run in order; each owns its matching checklist entry.
 
 ### F1. Resolve the file-transfer design
 
@@ -14,26 +14,21 @@ Obtain explicit authorization to update `docs/design.md` before editing it. Spec
 - The design states what secret detection cannot guarantee and preserves the existing approval and host-command safety rules.
 - The documentation diff is reviewed and `git diff --check` passes.
 
-### F2. Receive files in Expert conversations
+### F2. Attach files to tasks and draw sketches
 
-After F1, implement the approved inbound contract across Telegram, conversation turns and supported Expert providers. Preserve existing authorization, ordered turns, duplicate and restart behavior, and cleanup. Inform the PO when receipt fails. Update user documentation and test offline with fakes and Telegram fixtures.
+Implement the section "Conversation files" of `docs/design.md`, both cases, as one change. Use the ponytail skill. Reuse the existing turn, proposal, outbox and conversation cleanup flows. No new dependency, setting or journal migration is expected: the file of an inbound item fits its stored data, and a message body is stored as JSON. Telegram's limits are named constants. Update the README and test offline with fakes and Telegram fixtures.
 
-## Acceptance criteria
-- An authorized PO can attach supported images and other files to an Expert conversation message and the Expert can use them in the same conversation, within the approved limits.
-- Unsupported, oversized or failed downloads produce a notice to the PO; attachments outside Expert conversations do not enter an Expert turn.
-- Duplicate updates and restarts preserve the approved turn semantics, and conversation cleanup removes stored attachments.
-- Offline tests cover supported files, rejection and download failure, authorization, duplicates, recovery and cleanup; `uv run poe check` passes or unrelated failures are reported with evidence.
-
-### F3. Send screened files from Expert conversations
-
-After F2, implement the approved outgoing contract, including generated images and other files, and document its limits. Screen every outgoing file before delivery, fail closed on screening errors, and tell the PO when a file cannot be sent. Preserve journal and restart guarantees and conversation confinement.
+Live checks were run outside Shikiru on 2026-11-25 (claude 2.1.332, codex-cli 0.171.0); do not repeat them in the task sandbox, which cannot reach the models.
+- With the unchanged Expert adapter flags, Claude (`claude-sonnet-5-5`) and Codex (`gpt-6.1-terra`) read a text file and a PNG from the conversation's `files/` on first and resumed turns. Muse was not checked.
+- In an empty directory, `codex exec --json --ignore-user-config --disable apps -c 'web_search="disabled"' -c 'sandbox_mode="read-only"' -c 'model_reasoning_effort="low"' --skip-git-repo-check -m gpt-6.1-terra`, with the description on stdin, exited 0. The `thread.started` event gave the thread id, and one PNG (`exec-*.png`, 2.6 MB) appeared in `~/.codex/generated_images/<thread id>/`.
 
 ## Acceptance criteria
-- The Expert can send supported generated images and other files back to the same Telegram conversation within the approved limits.
-- Sensitive files, including keys, certificates and password files, and files containing detected secrets are blocked before sending; screening errors also block delivery.
-- The PO receives a notice when a file is rejected or cannot be sent; file paths and content cannot bypass screening or escape the approved scope.
-- User documentation explains file limits and the limits of secret detection, including that undetected secrets can still be disclosed.
-- Offline tests cover safe delivery, sensitive names and content, detected secrets, screening and delivery failures, authorization, conversation confinement and restart behavior; `uv run poe check` passes or unrelated failures are reported with evidence.
+- A photo or document an owner sends in an Expert topic is saved under the conversation's `files/`, and the turn's text holds the caption and the absolute path. A file name cannot leave that directory or take the name of an instruction file. A repeated update makes no second turn.
+- A caption with a secret is refused and its file is not downloaded. A file above 20 MB gets a notice, a passing download failure is tried again, and files outside Expert topics or from other users are ignored. The bot token and the download URL that holds it are never logged or journaled.
+- *Submit all* copies the conversation's files to `task_files/<proposal number>/`, and every submitted task names the absolute paths of the copies. A failed copy submits nothing and tells the PO. The end of the conversation removes its files and keeps the copies.
+- An answer with `image` runs the fixed Codex command with the description only on stdin, and the PNG is moved into `files/` and sent to the topic as a photo. The thread id and the file are checked before use. A secret in the description, no Codex rung, a failed run, a missing picture or a refused photo gives a notice. Stored answers without `image` still load.
+- The README describes both cases and their limits.
+- Offline tests cover these criteria; `uv run poe check` passes or unrelated failures are reported with evidence.
 
 ## Planned work: Show why no Expert rung answered (T-183)
 
