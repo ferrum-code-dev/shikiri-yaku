@@ -1,5 +1,40 @@
 # Task plan
 
+## Planned work: Expert conversation files (T-184)
+
+The request adds incoming and outgoing files only within Expert conversations. The current design permits the Expert to read files and nothing else, specifies only text answers, and describes no file transfer or secret detection for files. `AGENTS.md` forbids changing the design and building undescribed cases. Resolve that conflict with explicit authorization and an updated design before implementation; do not silently override it. Use the caveman and ponytail skills during implementation. The following tasks run in order; each owns its matching checklist entry.
+
+### F1. Resolve the file-transfer design
+
+Obtain explicit authorization to update `docs/design.md` before editing it. Specify incoming and outgoing files, provider capabilities and a safe generation mechanism consistent with approval and host-command rules, file lifetime and cleanup, size and type limits, authorization, failures, journal and restart behavior, and secret screening with its limits. Escalate unresolved product or security decisions instead of inventing them.
+
+## Acceptance criteria
+- Explicit authorization for any design edit is obtained before editing `docs/design.md`; without it the conflict is reported and implementation remains blocked.
+- The approved design describes both directions, confinement to Expert conversations, lifecycle, limits, authorization, failure notices, recovery, and outgoing sensitive-file and secret screening.
+- The design states what secret detection cannot guarantee and preserves the existing approval and host-command safety rules.
+- The documentation diff is reviewed and `git diff --check` passes.
+
+### F2. Receive files in Expert conversations
+
+After F1, implement the approved inbound contract across Telegram, conversation turns and supported Expert providers. Preserve existing authorization, ordered turns, duplicate and restart behavior, and cleanup. Inform the PO when receipt fails. Update user documentation and test offline with fakes and Telegram fixtures.
+
+## Acceptance criteria
+- An authorized PO can attach supported images and other files to an Expert conversation message and the Expert can use them in the same conversation, within the approved limits.
+- Unsupported, oversized or failed downloads produce a notice to the PO; attachments outside Expert conversations do not enter an Expert turn.
+- Duplicate updates and restarts preserve the approved turn semantics, and conversation cleanup removes stored attachments.
+- Offline tests cover supported files, rejection and download failure, authorization, duplicates, recovery and cleanup; `uv run poe check` passes or unrelated failures are reported with evidence.
+
+### F3. Send screened files from Expert conversations
+
+After F2, implement the approved outgoing contract, including generated images and other files, and document its limits. Screen every outgoing file before delivery, fail closed on screening errors, and tell the PO when a file cannot be sent. Preserve journal and restart guarantees and conversation confinement.
+
+## Acceptance criteria
+- The Expert can send supported generated images and other files back to the same Telegram conversation within the approved limits.
+- Sensitive files, including keys, certificates and password files, and files containing detected secrets are blocked before sending; screening errors also block delivery.
+- The PO receives a notice when a file is rejected or cannot be sent; file paths and content cannot bypass screening or escape the approved scope.
+- User documentation explains file limits and the limits of secret detection, including that undetected secrets can still be disclosed.
+- Offline tests cover safe delivery, sensitive names and content, detected secrets, screening and delivery failures, authorization, conversation confinement and restart behavior; `uv run poe check` passes or unrelated failures are reported with evidence.
+
 ## Planned work: Show why no Expert rung answered (T-183)
 
 `LadderExpert` already collects each rung's failure reason, including cooling-down rungs, but

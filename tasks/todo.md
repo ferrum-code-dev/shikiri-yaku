@@ -1,5 +1,31 @@
 # Todo
 
+## Planned work: Expert conversation files (T-184)
+
+### F1. Resolve the file-transfer design
+
+- [ ] F1. Resolve the design conflict and specify file transfers after explicit authorization.
+
+## Acceptance criteria
+- Authorization is obtained before any design edit; otherwise the conflict is reported and implementation remains blocked.
+- The design specifies file transfer, security, lifecycle, failures, recovery and detection limits; `git diff --check` passes.
+
+### F2. Receive files in Expert conversations
+
+- [ ] F2. Receive attachments in Expert conversations after F1.
+
+## Acceptance criteria
+- Authorized Expert turns accept supported files and notify the PO of failures; other conversations do not accept them.
+- Offline tests cover limits, authorization, duplicate delivery, recovery and cleanup; `uv run poe check` passes or unrelated failures are reported.
+
+### F3. Send screened files from Expert conversations
+
+- [ ] F3. Send screened files in Expert conversations after F2.
+
+## Acceptance criteria
+- Supported generated files reach the same conversation; sensitive files, detected secrets and screening failures are blocked and failures are reported to the PO.
+- Documentation states detection limits; offline tests cover delivery, screening, authorization and recovery; `uv run poe check` passes or unrelated failures are reported.
+
 ## Planned work: Show why no Expert rung answered (T-183)
 
 - [x] T-183. Show bounded, secret-screened rung failure reasons in the Expert topic reply.
