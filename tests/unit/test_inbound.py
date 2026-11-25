@@ -15,7 +15,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind, read_attachment
+from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FIXTURES
@@ -31,19 +31,6 @@ TEXT, REPLY, TAP = 700, 701, 702
 TOPIC: Final = 73
 BOT_MESSAGE: Final = 42
 GENERAL: Final = 1
-
-
-def test_document_and_photo_are_retained_with_caption() -> None:
-    body = json.loads((FIXTURES / "get_updates_attachments.json").read_text(encoding="utf-8"))
-    batch = _read(body)
-    assert [(item.update_id, item.text) for item in batch.items] == [
-        (710, "Please review"),
-        (711, None),
-    ]
-    assert [file.file_id for item in batch.items if (file := read_attachment(item.data))] == [
-        "file-1",
-        "photo-1",
-    ]
 
 
 class _Api:

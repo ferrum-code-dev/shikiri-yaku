@@ -98,13 +98,6 @@ class ExpertTurn:
 
 
 @dataclass(frozen=True, slots=True)
-class ExpertFile:
-    name: str
-    suffix: str
-    size: int
-
-
-@dataclass(frozen=True, slots=True)
 class ExpertRequest:
     directory: Path
     scope: dict[str, Path]
@@ -115,7 +108,6 @@ class ExpertRequest:
     turns: tuple[ExpertTurn, ...] = ()
     update_id: int = 0
     admin: bool = False
-    files: tuple[ExpertFile, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

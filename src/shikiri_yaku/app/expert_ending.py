@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shutil
-from contextlib import suppress
 from typing import TYPE_CHECKING, Final, Protocol
 
 from shikiri_yaku.app.expert import closed_reply, open_reply_keys
@@ -32,10 +31,6 @@ _REFUSED_DELETION: Final = (
     "stays, and the deletion is tried again."
 )
 _DELETION_KEY: Final = "expert:deletion:{number}"
-_FILE_DELETION_FAILURE: Final = (
-    "The files of Expert conversation {number} could not be removed. Cleanup will be retried."
-)
-_FILE_DELETION_KEY: Final = "expert:file-deletion:{number}"
 _CONVERSATION_CLOSING: Final = "closing"
 
 
@@ -175,23 +170,12 @@ class ExpertEnding:
         self._erase(row)
 
     def _erase(self, row: ConversationRecord) -> None:
-        try:
-            self._remove_directory(row.id)
-        except OSError:
-            self._outbox.queue(
-                None,
-                Purpose.EXPERT,
-                [Destination(self._channel, str(self._group_id))],
-                Message(_FILE_DELETION_FAILURE.format(number=row.id)),
-                key=_FILE_DELETION_KEY.format(number=row.id),
-                now=self._clock.now(),
-            )
-            return
+        self._remove_directory(row.id)
         self._log.erase(row.id, topic_chat=self._group_id)
 
     def _remove_directory(self, conversation_id: int) -> None:
         path = conversation_directory(self._directory, conversation_id)
-        with suppress(FileNotFoundError):
+        if path.exists():
             shutil.rmtree(path)
 
     def _report_refusal(self, row: ConversationRecord) -> None:

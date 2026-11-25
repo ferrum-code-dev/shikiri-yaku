@@ -89,8 +89,6 @@ EXPERT_RETENTION_DAYS: Final = 14
 EXPERT_WEB_TIMEOUT_S: Final = 20
 EXPERT_WEB_MAX_BYTES: Final = 1000000
 EXPERT_WEB_MAX_REDIRECTS: Final = 10
-EXPERT_FILE_MAX_BYTES: Final = 10_000_000
-EXPERT_FILES_MAX_BYTES: Final = 50_000_000
 ADMIN_IDLE_MIN: Final = 15
 ADMIN_APPROVAL_EXPIRY_MIN: Final = 10
 ADMIN_COMMAND_TIMEOUT_S: Final = 120
@@ -273,10 +271,6 @@ class ExpertSettings(_FrozenModel):
     web_timeout_s: PositiveInt = EXPERT_WEB_TIMEOUT_S
     web_max_bytes: PositiveInt = EXPERT_WEB_MAX_BYTES
     web_max_redirects: PositiveInt = EXPERT_WEB_MAX_REDIRECTS
-    file_max_bytes: Annotated[PositiveInt, Field(le=EXPERT_FILE_MAX_BYTES)] = EXPERT_FILE_MAX_BYTES
-    files_max_bytes: Annotated[PositiveInt, Field(le=EXPERT_FILES_MAX_BYTES)] = (
-        EXPERT_FILES_MAX_BYTES
-    )
 
 
 class AdminSettings(_FrozenModel):

@@ -343,8 +343,6 @@ def test_each_ending_leaves_no_rows_files_or_topic_and_touches_no_other_conversa
     h = build()
     target = h.open_conversation(CREATED, TARGET_THREAD)
     bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
-    assert h.log.reserve_attachment(target, 8001, 100, 500) is not None
-    assert h.log.reserve_attachment(bystander, 8002, 100, 500) is not None
     h.log.touch(bystander, NOW + timedelta(days=3))
 
     asyncio.run(end(h, target, TARGET_THREAD))
@@ -353,12 +351,6 @@ def test_each_ending_leaves_no_rows_files_or_topic_and_touches_no_other_conversa
     assert not conversation_directory(h.directory, target).exists()
     assert h.remaining(bystander) > 0
     assert conversation_directory(h.directory, bystander).exists()
-    assert (
-        h.database.connection.execute(
-            "SELECT conversation_id FROM attachments ORDER BY update_id"
-        ).fetchall()[0][0]
-        == bystander
-    )
     assert h.topics.deleted == ([] if end is _topic_gone_on_send else [TARGET_THREAD])
 
 
@@ -604,15 +596,8 @@ def test_a_failed_directory_removal_keeps_the_rows_until_the_sweep_finishes(
 ) -> None:
     h = build()
     conversation = h.open_conversation(CREATED, TARGET_THREAD)
-    bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
-    assert h.log.reserve_attachment(conversation, 8001, 100, 500) is not None
-    directory = conversation_directory(h.directory, conversation)
-    (directory / "partial").write_text("private file content")
     real_rmtree = shutil.rmtree
-    failures: list[OSError] = [
-        OSError(f"sensitive error {directory}"),
-        OSError(f"sensitive error {directory}"),
-    ]
+    failures: list[OSError] = [OSError("the directory is busy")]
 
     def flaky_rmtree(path: Path) -> None:
         if failures:
@@ -621,46 +606,19 @@ def test_a_failed_directory_removal_keeps_the_rows_until_the_sweep_finishes(
 
     monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
     h.topics.refusals = [ChannelRefusedError(TOPIC_GONE_REASON)]
-    report_key = f"expert:file-deletion:{conversation}"
 
     async def scenario() -> None:
-        await h.ending.topic_gone(conversation, Destination(CHANNEL, str(GROUP_ID), TARGET_THREAD))
+        with pytest.raises(OSError, match="busy"):
+            await h.ending.topic_gone(
+                conversation, Destination(CHANNEL, str(GROUP_ID), TARGET_THREAD)
+            )
         assert h.remaining(conversation) > 0
-        assert directory.exists()
-        assert (directory / "partial").exists()
-        assert (
-            h.database.connection.execute(
-                "SELECT COUNT(*) FROM attachments WHERE conversation_id = ?", (conversation,)
-            ).fetchone()[0]
-            == 1
-        )
-        assert h.notices(report_key) == 1
-        await h.ending.sweep()
-        assert h.remaining(conversation) > 0
-        assert h.notices(report_key) == 1
-        notice_id = h.database.connection.execute(
-            "SELECT id FROM messages WHERE notice_key = ?", (report_key,)
-        ).fetchone()[0]
-        notice = next(entry for entry in h.outbox.pending() if entry.message_id == notice_id)
-        assert notice.destination == Destination(CHANNEL, str(GROUP_ID))
-        assert str(directory) not in notice.message.text
-        assert "sensitive error" not in notice.message.text
-        assert "private file content" not in notice.message.text
         await h.ending.sweep()
 
     asyncio.run(scenario())
 
     assert h.remaining(conversation) == 0
-    assert not directory.exists()
-    assert h.notices(report_key) == 1
-    assert (
-        h.database.connection.execute(
-            "SELECT COUNT(*) FROM attachments WHERE conversation_id = ?", (conversation,)
-        ).fetchone()[0]
-        == 0
-    )
-    assert h.remaining(bystander) > 0
-    assert conversation_directory(h.directory, bystander).exists()
+    assert not conversation_directory(h.directory, conversation).exists()
 
 
 def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_finishes(

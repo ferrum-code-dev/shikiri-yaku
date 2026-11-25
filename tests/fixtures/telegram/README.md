@@ -4,7 +4,6 @@ the reply it stands for. A recording needs the bot token and the network, and th
 
 | File | Stands for | Source (documentation-based, not recorded) |
 | --- | --- | --- |
-| `get_updates_attachments.json` | Document and photo messages with and without captions | Telegram Bot API Update and Message shapes |
 | `send_ok.json` | the reply to `sendMessage`: the sent Message with its id and chat | Bot API, "Available methods" (sendMessage) and "Message" |
 | `edit_ok.json` | the reply to `editMessageText`: the edited Message | Bot API, "Available methods" (editMessageText) and "Message" |
 | `delete_ok.json` | the reply to `deleteMessage`: `true` | Bot API, "Available methods" (deleteMessage) |

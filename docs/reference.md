@@ -132,10 +132,6 @@ sqlite3 '<home>/<product>/journal.db' 'SELECT host, granted_at FROM web_grants O
 sqlite3 '<home>/<product>/journal.db' "DELETE FROM web_grants WHERE host = 'example.com';"
 ```
 
-Limit each file with `file_max_bytes` (default and maximum 10000000) and conversation storage
-with `files_max_bytes` (default and maximum 50000000). Unverified providers cannot use retained
-files. No provider's file handoff is currently verified, including on resumed turns.
-
 ```toml
 [expert]
 ladder = ["claude:sonnet", "codex:gpt-5"]

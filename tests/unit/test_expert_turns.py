@@ -17,7 +17,6 @@ from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_ending import ExpertEnding
-from shikiri_yaku.app.expert_files import ExpertFiles
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns
 from shikiri_yaku.app.expert_turns import ExpertTurns
@@ -25,15 +24,7 @@ from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.replies import Replies
-from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
-from shikiri_yaku.domain.inbound import (
-    ATTACHMENT,
-    Attachment,
-    Batch,
-    Inbound,
-    InboundKind,
-    attachment_data,
-)
+from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
@@ -59,12 +50,11 @@ from tests.support.expert_proposals import expert_proposals
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping, Sequence
 
-    from shikiri_yaku.app.expert_files import FileDownloader
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.health_source import HealthSource
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
-    from shikiri_yaku.domain.expert import ExpertRequest
+    from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
     from shikiri_yaku.ports import EscalationView, Expert, ShikiruClient, ShikiruTask
 
 OWNER: Final = 1001
@@ -212,7 +202,6 @@ class Harness:
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
         shared_group: bool = False,
-        file_downloader: FileDownloader | None = None,
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
@@ -251,11 +240,6 @@ class Harness:
             directory=path,
             channel=CHANNEL,
             group_id=GROUP_ID,
-            files=(
-                ExpertFiles(self.log, file_downloader, path, max_file=100, max_total=500)
-                if file_downloader is not None
-                else None
-            ),
             runs=self.runs,
             ending=self.ending,
             web=ExpertWebRequests(
@@ -312,16 +296,9 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
         shared_group: bool = False,
-        file_downloader: FileDownloader | None = None,
     ) -> Harness:
         harness = Harness(
-            tmp_path,
-            expert,
-            client,
-            muse=muse,
-            admins=admins,
-            shared_group=shared_group,
-            file_downloader=file_downloader,
+            tmp_path, expert, client, muse=muse, admins=admins, shared_group=shared_group
         )
         made.append(harness)
         return harness
@@ -411,289 +388,6 @@ def test_messages_during_a_running_turn_are_answered_in_order_once(
 
     _assert_prompts_in_order(runner, MESSAGES)
     assert _answer_keys(h) == ["expert:answer:1", "expert:answer:2", "expert:answer:3"]
-
-
-def test_attachment_refusal_is_durable_and_caption_runs_once(build: Callable[..., Harness]) -> None:
-    runner = Runner()
-    h = build(ladder(runner))
-    item = Inbound(
-        2, InboundKind.TEXT, OWNER, CHAT, "2", text="caption", data=ATTACHMENT, thread=THREAD
-    )
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        journal = JournalInbound(h.database)
-        journal.record_batch(CHANNEL, [item, item], 3, Clock().now())
-        restored = journal.pending()[0]
-        await h.turns.handle(restored)
-        await h.turns.handle(restored)
-
-    asyncio.run(scenario())
-    assert len(runner.calls) == 2
-    assert "caption" in runner.stdin[-1]
-    assert _answer_keys(h).count("expert:attachment:2") == 1
-    assert _answer_keys(h).count("expert:answer:2") == 1
-
-
-def test_attachment_download_finishes_before_later_turn(build: Callable[..., Harness]) -> None:
-    class Downloader:
-        def __init__(self) -> None:
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-            self.calls = 0
-
-        async def download(self, file_id: str, target: Path, max_bytes: int) -> int:
-            del file_id, max_bytes
-            self.calls += 1
-            self.started.set()
-            await self.release.wait()
-            await asyncio.to_thread(target.write_bytes, b"hello")
-            return 5
-
-    runner = Runner()
-    downloader = Downloader()
-    h = build(ladder(runner), file_downloader=downloader)
-    item = Inbound(
-        2,
-        InboundKind.TEXT,
-        OWNER,
-        CHAT,
-        "2",
-        text="caption",
-        thread=THREAD,
-        data=attachment_data(Attachment(file_id="id", name="note.txt")),
-    )
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        receiving = asyncio.create_task(h.turns.handle(item))
-        await asyncio.wait_for(downloader.started.wait(), timeout=1)
-        later = asyncio.create_task(h.turns.handle(_item(3, "later", thread=THREAD)))
-        await asyncio.wait({later}, timeout=0)
-        assert len(runner.calls) == 1
-        downloader.release.set()
-        await asyncio.wait_for(asyncio.gather(receiving, later), timeout=1)
-        await h.turns.handle(item)
-
-    asyncio.run(scenario())
-    _assert_prompts_in_order(runner, ("hello", "caption", "later"))
-    assert downloader.calls == 1
-    assert (
-        h.database.connection.execute(
-            "SELECT state FROM attachments WHERE update_id = 2"
-        ).fetchone()[0]
-        == "ready"
-    )
-
-
-def test_file_only_turn_recovers_download_and_runs_once_in_order(
-    build: Callable[..., Harness],
-) -> None:
-    class Downloader:
-        def __init__(self) -> None:
-            self.started = asyncio.Event()
-            self.resume = asyncio.Event()
-            self.calls = 0
-
-        async def download(self, file_id: str, target: Path, max_bytes: int) -> int:
-            del file_id, max_bytes
-            self.calls += 1
-            await asyncio.to_thread(target.write_bytes, b"hello")
-            if self.calls == 1:
-                self.started.set()
-                await self.resume.wait()
-            return 5
-
-    runner = Runner()
-    downloader = Downloader()
-    h = build(ladder(runner), file_downloader=downloader)
-    item = Inbound(
-        2,
-        InboundKind.TEXT,
-        OWNER,
-        CHAT,
-        "2",
-        thread=THREAD,
-        data=attachment_data(Attachment(file_id="id", name="note.txt")),
-    )
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        journal = JournalInbound(h.database)
-        journal.record_batch(CHANNEL, [item, item], 3, Clock().now())
-        interrupted = asyncio.create_task(h.turns.handle(journal.pending()[0]))
-        await asyncio.wait_for(downloader.started.wait(), timeout=1)
-        assert h.log.turn(2) is None
-        interrupted.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await interrupted
-        h.turns.recover()
-        await h.turns.handle(journal.pending()[0])
-        await h.turns.handle(_item(3, "later", thread=THREAD))
-        await h.turns.handle(journal.pending()[0])
-
-    asyncio.run(scenario())
-    assert downloader.calls == 2
-    assert len(runner.calls) == 3
-    assert "later" not in runner.stdin[1]
-    assert "later" in runner.stdin[2]
-    name = h.database.connection.execute(
-        "SELECT name FROM attachments WHERE update_id = 2"
-    ).fetchone()[0]
-    assert name not in runner.stdin[1]
-    assert _answer_keys(h).count("expert:attachment:2") == 1
-    assert _answer_keys(h).count("expert:answer:2") == 1
-
-
-def test_file_only_turn_interrupted_by_restart_is_not_run_again(
-    build: Callable[..., Harness],
-) -> None:
-    class Expert:
-        def __init__(self) -> None:
-            self.calls = 0
-            self.started = asyncio.Event()
-
-        async def turn(self, request: ExpertRequest) -> ExpertResult:
-            del request
-            self.calls += 1
-            if self.calls == 2:
-                self.started.set()
-                await asyncio.Event().wait()
-            return ExpertResult(
-                ExpertAnswer(reply="ok", title="", tasks=[], findings=""),
-                ExpertSession(0, "fake", "session", ""),
-                None,
-            )
-
-    class Downloader:
-        async def download(self, file_id: str, target: Path, max_bytes: int) -> int:
-            del file_id, max_bytes
-            return await asyncio.to_thread(target.write_bytes, b"hello")
-
-    expert = Expert()
-    h = build(expert, file_downloader=Downloader())
-    item = Inbound(
-        2,
-        InboundKind.TEXT,
-        OWNER,
-        CHAT,
-        "2",
-        thread=THREAD,
-        data=attachment_data(Attachment(file_id="id", name="note.txt")),
-    )
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        journal = JournalInbound(h.database)
-        journal.record_batch(CHANNEL, [item], 3, Clock().now())
-        running = asyncio.create_task(h.turns.handle(journal.pending()[0]))
-        await asyncio.wait_for(expert.started.wait(), timeout=1)
-        running.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await running
-        h.turns.recover()
-        await h.turns.handle(journal.pending()[0])
-
-    asyncio.run(scenario())
-    assert expert.calls == 2
-    turn = h.log.turn(2)
-    assert turn is not None
-    assert turn.state == "interrupted"
-    assert _answer_keys(h).count("expert:interrupted:2") == 1
-
-
-def test_ready_file_metadata_reaches_the_expert_port(build: Callable[..., Harness]) -> None:
-    class Capture:
-        def __init__(self) -> None:
-            self.requests: list[ExpertRequest] = []
-
-        async def turn(self, request: ExpertRequest) -> ExpertResult:
-            self.requests.append(request)
-            return ExpertResult(
-                ExpertAnswer(reply="ok", title="", tasks=[], findings=""),
-                ExpertSession(0, "fake", "session", ""),
-                None,
-            )
-
-    class Downloader:
-        async def download(self, file_id: str, target: Path, max_bytes: int) -> int:
-            del file_id, max_bytes
-            return await asyncio.to_thread(target.write_bytes, b"hello")
-
-    expert = Capture()
-    h = build(expert, file_downloader=Downloader())
-    item = Inbound(
-        2,
-        InboundKind.TEXT,
-        OWNER,
-        CHAT,
-        "2",
-        text="read this",
-        thread=THREAD,
-        data=attachment_data(Attachment(file_id="id", name="note.txt")),
-    )
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        JournalInbound(h.database).record_batch(CHANNEL, [item], 3, Clock().now())
-        await h.turns.handle(item)
-        await h.turns.handle(_item(3, "continue", thread=THREAD))
-
-    asyncio.run(scenario())
-    assert not expert.requests[0].files
-    for request in expert.requests[1:]:
-        (file,) = request.files
-        assert (file.suffix, file.size) == (".txt", 5)
-        assert (request.directory / file.name).read_bytes() == b"hello"
-
-
-def test_only_owner_attachments_in_an_expert_topic_are_noticed(
-    build: Callable[..., Harness],
-) -> None:
-    runner = Runner()
-    h = build(ladder(runner))
-
-    async def scenario() -> None:
-        await h.ask.handle(_item(1, "/expert hello"), None)
-        items = (
-            Inbound(2, InboundKind.TEXT, OWNER, CHAT, "2", data=ATTACHMENT, thread=THREAD),
-            Inbound(3, InboundKind.TEXT, STRANGER, CHAT, "3", data=ATTACHMENT, thread=THREAD),
-            Inbound(4, InboundKind.TEXT, OWNER, CHAT, "4", text="/expert outside", data=ATTACHMENT),
-        )
-        log = _Log(h.database, expected=2)
-        poller = InboundPoller(
-            _Updates(Batch(4, items)), log, Clock(), channel=CHANNEL, owners=[OWNER], wait_s=1
-        )
-        replies = Replies(
-            JournalReplies(
-                h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
-            ),
-            h.outbox,
-            Clock(),
-            {},
-            channel=CHANNEL,
-            commands=h.commands,
-            goal=cast("GoalCommand", None),
-            expert_turns=h.turns,
-        )
-        service = InboundService(
-            poller,
-            log,
-            replies,
-            cast("HealthSource", _Health()),
-            Clock(),
-            interval_s=1,
-            expert=h.turns,
-        )
-        await service.tick()
-        await asyncio.wait_for(log.handled.wait(), timeout=1)
-
-    asyncio.run(scenario())
-    assert "expert:attachment:2" in _answer_keys(h)
-    assert "expert:attachment:3" not in _answer_keys(h)
-    assert h.log.turn(2) is not None
-    assert h.log.get(4) is None
-    assert len(runner.calls) == 2
 
 
 _MIXED_RUNG_FAILURES: Final = [

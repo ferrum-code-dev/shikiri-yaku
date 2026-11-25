@@ -49,7 +49,6 @@ from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_ending import ExpertEnding
-from shikiri_yaku.app.expert_files import ExpertFiles
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.expert_runs import ConversationRuns
@@ -448,17 +447,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             admins=admins,
             known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
             admin_executor=admin_executor,
-            files=(
-                ExpertFiles(
-                    conversations,
-                    bot_api,
-                    directory,
-                    max_file=settings.expert.file_max_bytes,
-                    max_total=settings.expert.files_max_bytes,
-                )
-                if isinstance(bot_api, HttpBotApi)
-                else None
-            ),
             web=ExpertWebRequests(
                 JournalWeb(journal),
                 outbox,
