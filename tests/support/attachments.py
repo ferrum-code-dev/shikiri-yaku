@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.ports import ChannelRefusedError, ChannelUnavailableError, SketchError
@@ -55,3 +56,31 @@ class FakeSketcher:
         self.made.parent.mkdir(parents=True, exist_ok=True)
         self.made.write_bytes(PNG)
         return self.made
+
+
+class HeldDownloads(FakeDownloads):
+    """Starts a download and finishes it only once `release` is set."""
+
+    def __init__(self, files: Mapping[str, bytes]) -> None:
+        super().__init__(files)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def fetch(self, file_id: str) -> bytes:
+        self.started.set()
+        await self.release.wait()
+        return await super().fetch(file_id)
+
+
+class HeldSketcher(FakeSketcher):
+    """Starts a drawing and finishes it only once `release` is set."""
+
+    def __init__(self, made: Path) -> None:
+        super().__init__(made)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def draw(self, description: str) -> Path:
+        self.started.set()
+        await self.release.wait()
+        return await super().draw(description)

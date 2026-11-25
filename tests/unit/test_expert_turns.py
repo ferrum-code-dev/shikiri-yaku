@@ -45,7 +45,13 @@ from shikiri_yaku.ports import (
     ExpertError,
     ShikiruLinkDownError,
 )
-from tests.support.attachments import PNG, FakeDownloads, FakeSketcher
+from tests.support.attachments import (
+    PNG,
+    FakeDownloads,
+    FakeSketcher,
+    HeldDownloads,
+    HeldSketcher,
+)
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
@@ -1447,3 +1453,80 @@ def test_a_sketch_never_overwrites_an_attachment_of_the_same_turn(
     assert (folder / "2-sketch.png").read_bytes() == b"attached"
     assert (folder / "sketch-2.png").read_bytes() == PNG
     assert json.loads(_body(h, "expert:sketch:2"))["photo"] == str(folder / "sketch-2.png")
+
+
+def test_a_message_sent_after_a_file_waits_for_the_files_turn(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+
+    async def scenario() -> None:
+        downloads = HeldDownloads({"file-1": b"attached"})
+        h = build(ladder(runner), downloads=downloads)
+        await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
+        item = _file_item(2, "file-1", "a.png", caption=MESSAGES[1])
+        attach = asyncio.create_task(h.turns.handle(item))
+        later = asyncio.create_task(h.turns.handle(_item(3, MESSAGES[2], thread=THREAD)))
+        await asyncio.wait_for(downloads.started.wait(), timeout=1)
+        downloads.release.set()
+        await asyncio.wait_for(asyncio.gather(attach, later), timeout=1)
+
+    asyncio.run(scenario())
+
+    _assert_prompts_in_order(runner, MESSAGES)
+
+
+def test_a_conversation_that_ends_during_a_download_gets_no_file_and_no_turn(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        downloads = HeldDownloads({"file-1": b"attached"})
+        h = build(ladder(Runner()), downloads=downloads)
+        await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
+        conversation = h.log.at_thread(THREAD)
+        assert conversation is not None
+        attach = asyncio.create_task(h.turns.handle(_file_item(2, "file-1", "a.png")))
+        await asyncio.wait_for(downloads.started.wait(), timeout=1)
+        close = asyncio.create_task(h.ending.end(conversation.id, sender=OWNER, update_id=3))
+        # keep: lets the ending run as far as it can while the file is still downloading
+        await asyncio.wait({close}, timeout=0.05)
+        downloads.release.set()
+        await asyncio.wait_for(asyncio.gather(attach, close), timeout=1)
+
+        assert h.log.turn(2) is None
+        assert not (tmp_path / "conversations" / str(conversation.id) / "files").exists()
+
+    asyncio.run(scenario())
+
+
+def test_an_ending_stops_a_sketch_being_drawn(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        sketcher = HeldSketcher(tmp_path / "codex" / "pic.png")
+        h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        await asyncio.wait_for(sketcher.started.wait(), timeout=1)
+        conversation = h.log.at_thread(THREAD)
+        assert conversation is not None
+
+        ending = h.ending.end(conversation.id, sender=OWNER, update_id=2)
+        await asyncio.wait_for(ending, timeout=1)
+        await asyncio.wait_for(asked, timeout=1)
+
+        assert PHOTO_KEY not in _answer_keys(h)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("description", ["", "  "], ids=["empty", "blank"])
+def test_a_blank_image_draws_nothing(
+    build: Callable[..., Harness], tmp_path: Path, description: str
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": description})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    assert sketcher.descriptions == []
+    assert PHOTO_KEY not in _answer_keys(h)

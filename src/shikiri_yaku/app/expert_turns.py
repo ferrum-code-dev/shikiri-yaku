@@ -222,24 +222,35 @@ class ExpertTurns:
         if attached.size is not None and attached.size > DOWNLOAD_LIMIT_BYTES:
             self._file_notice(item, conversation, _TOO_LARGE)
             return
-        try:
-            content = await self._downloads.fetch(attached.id)
-        except ChannelRefusedError:
-            self._file_notice(item, conversation, _NOT_DOWNLOADED)
-            return
-        try:
-            path = save_attachment(
-                conversation_directory(self._directory, conversation.id),
-                item.update_id,
-                attached.name,
-                content,
-            )
-        except OSError:
-            self._file_notice(item, conversation, _NOT_SAVED)
-            return
-        text = join_blocks(item.text or "", f"{_ATTACHED}{path}")
-        self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
-        await self.run(conversation.id, item.update_id)
+        # keep: locked from the download to the turn's end, so a later message waits behind the file
+        async with self._runs.lock(conversation.id):
+            try:
+                content = await self._downloads.fetch(attached.id)
+            except ChannelRefusedError:
+                content = None
+            # keep: the conversation may have ended meanwhile; nothing is written for it then
+            if not self._is_open(conversation.id):
+                return
+            if content is None:
+                self._file_notice(item, conversation, _NOT_DOWNLOADED)
+                return
+            try:
+                path = save_attachment(
+                    conversation_directory(self._directory, conversation.id),
+                    item.update_id,
+                    attached.name,
+                    content,
+                )
+            except OSError:
+                self._file_notice(item, conversation, _NOT_SAVED)
+                return
+            text = join_blocks(item.text or "", f"{_ATTACHED}{path}")
+            self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
+            await self._run_locked(conversation.id, item.update_id)
+
+    def _is_open(self, conversation_id: int) -> bool:
+        conversation = self._log.conversation(conversation_id)
+        return conversation is not None and conversation.state == _CONVERSATION_OPEN
 
     def _file_notice(self, item: Inbound, conversation: ConversationRecord, text: str) -> None:
         queue_expert_notice(
@@ -417,8 +428,23 @@ class ExpertTurns:
         if answer.title and not self._log.history(conversation_id, before=update_id):
             with suppress(ChannelRefusedError):
                 await self._topics.rename(conversation.thread_id, f"💬 {answer.title}")
-        if answer.image is not None:
-            await self._sketches.draw(conversation, update_id, answer.image)
+        if description := (answer.image or "").strip():
+            await self._draw(conversation_id, update_id, description)
+
+    async def _draw(self, conversation_id: int, update_id: int, description: str) -> None:
+        """Draw an answer's sketch in a task an ending stops, unless the conversation is ending."""
+        conversation = self._log.conversation(conversation_id)
+        if conversation is None or conversation.state != _CONVERSATION_OPEN:
+            return
+        drawing = asyncio.create_task(self._sketches.draw(conversation, update_id, description))
+        self._runs.track(conversation_id, drawing)
+        try:
+            await asyncio.wait({drawing})
+        finally:
+            self._runs.untrack(conversation_id)
+            drawing.cancel()
+        if not drawing.cancelled():
+            drawing.result()
 
     async def _context(self, scope: list[str]) -> dict[str, object]:
         context: dict[str, object] = {}
