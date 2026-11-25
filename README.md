@@ -157,6 +157,10 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
   write `/expert@bot <question>`.
 - **Expert topics:** each message there is a follow-up turn. `/effort [level]`, `/summarize` and
   `/help` work there. `/close` ends the conversation.
+- **Attachments:** text, Markdown, CSV, JSON, PNG and JPEG files can be retained in the conversation,
+  but the Expert cannot use them until provider support is verified.
+  Captions are sent as text; a file without a caption also starts a turn. Files are deleted when
+  the conversation is cleaned up.
 - **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed.
   Each proposal submits at most once.
 - **Restarts and uncertain topics:** an interrupted turn is not repeated. If topic creation is

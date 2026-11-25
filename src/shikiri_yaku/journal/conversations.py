@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePath
 from typing import TYPE_CHECKING, Final
+from uuid import uuid4
 
 from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.expert import (
     MODE_EXPERT,
     ConversationRecord,
+    ExpertFile,
     ExpertSession,
     TurnRecord,
 )
+from shikiri_yaku.domain.inbound import read_attachment
 from shikiri_yaku.journal.database import parse_stamp, stamp
 from shikiri_yaku.journal.final_edits import settle_notice
 from shikiri_yaku.ports import Message
@@ -74,6 +78,55 @@ class Conversations:
 
     def __init__(self, database: Database) -> None:
         self._database = database
+
+    def attachments(self, conversation_id: int, *, through: int) -> tuple[ExpertFile, ...]:
+        """Return ready file metadata from this conversation up to the current turn."""
+        rows = self._database.connection.execute(
+            "SELECT a.name, a.reserved, m.data FROM attachments a "
+            "JOIN messages m ON m.update_id = a.update_id "
+            "WHERE a.conversation_id = ? AND a.update_id <= ? AND a.state = 'ready' "
+            "ORDER BY a.update_id",
+            (conversation_id, through),
+        )
+        return tuple(
+            ExpertFile(row["name"], PurePath(file.name).suffix.lower(), row["reserved"])
+            for row in rows
+            if (file := read_attachment(row["data"])) is not None
+        )
+
+    def reserve_attachment(
+        self, conversation_id: int, update_id: int, max_file: int, max_total: int
+    ) -> tuple[str, str, int] | None:
+        """Reserve capacity before downloading; reuse the same record after a replay."""
+        with self._database.transaction() as connection:
+            row = connection.execute(
+                "SELECT name, state, reserved FROM attachments "
+                "WHERE update_id = ? AND conversation_id = ?",
+                (update_id, conversation_id),
+            ).fetchone()
+            if row is not None:
+                return row["name"], row["state"], row["reserved"]
+            total = connection.execute(
+                "SELECT COALESCE(SUM(reserved), 0) FROM attachments WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()[0]
+            reserve = min(max_file, max_total - total)
+            if reserve <= 0:
+                return None
+            name = uuid4().hex
+            connection.execute(
+                "INSERT INTO attachments VALUES (?, ?, ?, ?, 'pending')",
+                (update_id, conversation_id, name, reserve),
+            )
+            return name, "pending", reserve
+
+    def finish_attachment(self, update_id: int, state: str, size: int) -> None:
+        """Settle a reservation with its actual retained size or a failed state."""
+        self._database.connection.execute(
+            "UPDATE attachments SET state = ?, reserved = ? "
+            "WHERE update_id = ? AND state = 'pending'",
+            (state, size, update_id),
+        )
 
     def create(
         self,
@@ -376,6 +429,9 @@ class Conversations:
                 "DELETE FROM web_requests WHERE update_id IN "
                 "(SELECT update_id FROM turns WHERE conversation_id = ?)",
                 (conversation_id,),
+            )
+            connection.execute(
+                "DELETE FROM attachments WHERE conversation_id = ?", (conversation_id,)
             )
             connection.execute("DELETE FROM turns WHERE conversation_id = ?", (conversation_id,))
             connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))

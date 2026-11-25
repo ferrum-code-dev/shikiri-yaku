@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Final
+from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shikiri_yaku.ports import ChannelUnavailableError
 
@@ -17,6 +20,34 @@ API_URL: Final = "https://api.telegram.org/bot{token}"
 HTTPX_LOGGER: Final = "httpx"
 NO_REPLY: Final = "the Bot API could not be reached"
 NO_TOKEN: Final = "the token file cannot be read"  # noqa: S105 -- a message, not the token
+FILE_UNAVAILABLE: Final = "the file could not be downloaded"
+FILE_TOO_LARGE: Final = "the file exceeds the download limit"
+PRIVATE_FILE_MODE: Final = 0o600
+INVALID_PATH_PARTS: Final = frozenset({".", ".."})
+BACKSLASH: Final = "\\"
+
+
+def _check_size(size: int, limit: int) -> None:
+    if size > limit:
+        raise ChannelUnavailableError(FILE_TOO_LARGE)
+
+
+def _remove_partial(target: Path) -> None:
+    target.unlink(missing_ok=True)
+
+
+class _TelegramFile(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    file_path: str
+    file_size: int | None = None
+
+
+class _FileReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    ok: bool
+    result: _TelegramFile | None = None
 
 
 class HttpBotApi:
@@ -53,6 +84,51 @@ class HttpBotApi:
         except httpx.HTTPError, ValueError:
             raise ChannelUnavailableError(NO_REPLY) from None
         return reply
+
+    async def download(self, file_id: str, target: Path, max_bytes: int) -> int:
+        """Stream a Telegram file into a new private file, enforcing its actual size."""
+        if self._base_url is None:
+            raise ChannelUnavailableError(NO_TOKEN)
+        try:
+            reply = _FileReply.model_validate(await self.call("getFile", {"file_id": file_id}))
+            if not reply.ok or reply.result is None:
+                raise ChannelUnavailableError(FILE_UNAVAILABLE)
+            remote = reply.result
+            if remote.file_size is not None and (
+                remote.file_size < 0 or remote.file_size > max_bytes
+            ):
+                raise ChannelUnavailableError(FILE_TOO_LARGE)
+            parts = remote.file_path.split("/")
+            if any(not part or part in INVALID_PATH_PARTS or BACKSLASH in part for part in parts):
+                raise ChannelUnavailableError(FILE_UNAVAILABLE)
+            url = (
+                self._base_url.replace("/bot", "/file/bot", 1)
+                + "/"
+                + "/".join(quote(part, safe="") for part in parts)
+            )
+            size = 0
+            created = False
+            try:
+                async with (
+                    httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client,
+                    client.stream("GET", url) as response,
+                ):
+                    response.raise_for_status()
+                    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, PRIVATE_FILE_MODE)
+                    created = True
+                    with os.fdopen(fd, "wb") as output:
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            _check_size(size, max_bytes)
+                            output.write(chunk)
+            except BaseException:
+                if created:
+                    _remove_partial(target)
+                raise
+            else:
+                return size
+        except ValidationError, httpx.HTTPError, OSError, ValueError:
+            raise ChannelUnavailableError(FILE_UNAVAILABLE) from None
 
     @property
     def known_secrets(self) -> tuple[str, ...]:

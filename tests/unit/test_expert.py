@@ -13,10 +13,12 @@ import pytest
 
 from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.adapters.agents.codex import CodexExpert
+from shikiri_yaku.adapters.agents.common import FileCapability
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.domain.expert import (
     AdminAnswer,
     ExpertAnswer,
+    ExpertFile,
     ExpertRequest,
     ExpertResult,
     ExpertSession,
@@ -82,6 +84,93 @@ class Runner:
 
 
 EXPERTS = {"claude": ClaudeExpert, "codex": CodexExpert}
+
+
+class VerifiedClaude(ClaudeExpert):
+    verified_files = (
+        FileCapability("verified-model", "version 1", ".txt", 5, 3),
+        FileCapability("verified-model", "version 1", ".png", 8, 8),
+    )
+
+
+class VersionRunner(Runner):
+    def __init__(self, version: str) -> None:
+        super().__init__("claude")
+        self.version = version
+
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        stdin: str | None = None,
+    ) -> CommandResult:
+        if list(argv) == ["claude", "--version"]:
+            return CommandResult(0, self.version, "")
+        return await super().run(argv, timeout_s=timeout_s, cwd=cwd, env=env, stdin=stdin)
+
+
+@pytest.mark.parametrize(
+    ("model", "version", "session", "suffix", "content", "allowed"),
+    [
+        ("verified-model", "version 1", None, ".txt", "hello", True),
+        ("verified-model", "version 1", None, ".png", "image", True),
+        ("verified-model", "version 1", "old", ".txt", "hey", True),
+        ("verified-model", "version 1", "old", ".txt", "hello", False),
+        ("different", "version 1", None, ".txt", "hello", False),
+        ("verified-model", "version 2", None, ".txt", "hello", False),
+        ("verified-model", "version 1", None, ".jpg", "hello", False),
+    ],
+)
+def test_file_handoff_requires_verified_model_version_interface_type_and_size(  # noqa: PLR0917
+    tmp_path: Path,
+    model: str,
+    version: str,
+    session: str | None,
+    suffix: str,
+    content: str,
+    allowed: bool,  # noqa: FBT001 -- table column
+) -> None:
+    name = "d2f4320a62b84d1b9a47a3e82716f7c1"
+    (tmp_path / name).write_text(content)
+    request = ExpertRequest(tmp_path, {}, "hello", files=(ExpertFile(name, suffix, len(content)),))
+    runner = VersionRunner(version)
+    asyncio.run(
+        VerifiedClaude(model, runner, effort=None, timeout_s=20).turn(
+            request, session_id=session, handoff=None
+        )
+    )
+    assert (str(tmp_path / name) in runner.stdin) is allowed
+
+
+def test_unverified_provider_never_receives_a_file_path(tmp_path: Path) -> None:
+    name = "d2f4320a62b84d1b9a47a3e82716f7c1"
+    (tmp_path / name).write_text("hello")
+    request = ExpertRequest(tmp_path, {}, "hello", files=(ExpertFile(name, ".txt", 5),))
+    runner = Runner("claude")
+    asyncio.run(
+        ClaudeExpert("model", runner, effort=None, timeout_s=20).turn(
+            request, session_id=None, handoff=None
+        )
+    )
+    assert str(tmp_path / name) not in runner.stdin
+
+
+def test_file_handoff_refuses_a_symlink(tmp_path: Path) -> None:
+    name = "d2f4320a62b84d1b9a47a3e82716f7c1"
+    target = tmp_path / "other"
+    target.write_text("hello")
+    (tmp_path / name).symlink_to(target)
+    request = ExpertRequest(tmp_path, {}, "hello", files=(ExpertFile(name, ".txt", 5),))
+    runner = VersionRunner("version 1")
+    asyncio.run(
+        VerifiedClaude("verified-model", runner, effort=None, timeout_s=20).turn(
+            request, session_id=None, handoff=None
+        )
+    )
+    assert str(tmp_path / name) not in runner.stdin
 
 
 @pytest.mark.parametrize(

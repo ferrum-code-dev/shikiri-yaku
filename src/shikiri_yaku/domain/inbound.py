@@ -4,6 +4,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+ATTACHMENT: Final = "attachment"
+ATTACHMENT_PREFIX: Final = "attachment:"
+FILE_ID_LIMIT: Final = 512
+FILE_NAME_LIMIT: Final = 255
+
+
+class Attachment(BaseModel):
+    """Bounded metadata needed to retrieve one channel attachment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    file_id: str = Field(min_length=1, max_length=FILE_ID_LIMIT)
+    name: str = Field(min_length=1, max_length=FILE_NAME_LIMIT)
+    size: int | None = Field(default=None, ge=0)
+
+
+def attachment_data(attachment: Attachment) -> str:
+    return ATTACHMENT_PREFIX + attachment.model_dump_json()
+
+
+def is_attachment(data: str | None) -> bool:
+    return data == ATTACHMENT or bool(data and data.startswith(ATTACHMENT_PREFIX))
+
+
+def read_attachment(data: str | None) -> Attachment | None:
+    if not data or not data.startswith(ATTACHMENT_PREFIX):
+        return None
+    try:
+        return Attachment.model_validate_json(data.removeprefix(ATTACHMENT_PREFIX))
+    except ValidationError:
+        return None
 
 
 class InboundKind(StrEnum):

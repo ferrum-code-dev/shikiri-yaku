@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING, Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.adapters.telegram import REF_SEPARATOR, UNEXPECTED_REPLY
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import (
+    ATTACHMENT,
+    Attachment,
+    Batch,
+    Inbound,
+    InboundKind,
+    attachment_data,
+)
 from shikiri_yaku.ports import ChannelProtocolError
 
 if TYPE_CHECKING:
@@ -35,11 +42,26 @@ class _Closed(_Payload):
     """The service message Telegram sends when a forum topic is closed; it has no fields we read."""
 
 
+class _File(_Payload):
+    file_id: str
+    file_name: str | None = None
+    file_size: StrictInt | None = None
+
+
 class _Message(_Payload):
     message_id: int
     sender: Annotated[_Identity, Field(alias="from")]
     chat: _Identity
     text: str | None = None
+    caption: str | None = None
+    document: _File | None = None
+    photo: list[_File] | None = None
+    audio: dict[str, object] | None = None
+    video: dict[str, object] | None = None
+    animation: dict[str, object] | None = None
+    voice: dict[str, object] | None = None
+    video_note: dict[str, object] | None = None
+    sticker: dict[str, object] | None = None
     message_thread_id: StrictInt | None = None
     reply_to_message: _Replied | None = None
     forum_topic_closed: _Closed | None = None
@@ -130,7 +152,9 @@ def _item(update: _Update) -> Inbound | None:
             _ref(closed.chat.id, closed.message_id),
             thread=_thread(closed.message_thread_id),
         )
-    if update.message is not None and update.message.text is not None:
+    if update.message is not None and (
+        update.message.text is not None or _has_attachment(update.message)
+    ):
         sent = update.message
         replied = _replied(sent)
         return Inbound(
@@ -140,10 +164,43 @@ def _item(update: _Update) -> Inbound | None:
             sent.chat.id,
             _ref(sent.chat.id, sent.message_id),
             reply_to_ref=None if replied is None else _ref(sent.chat.id, replied.message_id),
-            text=sent.text,
+            text=sent.text if sent.text is not None else sent.caption,
+            data=_attachment(sent),
             thread=_thread(sent.message_thread_id),
         )
     return None
+
+
+def _attachment(message: _Message) -> str | None:
+    file = message.document or (message.photo[-1] if message.photo else None)
+    if file is not None:
+        try:
+            return attachment_data(
+                Attachment(
+                    file_id=file.file_id,
+                    name=(file.file_name or "") if message.document is not None else "photo.jpg",
+                    size=file.file_size,
+                )
+            )
+        except ValidationError:
+            return ATTACHMENT
+    return ATTACHMENT if _has_attachment(message) else None
+
+
+def _has_attachment(message: _Message) -> bool:
+    return any(
+        value is not None
+        for value in (
+            message.document,
+            message.photo,
+            message.audio,
+            message.video,
+            message.animation,
+            message.voice,
+            message.video_note,
+            message.sticker,
+        )
+    )
 
 
 def _thread(thread: int | None) -> int | None:

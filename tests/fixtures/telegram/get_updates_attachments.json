@@ -1,0 +1,4 @@
+{"ok": true, "result": [
+  {"update_id": 710, "message": {"message_id": 90, "from": {"id": 1001}, "chat": {"id": -1009}, "message_thread_id": 73, "caption": "Please review", "document": {"file_id": "file-1", "file_name": "note.txt", "file_size": 12}}},
+  {"update_id": 711, "message": {"message_id": 91, "from": {"id": 1001}, "chat": {"id": -1009}, "message_thread_id": 73, "photo": [{"file_id": "photo-1", "width": 1, "height": 1}]}}
+]}

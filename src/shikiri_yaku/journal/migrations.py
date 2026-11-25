@@ -251,4 +251,12 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE conversations ADD COLUMN ending_at TEXT",),
     ("ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'expert'",),
+    (
+        """CREATE TABLE attachments (
+            update_id INTEGER PRIMARY KEY,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+            name TEXT NOT NULL, reserved INTEGER NOT NULL,
+            state TEXT NOT NULL
+        )""",
+    ),
 )

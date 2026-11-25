@@ -21,7 +21,7 @@ from shikiri_yaku.domain.expert import (
     admin_message_text,
     stored_answer,
 )
-from shikiri_yaku.domain.inbound import InboundKind
+from shikiri_yaku.domain.inbound import InboundKind, is_attachment, read_attachment
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert import ConversationLog, ExpertTopics
     from shikiri_yaku.app.expert_admin import AdminExecutor
     from shikiri_yaku.app.expert_ending import ExpertEnding
+    from shikiri_yaku.app.expert_files import ExpertFiles
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.expert_runs import ConversationRuns
     from shikiri_yaku.app.expert_web import ExpertWebRequests
@@ -49,6 +50,10 @@ if TYPE_CHECKING:
 
 CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
 SUMMARY_PROMPT: Final = "Summarize this conversation in two or three short sentences."
+FILE_ONLY_PROMPT: Final = (
+    "The PO sent a file without a caption. If it was not provided to you, say it is unavailable; "
+    "do not infer its contents."
+)
 ADMIN_WARNING: Final = (
     "This chat is not private: members of the group can read this topic, including any command "
     "the Expert proposes and its output."
@@ -136,9 +141,11 @@ class ExpertTurns:
         admins: frozenset[int] = frozenset(),
         known_secrets: tuple[str, ...] = (),
         admin_executor: AdminExecutor | None = None,
+        files: ExpertFiles | None = None,
     ) -> None:
         self._log = log
         self._admin_executor = admin_executor
+        self._files = files
         self._outbox = outbox
         self._clock = clock
         self._expert = expert
@@ -178,6 +185,9 @@ class ExpertTurns:
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
             return
         self._log.touch(conversation.id, self._clock.now())
+        if is_attachment(item.data):
+            await self._receive_attachment(item, conversation.id)
+            return
         text = item.text or ""
         words = text.split()
         if not words or not words[0].startswith("/"):
@@ -194,6 +204,37 @@ class ExpertTurns:
             await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
         else:
             self._reply(item, _HELP, conversation.id)
+
+    async def _receive_attachment(self, item: Inbound, conversation_id: int) -> None:
+        async with self._runs.lock(conversation_id):
+            current = self._log.conversation(conversation_id)
+            if current is None or current.state != _CONVERSATION_OPEN:
+                return
+            attachment = read_attachment(item.data)
+            received = (
+                attachment is not None
+                and self._files is not None
+                and await self._files.receive(conversation_id, item.update_id, attachment)
+            )
+            self._attachment_notice(item, conversation_id, received=received)
+            self._log.add_turn(
+                conversation_id, item.update_id, item.text or FILE_ONLY_PROMPT, self._clock.now()
+            )
+            await self._run_locked(conversation_id, item.update_id)
+
+    def _attachment_notice(self, item: Inbound, conversation_id: int, *, received: bool) -> None:
+        if received:
+            message = "File retained. The Expert cannot use it until file support is verified."
+        else:
+            message = "The attachment could not be received."
+        queue_expert_notice(
+            self._outbox,
+            self._clock,
+            item_destination(self._channel, item),
+            message,
+            key=f"expert:attachment:{item.update_id}",
+            conversation_id=conversation_id,
+        )
 
     def warn_admin(self, conversation: ConversationRecord) -> None:
         """Say in the topic of an admin conversation that the chat is not private."""
@@ -277,6 +318,7 @@ class ExpertTurns:
             message=turn.text,
             update_id=update_id,
             admin=conversation.mode == MODE_ADMIN,
+            files=self._log.attachments(conversation.id, through=update_id),
             context=json.dumps(context),
             effort=conversation.effort,
             session=conversation.session,

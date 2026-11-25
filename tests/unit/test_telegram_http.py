@@ -9,14 +9,17 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import httpx
 import pytest
 
-from shikiri_yaku.adapters.telegram_http import NO_REPLY, NO_TOKEN, HttpBotApi
+from shikiri_yaku.adapters.telegram_http import FILE_TOO_LARGE, NO_REPLY, NO_TOKEN, HttpBotApi
 from shikiri_yaku.ports import ChannelError
 from tests.support.telegram_bot import FIXTURES
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 TOKEN: Final = "42:a-token-that-only-this-test-uses"  # noqa: S105 -- made up for this test
 TIMEOUT_S: Final = 5
@@ -150,3 +153,83 @@ def test_the_token_is_never_logged_even_at_debug_level(
 
     assert seen
     assert TOKEN not in caplog.text
+
+
+def test_file_download_streams_to_a_private_file(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST":
+            return httpx.Response(
+                200, json={"ok": True, "result": {"file_path": "documents/test.txt"}}
+            )
+        return httpx.Response(200, content=b"hello")
+
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=httpx.MockTransport(handle))
+    destination = tmp_path / "partial"
+    assert asyncio.run(api.download("file-id", destination, 5)) == 5
+    assert destination.read_bytes() == b"hello"
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert str(requests[1].url) == f"https://api.telegram.org/file/bot{TOKEN}/documents/test.txt"
+
+
+@pytest.mark.parametrize("declared", [None, 6])
+def test_oversized_file_is_rejected_and_partial_removed(
+    tmp_path: Path, declared: int | None
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(
+                200, json={"ok": True, "result": {"file_path": "a", "file_size": declared}}
+            )
+        return httpx.Response(200, content=b"123456")
+
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=httpx.MockTransport(handle))
+    destination = tmp_path / "partial"
+    with pytest.raises(ChannelError, match=FILE_TOO_LARGE):
+        asyncio.run(api.download("file-id", destination, 5))
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("remote", ["../secret", "/secret", "a/../secret", "a\\secret"])
+def test_invalid_download_path_is_not_requested(tmp_path: Path, remote: str) -> None:
+    seen: list[httpx.Request] = []
+    body = json.dumps({"ok": True, "result": {"file_path": remote}}).encode()
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=_reply(200, body, seen))
+    with pytest.raises(ChannelError):
+        asyncio.run(api.download("file-id", tmp_path / "partial", 5))
+    assert len(seen) == 1
+
+
+def test_download_failure_removes_partial_and_hides_transport_details(tmp_path: Path) -> None:
+    class BrokenStream(httpx.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield b"partial"
+            raise httpx.ReadError(TOKEN)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"ok": True, "result": {"file_path": "a"}})
+        return httpx.Response(200, stream=BrokenStream())
+
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=httpx.MockTransport(handle))
+    destination = tmp_path / "partial"
+    with pytest.raises(ChannelError) as error:
+        asyncio.run(api.download("file-id", destination, 20))
+    assert TOKEN not in str(error.value)
+    assert not destination.exists()
+
+
+def test_download_does_not_replace_existing_file(tmp_path: Path) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"ok": True, "result": {"file_path": "a"}})
+        return httpx.Response(200, content=b"new")
+
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=httpx.MockTransport(handle))
+    destination = tmp_path / "partial"
+    destination.write_text("existing")
+    with pytest.raises(ChannelError):
+        asyncio.run(api.download("file-id", destination, 20))
+    assert destination.read_text() == "existing"

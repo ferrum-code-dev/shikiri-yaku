@@ -18,5 +18,6 @@ def remove_expert_schema(connection: Connection) -> None:
     connection.execute("DROP TABLE web_requests")
     connection.execute("DROP TABLE web_grants")
     connection.execute("DROP TABLE proposals")
+    connection.execute("DROP TABLE attachments")
     connection.execute("DROP TABLE turns")
     connection.execute("DROP TABLE conversations")

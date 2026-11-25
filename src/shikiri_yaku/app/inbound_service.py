@@ -15,7 +15,7 @@ from shikiri_yaku.domain.callback import (
     WEB_DENY_VERB,
     decode_callback,
 )
-from shikiri_yaku.domain.inbound import InboundKind
+from shikiri_yaku.domain.inbound import InboundKind, is_attachment
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError, ShikiruError
 
 if TYPE_CHECKING:
@@ -80,6 +80,11 @@ class InboundService:
                 task.result()
         await self._poll()
         for item in self._log.pending():
+            if is_attachment(item.data) and not (
+                self._expert is not None and self._expert.owns(item)
+            ):
+                self._log.mark_handled(item.update_id)
+                continue
             if self._background(item):
                 if item.update_id not in self._tasks:
                     self._tasks[item.update_id] = asyncio.create_task(self._run_background(item))
