@@ -71,6 +71,12 @@ class JournalOutbox:
         ).fetchone()
         return row is not None
 
+    def notice_queued(self, key: str) -> bool:
+        row = self._database.connection.execute(
+            "SELECT 1 FROM messages WHERE direction = 'out' AND notice_key = ?", (key,)
+        ).fetchone()
+        return row is not None
+
     def queue_command_reply(
         self,
         destinations: Sequence[Destination],

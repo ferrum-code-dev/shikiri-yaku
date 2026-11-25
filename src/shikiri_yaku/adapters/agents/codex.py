@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, override
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from shikiri_yaku.adapters.agents.common import (
     ANSWER_FILE,
@@ -19,16 +22,22 @@ from shikiri_yaku.adapters.agents.common import (
     CliRung,
 )
 from shikiri_yaku.domain.classification import CallRecord
-from shikiri_yaku.ports import ExpertError
+from shikiri_yaku.ports import CommandError, ExpertError, SketchError
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from shikiri_yaku.domain.expert import ExpertAnswer, ExpertRequest
-    from shikiri_yaku.ports import CommandResult
+    from shikiri_yaku.ports import CommandResult, ExpertCommandRunner
 
 NAME: Final = "codex"
 THREAD_STARTED: Final = "thread.started"
+CODEX_HOME_VARIABLE: Final = "CODEX_HOME"
+DEFAULT_HOME: Final = ".codex"
+GENERATED_IMAGES: Final = "generated_images"
+PNG_SIGNATURE: Final = b"\x89PNG\r\n\x1a\n"
+PLAIN_NAME: Final = re.compile(r"[A-Za-z0-9_-]+")
+_SKETCH_FAILED: Final = "codex did not finish the run"
+_NO_THREAD: Final = "codex named no thread"
+_NO_PICTURE: Final = "codex saved no picture"
 _LOOKUPS: Final = "Answer from the facts above alone. Run no command and look nothing up."
 _TOKENS: Final = re.compile(r"tokens used:?\s+(\d[\d,]*)(?![\w.])")
 
@@ -154,4 +163,108 @@ class CodexExpert(CliExpert):
         )
 
 
-AGENT: Final = AgentAdapter(name=NAME, reasoner=CodexRung, expert=CodexExpert)
+class CodexSketcher:
+    """Draws a picture with one Codex model: a fresh thread, read-only, and no web tool.
+
+    The description goes on standard input and the run starts in an empty directory. Codex keeps
+    the picture in its own store, under the thread the run started, so the picture is found by
+    that thread's id. The id and the file are checked before the path is returned.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        runner: ExpertCommandRunner,
+        *,
+        effort: str | None,
+        timeout_s: float,
+        store: Path | None = None,
+    ) -> None:
+        self._model = model
+        self._runner = runner
+        self._effort = effort
+        self._timeout_s = timeout_s
+        self._store = codex_store() if store is None else store
+
+    async def draw(self, description: str) -> Path:
+        with tempfile.TemporaryDirectory() as empty:
+            try:
+                result = await self._runner.run(
+                    self._argv(),
+                    timeout_s=self._timeout_s,
+                    cwd=Path(empty),
+                    stdin=description,
+                )
+            except CommandError:
+                raise SketchError(_SKETCH_FAILED) from None
+        if result.returncode != 0:
+            raise SketchError(_SKETCH_FAILED)
+        thread = _thread_id(result.stdout)
+        if thread is None:
+            raise SketchError(_NO_THREAD)
+        picture = _newest_png(self._store / GENERATED_IMAGES / thread)
+        if picture is None:
+            raise SketchError(_NO_PICTURE)
+        return picture
+
+    def _argv(self) -> list[str]:
+        argv = [
+            "codex",
+            "exec",
+            "--json",
+            "--ignore-user-config",
+            "--disable",
+            "apps",
+            "-c",
+            'web_search="disabled"',
+            "-c",
+            'sandbox_mode="read-only"',
+            "--skip-git-repo-check",
+            "-m",
+            self._model,
+        ]
+        if self._effort is not None:
+            argv += ["-c", f"model_reasoning_effort={json.dumps(self._effort, ensure_ascii=False)}"]
+        return argv
+
+
+def codex_store() -> Path:
+    """Return Codex's own directory: CODEX_HOME when it is set, else the default under the home."""
+    home = os.environ.get(CODEX_HOME_VARIABLE)
+    return Path(home) if home else Path.home() / DEFAULT_HOME
+
+
+def _thread_id(stdout: str) -> str | None:
+    for line in stdout.splitlines():
+        try:
+            event = _CodexEvent.model_validate_json(line)
+        except ValidationError:
+            continue
+        if (
+            event.type == THREAD_STARTED
+            and event.thread_id
+            and PLAIN_NAME.fullmatch(event.thread_id)
+        ):
+            return event.thread_id
+    return None
+
+
+def _newest_png(folder: Path) -> Path | None:
+    """Return the newest PNG a run saved in its thread's folder, if it is a regular PNG file."""
+    try:
+        if folder.is_symlink() or not folder.is_dir():
+            return None
+        files = [path for path in folder.glob("*.png") if path.is_file() and not path.is_symlink()]
+        if not files:
+            return None
+        newest = max(files, key=lambda path: path.stat().st_mtime)
+        with newest.open("rb") as image:
+            signature = image.read(len(PNG_SIGNATURE))
+    except OSError:
+        return None
+    return newest if signature == PNG_SIGNATURE else None
+
+
+AGENT: Final = AgentAdapter(
+    name=NAME, reasoner=CodexRung, expert=CodexExpert, sketcher=CodexSketcher
+)

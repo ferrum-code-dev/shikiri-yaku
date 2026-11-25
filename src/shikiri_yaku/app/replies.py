@@ -113,6 +113,9 @@ class Replies:
         self._expert_turns = expert_turns
 
     async def handle(self, item: Inbound) -> None:
+        # keep: a file outside an Expert topic is ignored, even when its caption reads as a command
+        if item.kind == InboundKind.FILE:
+            return
         if item.kind == InboundKind.TEXT or is_command(item.text):
             await self._commands.handle(item)
             return

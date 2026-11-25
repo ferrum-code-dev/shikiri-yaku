@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.inbound import Inbound, InboundKind
+from shikiri_yaku.domain.inbound import FileRef, Inbound, InboundKind
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
@@ -16,16 +16,19 @@ if TYPE_CHECKING:
 
 
 def _inbound(row: sqlite3.Row) -> Inbound:
+    kind = InboundKind(row["kind"])
+    is_file = kind == InboundKind.FILE and row["data"] is not None
     return Inbound(
         update_id=row["update_id"],
-        kind=InboundKind(row["kind"]),
+        kind=kind,
         sender=row["sender"],
         chat=int(row["chat"]),
         message_ref=row["message_ref"],
         reply_to_ref=row["reply_to_ref"],
         text=row["body"],
-        data=row["data"],
+        data=None if is_file else row["data"],
         thread=row["thread"],
+        file=FileRef.model_validate_json(row["data"]) if is_file else None,
     )
 
 
@@ -78,10 +81,16 @@ class JournalInbound:
         rows = self._database.connection.execute(
             """
             SELECT * FROM messages
-            WHERE direction = ? AND delivery = ? AND kind IN (?, ?)
+            WHERE direction = ? AND delivery = ? AND kind IN (?, ?, ?)
             ORDER BY update_id
             """,
-            (Direction.IN, Delivery.REFUSED, InboundKind.TEXT, InboundKind.REPLY),
+            (
+                Direction.IN,
+                Delivery.REFUSED,
+                InboundKind.TEXT,
+                InboundKind.REPLY,
+                InboundKind.FILE,
+            ),
         )
         return [_inbound(row) for row in rows]
 
@@ -106,7 +115,8 @@ class JournalInbound:
     @staticmethod
     def _insert(connection: sqlite3.Connection, channel: str, item: Inbound, now: datetime) -> None:
         """Insert an item once; a secret keeps its form and loses its text and data."""
-        form = secret_form([text for text in (item.text, item.data) if text is not None])
+        data = item.data if item.file is None else item.file.model_dump_json()
+        form = secret_form([text for text in (item.text, data) if text is not None])
         connection.execute(
             """
             INSERT INTO messages (direction, channel, chat, update_id, kind, sender, message_ref,
@@ -124,7 +134,7 @@ class JournalInbound:
                 item.message_ref,
                 item.reply_to_ref,
                 None if form else item.text,
-                None if form else item.data,
+                None if form else data,
                 Delivery.RECEIVED if form is None else Delivery.REFUSED,
                 form,
                 stamp(now),

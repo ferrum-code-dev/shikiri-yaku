@@ -39,6 +39,8 @@ class FakeBotApi:
         self._updates = updates or []
         self._after_send = after_send
         self._message_ids = itertools.count(FIRST_MESSAGE_ID)
+        self.uploads: list[tuple[str, dict[str, Any], str, str, bytes]] = []
+        self.downloads: list[str] = []
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         self.calls.append((method, dict(payload)))
@@ -51,6 +53,25 @@ class FakeBotApi:
             return json.loads(GET_ME_OK.read_text(encoding="utf-8"))
         if method == GET_WEBHOOK_INFO:
             return json.loads(GET_WEBHOOK_INFO_OK.read_text(encoding="utf-8"))
+        return self._send_reply()
+
+    async def upload(
+        self,
+        method: str,
+        payload: Mapping[str, object],
+        field: str,
+        name: str,
+        content: bytes,
+    ) -> object:
+        self.uploads.append((method, dict(payload), field, name, content))
+        self.called.set()
+        return self._send_reply()
+
+    async def download(self, file_path: str) -> bytes:
+        self.downloads.append(file_path)
+        return b""
+
+    def _send_reply(self) -> dict[str, Any]:
         reply: dict[str, Any] = json.loads(SEND_OK.read_text(encoding="utf-8"))
         reply["result"]["message_id"] = next(self._message_ids)
         return reply

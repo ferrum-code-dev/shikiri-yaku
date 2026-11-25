@@ -33,6 +33,7 @@ from shikiri_yaku.adapters.telegram import (
     TelegramChannelCheck,
     TelegramForumTopics,
 )
+from shikiri_yaku.adapters.telegram_files import TelegramFiles
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_topics import (
     TelegramDestinations,
@@ -49,9 +50,11 @@ from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_ending import ExpertEnding
+from shikiri_yaku.app.expert_files import TaskFiles
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.expert_runs import ConversationRuns
+from shikiri_yaku.app.expert_sketches import ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.goal import GoalCommand
@@ -142,7 +145,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.adapters.agents.common import AgentAdapter
     from shikiri_yaku.adapters.shikiru_mcp import Connector
-    from shikiri_yaku.adapters.telegram import BotApi
+    from shikiri_yaku.adapters.telegram import BotApi, FileApi
     from shikiri_yaku.cli import Job
     from shikiri_yaku.domain.classification import Category, Classifier
     from shikiri_yaku.domain.extension import Extension, Handler
@@ -170,6 +173,7 @@ if TYPE_CHECKING:
         RetryLog,
         ShikiruClient,
         SignalNumbers,
+        Sketcher,
         StartLog,
         WaitLog,
     )
@@ -281,6 +285,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         journal, MessageStore(journal, reporter), ending_prefixes=ENDING_NOTICE_PREFIXES
     )
     bot_api = bot(settings)
+    # keep: the factory builds HttpBotApi, which also uploads and downloads; tests may pass less
+    files_api = cast("FileApi", bot_api)
     topics = TopicStore(journal)
     group_id = settings.telegram.group_id
     reconciler = (
@@ -428,8 +434,18 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 if settings.admin is not None
                 else ADMIN_APPROVAL_EXPIRY_MIN
             ),
+            files=TaskFiles(directory),
         )
         ending.admin_expiry = proposals.expire_admin
+        sketches = ExpertSketches(
+            build_sketcher(settings, commands),
+            outbox,
+            clock,
+            directory=directory,
+            channel=TELEGRAM_CHANNEL,
+            group_id=group_id,
+            known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+        )
         turns = ExpertTurns(
             conversations,
             outbox,
@@ -444,6 +460,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             runs=runs,
             ending=ending,
             proposals=proposals,
+            downloads=TelegramFiles(files_api),
+            sketches=sketches,
             admins=admins,
             known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
             admin_executor=admin_executor,
@@ -481,7 +499,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         standing_on_failure=failure_policy(extensions),
         expiry=ending,
     )
-    channel = TelegramChannel(bot_api, clock, outbox)
+    channel = TelegramChannel(files_api, clock, outbox)
     jobs.append(outbox_job(settings, outbox, clock, channel, gone=ending))
     goal = goal_command(
         journal,
@@ -645,6 +663,22 @@ def build_expert(
         )
     )
     return expert, expert_rungs
+
+
+def build_sketcher(settings: Settings, commands: CommandRunner) -> Sketcher | None:
+    """Return the sketcher of the first Expert rung whose agent can draw, or None without one."""
+    if settings.expert is None:
+        return None
+    for rung in settings.expert.ladder:
+        factory = AGENTS[rung.adapter].sketcher
+        if factory is not None:
+            return factory(
+                rung.model,
+                cast("ExpertCommandRunner", commands),
+                effort=rung.effort,
+                timeout_s=settings.expert.timeout_s,
+            )
+    return None
 
 
 def build_reasoner(

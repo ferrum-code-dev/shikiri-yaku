@@ -21,6 +21,7 @@ from shikiri_yaku.domain.expert import (
     ExpertResult,
     ExpertSession,
     ExpertTurn,
+    stored_answer,
 )
 from shikiri_yaku.ports import CommandResult, ExpertError
 
@@ -425,3 +426,24 @@ def test_ladder_reports_exhaustion(tmp_path: Path) -> None:
     )
     with pytest.raises(ExpertError, match=r"claude.*codex"):
         asyncio.run(ladder.turn(ExpertRequest(tmp_path, {"api": tmp_path}, "hello")))
+
+
+@pytest.mark.parametrize(
+    ("stored", "image"),
+    [
+        pytest.param(
+            {"reply": "r", "title": "t", "tasks": [], "findings": ""}, None, id="before-sketches"
+        ),
+        pytest.param(
+            {"reply": "r", "title": "t", "tasks": [], "findings": "", "image": "a graph"},
+            "a graph",
+            id="with-a-sketch",
+        ),
+    ],
+)
+def test_a_stored_answer_loads_with_or_without_a_sketch(
+    stored: dict[str, object], image: str | None
+) -> None:
+    answer = stored_answer(json.dumps(stored))
+
+    assert answer.image == image

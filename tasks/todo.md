@@ -12,7 +12,7 @@
 
 ### F2. Attach files to tasks and draw sketches
 
-- [ ] F2. Attach files to submitted tasks and draw sketches on request, after F1.
+- [x] F2. Attach files to submitted tasks and draw sketches on request, after F1.
 
 ## Acceptance criteria
 - Attached files reach the Expert and are named by absolute path in submitted tasks; a requested sketch reaches the topic; failures are reported to the PO.

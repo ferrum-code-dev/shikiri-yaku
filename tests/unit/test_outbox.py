@@ -309,6 +309,29 @@ def test_a_message_the_platform_refuses_for_good_is_never_offered_again_and_the_
     assert (stored.delivery, stored.body, stored.refusal) == (Delivery.REFUSED, None, "too_long")
 
 
+def test_a_photo_survives_the_journal_and_a_refused_one_leaves_a_notice_and_no_body(
+    memory: Database,
+) -> None:
+    number = _signal(memory)
+    photo = "/instance/conversations/1/files/2-sketch.png"
+    _outbox(memory).queue(
+        number, Purpose.QUESTION, [OWNER], Message("a", photo=photo), key="p:1", now=START
+    )
+    [pending] = _outbox(memory).pending()
+    channel = _Channel()
+    channel.refusal = "photo_unreadable"
+
+    asyncio.run(_sender(memory, channel).tick())
+    channel.refusal = None
+    asyncio.run(_sender(memory, channel).tick())
+
+    assert pending.message.photo == photo
+    [(_, notice)] = channel.sent
+    assert f"S{number}" in notice.text
+    [stored, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (stored.delivery, stored.body) == (Delivery.REFUSED, None)
+
+
 def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database) -> None:
     number = _signal(memory, Kind.PR_REVIEW)
     clock = _Clock()

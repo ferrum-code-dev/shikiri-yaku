@@ -15,7 +15,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FIXTURES
@@ -209,3 +209,60 @@ def test_a_failed_poll_does_not_carry_the_payload_in_its_traceback(body: object)
 def test_a_reply_that_is_not_a_list_of_updates_fails_the_poll(body: object) -> None:
     with pytest.raises(ChannelProtocolError, match=UNEXPECTED_REPLY):
         _read(body)
+
+
+_FILE_SHAPES = [
+    pytest.param(
+        {
+            "message_id": 90,
+            **_IN_TOPIC,
+            "caption": "see",
+            "photo": [{"file_id": "small", "file_size": 1}, {"file_id": "large", "file_size": 9}],
+        },
+        Inbound(
+            720,
+            InboundKind.FILE,
+            OWNER,
+            GROUP,
+            f"{GROUP}/90",
+            text="see",
+            thread=TOPIC,
+            file=FileRef(id="large", name="photo.jpg", size=9),
+        ),
+        id="photo takes its largest size and the caption",
+    ),
+    pytest.param(
+        {"message_id": 91, **_IN_TOPIC, "document": {"file_id": "doc", "file_size": 5}},
+        Inbound(
+            721,
+            InboundKind.FILE,
+            OWNER,
+            GROUP,
+            f"{GROUP}/91",
+            thread=TOPIC,
+            file=FileRef(id="doc", name="document", size=5),
+        ),
+        id="document without a name",
+    ),
+    pytest.param(
+        {"message_id": 92, **_IN_PRIVATE, "document": {"file_id": "pdf", "file_name": "spec.pdf"}},
+        Inbound(
+            722,
+            InboundKind.FILE,
+            OWNER,
+            OWNER,
+            f"{OWNER}/92",
+            file=FileRef(id="pdf", name="spec.pdf"),
+        ),
+        id="document in private chat",
+    ),
+]
+
+
+@pytest.mark.parametrize(("message", "expected"), _FILE_SHAPES)
+def test_a_photo_or_document_becomes_a_file_item_with_its_caption(
+    message: dict[str, object], expected: Inbound
+) -> None:
+    body = {"ok": True, "result": [{"update_id": expected.update_id, "message": message}]}
+
+    assert _read(body).items == (expected,)

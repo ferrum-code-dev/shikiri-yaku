@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
+from shikiri_yaku.app.expert_files import TaskFiles
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import reject_all_data, submit_all_data
@@ -176,9 +177,11 @@ class Harness:
         *,
         mode: str = MODE_EXPERT,
         admins: frozenset[int] = frozenset(),
+        files: TaskFiles | None = None,
     ) -> None:
         self.mode = mode
         self.admins = admins
+        self.files = files
         self.database = Database.open(":memory:")
         _DATABASES.append(self.database)
         self.conversations = Conversations(self.database)
@@ -201,6 +204,7 @@ class Harness:
             group_id=CHAT,
             final=self.final,
             access=AdminAccess(self.conversations, Clock(), admins=self.admins),
+            files=self.files,
         )
 
     def answer(
@@ -340,6 +344,43 @@ class Harness:
         return self.count(
             "SELECT COUNT(*) FROM command_replies WHERE reply_key LIKE 'expert:proposal:%'"
         )
+
+
+class _Uncopyable(TaskFiles):
+    def copy_for_proposal(self, conversation_id: int, proposal_id: int) -> list[str]:
+        del conversation_id, proposal_id
+        raise OSError
+
+
+def test_submit_all_names_each_copied_file_in_every_task(tmp_path: Path) -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha}, files=TaskFiles(tmp_path))
+    harness.answer(FIRST, [("alpha", "first"), ("alpha", "second")])
+    folder = tmp_path / "conversations" / str(harness.conversation_id) / "files"
+    folder.mkdir(parents=True)
+    (folder / "1-photo.jpg").write_bytes(b"photo")
+    copy = tmp_path / "task_files" / str(FIRST) / "1-photo.jpg"
+
+    harness.tap(2, submit_all_data(FIRST))
+
+    assert copy.read_bytes() == b"photo"
+    assert len(alpha.requests) == 2
+    assert all(request.startswith(("first", "second")) for request in alpha.requests)
+    assert all(str(copy) in request for request in alpha.requests)
+
+
+def test_a_failed_file_copy_submits_nothing_and_tells_the_po(tmp_path: Path) -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha}, files=_Uncopyable(tmp_path))
+    harness.answer(FIRST, [("alpha", "first")])
+
+    harness.tap(2, submit_all_data(FIRST))
+
+    assert alpha.requests == []
+    assert (
+        harness.count("SELECT COUNT(*) FROM command_replies WHERE reply_key = ?", "expert:files:2")
+        == 1
+    )
 
 
 def test_submit_all_sends_each_task_once_to_the_component_it_names() -> None:

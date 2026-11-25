@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.adapters.telegram import REF_SEPARATOR, UNEXPECTED_REPLY
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
 from shikiri_yaku.ports import ChannelProtocolError
 
 if TYPE_CHECKING:
@@ -17,6 +17,9 @@ GET_UPDATES: Final = "getUpdates"
 ALLOWED_UPDATES: Final = ("message", "callback_query")
 # keep: Telegram's built-in General topic is 1 on the wire; the app knows it as no thread
 GENERAL_THREAD: Final = 1
+# keep: the Bot API names a document it sends without a name, and a photo carries none
+DOCUMENT_NAME: Final = "document"
+PHOTO_NAME: Final = "photo.jpg"
 
 
 class _Payload(BaseModel):
@@ -35,11 +38,23 @@ class _Closed(_Payload):
     """The service message Telegram sends when a forum topic is closed; it has no fields we read."""
 
 
+class _Sized(_Payload):
+    file_id: str
+    file_size: StrictInt | None = None
+
+
+class _Document(_Sized):
+    file_name: str | None = None
+
+
 class _Message(_Payload):
     message_id: int
     sender: Annotated[_Identity, Field(alias="from")]
     chat: _Identity
     text: str | None = None
+    caption: str | None = None
+    photo: list[_Sized] | None = None
+    document: _Document | None = None
     message_thread_id: StrictInt | None = None
     reply_to_message: _Replied | None = None
     forum_topic_closed: _Closed | None = None
@@ -130,6 +145,18 @@ def _item(update: _Update) -> Inbound | None:
             _ref(closed.chat.id, closed.message_id),
             thread=_thread(closed.message_thread_id),
         )
+    if update.message is not None and (attached := _file(update.message)) is not None:
+        sent = update.message
+        return Inbound(
+            update.update_id,
+            InboundKind.FILE,
+            sent.sender.id,
+            sent.chat.id,
+            _ref(sent.chat.id, sent.message_id),
+            text=sent.caption,
+            thread=_thread(sent.message_thread_id),
+            file=attached,
+        )
     if update.message is not None and update.message.text is not None:
         sent = update.message
         replied = _replied(sent)
@@ -143,6 +170,19 @@ def _item(update: _Update) -> Inbound | None:
             text=sent.text,
             thread=_thread(sent.message_thread_id),
         )
+    return None
+
+
+def _file(sent: _Message) -> FileRef | None:
+    """Return the document or the largest photo size a message sends, None when it sends neither."""
+    if sent.document is not None:
+        document = sent.document
+        name = document.file_name or DOCUMENT_NAME
+        return FileRef(id=document.file_id, name=name, size=document.file_size)
+    if sent.photo:
+        # keep: Telegram lists the sizes of a photo from the smallest to the largest
+        largest = sent.photo[-1]
+        return FileRef(id=largest.file_id, name=PHOTO_NAME, size=largest.file_size)
     return None
 
 

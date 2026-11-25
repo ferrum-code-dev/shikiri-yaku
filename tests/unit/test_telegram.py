@@ -12,6 +12,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import (
     BUTTON_DATA_TOO_LONG,
+    PHOTO_UNREADABLE,
     PLATFORM_REFUSED,
     TEXT_TOO_LONG,
     TelegramChannel,
@@ -26,6 +27,7 @@ from shikiri_yaku.ports import (
     ChannelRefusedError,
     Message,
 )
+from tests.support.attachments import PNG
 from tests.support.secrets import SECRETS, secret_messages
 
 if TYPE_CHECKING:
@@ -44,15 +46,25 @@ def _recorded(name: str) -> dict[str, Any]:
 
 
 class _Api:
-    """Answers each call with the next reply and keeps what was posted."""
+    """Answers each call with the next reply and keeps what was posted, and each upload."""
 
     def __init__(self, replies: list[object]) -> None:
         self._replies = replies
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.uploads: list[tuple[str, dict[str, Any], str, str, bytes]] = []
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object:
         self.calls.append((method, dict(payload)))
         return self._replies.pop(0)
+
+    async def upload(
+        self, method: str, payload: Mapping[str, object], field: str, name: str, content: bytes
+    ) -> object:
+        self.uploads.append((method, dict(payload), field, name, content))
+        return self._replies.pop(0)
+
+    async def download(self, file_path: str) -> bytes:
+        raise NotImplementedError(file_path)
 
 
 class _Clock:
@@ -94,6 +106,29 @@ def _send(api: _Api, clock: _Clock, message: Message = MESSAGE) -> str:
     return asyncio.run(
         TelegramChannel(api, clock, _Copies(api)).send(Destination("telegram", "1001"), message)
     )
+
+
+def test_a_photo_is_uploaded_with_its_text_as_the_caption(tmp_path: Path) -> None:
+    photo = tmp_path / "sketch.png"
+    photo.write_bytes(PNG)
+    api = _Api([_recorded("send_ok.json")])
+
+    assert _send(api, _Clock(), Message("the flow", photo=str(photo))) == SENT
+    assert api.calls == []
+    method, payload, field, name, content = api.uploads[0]
+    assert (method, field, name, content) == ("sendPhoto", "photo", "sketch.png", PNG)
+    assert payload["caption"] == "the flow"
+    assert "text" not in payload
+
+
+def test_a_photo_that_cannot_be_read_is_refused_before_any_call(tmp_path: Path) -> None:
+    api = _Api([])
+
+    with pytest.raises(ChannelRefusedError) as refused:
+        _send(api, _Clock(), Message("", photo=str(tmp_path / "gone.png")))
+
+    assert str(refused.value) == PHOTO_UNREADABLE
+    assert (api.calls, api.uploads) == ([], [])
 
 
 def test_send_posts_text_and_keyboard_and_returns_the_chat_and_message_ref() -> None:

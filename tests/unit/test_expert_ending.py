@@ -12,6 +12,7 @@ import pytest
 from shikiri_yaku.app.expert import OPEN_REPLY
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
+from shikiri_yaku.app.expert_sketches import ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
@@ -37,6 +38,7 @@ from shikiri_yaku.ports import (
     Message,
     ShikiruTask,
 )
+from tests.support.attachments import FakeDownloads
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.expert_proposals import expert_proposals
@@ -222,6 +224,10 @@ class Harness:
                 clients,
                 channel=CHANNEL,
                 group_id=GROUP_ID,
+            ),
+            downloads=FakeDownloads(),
+            sketches=ExpertSketches(
+                None, self.outbox, self.clock, directory=path, channel=CHANNEL, group_id=GROUP_ID
             ),
         )
 

@@ -16,6 +16,7 @@ from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
+from shikiri_yaku.app.expert_sketches import ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
@@ -44,6 +45,7 @@ from shikiri_yaku.ports import (
     ExpertError,
     ShikiruTask,
 )
+from tests.support.attachments import FakeDownloads
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
 
@@ -213,6 +215,10 @@ class Harness:
             group_id=-100123,
             runs=self.runs,
             ending=self.ending,
+            downloads=FakeDownloads(),
+            sketches=ExpertSketches(
+                None, self.outbox, Clock(), directory=path, channel="telegram", group_id=-100123
+            ),
             proposals=expert_proposals(
                 self.database,
                 self.log,

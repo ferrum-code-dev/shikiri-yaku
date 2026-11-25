@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import html
 import stat
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 from urllib.parse import urlsplit
 
@@ -32,7 +33,6 @@ from shikiri_yaku.ports import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import Clock, Copies, Message
@@ -41,6 +41,8 @@ TELEGRAM_CHANNEL: Final = "telegram"
 TOKEN_MODE: Final = 0o600
 OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 SEND_MESSAGE: Final = "sendMessage"
+SEND_PHOTO: Final = "sendPhoto"
+PHOTO_FIELD: Final = "photo"
 EDIT_MESSAGE_TEXT: Final = "editMessageText"
 # keep: the Bot API's parse mode for the markup a message carries
 HTML_PARSE_MODE: Final = "HTML"
@@ -81,6 +83,7 @@ DEFINITE_REFUSAL_CODES: Final = frozenset({BAD_REQUEST, FORBIDDEN})
 TEXT_TOO_LONG: Final = "text_too_long"
 BUTTON_DATA_TOO_LONG: Final = "button_data_too_long"
 PLATFORM_REFUSED: Final = "platform_refused"
+PHOTO_UNREADABLE: Final = "photo_unreadable"
 NOT_ACCEPTED: Final = "the Bot API did not accept the request"
 UNEXPECTED_REPLY: Final = "the Bot API replied in a shape the Channel does not read"
 BOT_NOT_IDENTIFIED: Final = "getMe did not identify a Telegram bot"
@@ -108,6 +111,24 @@ class BotApi(Protocol):
     """
 
     async def call(self, method: str, payload: Mapping[str, object]) -> object: ...
+
+
+class FileApi(BotApi, Protocol):
+    """A Bot API that also sends a file with a method, and fetches a file the Bot API names.
+
+    `download` raises ChannelRefusedError when the Bot API will not give the file.
+    """
+
+    async def upload(
+        self,
+        method: str,
+        payload: Mapping[str, object],
+        field: str,
+        name: str,
+        content: bytes,
+    ) -> object: ...
+
+    async def download(self, file_path: str) -> bytes: ...
 
 
 class _Chat(BaseModel):
@@ -276,7 +297,7 @@ class TelegramChannel:
     edit is journaled on its copy, and a secret edit also deletes that copy first.
     """
 
-    def __init__(self, api: BotApi, clock: Clock, copies: Copies) -> None:
+    def __init__(self, api: FileApi, clock: Clock, copies: Copies) -> None:
         self._api = api
         self._clock = clock
         self._copies = copies
@@ -288,7 +309,12 @@ class TelegramChannel:
             payload["message_thread_id"] = destination.thread
         if message.reply_to is not None:
             payload["reply_parameters"] = _reply_parameters(message.reply_to)
-        reply = await self._request(SEND_MESSAGE, payload)
+        if message.photo is None:
+            reply = await self._request(SEND_MESSAGE, payload)
+        else:
+            # keep: a photo's text is its caption, the only text field sendPhoto has
+            payload["caption"] = payload.pop("text")
+            reply = await self._request(SEND_PHOTO, payload, photo=_read_photo(message.photo))
         if not isinstance(reply.result, _Sent):
             raise ChannelError(UNEXPECTED_REPLY)
         return f"{reply.result.chat.id}{REF_SEPARATOR}{reply.result.message_id}"
@@ -318,27 +344,50 @@ class TelegramChannel:
             await self._request(DELETE_MESSAGE, _target(message_ref))
             self._copies.confirm_deletion(message_ref)
 
-    async def _request(self, method: str, payload: Mapping[str, object]) -> _Ok:
-        reply = await self._post(method, payload)
+    async def _request(
+        self,
+        method: str,
+        payload: Mapping[str, object],
+        *,
+        photo: tuple[str, bytes] | None = None,
+    ) -> _Ok:
+        reply = await self._post(method, payload, photo)
         if (
             isinstance(reply, _Failed)
             and reply.error_code == TOO_MANY_REQUESTS
             and reply.parameters is not None
         ):
             await self._clock.sleep(reply.parameters.retry_after)
-            reply = await self._post(method, payload)
+            reply = await self._post(method, payload, photo)
         if isinstance(reply, _Ok):
             return reply
         if reply.error_code == BAD_REQUEST:
             raise ChannelRefusedError(_refused_reason(reply))
         raise ChannelError(NOT_ACCEPTED)
 
-    async def _post(self, method: str, payload: Mapping[str, object]) -> _Ok | _Failed:
-        body = await self._api.call(method, payload)
+    async def _post(
+        self,
+        method: str,
+        payload: Mapping[str, object],
+        photo: tuple[str, bytes] | None,
+    ) -> _Ok | _Failed:
+        if photo is None:
+            body = await self._api.call(method, payload)
+        else:
+            body = await self._api.upload(method, payload, PHOTO_FIELD, *photo)
         try:
             return _REPLY.validate_python(body)
         except ValidationError as error:
             raise ChannelError(UNEXPECTED_REPLY) from error
+
+
+def _read_photo(path: str) -> tuple[str, bytes]:
+    """Return the file name and the bytes of a photo, or refuse it when it cannot be read."""
+    photo = Path(path)
+    try:
+        return photo.name, photo.read_bytes()
+    except OSError:
+        raise ChannelRefusedError(PHOTO_UNREADABLE) from None
 
 
 def _target(message_ref: str) -> dict[str, object]:

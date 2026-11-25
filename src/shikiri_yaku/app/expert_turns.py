@@ -11,6 +11,7 @@ from unicodedata import category
 from unicodedata import name as unicode_name
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.expert_files import save_attachment
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import (
     MODE_ADMIN,
@@ -26,11 +27,13 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
+    DOWNLOAD_LIMIT_BYTES,
     MESSAGE_TEXT_LIMIT,
     ChannelRefusedError,
     ExpertError,
     Message,
     TaskStatus,
+    join_blocks,
 )
 
 if TYPE_CHECKING:
@@ -42,10 +45,11 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_ending import ExpertEnding
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.app.expert_runs import ConversationRuns
+    from shikiri_yaku.app.expert_sketches import ExpertSketches
     from shikiri_yaku.app.expert_web import ExpertWebRequests
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Expert, Outbox, ShikiruClient
+    from shikiri_yaku.domain.inbound import FileRef, Inbound
+    from shikiri_yaku.ports import Clock, Downloads, Expert, Outbox, ShikiruClient
 
 CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
 SUMMARY_PROMPT: Final = "Summarize this conversation in two or three short sentences."
@@ -61,6 +65,10 @@ _EXPERT_FAILURE_MESSAGE_LIMIT: Final = 1000
 _EXPERT_FAILURE_LINE_MINIMUM: Final = 48
 _EXPERT_FAILURE_OMISSION_RESERVE: Final = 32
 _REFUSED_COMMAND: Final = "The proposed command could not be shown exactly and was refused."
+_ATTACHED: Final = "Attached file (absolute path): "
+_TOO_LARGE: Final = "The file is larger than the 20 MB download limit, so it was not saved."
+_NOT_DOWNLOADED: Final = "The chat did not give the file, so it was not saved."
+_NOT_SAVED: Final = "The file could not be saved in this conversation's files."
 _EFFORT: Final = "/effort"
 _EFFORT_USAGE: Final = "Usage: /effort [level]"
 _SUMMARIZE: Final = "/summarize"
@@ -132,6 +140,8 @@ class ExpertTurns:
         runs: ConversationRuns,
         ending: ExpertEnding,
         proposals: ExpertProposals,
+        downloads: Downloads,
+        sketches: ExpertSketches,
         web: ExpertWebRequests | None = None,
         admins: frozenset[int] = frozenset(),
         known_secrets: tuple[str, ...] = (),
@@ -139,6 +149,8 @@ class ExpertTurns:
     ) -> None:
         self._log = log
         self._admin_executor = admin_executor
+        self._downloads = downloads
+        self._sketches = sketches
         self._outbox = outbox
         self._clock = clock
         self._expert = expert
@@ -156,9 +168,10 @@ class ExpertTurns:
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
     def owns(self, item: Inbound) -> bool:
-        """Return whether a text, reply or closed topic belongs to an open Expert topic."""
+        """Return whether a text, reply, file or closed topic belongs to an open Expert topic."""
         return (
-            item.kind in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.TOPIC_CLOSED)
+            item.kind
+            in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.FILE, InboundKind.TOPIC_CLOSED)
             and item.chat == self._group_id
             and item.thread is not None
             and self._log.at_thread(item.thread) is not None
@@ -178,6 +191,9 @@ class ExpertTurns:
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
             return
         self._log.touch(conversation.id, self._clock.now())
+        if item.file is not None:
+            await self._attach(item, conversation, item.file)
+            return
         text = item.text or ""
         words = text.split()
         if not words or not words[0].startswith("/"):
@@ -194,6 +210,46 @@ class ExpertTurns:
             await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
         else:
             self._reply(item, _HELP, conversation.id)
+
+    async def _attach(
+        self, item: Inbound, conversation: ConversationRecord, attached: FileRef
+    ) -> None:
+        """Save an owner's file, then make its turn: the caption and the file's absolute path.
+
+        A file over the Bot API's limit, or one the Bot API will not give, gets a notice and no
+        turn. A transient failure raises ChannelError, so the item stays pending and is tried again.
+        """
+        if attached.size is not None and attached.size > DOWNLOAD_LIMIT_BYTES:
+            self._file_notice(item, conversation, _TOO_LARGE)
+            return
+        try:
+            content = await self._downloads.fetch(attached.id)
+        except ChannelRefusedError:
+            self._file_notice(item, conversation, _NOT_DOWNLOADED)
+            return
+        try:
+            path = save_attachment(
+                conversation_directory(self._directory, conversation.id),
+                item.update_id,
+                attached.name,
+                content,
+            )
+        except OSError:
+            self._file_notice(item, conversation, _NOT_SAVED)
+            return
+        text = join_blocks(item.text or "", f"{_ATTACHED}{path}")
+        self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
+        await self.run(conversation.id, item.update_id)
+
+    def _file_notice(self, item: Inbound, conversation: ConversationRecord, text: str) -> None:
+        queue_expert_notice(
+            self._outbox,
+            self._clock,
+            Destination(self._channel, str(self._group_id), conversation.thread_id),
+            text,
+            key=f"expert:file:{item.update_id}",
+            conversation_id=conversation.id,
+        )
 
     def warn_admin(self, conversation: ConversationRecord) -> None:
         """Say in the topic of an admin conversation that the chat is not private."""
@@ -361,6 +417,8 @@ class ExpertTurns:
         if answer.title and not self._log.history(conversation_id, before=update_id):
             with suppress(ChannelRefusedError):
                 await self._topics.rename(conversation.thread_id, f"💬 {answer.title}")
+        if answer.image is not None:
+            await self._sketches.draw(conversation, update_id, answer.image)
 
     async def _context(self, scope: list[str]) -> dict[str, object]:
         context: dict[str, object] = {}

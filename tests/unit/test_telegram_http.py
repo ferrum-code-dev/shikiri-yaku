@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from shikiri_yaku.adapters.telegram_http import NO_REPLY, NO_TOKEN, HttpBotApi
-from shikiri_yaku.ports import ChannelError
+from shikiri_yaku.ports import ChannelError, ChannelRefusedError, ChannelUnavailableError
 from tests.support.telegram_bot import FIXTURES
 
 TOKEN: Final = "42:a-token-that-only-this-test-uses"  # noqa: S105 -- made up for this test
@@ -24,6 +24,7 @@ HTTP_OK: Final = 200
 HTTP_BAD_REQUEST: Final = 400
 HTTP_TOO_MANY_REQUESTS: Final = 429
 HTTP_BAD_GATEWAY: Final = 502
+HTTP_NOT_FOUND: Final = 404
 PAYLOAD: Final = {"chat_id": "1001", "text": "S1 · Which way?"}
 SEND_URL: Final = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
@@ -150,3 +151,55 @@ def test_the_token_is_never_logged_even_at_debug_level(
 
     assert seen
     assert TOKEN not in caplog.text
+
+
+def test_an_upload_is_a_form_with_its_fields_and_the_file(tmp_path: Path) -> None:
+    seen: list[httpx.Request] = []
+    api = HttpBotApi(
+        _token_file(tmp_path),
+        TIMEOUT_S,
+        transport=_reply(HTTP_OK, b'{"ok": true, "result": true}', seen),
+    )
+
+    asyncio.run(
+        api.upload(
+            "sendPhoto",
+            {"chat_id": "1001", "caption": "look", "reply_markup": {"inline_keyboard": []}},
+            "photo",
+            "sketch.png",
+            b"PNG",
+        )
+    )
+
+    request = seen[0]
+    assert request.url == f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    assert request.headers["content-type"].startswith("multipart/form-data")
+    assert b'name="photo"; filename="sketch.png"' in request.content
+    assert b'name="caption"\r\n\r\nlook' in request.content
+    assert b'{"inline_keyboard": []}' in request.content
+
+
+def test_a_download_fetches_the_path_under_the_file_url(tmp_path: Path) -> None:
+    seen: list[httpx.Request] = []
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=_reply(HTTP_OK, b"bytes", seen))
+
+    assert asyncio.run(api.download("photos/p.jpg")) == b"bytes"
+    assert seen[0].url == f"https://api.telegram.org/file/bot{TOKEN}/photos/p.jpg"
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        pytest.param(HTTP_NOT_FOUND, ChannelRefusedError, id="not-given"),
+        pytest.param(HTTP_TOO_MANY_REQUESTS, ChannelUnavailableError, id="rate-limited"),
+        pytest.param(HTTP_BAD_GATEWAY, ChannelUnavailableError, id="server-failed"),
+    ],
+)
+def test_a_failed_download_is_named_by_its_kind_and_never_by_the_token(
+    tmp_path: Path, status: int, error: type[Exception]
+) -> None:
+    api = HttpBotApi(_token_file(tmp_path), TIMEOUT_S, transport=_reply(status, b"", []))
+
+    with pytest.raises(error) as raised:
+        asyncio.run(api.download("photos/p.jpg"))
+    assert TOKEN not in str(raised.value)

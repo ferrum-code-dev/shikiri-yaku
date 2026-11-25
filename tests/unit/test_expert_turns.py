@@ -19,12 +19,13 @@ from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns
+from shikiri_yaku.app.expert_sketches import ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
 from shikiri_yaku.app.replies import Replies
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
@@ -36,16 +37,20 @@ from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import (
+    DOWNLOAD_LIMIT_BYTES,
     TOPIC_GONE_REASON,
     ChannelRefusedError,
+    ChannelUnavailableError,
     CommandResult,
     ExpertError,
     ShikiruLinkDownError,
 )
+from tests.support.attachments import PNG, FakeDownloads, FakeSketcher
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.secrets import SECRETS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping, Sequence
@@ -55,7 +60,14 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
-    from shikiri_yaku.ports import EscalationView, Expert, ShikiruClient, ShikiruTask
+    from shikiri_yaku.ports import (
+        EscalationView,
+        Expert,
+        ReplyLog,
+        ShikiruClient,
+        ShikiruTask,
+        Sketcher,
+    )
 
 OWNER: Final = 1001
 STRANGER: Final = 2002
@@ -141,8 +153,9 @@ class FlakyClient(Client):
 class Runner:
     """Answers as the Claude CLI does; with `hold`, the first call waits until `release` is set."""
 
-    def __init__(self, *, hold: bool = False) -> None:
+    def __init__(self, *, hold: bool = False, answer: dict[str, object] | None = None) -> None:
         self.hold = hold
+        self.answer = ANSWER if answer is None else answer
         self.calls: list[list[str]] = []
         self.stdin: list[str] = []
         self.started = asyncio.Event()
@@ -174,7 +187,7 @@ class Runner:
         output: dict[str, object] = {
             "is_error": False,
             "session_id": "session",
-            "structured_output": ANSWER,
+            "structured_output": self.answer,
         }
         return CommandResult(0, json.dumps(output), "")
 
@@ -202,12 +215,15 @@ class Harness:
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
         shared_group: bool = False,
+        downloads: FakeDownloads | None = None,
+        sketcher: Sketcher | None = None,
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
         self.outbox = JournalOutbox(self.database, MessageStore(self.database, Reporter()))
         self.topics = Topics()
         scope_root = Path("/component") if muse else path
+        self.downloads = FakeDownloads() if downloads is None else downloads
         scope = {name: scope_root / name for name in ("api", "web")}
         shared = client or Client()
         clients = {name: cast("ShikiruClient", shared) for name in scope}
@@ -242,6 +258,10 @@ class Harness:
             group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
+            downloads=self.downloads,
+            sketches=ExpertSketches(
+                sketcher, self.outbox, Clock(), directory=path, channel=CHANNEL, group_id=GROUP_ID
+            ),
             web=ExpertWebRequests(
                 JournalWeb(self.database),
                 self.outbox,
@@ -296,9 +316,18 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         muse: bool = False,
         admins: frozenset[int] = frozenset(),
         shared_group: bool = False,
+        downloads: FakeDownloads | None = None,
+        sketcher: Sketcher | None = None,
     ) -> Harness:
         harness = Harness(
-            tmp_path, expert, client, muse=muse, admins=admins, shared_group=shared_group
+            tmp_path,
+            expert,
+            client,
+            muse=muse,
+            admins=admins,
+            shared_group=shared_group,
+            downloads=downloads,
+            sketcher=sketcher,
         )
         made.append(harness)
         return harness
@@ -1206,3 +1235,215 @@ def test_restart_resumes_pending_admin_output_before_new_turns(
     assert turn is not None
     assert turn.state == "done"
     assert h.log.pending_admin_followups() == []
+
+
+PHOTO_KEY: Final = "expert:sketch:1"
+
+
+def _file_item(
+    update_id: int,
+    file_id: str,
+    name: str,
+    *,
+    caption: str | None = None,
+    size: int | None = None,
+) -> Inbound:
+    return Inbound(
+        update_id,
+        InboundKind.FILE,
+        OWNER,
+        CHAT,
+        str(update_id),
+        text=caption,
+        thread=THREAD,
+        file=FileRef(id=file_id, name=name, size=size),
+    )
+
+
+def _conversation_directory(h: Harness, root: Path) -> Path:
+    conversation = h.log.at_thread(THREAD)
+    assert conversation is not None
+    return root / "conversations" / str(conversation.id)
+
+
+def _body(h: Harness, notice_key: str) -> str:
+    row = h.database.connection.execute(
+        "SELECT body FROM messages WHERE notice_key = ?", (notice_key,)
+    ).fetchone()
+    return row["body"]
+
+
+def test_an_attached_file_is_saved_and_its_turn_names_its_absolute_path(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    runner = Runner()
+    downloads = FakeDownloads({"file-1": b"attached"})
+    h = build(ladder(runner), downloads=downloads)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    item = _file_item(2, "file-1", "AGENTS.md", caption=MESSAGES[1])
+    asyncio.run(h.turns.handle(item))
+
+    saved = _conversation_directory(h, tmp_path) / "files" / "2-AGENTS.md"
+    assert saved.read_bytes() == b"attached"
+    assert downloads.fetched == ["file-1"]
+    assert MESSAGES[1] in runner.stdin[1]
+    assert str(saved) in runner.stdin[1]
+    assert "expert:answer:2" in _answer_keys(h)
+
+
+def test_a_repeated_file_update_makes_no_second_turn(build: Callable[..., Harness]) -> None:
+    runner = Runner()
+    h = build(ladder(runner), downloads=FakeDownloads({"file-1": b"once"}))
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    item = _file_item(2, "file-1", "a.txt")
+
+    asyncio.run(h.turns.handle(item))
+    asyncio.run(h.turns.handle(item))
+
+    assert len(runner.stdin) == 2
+    assert h.log.turn(2) is not None
+
+
+@pytest.mark.parametrize(
+    ("file_size", "refused"),
+    [(DOWNLOAD_LIMIT_BYTES + 1, frozenset[str]()), (None, frozenset({"file-1"}))],
+    ids=["over-the-limit", "refused-by-the-channel"],
+)
+def test_a_file_not_saved_gets_a_notice_and_no_turn(
+    build: Callable[..., Harness],
+    file_size: int | None,
+    refused: frozenset[str],
+) -> None:
+    downloads = FakeDownloads({"file-1": b"unused"}, refused=refused)
+    h = build(ladder(Runner()), downloads=downloads)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    asyncio.run(h.turns.handle(_file_item(2, "file-1", "big.zip", size=file_size)))
+
+    assert h.log.turn(2) is None
+    assert "expert:file:2" in _answer_keys(h)
+    assert downloads.fetched == ([] if file_size is not None else ["file-1"])
+
+
+def test_a_file_that_fails_for_a_passing_reason_is_tried_again(
+    build: Callable[..., Harness],
+) -> None:
+    downloads = FakeDownloads({"file-1": b"later"}, unavailable=frozenset({"file-1"}))
+    h = build(ladder(Runner()), downloads=downloads)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    item = _file_item(2, "file-1", "a.txt")
+
+    with pytest.raises(ChannelUnavailableError):
+        asyncio.run(h.turns.handle(item))
+    assert h.log.turn(2) is None
+
+    asyncio.run(h.turns.handle(item))
+
+    assert h.log.turn(2) is not None
+    assert downloads.fetched == ["file-1", "file-1"]
+
+
+def test_a_file_outside_an_expert_topic_is_not_run_as_a_command() -> None:
+    database = Database.open(":memory:")
+    outbox = JournalOutbox(database, MessageStore(database, Reporter()))
+    replies = Replies(
+        cast("ReplyLog", None),
+        outbox,
+        Clock(),
+        {},
+        channel=CHANNEL,
+        commands=cast("Commands", None),
+        goal=cast("GoalCommand", None),
+    )
+    caption = Inbound(
+        9, InboundKind.FILE, OWNER, OWNER, "9", text="/status", file=FileRef(id="f", name="a")
+    )
+
+    asyncio.run(replies.handle(caption))
+    pending = outbox.pending()
+    database.close()
+
+    assert pending == []
+
+
+def test_a_requested_sketch_is_kept_with_the_files_and_sent_as_a_photo(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a box diagram"})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    kept = _conversation_directory(h, tmp_path) / "files" / "sketch-1.png"
+    assert sketcher.descriptions == ["a box diagram"]
+    assert kept.read_bytes() == PNG
+    assert not sketcher.made.exists()
+    assert json.loads(_body(h, PHOTO_KEY))["photo"] == str(kept)
+
+
+def test_a_sketch_is_drawn_once_however_often_its_turn_is_delivered(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    conversation = h.log.at_thread(THREAD)
+    assert conversation is not None
+
+    asyncio.run(h.turns.run(conversation.id, 1))
+
+    assert sketcher.descriptions == ["a graph"]
+
+
+@pytest.mark.parametrize(
+    ("description", "sketcher_error"),
+    [
+        (f"a diagram with {SECRETS['sk_key']}", None),
+        ("a graph", "codex did not finish the run"),
+    ],
+    ids=["secret-in-description", "failed-run"],
+)
+def test_a_sketch_not_drawn_gets_a_notice_and_no_photo(
+    build: Callable[..., Harness],
+    tmp_path: Path,
+    description: str,
+    sketcher_error: str | None,
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "pic.png", error=sketcher_error)
+    h = build(ladder(Runner(answer={**ANSWER, "image": description})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    assert PHOTO_KEY in _answer_keys(h)
+    assert json.loads(_body(h, PHOTO_KEY))["photo"] is None
+    assert not (_conversation_directory(h, tmp_path) / "files" / "sketch-1.png").exists()
+
+
+def test_a_sketch_without_a_codex_rung_gets_a_notice(build: Callable[..., Harness]) -> None:
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})))
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    assert PHOTO_KEY in _answer_keys(h)
+    assert json.loads(_body(h, PHOTO_KEY))["photo"] is None
+
+
+def test_a_sketch_never_overwrites_an_attachment_of_the_same_turn(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    downloads = FakeDownloads({"file-1": b"attached"})
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(
+        ladder(Runner(answer={**ANSWER, "image": "a graph"})),
+        downloads=downloads,
+        sketcher=sketcher,
+    )
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    asyncio.run(h.turns.handle(_file_item(2, "file-1", "sketch.png", caption=MESSAGES[1])))
+
+    folder = _conversation_directory(h, tmp_path) / "files"
+    assert (folder / "2-sketch.png").read_bytes() == b"attached"
+    assert (folder / "sketch-2.png").read_bytes() == PNG
+    assert json.loads(_body(h, "expert:sketch:2"))["photo"] == str(folder / "sketch-2.png")

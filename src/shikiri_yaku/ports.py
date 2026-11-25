@@ -736,6 +736,8 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
 # keep: Telegram's limits, named here because the Channel is the only user of them
 MESSAGE_TEXT_LIMIT: Final = 4096
 CALLBACK_DATA_LIMIT: Final = 64
+# keep: the largest file the Bot API gives a bot; Telegram's limit, not a setting of ours
+DOWNLOAD_LIMIT_BYTES: Final = 20 * 1024 * 1024
 # keep: the blank line that sets each block of a message off from the next
 BLOCK_SEPARATOR: Final = "\n\n"
 
@@ -780,6 +782,8 @@ class Message:
 
     `reply_to` is the Channel's reference of the message this one answers, so the PO sees which
     command it belongs to. It is stored with the body, so a retry or a restart keeps it.
+
+    `photo` is the absolute path of a picture sent in the message, and `text` is its caption.
     """
 
     text: str
@@ -787,6 +791,7 @@ class Message:
     heading: str = ""
     expects_reply: bool = False
     reply_to: str | None = None
+    photo: str | None = None
 
     def __post_init__(self) -> None:
         if self.expects_reply and self.buttons:
@@ -929,6 +934,10 @@ class Outbox(Protocol):
 
     def command_reply_queued(self, key: str) -> bool:
         """Return whether this logical command reply and all of its parts were journaled."""
+        ...
+
+    def notice_queued(self, key: str) -> bool:
+        """Return whether a message was journaled under this notice key, sent or not."""
         ...
 
     def queue_command_reply(
@@ -1112,6 +1121,26 @@ class ExpertError(Exception):
     ) -> None:
         super().__init__(*args)
         self.rung_failures = rung_failures
+
+
+class Downloads(Protocol):
+    """Fetches a file the PO attached, by the id the channel gave it.
+
+    A transient failure raises ChannelError and is tried again; ChannelRefusedError means the
+    channel will not give the file at all.
+    """
+
+    async def fetch(self, file_id: str) -> bytes: ...
+
+
+class SketchError(Exception):
+    """A sketch was not drawn; the message is a fixed reason that carries no output."""
+
+
+class Sketcher(Protocol):
+    """Draws the picture an Expert answer describes and returns the path of the PNG it made."""
+
+    async def draw(self, description: str) -> Path: ...
 
 
 class Reasoner(Protocol):

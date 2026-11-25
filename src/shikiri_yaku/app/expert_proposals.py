@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert import ConversationLog
     from shikiri_yaku.app.expert_admin import AdminAccess
+    from shikiri_yaku.app.expert_files import TaskFiles
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.expert import ExpertTask
     from shikiri_yaku.domain.inbound import Inbound
@@ -59,6 +60,8 @@ _CONVERSATION_OPEN: Final = "open"
 _SUBMIT_ALL: Final = "Submit all"
 _REJECT_ALL: Final = "Reject all"
 _REJECTED: Final = "Rejected. Nothing submitted."
+_FILES_NOT_COPIED: Final = "Nothing submitted: the conversation's files could not be copied."
+_FILES_HEADING: Final = "Files attached to the conversation (absolute paths):"
 _SUPERSEDED: Final = "Superseded by a newer proposal. Nothing submitted."
 _INTERRUPTED: Final = "Interrupted by a restart. Check the tasks marked unknown first."
 _RESULTS: Final = "Task results:"
@@ -184,6 +187,7 @@ class ExpertProposals:
         group_id: int,
         access: AdminAccess,
         approval_expiry_min: int = ADMIN_APPROVAL_EXPIRY_MIN,
+        files: TaskFiles | None = None,
     ) -> None:
         self._log = log
         self._conversations = conversations
@@ -195,6 +199,7 @@ class ExpertProposals:
         self._group_id = group_id
         self._access = access
         self._admin_expiry = timedelta(minutes=approval_expiry_min)
+        self._files = files
 
     def answer_messages(
         self, conversation_id: int, update_id: int, answer: ExpertAnswer
@@ -395,7 +400,25 @@ class ExpertProposals:
         opened = self._open(proposal_id)
         if opened is None:
             return
-        payloads = [_payload(opened.destination, proposal_id, task) for task in opened.answer.tasks]
+        try:
+            files = (
+                []
+                if self._files is None
+                else self._files.copy_for_proposal(opened.conversation_id, proposal_id)
+            )
+        except OSError:
+            queue_command_reply(
+                self._outbox,
+                [opened.destination],
+                _FILES_NOT_COPIED,
+                key=f"expert:files:{item.update_id}",
+                now=self._clock.now(),
+                conversation_id=opened.conversation_id,
+            )
+            return
+        payloads = [
+            _payload(opened.destination, proposal_id, task, files) for task in opened.answer.tasks
+        ]
         if not self._log.begin(proposal_id, payloads, self._clock.now()):
             self._say(item, opened, self._log.state(proposal_id))
             return
@@ -586,18 +609,21 @@ def _pack_lines(lines: list[str], first_room: int, other_room: int) -> list[str]
     return chunks
 
 
-def _payload(destination: Destination, proposal_id: int, task: ExpertTask) -> SubmitPayload:
+def _payload(
+    destination: Destination, proposal_id: int, task: ExpertTask, files: list[str]
+) -> SubmitPayload:
+    text = join_blocks(task.text, "\n".join([_FILES_HEADING, *files]) if files else "")
     if task.planning:
         return SubmitPayload(
             component=task.component,
-            request=join_blocks(_PLAN_AND_EXECUTE, task.text),
+            request=join_blocks(_PLAN_AND_EXECUTE, text),
             destination=destination,
             proposal=proposal_id,
             mode=SubmitMode.PLAN,
         )
     return SubmitPayload(
         component=task.component,
-        request=task.text,
+        request=text,
         destination=destination,
         proposal=proposal_id,
     )

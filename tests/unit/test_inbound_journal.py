@@ -10,7 +10,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.inbound_poller import InboundPoller
-from shikiri_yaku.domain.inbound import Batch, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
 from shikiri_yaku.journal import Database, JournalInbound
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
@@ -192,3 +192,56 @@ def test_text_with_a_secret_is_kept_without_its_text_and_is_not_pending(
     assert journal.pending() == []
     row = database.connection.execute("SELECT * FROM messages WHERE direction = 'in'").fetchone()
     assert (row["body"], row["data"], row["refusal"]) == (None, None, form)
+
+
+def test_a_file_item_is_kept_with_its_caption_and_its_file_reference(
+    journal: JournalInbound,
+) -> None:
+    item = Inbound(
+        740,
+        InboundKind.FILE,
+        OWNER,
+        GROUP,
+        f"{GROUP}/95",
+        text="look",
+        thread=None,
+        file=FileRef(id="file-1", name="spec.pdf", size=3),
+    )
+
+    _poll(_Updates(Batch(740, (item,))), journal)
+
+    assert journal.pending() == [item]
+
+
+def test_a_file_from_someone_but_an_owner_is_not_kept(journal: JournalInbound) -> None:
+    stranger = Inbound(
+        741,
+        InboundKind.FILE,
+        STRANGER,
+        GROUP,
+        f"{GROUP}/96",
+        file=FileRef(id="file-2", name="x.bin"),
+    )
+
+    _poll(_Updates(Batch(741, (stranger,))), journal)
+
+    assert journal.pending() == []
+
+
+def test_a_file_whose_caption_carries_a_secret_is_refused_and_kept_only_to_delete(
+    journal: JournalInbound,
+) -> None:
+    item = Inbound(
+        742,
+        InboundKind.FILE,
+        OWNER,
+        GROUP,
+        f"{GROUP}/97",
+        text=f"key {SECRETS['sk_key']}",
+        file=FileRef(id="file-3", name="key.txt"),
+    )
+
+    _poll(_Updates(Batch(742, (item,))), journal)
+
+    assert journal.pending() == []
+    assert [stored.update_id for stored in journal.to_delete()] == [742]

@@ -31,6 +31,8 @@ class ExpertAnswer(BaseModel):
     title: str
     tasks: list[ExpertTask]
     findings: str
+    # keep: a default lets answers stored before sketches load; the agent schema still requires it
+    image: str | None = None
 
 
 class AdminAnswer(ExpertAnswer):

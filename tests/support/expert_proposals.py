@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.app.expert import ConversationLog
+    from shikiri_yaku.app.expert_files import TaskFiles
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox, ShikiruClient
 
@@ -33,6 +34,7 @@ def expert_proposals(
     group_id: int,
     final: FinalEdits | None = None,
     access: AdminAccess | None = None,
+    files: TaskFiles | None = None,
 ) -> ExpertProposals:
     replies = JournalReplies(
         database, SignalStore(database), OpStore(database), channel_name=channel
@@ -49,4 +51,5 @@ def expert_proposals(
         channel=channel,
         group_id=group_id,
         access=access or AdminAccess(conversations, clock, admins=frozenset()),
+        files=files,
     )

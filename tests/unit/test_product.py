@@ -159,6 +159,9 @@ class _Outbox:
         del key
         return False
 
+    def notice_queued(self, key: str) -> bool:
+        return any(queued_key == key for *_, queued_key in self.queued)
+
     def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
         raise NotImplementedError
 
