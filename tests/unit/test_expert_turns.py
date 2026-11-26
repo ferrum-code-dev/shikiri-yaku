@@ -1298,6 +1298,20 @@ def test_an_attached_file_is_saved_and_its_turn_names_its_absolute_path(
     assert "expert:answer:2" in _answer_keys(h)
 
 
+def test_every_turn_is_given_the_names_of_the_conversation_files(
+    build: Callable[..., Harness],
+) -> None:
+    runner = Runner()
+    downloads = FakeDownloads({"file-1": b"attached"})
+    h = build(ladder(runner), downloads=downloads)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    asyncio.run(h.turns.handle(_file_item(2, "file-1", "photo.jpg")))
+
+    asyncio.run(h.turns.handle(_item(3, MESSAGES[2], thread=THREAD)))
+
+    assert "Files:\n2-photo.jpg\n" in runner.stdin[-1]
+
+
 def test_a_repeated_file_update_makes_no_second_turn(build: Callable[..., Harness]) -> None:
     runner = Runner()
     h = build(ladder(runner), downloads=FakeDownloads({"file-1": b"once"}))

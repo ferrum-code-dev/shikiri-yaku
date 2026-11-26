@@ -22,6 +22,8 @@ class ExpertTask(BaseModel):
     title: str
     text: str
     planning: bool = False
+    # keep: a default lets answers stored before files load; the agent schema still requires it
+    files: list[str] = []
 
 
 class ExpertAnswer(BaseModel):
@@ -104,6 +106,7 @@ class ExpertRequest:
     directory: Path
     scope: dict[str, Path]
     message: str
+    files: tuple[str, ...] = ()
     context: str = ""
     effort: str | None = None
     session: ExpertSession | None = None

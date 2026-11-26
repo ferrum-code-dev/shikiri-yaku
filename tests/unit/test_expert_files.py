@@ -11,6 +11,7 @@ import pytest
 from shikiri_yaku.app.expert_files import (
     TaskFiles,
     attachment_name,
+    conversation_file_names,
     move_sketch,
     save_attachment,
 )
@@ -77,13 +78,47 @@ def test_task_copies_outlive_the_conversation_directory(tmp_path: Path) -> None:
     files.mkdir(parents=True)
     (files / "7-photo.jpg").write_bytes(b"photo")
 
-    copies = TaskFiles(tmp_path).copy_for_proposal(3, 9)
+    copies = TaskFiles(tmp_path).copy_for_proposal(3, 9, ["7-photo.jpg"])
     shutil.rmtree(tmp_path / "conversations" / "3")
 
-    assert copies == [str(tmp_path / "task_files" / "9" / "7-photo.jpg")]
-    assert [Path(copy).read_bytes() for copy in copies] == [b"photo"]
+    assert copies == {"7-photo.jpg": str(tmp_path / "task_files" / "9" / "7-photo.jpg")}
+    assert Path(copies["7-photo.jpg"]).read_bytes() == b"photo"
 
 
-def test_a_conversation_without_files_copies_nothing(tmp_path: Path) -> None:
-    assert TaskFiles(tmp_path).copy_for_proposal(3, 9) == []
+def test_only_the_named_files_are_copied(tmp_path: Path) -> None:
+    files = tmp_path / "conversations" / "3" / "files"
+    files.mkdir(parents=True)
+    (files / "7-photo.jpg").write_bytes(b"photo")
+    (files / "8-notes.txt").write_bytes(b"notes")
+
+    TaskFiles(tmp_path).copy_for_proposal(3, 9, ["8-notes.txt"])
+
+    assert (tmp_path / "task_files" / "9" / "8-notes.txt").read_bytes() == b"notes"
+    assert not (tmp_path / "task_files" / "9" / "7-photo.jpg").exists()
+
+
+def test_a_named_file_that_is_gone_fails_the_copy(tmp_path: Path) -> None:
+    (tmp_path / "conversations" / "3" / "files").mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError):
+        TaskFiles(tmp_path).copy_for_proposal(3, 9, ["7-photo.jpg"])
+
+
+def test_a_proposal_naming_no_file_copies_nothing(tmp_path: Path) -> None:
+    assert TaskFiles(tmp_path).copy_for_proposal(3, 9, []) == {}
     assert not (tmp_path / "task_files").exists()
+
+
+def test_the_conversation_lists_its_attachments_and_sketches(tmp_path: Path) -> None:
+    save_attachment(tmp_path, UPDATE, "photo.jpg", b"photo")
+    move_sketch(tmp_path, UPDATE, _drawn(tmp_path))
+
+    assert conversation_file_names(tmp_path) == ("7-photo.jpg", "sketch-7.png")
+    assert conversation_file_names(tmp_path / "none") == ()
+
+
+def _drawn(tmp_path: Path) -> Path:
+    drawn = tmp_path / "codex" / "ig.png"
+    drawn.parent.mkdir()
+    drawn.write_bytes(b"sketch")
+    return drawn

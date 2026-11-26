@@ -11,7 +11,7 @@ from unicodedata import category
 from unicodedata import name as unicode_name
 
 from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
-from shikiri_yaku.app.expert_files import save_attachment
+from shikiri_yaku.app.expert_files import conversation_file_names, save_attachment
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import (
     MODE_ADMIN,
@@ -342,6 +342,7 @@ class ExpertTurns:
             directory=directory,
             scope={name: self._scope[name] for name in conversation.scope},
             message=turn.text,
+            files=conversation_file_names(directory),
             update_id=update_id,
             admin=conversation.mode == MODE_ADMIN,
             context=json.dumps(context),

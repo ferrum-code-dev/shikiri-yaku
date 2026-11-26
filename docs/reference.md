@@ -378,14 +378,17 @@ The outcome depends on what Shikiru reports:
 
 ### Task proposals
 
-An Expert answer that proposes tasks shows one line per task (component and title). The bot offers
+An Expert answer that proposes tasks shows one line per task (component and title), and the names of
+the files that task needs under it. The bot offers
 **Submit all** and **Reject all** only after every task-list message has been sent; if a task-list
 message is refused, the actions are not offered. Every task is shown whole, and once submitted its
 outcome is shown too. Long outcomes continue in following messages, preserving the complete
 Shikiru task ids.
 
 - **Submit all:** each task's text goes to its component with `submit_task`, one submit op per task,
-  in the order given, one at a time. The reply itself stays in the earlier answer message; the
+  in the order given, one at a time. Only the files the tasks name are copied to
+  `task_files/<proposal>/` in the instance directory, and each task's text lists the absolute paths
+  of its own copies. A copy that fails or a named file that is gone submits nothing. The reply itself stays in the earlier answer message; the
   action message is edited to remove its buttons and show only the final state: one line per task
   (component, title, and the outcome) followed by `Submitted: N of M tasks.`, which counts the
   confirmed tasks. When that does not fit, the line ends `; results follow.` and the outcomes
@@ -591,6 +594,7 @@ Each product's state lives under `<home>/<product>`. The default is `~/.shikiri-
 - `install-scratch/`: approved install commands, outside all component repositories.
 - `output/install-<op-id>.log`: install output. The directory has mode `0700` and each file has mode `0600`, because package-manager output can contain sensitive paths or tokens.
 - `reasoner-scratch/`: temporary directories for Reasoner runs.
+- `task_files/<proposal>/`: copies of the conversation files that a proposal's tasks name. They outlive the conversation's `files/`, which is deleted when the conversation ends.
 - `backups/journal-schema<N>.db`: journal copies made before migrations. See [Applying changes](#applying-changes).
 
 Keep the instance directory private. Back it up with the same care as other operational data.

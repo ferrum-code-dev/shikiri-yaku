@@ -62,6 +62,7 @@ _REJECT_ALL: Final = "Reject all"
 _REJECTED: Final = "Rejected. Nothing submitted."
 _FILES_NOT_COPIED: Final = "Nothing submitted: the conversation's files could not be copied."
 _FILES_HEADING: Final = "Files attached to the conversation (absolute paths):"
+_NO_FILE_STORE: Final = "the conversation's files are not available"
 _SUPERSEDED: Final = "Superseded by a newer proposal. Nothing submitted."
 _INTERRUPTED: Final = "Interrupted by a restart. Check the tasks marked unknown first."
 _RESULTS: Final = "Task results:"
@@ -400,12 +401,9 @@ class ExpertProposals:
         opened = self._open(proposal_id)
         if opened is None:
             return
+        names = {name for task in opened.answer.tasks for name in task.files}
         try:
-            files = (
-                []
-                if self._files is None
-                else self._files.copy_for_proposal(opened.conversation_id, proposal_id)
-            )
+            copies = self._copy(opened.conversation_id, proposal_id, names)
         except OSError:
             queue_command_reply(
                 self._outbox,
@@ -417,7 +415,13 @@ class ExpertProposals:
             )
             return
         payloads = [
-            _payload(opened.destination, proposal_id, task, files) for task in opened.answer.tasks
+            _payload(
+                opened.destination,
+                proposal_id,
+                task,
+                [copies[name] for name in task.files],
+            )
+            for task in opened.answer.tasks
         ]
         if not self._log.begin(proposal_id, payloads, self._clock.now()):
             self._say(item, opened, self._log.state(proposal_id))
@@ -428,6 +432,15 @@ class ExpertProposals:
                 break
         self._log.finish(proposal_id)
         self._settle(proposal_id)
+
+    def _copy(self, conversation_id: int, proposal_id: int, names: set[str]) -> dict[str, str]:
+        """Copy the files the tasks name; raise OSError when they cannot be copied."""
+        if not names:
+            return {}
+        if self._files is None:
+            # keep: composition always gives the file store; a task that names a file needs it
+            raise OSError(_NO_FILE_STORE)
+        return self._files.copy_for_proposal(conversation_id, proposal_id, names)
 
     def _reject(self, item: Inbound, proposal_id: int) -> None:
         opened = self._open(proposal_id)
@@ -634,6 +647,8 @@ def _task_lines(tasks: list[ExpertTask]) -> list[str]:
     for index, task in enumerate(tasks, 1):
         marker = _PLANNING_MARKER if task.planning else ""
         lines.append(f"{index}. {task.component} · {task.title}{marker}")
+        if task.files:
+            lines.append(f"   files: {', '.join(task.files)}")
     return lines
 
 

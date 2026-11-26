@@ -46,7 +46,7 @@ from shikiri_yaku.ports import (
 from tests.support.expert_proposals import expert_proposals
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping, Sequence
+    from collections.abc import Generator, Iterable, Mapping, Sequence
     from pathlib import Path
 
     from shikiri_yaku.app.expert_proposals import ExpertProposals
@@ -210,7 +210,7 @@ class Harness:
     def answer(
         self,
         update_id: int,
-        tasks: Sequence[tuple[str, str] | tuple[str, str, bool]],
+        tasks: Sequence[tuple[str, str] | tuple[str, str, bool] | tuple[str, str, bool, list[str]]],
         *,
         title: str = "",
         reply: str = "Plan",
@@ -218,8 +218,9 @@ class Harness:
     ) -> None:
         """Deliver an answer with these (component, text) tasks, as an Expert turn does.
 
-        A task may add a third element for its planning marker. Each task's title is its text,
-        unless `title` is given. The answer's message is then sent, so that a tap from it counts.
+        A task may add a third element for its planning marker and a fourth for its file names.
+        Each task's title is its text, unless `title` is given. The answer's message is then sent,
+        so that a tap from it counts.
         """
         if update_id == FIRST:
             self.conversations.create(
@@ -245,7 +246,8 @@ class Harness:
                     component=item[0],
                     title=title or item[1],
                     text=item[1],
-                    planning=item[2] if len(item) == 3 else False,
+                    planning=item[2] if len(item) > 2 else False,
+                    files=item[3] if len(item) > 3 else [],
                 )
                 for item in tasks
             ],
@@ -347,32 +349,58 @@ class Harness:
 
 
 class _Uncopyable(TaskFiles):
-    def copy_for_proposal(self, conversation_id: int, proposal_id: int) -> list[str]:
-        del conversation_id, proposal_id
+    def copy_for_proposal(
+        self, conversation_id: int, proposal_id: int, names: Iterable[str]
+    ) -> dict[str, str]:
+        del conversation_id, proposal_id, names
         raise OSError
 
 
-def test_submit_all_names_each_copied_file_in_every_task(tmp_path: Path) -> None:
+def test_submit_all_names_each_task_only_its_own_copied_files(tmp_path: Path) -> None:
     alpha = FakeShikiru()
     harness = Harness({"alpha": alpha}, files=TaskFiles(tmp_path))
-    harness.answer(FIRST, [("alpha", "first"), ("alpha", "second")])
+    harness.answer(FIRST, [("alpha", "first", False, ["1-photo.jpg"]), ("alpha", "second", False)])
     folder = tmp_path / "conversations" / str(harness.conversation_id) / "files"
     folder.mkdir(parents=True)
     (folder / "1-photo.jpg").write_bytes(b"photo")
+    (folder / "2-notes.txt").write_bytes(b"notes")
     copy = tmp_path / "task_files" / str(FIRST) / "1-photo.jpg"
 
     harness.tap(2, submit_all_data(FIRST))
 
     assert copy.read_bytes() == b"photo"
-    assert len(alpha.requests) == 2
-    assert all(request.startswith(("first", "second")) for request in alpha.requests)
-    assert all(str(copy) in request for request in alpha.requests)
+    assert not (tmp_path / "task_files" / str(FIRST) / "2-notes.txt").exists()
+    first, second = alpha.requests
+    assert first.startswith("first")
+    assert str(copy) in first
+    assert second == "second"
+
+
+def test_the_task_list_names_each_tasks_files(tmp_path: Path) -> None:
+    harness = Harness({"alpha": FakeShikiru()}, files=TaskFiles(tmp_path))
+    harness.answer(FIRST, [("alpha", "first", False, ["1-photo.jpg", "sketch-1.png"])])
+
+    assert any("files: 1-photo.jpg, sketch-1.png" in text for text in harness.texts(FIRST))
+
+
+def test_a_missing_named_file_submits_nothing_and_tells_the_po(tmp_path: Path) -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha}, files=TaskFiles(tmp_path))
+    harness.answer(FIRST, [("alpha", "first", False, ["ghost.txt"])])
+
+    harness.tap(2, submit_all_data(FIRST))
+
+    assert alpha.requests == []
+    assert (
+        harness.count("SELECT COUNT(*) FROM command_replies WHERE reply_key = ?", "expert:files:2")
+        == 1
+    )
 
 
 def test_a_failed_file_copy_submits_nothing_and_tells_the_po(tmp_path: Path) -> None:
     alpha = FakeShikiru()
     harness = Harness({"alpha": alpha}, files=_Uncopyable(tmp_path))
-    harness.answer(FIRST, [("alpha", "first")])
+    harness.answer(FIRST, [("alpha", "first", False, ["1-photo.jpg"])])
 
     harness.tap(2, submit_all_data(FIRST))
 

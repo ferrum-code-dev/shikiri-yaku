@@ -270,6 +270,11 @@ def test_codex_effort_override(
             **ANSWER,
             "tasks": [{"component": "api", "title": "x", "text": "x", "planning": "yes"}],
         },
+        {**ANSWER, "tasks": [{"component": "api", "title": "x", "text": "x", "files": ["a.png"]}]},
+        {
+            **ANSWER,
+            "tasks": [{"component": "api", "title": "x", "text": "x", "files": ["/etc/passwd"]}],
+        },
     ],
 )
 def test_invalid_answer_never_escapes(
@@ -298,6 +303,27 @@ def test_the_prompt_tells_the_expert_when_to_plan(provider: str, tmp_path: Path)
     assert "`planning` to true" in runner.stdin
     assert "complex" in runner.stdin
     assert "many steps" in runner.stdin
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+def test_the_agent_gets_the_conversation_files_and_must_name_them(
+    provider: str, tmp_path: Path
+) -> None:
+    answer = {
+        **ANSWER,
+        "tasks": [{"component": "api", "title": "x", "text": "x", "files": ["7-photo.jpg"]}],
+    }
+    runner = Runner(provider, answer)
+    rung = EXPERTS[provider]("model", runner, effort=None, timeout_s=20)
+    request = ExpertRequest(tmp_path, {"api": tmp_path}, "hello", files=("7-photo.jpg",))
+
+    result = asyncio.run(rung.turn(request, session_id=None, handoff=None))
+
+    assert "7-photo.jpg" in runner.stdin
+    assert "`files`" in runner.stdin
+    definitions = cast("dict[str, dict[str, list[str]]]", runner.schema["$defs"])
+    assert "files" in definitions["ExpertTask"]["required"]
+    assert result.answer.tasks[0].files == ["7-photo.jpg"]
     assert "clear, small change" in runner.stdin
 
 

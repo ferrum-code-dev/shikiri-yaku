@@ -158,8 +158,8 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
 - **Expert topics:** each message there is a follow-up turn. `/effort [level]`, `/summarize` and
   `/help` work there. `/close` ends the conversation.
 - **Files:** a photo or document sent in an Expert topic is a turn. Its caption, if any, comes with
-  the file's absolute path, which the Expert reads. Files over 20 MB, the Bot API's download limit,
-  are not saved and get a notice. A caption with a secret is refused, and its file is not
+  the file's absolute path, which the Expert reads. The Expert names in each task only the files that
+  task needs. Files over 20 MB, the Bot API's download limit, are not saved and get a notice. A caption with a secret is refused, and its file is not
   downloaded. Files sent outside Expert topics, and files from other users, are ignored. The
   contents of files and sketches are not searched for secrets, and group members can see them.
 - **Sketches:** the Expert may answer a request for a picture with a description. A Codex rung in
@@ -167,11 +167,11 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
   topic and kept with the conversation's files. Each request draws a new picture. Without a Codex
   rung, or when the run fails or leaves no picture, the topic gets a notice. A description with a
   secret is not sent to Codex.
-- **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed.
-  Each proposal submits at most once. **Submit all** copies the conversation's files to
-  `task_files/` in the instance directory and names each copy's absolute path in every task it
-  submits. If a copy fails, nothing is submitted. The copies are never deleted; the conversation's
-  own files are deleted when it ends.
+- **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed,
+  and each task lists the names of its files. Each proposal submits at most once. **Submit all**
+  copies only the files its tasks name to `task_files/` in the instance directory, and each task
+  names the absolute paths of its own copies. If a copy fails or a named file is gone, nothing is
+  submitted. The copies are never deleted; the conversation's own files are deleted when it ends.
 - **Restarts and uncertain topics:** an interrupted turn is not repeated. If topic creation is
   uncertain, ask again.
 

@@ -10,6 +10,7 @@ from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.settings import EXPERT_FILE_NAME_MAX_CHARS
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 FILES_DIR: Final = "files"
@@ -45,6 +46,14 @@ def move_sketch(directory: Path, update_id: int, source: Path) -> Path:
     return target.absolute()
 
 
+def conversation_file_names(directory: Path) -> tuple[str, ...]:
+    """Return the names of the conversation's files, attachments and sketches alike."""
+    folder = directory / FILES_DIR
+    if not folder.is_dir():
+        return ()
+    return tuple(sorted(path.name for path in folder.iterdir() if path.is_file()))
+
+
 class TaskFiles:
     """Copies a conversation's files for a proposal's tasks, since the conversation may end first.
 
@@ -55,22 +64,23 @@ class TaskFiles:
     def __init__(self, directory: Path) -> None:
         self._directory = directory
 
-    def copy_for_proposal(self, conversation_id: int, proposal_id: int) -> list[str]:
-        """Copy every file of the conversation under the proposal; return the absolute copies.
+    def copy_for_proposal(
+        self, conversation_id: int, proposal_id: int, names: Iterable[str]
+    ) -> dict[str, str]:
+        """Copy the named files under the proposal; return each name's absolute copy.
 
-        An OSError from a copy is raised, and then no task of the proposal is submitted.
+        An OSError from a copy, or a named file that is gone, is raised, and then no task of the
+        proposal is submitted.
         """
+        wanted = sorted(set(names))
+        if not wanted:
+            return {}
         folder = conversation_directory(self._directory, conversation_id) / FILES_DIR
-        if not folder.is_dir():
-            return []
-        sources = sorted(path for path in folder.iterdir() if path.is_file())
-        if not sources:
-            return []
         target = self._directory / TASK_FILES_DIR / str(proposal_id)
         target.mkdir(parents=True, exist_ok=True)
-        copies: list[str] = []
-        for source in sources:
-            copy = target / source.name
-            shutil.copy2(source, copy)
-            copies.append(str(copy.absolute()))
+        copies: dict[str, str] = {}
+        for name in wanted:
+            copy = target / name
+            shutil.copy2(folder / name, copy)
+            copies[name] = str(copy.absolute())
         return copies
