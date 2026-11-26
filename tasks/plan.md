@@ -1,5 +1,22 @@
 # Task plan
 
+## Planned work: View the tasks of a proposal
+
+In a live run on 2026-11-26 the PO could not read the proposed tasks before *Submit all*: the list shows component, title and file names, while the action message said that all task details were above. The PO approved the paragraph "View all" in `docs/design.md`.
+
+### F5. Show the tasks of a proposal on request
+
+Implement "View all", with the matching words of "Tasks", as one change. Use the ponytail skill. Reuse the existing proposal tap, outbox, secret screen and `split_reply`. No new setting, dependency or journal migration. Update the README and `docs/reference.md`.
+
+## Acceptance criteria
+- The action message of an offered proposal has *Submit all*, *Reject all* and *View all*, and no longer says that all task details are above. A decided or voided proposal has none of the three.
+- *View all* sends the messages that "View all" describes: grouped by component, numbered as in the list, with each task's full text.
+- A task longer than the channel's message limit continues in further messages, with no word lost.
+- A secret form in any task sends no task and tells the PO. Texts are screened before they are split.
+- A view submits nothing and leaves the proposal offered. Each tap sends the tasks again; the same tap handled twice does not.
+- A tap counts only from the action message and an admitted sender; a proposal no longer offered is answered as for the other buttons.
+- Offline tests cover these criteria; `uv run poe check` passes or unrelated failures are reported with evidence.
+
 ## Planned work: Expert file selection and sketch progress
 
 A live run on 2026-11-26 showed two gaps in "Conversation files". *Submit all* named every conversation file in every task: of three files one was needed, and an outdated sketch contradicted the task text. A sketch took 64 to 70 seconds of a 120 second limit with nothing in the topic meanwhile. The PO approved the changed section in `docs/design.md`. The tasks run in order; each owns its matching checklist entry.

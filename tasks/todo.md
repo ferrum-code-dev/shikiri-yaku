@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: View the tasks of a proposal
+
+- [ ] F5. Show the tasks of a proposal on request.
+
 ## Planned work: Expert file selection and sketch progress
 
 - [x] F3. Name only the files a task needs.
