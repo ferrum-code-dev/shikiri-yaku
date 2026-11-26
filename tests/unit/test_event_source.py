@@ -185,11 +185,11 @@ def test_resolved_escalation_and_pr_lifecycle_close_the_matching_signals(
     client.views = {"E1": _view("E1")}
     client.events = [
         _raised(1, "E1"),
-        _event(2, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
+        _event(2, "pr_opened", task_id="T1", url="u", branch="b", commits=["c1"]),
         _event(3, "escalation_resolved", escalation_id="E1", resolution="answer"),
-        _event(4, "pr_opened", task_id="T2", url="u2", branch="b2", commits=1),
+        _event(4, "pr_opened", task_id="T2", url="u2", branch="b2", commits=["c1"]),
         _event(5, "pr_withdrawn", task_id="T2"),
-        _event(6, "pr_opened", task_id="T3", url="u3", branch="b3", commits=2),
+        _event(6, "pr_opened", task_id="T3", url="u3", branch="b3", commits=["c1", "c2"]),
         _event(7, "task_done", task_id="T3"),
     ]
     asyncio.run(source.poll())
@@ -209,7 +209,7 @@ def test_a_pr_closed_escalation_closes_its_review_and_still_raises_its_own_signa
     source, _ = _source(database, client)
     asyncio.run(source.poll())
     client.events = [
-        _event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
+        _event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=["c1"]),
         _event(2, "escalation", task_id="T1", escalation_id="E1", reason="pr_closed"),
     ]
     asyncio.run(source.poll())
@@ -286,12 +286,12 @@ def test_crash_during_first_sync_leaves_no_cursor_so_the_clean_stop_is_still_res
 def test_first_sync_keeps_only_the_pull_request_that_is_still_waiting(database: Database) -> None:
     client = _FakeClient()
     client.events = [
-        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=1),
-        _event(2, "pr_opened", task_id="T2", url="u2", branch="b2", commits=1),
+        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=["c1"]),
+        _event(2, "pr_opened", task_id="T2", url="u2", branch="b2", commits=["c1"]),
         _event(3, "pr_withdrawn", task_id="T2"),
-        _event(4, "pr_opened", task_id="T3", url="u3", branch="b3", commits=1),
+        _event(4, "pr_opened", task_id="T3", url="u3", branch="b3", commits=["c1"]),
         _event(5, "task_done", task_id="T3"),
-        _event(6, "pr_opened", task_id="T4", url="u4", branch="b4", commits=1),
+        _event(6, "pr_opened", task_id="T4", url="u4", branch="b4", commits=["c1"]),
         _event(7, "escalation", task_id="T4", escalation_id="E4", reason="pr_closed"),
         _raised(8, "E1"),
     ]
@@ -306,7 +306,9 @@ def test_first_sync_keeps_only_the_pull_request_that_is_still_waiting(database: 
 
 def test_pr_opened_keeps_its_link_and_commit_count_in_the_journal(database: Database) -> None:
     client = _FakeClient()
-    client.events = [_event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=3)]
+    client.events = [
+        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=["c1", "c2", "c3"])
+    ]
     source, _ = _source(database, client)
     asyncio.run(source.poll())
     stored = SignalStore(database).by_id("api:pr_review:1")
@@ -318,7 +320,7 @@ def test_pr_opened_without_its_link_is_a_protocol_error(database: Database) -> N
     client = _FakeClient()
     source, _ = _source(database, client)
     asyncio.run(source.poll())
-    client.events = [_event(1, "pr_opened", task_id="T1", branch="b1", commits=1)]
+    client.events = [_event(1, "pr_opened", task_id="T1", branch="b1", commits=["c1"])]
     with pytest.raises(ShikiruProtocolError):
         asyncio.run(source.poll())
 
@@ -327,7 +329,7 @@ def test_restart_and_repeated_first_sync_add_no_second_pr_review_signal(
     database: Database,
 ) -> None:
     client = _FakeClient()
-    client.events = [_event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=1)]
+    client.events = [_event(1, "pr_opened", task_id="T1", url="u", branch="b", commits=["c1"])]
     source, _ = _source(database, client)
     asyncio.run(source.poll())
     restarted, journal = _source(database, client)
@@ -357,7 +359,7 @@ def _open_work_of_two_tasks(database: Database, client: _FakeClient) -> EventSou
         _raised(1, "E1"),
         _raised(2, "E2"),
         _raised(3, "E3"),
-        _event(4, "pr_opened", task_id="T1", url="u", branch="b", commits=1),
+        _event(4, "pr_opened", task_id="T1", url="u", branch="b", commits=["c1"]),
         _event(5, "escalation", task_id="T2", escalation_id="E4", reason="decision_required"),
     ]
     asyncio.run(source.poll())
@@ -436,7 +438,7 @@ def test_first_sync_opens_no_review_for_a_pull_request_of_a_task_cancelled_in_it
 ) -> None:
     client = _FakeClient()
     client.events = [
-        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=1),
+        _event(1, "pr_opened", task_id="T1", url="u1", branch="b1", commits=["c1"]),
         _event(2, "task_cancelled", task_id="T1"),
     ]
     source, _ = _source(database, client)

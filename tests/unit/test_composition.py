@@ -1259,7 +1259,9 @@ def test_a_pull_request_opened_is_sent_for_review_and_the_task_done_closes_its_m
     session = _ShikiruSession(
         asyncio.Event(),
         answers={"list_escalations": {"result": []}},
-        events=[_recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": 2})],
+        events=[
+            _recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": ["c1", "c2"]})
+        ],
         later=[_recorded_event(EventKinds.TASK_DONE, 42, {})],
         gate=bot.marked,
     )
@@ -1706,7 +1708,9 @@ def test_a_pull_request_closed_unmerged_closes_its_review_message(tmp_path: Path
     session = _ShikiruSession(
         asyncio.Event(),
         answers={"list_escalations": {"result": []}},
-        events=[_recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": 2})],
+        events=[
+            _recorded_event(EventKinds.PR_OPENED, 41, {"url": _PR_URL, "commits": ["c1", "c2"]})
+        ],
         later=[
             _recorded_event(
                 EventKinds.ESCALATION, 42, {"escalation_id": "E-1", "reason": PR_CLOSED_REASON}

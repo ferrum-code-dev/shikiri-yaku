@@ -56,7 +56,7 @@ class _PullRequestData(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     url: str
-    commits: int
+    commits: list[str]
 
 
 class _OpenPulls:
@@ -222,7 +222,9 @@ class EventSource:
 
     def _review(self, event: ShikiruEvent) -> Signal:
         data = _event_data(event, _PullRequestData)
-        return self._signal(event, Kind.PR_REVIEW, event.kind, PullRequest(data.url, data.commits))
+        return self._signal(
+            event, Kind.PR_REVIEW, event.kind, PullRequest(data.url, len(data.commits))
+        )
 
     def _signal(
         self,
