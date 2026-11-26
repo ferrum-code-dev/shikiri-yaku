@@ -832,3 +832,50 @@ def test_closing_associates_an_untagged_shared_selection_reply(
     assert dict(platform.edits)[selection_ref].text.endswith("2026-01-01 00:00 UTC")
     asyncio.run(h.ending.sweep())
     assert h.remaining(target) == 0
+
+
+def _conversation_row(database: Database, update_id: int) -> int:
+    row = database.connection.execute(
+        "SELECT id FROM conversations WHERE update_id = ?", (update_id,)
+    ).fetchone()
+    return int(row[0])
+
+
+def test_erasing_a_conversation_deletes_the_reply_keys_of_its_own_replies_only() -> None:
+    database = Database.open(":memory:")
+    try:
+        conversations = Conversations(database)
+        outbox = JournalOutbox(database, MessageStore(database, Reporter()))
+        for update_id, thread in ((CREATED, TARGET_THREAD), (CREATED + 100, BYSTANDER_THREAD)):
+            conversations.create(update_id, chat=CHAT, thread=None, text="hi", scope=[], now=NOW)
+            conversations.opened(update_id, thread)
+        target = _conversation_row(database, CREATED)
+        bystander = _conversation_row(database, CREATED + 100)
+        destination = [Destination(CHANNEL, str(CHAT), TARGET_THREAD)]
+        outbox.queue_command_reply(
+            destination,
+            [Message("a"), Message("b")],
+            key="expert:view:601:1",
+            now=NOW,
+            conversation_id=target,
+        )
+        outbox.queue_command_reply(
+            destination, [Message("c")], key="expert:view:601", now=NOW, conversation_id=target
+        )
+        outbox.queue_command_reply(
+            destination,
+            [Message("d")],
+            key="expert:view:602:1",
+            now=NOW,
+            conversation_id=bystander,
+        )
+        outbox.queue_command_reply(destination, [Message("e")], key="expert:select:603", now=NOW)
+
+        conversations.erase(target, topic_chat=CHAT)
+
+        kept = {
+            row[0] for row in database.connection.execute("SELECT reply_key FROM command_replies")
+        }
+        assert kept == {"expert:view:602:1", "expert:select:603"}
+    finally:
+        database.close()

@@ -362,6 +362,16 @@ class Conversations:
                 "DELETE FROM command_replies WHERE reply_key LIKE '%:' || ?",
                 [(update["update_id"],) for update in updates],
             )
+            # keep: a reply part's key is its reply key and index, read before its messages go
+            notices = connection.execute(
+                "SELECT notice_key FROM messages "
+                "WHERE conversation_id = ? AND notice_key IS NOT NULL",
+                (conversation_id,),
+            ).fetchall()
+            connection.executemany(
+                "DELETE FROM command_replies WHERE reply_key = ?",
+                [(notice["notice_key"].rpartition(":")[0],) for notice in notices],
+            )
             connection.execute(_ERASE_MESSAGES, owned)
             connection.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
             connection.execute(
