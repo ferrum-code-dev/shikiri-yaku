@@ -1,5 +1,33 @@
 # Task plan
 
+## Planned work: Expert file selection and sketch progress
+
+A live run on 2026-11-26 showed two gaps in "Conversation files". *Submit all* named every conversation file in every task: of three files one was needed, and an outdated sketch contradicted the task text. A sketch took 64 to 70 seconds of a 120 second limit with nothing in the topic meanwhile. The PO approved the changed section in `docs/design.md`. The tasks run in order; each owns its matching checklist entry.
+
+### F3. Name only the files a task needs
+
+Implement "Tasks with files" of the section "Conversation files", with the matching lines of "Answer", "Tasks" and "What an agent may do", as one change. Use the ponytail skill. Reuse the existing answer check, proposal and file copy code. No new setting or journal migration. Update the README and `docs/reference.md`.
+
+## Acceptance criteria
+- Every Expert turn, first, resumed and after a provider switch, gets the names of the conversation's files, attachments and sketches.
+- A task of an answer has `files`, which the agent schema requires. A name the conversation does not hold, a path included, makes the answer invalid as a component outside the scope does. Stored answers without `files` still load.
+- The Expert is told to name only the files a task needs, and to say in the task text what each is for and what in it does not apply.
+- The proposal message shows each task's file names under the task.
+- *Submit all* copies only the named files, and each submitted text names the absolute copies of its own task's files, none for a task that names none. A failed copy or a missing named file submits nothing and tells the PO.
+- Offline tests cover these criteria; `uv run poe check` passes or unrelated failures are reported with evidence.
+
+### F4. Give sketches their own time limit and show progress
+
+Implement the limit in "Sketches" and "Sketch progress" of the section "Conversation files", as one change, after F3. Use the ponytail skill. Reuse the outbox slot and the job that deletes replaced copies; no new deletion path and no journal migration. Update the README and `docs/reference.md`.
+
+## Acceptance criteria
+- `expert.sketch_timeout_s` defaults to 300 and limits the Codex sketch run; `expert.timeout_s` keeps limiting turns only.
+- The progress message is sent after the answer and before the photo, only when Codex is about to run.
+- The photo, a failed drawing, an unsaved picture and a photo Telegram refuses each end with the progress message deleted and, without a photo, a notice that says why. Earlier sketches and their notices stay.
+- After a restart during a drawing, no progress message stays once the interrupted work has been handled again. A restart that does not draw again tells the PO and removes it.
+- Ending the conversation during a drawing leaves no message and queues no photo.
+- Offline tests cover these criteria; `uv run poe check` passes or unrelated failures are reported with evidence.
+
 ## Planned work: Expert conversation files (T-184)
 
 Files serve two cases only: the PO attaches a file that a task needs, and the PO asks the Expert for a sketch. The first design (T-185) and its implementation (T-186) covered much more and were reverted; do not restore that code. The PO authorized replacing that design with the section "Conversation files" in `docs/design.md`. The following tasks run in order; each owns its matching checklist entry.
