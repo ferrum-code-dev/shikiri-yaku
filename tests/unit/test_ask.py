@@ -217,7 +217,13 @@ class Harness:
             ending=self.ending,
             downloads=FakeDownloads(),
             sketches=ExpertSketches(
-                None, self.outbox, Clock(), directory=path, channel="telegram", group_id=-100123
+                None,
+                self.outbox,
+                Clock(),
+                directory=path,
+                channel="telegram",
+                group_id=-100123,
+                outbox_interval_s=1,
             ),
             proposals=expert_proposals(
                 self.database,

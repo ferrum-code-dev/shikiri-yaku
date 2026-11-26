@@ -19,20 +19,23 @@ from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_ladder import LadderExpert
 from shikiri_yaku.app.expert_runs import ConversationRuns
-from shikiri_yaku.app.expert_sketches import ExpertSketches
+from shikiri_yaku.app.expert_sketches import DRAWING, ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.app.inbound_service import InboundService
+from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
+from shikiri_yaku.domain.outbound import SKETCH_PHOTO_REFUSED, SKETCH_PROGRESS_REFUSED
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.inbound import JournalInbound
-from shikiri_yaku.journal.messages import MessageStore
+from shikiri_yaku.journal.messages import Delivery, MessageStore
 from shikiri_yaku.journal.ops import OpStore
 from shikiri_yaku.journal.outbox import JournalOutbox
+from shikiri_yaku.journal.replacements import JournalReplacements
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.web import JournalWeb
@@ -43,6 +46,7 @@ from shikiri_yaku.ports import (
     ChannelUnavailableError,
     CommandResult,
     ExpertError,
+    Message,
     ShikiruLinkDownError,
 )
 from tests.support.attachments import (
@@ -66,9 +70,11 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
+    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import (
         EscalationView,
         Expert,
+        Outbox,
         ReplyLog,
         ShikiruClient,
         ShikiruTask,
@@ -97,6 +103,11 @@ class Clock:
 
     async def sleep(self, seconds: float) -> None:
         del seconds
+        # keep: a wait that polls the outbox must let the sender's task run, without time passing
+        loop = asyncio.get_running_loop()
+        ready = loop.create_future()
+        loop.call_soon(ready.set_result, None)
+        await ready
 
 
 class Reporter:
@@ -223,6 +234,7 @@ class Harness:
         shared_group: bool = False,
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
+        auto_progress_delivery: bool = True,
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
@@ -266,7 +278,18 @@ class Harness:
             ending=self.ending,
             downloads=self.downloads,
             sketches=ExpertSketches(
-                sketcher, self.outbox, Clock(), directory=path, channel=CHANNEL, group_id=GROUP_ID
+                sketcher,
+                cast(
+                    "Outbox",
+                    _AutoProgressOutbox(self.database, self.outbox)
+                    if auto_progress_delivery
+                    else self.outbox,
+                ),
+                Clock(),
+                directory=path,
+                channel=CHANNEL,
+                group_id=GROUP_ID,
+                outbox_interval_s=0.01,
             ),
             web=ExpertWebRequests(
                 JournalWeb(self.database),
@@ -324,6 +347,7 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         shared_group: bool = False,
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
+        auto_progress_delivery: bool = True,
     ) -> Harness:
         harness = Harness(
             tmp_path,
@@ -334,6 +358,7 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
             shared_group=shared_group,
             downloads=downloads,
             sketcher=sketcher,
+            auto_progress_delivery=auto_progress_delivery,
         )
         made.append(harness)
         return harness
@@ -1244,6 +1269,43 @@ def test_restart_resumes_pending_admin_output_before_new_turns(
 
 
 PHOTO_KEY: Final = "expert:sketch:1"
+PROGRESS_KEY: Final = "expert:sketch:1:progress"
+
+
+def _send_all(h: Harness) -> dict[str, str]:
+    """Confirm every queued message as sent, in order; return the reference of each notice key."""
+    for pending in h.outbox.pending():
+        h.outbox.confirm(pending.message_id, f"ref-{pending.message_id}")
+    rows = h.database.connection.execute(
+        "SELECT notice_key, platform_message_id FROM messages WHERE direction = 'out'"
+        " AND platform_message_id IS NOT NULL AND notice_key IS NOT NULL"
+    ).fetchall()
+    return {row["notice_key"]: row["platform_message_id"] for row in rows}
+
+
+class _AutoProgressOutbox:
+    """Treat queued progress as sent in tests that do not exercise the sender."""
+
+    def __init__(self, database: Database, outbox: JournalOutbox) -> None:
+        self._database = database
+        self._outbox = outbox
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._outbox, name)
+
+    def sent(self, key: str) -> bool:
+        if key.startswith("expert:sketch:") and key.endswith(":progress"):
+            row = self._database.connection.execute(
+                "SELECT id, delivery FROM messages WHERE direction = 'out' AND notice_key = ?",
+                (key,),
+            ).fetchone()
+            if row is not None and row["delivery"] == Delivery.PENDING:
+                self._outbox.confirm(row["id"], f"test-progress-{row['id']}")
+        return self._outbox.sent(key)
+
+
+def _superseded(h: Harness) -> list[str]:
+    return JournalReplacements(h.database, MessageStore(h.database, Reporter())).superseded()
 
 
 def _file_item(
@@ -1524,6 +1586,7 @@ def test_an_ending_stops_a_sketch_being_drawn(
         conversation = h.log.at_thread(THREAD)
         assert conversation is not None
 
+        assert PROGRESS_KEY in _answer_keys(h)
         ending = h.ending.end(conversation.id, sender=OWNER, update_id=2)
         await asyncio.wait_for(ending, timeout=1)
         await asyncio.wait_for(asked, timeout=1)
@@ -1544,3 +1607,388 @@ def test_a_blank_image_draws_nothing(
 
     assert sketcher.descriptions == []
     assert PHOTO_KEY not in _answer_keys(h)
+
+
+def test_a_sketch_shows_its_progress_until_the_photo_replaces_it(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    assert _answer_keys(h)[-2:] == [PROGRESS_KEY, PHOTO_KEY]
+    sent = _send_all(h)
+    assert _superseded(h) == [sent[PROGRESS_KEY]]
+
+
+class _MissingPictureSketcher(FakeSketcher):
+    async def draw(self, description: str) -> Path:
+        self.descriptions.append(description)
+        return self.made
+
+
+def test_a_picture_that_cannot_be_saved_replaces_progress_with_a_notice(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    sketcher = _MissingPictureSketcher(tmp_path / "missing.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    sent = _send_all(h)
+    notice = json.loads(_body(h, PHOTO_KEY))
+    assert notice["photo"] is None
+    assert notice["text"]
+    assert _superseded(h) == [sent[PROGRESS_KEY]]
+
+
+def test_later_sketch_keeps_an_earlier_picture_and_notice(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    runner = Runner(answer={**ANSWER, "image": "first picture"})
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(runner), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    _send_all(h)
+
+    runner.answer = {**ANSWER, "image": "failed picture"}
+    sketcher.error = "drawing failed"
+    asyncio.run(h.turns.handle(_item(2, MESSAGES[1], thread=THREAD)))
+    _send_all(h)
+
+    runner.answer = {**ANSWER, "image": "later picture"}
+    sketcher.error = None
+    asyncio.run(h.turns.handle(_item(3, MESSAGES[2], thread=THREAD)))
+    _send_all(h)
+
+    earlier_picture = json.loads(_body(h, "expert:sketch:1"))
+    earlier_notice = json.loads(_body(h, "expert:sketch:2"))
+    later_picture = json.loads(_body(h, "expert:sketch:3"))
+    rows = h.database.connection.execute(
+        "SELECT notice_key, delivery FROM messages WHERE notice_key IN (?, ?, ?)",
+        ("expert:sketch:1", "expert:sketch:2", "expert:sketch:3"),
+    ).fetchall()
+    assert {row["notice_key"]: row["delivery"] for row in rows} == {
+        "expert:sketch:1": Delivery.SENT,
+        "expert:sketch:2": Delivery.SENT,
+        "expert:sketch:3": Delivery.SENT,
+    }
+    assert earlier_picture["photo"] is not None
+    assert earlier_notice["photo"] is None
+    assert earlier_notice["text"]
+    assert later_picture["photo"] is not None
+
+
+@pytest.mark.parametrize(
+    ("description", "sketcher_error", "progressed"),
+    [
+        (f"a diagram with {SECRETS['sk_key']}", None, False),
+        ("a graph", "codex did not finish the run", True),
+    ],
+    ids=["secret-before-codex", "failed-run"],
+)
+def test_a_sketch_not_drawn_replaces_its_progress_with_its_notice(
+    build: Callable[..., Harness],
+    tmp_path: Path,
+    description: str,
+    sketcher_error: str | None,
+    *,
+    progressed: bool,
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "pic.png", error=sketcher_error)
+    h = build(ladder(Runner(answer={**ANSWER, "image": description})), sketcher=sketcher)
+
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    assert (PROGRESS_KEY in _answer_keys(h)) == progressed
+    sent = _send_all(h)
+    assert _superseded(h) == ([sent[PROGRESS_KEY]] if progressed else [])
+
+
+def test_a_photo_telegram_refuses_is_replaced_by_the_notice_of_its_refusal(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
+    h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+    h.outbox.confirm(_message_id(h, PROGRESS_KEY), "ref-progress")
+    h.outbox.refuse(_message_id(h, PHOTO_KEY), "photo refused", now=Clock().now())
+
+    _send_all(h)
+
+    assert _superseded(h) == ["ref-progress"]
+    notice = h.database.connection.execute(
+        "SELECT body, delivery FROM messages WHERE notice_key LIKE 'refused:%'"
+    ).fetchone()
+    assert notice["delivery"] == Delivery.SENT
+    assert json.loads(notice["body"])["text"] == SKETCH_PHOTO_REFUSED
+
+
+class _Channel:
+    """Records the text of each message it sends, in the order the sender sends them."""
+
+    def __init__(
+        self,
+        *,
+        unavailable_progress: int = 0,
+        refuse_progress: bool = False,
+        hold_progress: bool = False,
+    ) -> None:
+        self.texts: list[str] = []
+        self.unavailable_progress = unavailable_progress
+        self.refuse_progress = refuse_progress
+        self.hold_progress = hold_progress
+        self.progress_attempts = 0
+        self.progress_started = asyncio.Event()
+        self.release_progress = asyncio.Event()
+        self.refusal_notice_sent = asyncio.Event()
+
+    async def send(self, destination: Destination, message: Message) -> str:
+        del destination
+        if message.text == DRAWING:
+            self.progress_attempts += 1
+            if self.hold_progress:
+                self.progress_started.set()
+                await self.release_progress.wait()
+            if self.refuse_progress:
+                raise ChannelRefusedError
+            if self.unavailable_progress:
+                self.unavailable_progress -= 1
+                raise ChannelUnavailableError
+        self.texts.append(message.text)
+        if message.text == SKETCH_PROGRESS_REFUSED:
+            self.refusal_notice_sent.set()
+        return f"ref-{len(self.texts)}"
+
+    async def edit(self, message_ref: str, message: Message) -> None:
+        del message_ref, message
+
+    async def delete(self, message_ref: str) -> None:
+        del message_ref
+
+
+class _SeenSketcher(HeldSketcher):
+    """A held sketcher that keeps what the channel had sent when its drawing started."""
+
+    def __init__(self, made: Path, channel: _Channel) -> None:
+        super().__init__(made)
+        self.channel = channel
+        self.sent_at_start: list[str] = []
+
+    async def draw(self, description: str) -> Path:
+        self.sent_at_start = list(self.channel.texts)
+        return await super().draw(description)
+
+
+def test_the_progress_message_is_sent_before_the_drawing_starts(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        channel = _Channel(unavailable_progress=1)
+        sketcher = _SeenSketcher(tmp_path / "codex" / "pic.png", channel)
+        h = build(
+            ladder(Runner(answer={**ANSWER, "image": "a graph"})),
+            sketcher=sketcher,
+            auto_progress_delivery=False,
+        )
+        sender = asyncio.create_task(
+            OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).run()
+        )
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        try:
+            await asyncio.wait_for(sketcher.started.wait(), timeout=5)
+            assert sketcher.sent_at_start[-2:] == ["Ready", DRAWING]
+            assert channel.progress_attempts == 2
+            sketcher.release.set()
+            await asyncio.wait_for(asked, timeout=5)
+        finally:
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_a_refused_progress_message_prevents_the_drawing_and_says_why(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        channel = _Channel(refuse_progress=True)
+        sketcher = HeldSketcher(tmp_path / "codex" / "pic.png")
+        h = build(
+            ladder(Runner(answer={**ANSWER, "image": "a graph"})),
+            sketcher=sketcher,
+            auto_progress_delivery=False,
+        )
+        sender = asyncio.create_task(
+            OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).run()
+        )
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        try:
+            await asyncio.wait_for(asked, timeout=5)
+            await asyncio.wait_for(channel.refusal_notice_sent.wait(), timeout=5)
+            assert not sketcher.started.is_set()
+            assert PHOTO_KEY not in _answer_keys(h)
+            refusal = h.database.connection.execute(
+                "SELECT delivery FROM messages WHERE notice_key LIKE 'refused:%'"
+            ).fetchone()
+            assert refusal["delivery"] == Delivery.SENT
+            assert SKETCH_PROGRESS_REFUSED in channel.texts
+            assert not h.database.connection.execute(
+                "SELECT 1 FROM messages WHERE notice_key = ?", (PHOTO_KEY,)
+            ).fetchone()
+        finally:
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_restart_before_progress_delivery_never_sends_the_progress_message(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        channel = _Channel(hold_progress=True)
+        sketcher = HeldSketcher(tmp_path / "codex" / "pic.png")
+        h = build(
+            ladder(Runner(answer={**ANSWER, "image": "a graph"})),
+            sketcher=sketcher,
+            auto_progress_delivery=False,
+        )
+        sender = asyncio.create_task(
+            OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).run()
+        )
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        try:
+            await asyncio.wait_for(channel.progress_started.wait(), timeout=5)
+            progress_id = _message_id(h, PROGRESS_KEY)
+            [pending] = h.database.connection.execute(
+                "SELECT delivery FROM messages WHERE id = ?", (progress_id,)
+            ).fetchall()
+            assert pending["delivery"] == Delivery.PENDING
+
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+            h.turns.recover()
+            [retired] = h.database.connection.execute(
+                "SELECT delivery FROM messages WHERE id = ?", (progress_id,)
+            ).fetchall()
+            assert retired["delivery"] == Delivery.OBSOLETE
+
+            channel.release_progress.set()
+            await OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).tick()
+
+            [notice] = h.database.connection.execute(
+                "SELECT delivery, body FROM messages WHERE notice_key = ?", (PHOTO_KEY,)
+            ).fetchall()
+            assert notice["delivery"] == Delivery.SENT
+            assert json.loads(notice["body"])["text"]
+            assert DRAWING not in channel.texts
+            assert not sketcher.started.is_set()
+            assert sketcher.descriptions == []
+        finally:
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_recovery_retries_when_crash_notice_cannot_be_journaled(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        channel = _Channel(hold_progress=True)
+        sketcher = HeldSketcher(tmp_path / "codex" / "pic.png")
+        h = build(
+            ladder(Runner(answer={**ANSWER, "image": "a graph"})),
+            sketcher=sketcher,
+            auto_progress_delivery=False,
+        )
+        sender = asyncio.create_task(
+            OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).run()
+        )
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        try:
+            await asyncio.wait_for(channel.progress_started.wait(), timeout=5)
+            progress_id = _message_id(h, PROGRESS_KEY)
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+            h.database.connection.execute(
+                """CREATE TEMP TRIGGER fail_sketch_notice BEFORE INSERT ON messages
+                WHEN NEW.notice_key = 'expert:sketch:1'
+                BEGIN SELECT RAISE(ABORT, 'simulated crash'); END"""
+            )
+            with pytest.raises(Exception, match="simulated crash"):
+                h.turns.recover()
+
+            [pending] = h.database.connection.execute(
+                "SELECT delivery FROM messages WHERE id = ?", (progress_id,)
+            ).fetchall()
+            assert pending["delivery"] == Delivery.PENDING
+            assert (
+                h.database.connection.execute(
+                    "SELECT 1 FROM messages WHERE notice_key = ?", (PHOTO_KEY,)
+                ).fetchone()
+                is None
+            )
+
+            h.database.connection.execute("DROP TRIGGER fail_sketch_notice")
+            h.turns.recover()
+
+            [retired] = h.database.connection.execute(
+                "SELECT delivery FROM messages WHERE id = ?", (progress_id,)
+            ).fetchall()
+            assert retired["delivery"] == Delivery.OBSOLETE
+
+            channel.release_progress.set()
+            await OutboxSender(h.outbox, channel, Clock(), interval_s=0.01).tick()
+
+            [notice] = h.database.connection.execute(
+                "SELECT delivery, body FROM messages WHERE notice_key = ?", (PHOTO_KEY,)
+            ).fetchall()
+            assert notice["delivery"] == Delivery.SENT
+            assert json.loads(notice["body"])["photo"] is None
+            assert DRAWING not in channel.texts
+            assert not sketcher.started.is_set()
+        finally:
+            sender.cancel()
+            asked.cancel()
+            await asyncio.gather(sender, asked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_a_restart_during_a_drawing_replaces_its_progress_with_a_notice(
+    build: Callable[..., Harness], tmp_path: Path
+) -> None:
+    async def scenario() -> None:
+        sketcher = HeldSketcher(tmp_path / "codex" / "pic.png")
+        h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
+        asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+        await asyncio.wait_for(sketcher.started.wait(), timeout=1)
+        sent = _send_all(h)
+
+        h.turns.recover()
+        _send_all(h)
+
+        assert json.loads(_body(h, PHOTO_KEY))["photo"] is None
+        assert _superseded(h) == [sent[PROGRESS_KEY]]
+        asked.cancel()
+        await asyncio.gather(asked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def _message_id(h: Harness, notice_key: str) -> int:
+    row = h.database.connection.execute(
+        "SELECT id FROM messages WHERE notice_key = ?", (notice_key,)
+    ).fetchone()
+    return int(row["id"])

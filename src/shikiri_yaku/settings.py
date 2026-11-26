@@ -82,6 +82,7 @@ REASONER_COOLDOWN_MIN: Final = 5
 REASONER_MAX_PARALLEL: Final = 2
 REASONER_INPUT_MAX_CHARS: Final = 4000
 EXPERT_TIMEOUT_S: Final = 120
+EXPERT_SKETCH_TIMEOUT_S: Final = 300
 EXPERT_COOLDOWN_MIN: Final = 5
 EXPERT_MAX_PARALLEL: Final = 2
 EXPERT_HANDOFF_TURNS: Final = 5
@@ -265,6 +266,7 @@ class ReasonerSettings(_FrozenModel):
 class ExpertSettings(_FrozenModel):
     ladder: Annotated[tuple[_Rung, ...], _AT_LEAST_ONE]
     timeout_s: PositiveInt = EXPERT_TIMEOUT_S
+    sketch_timeout_s: PositiveInt = EXPERT_SKETCH_TIMEOUT_S
     cooldown_min: PositiveInt = EXPERT_COOLDOWN_MIN
     max_parallel: PositiveInt = EXPERT_MAX_PARALLEL
     handoff_turns: PositiveInt = EXPERT_HANDOFF_TURNS

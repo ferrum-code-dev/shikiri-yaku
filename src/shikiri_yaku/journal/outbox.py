@@ -77,6 +77,55 @@ class JournalOutbox:
         ).fetchone()
         return row is not None
 
+    def settled(self, key: str) -> bool:
+        row = self._database.connection.execute(
+            "SELECT delivery FROM messages WHERE direction = 'out' AND notice_key = ?", (key,)
+        ).fetchone()
+        return row is not None and row["delivery"] != Delivery.PENDING
+
+    def sent(self, key: str) -> bool:
+        row = self._database.connection.execute(
+            "SELECT delivery FROM messages WHERE direction = 'out' AND notice_key = ?", (key,)
+        ).fetchone()
+        return row is not None and row["delivery"] == Delivery.SENT
+
+    def recover_interrupted_drawings(self, message: Message, now: datetime) -> None:
+        # keep: retire unsent progress and queue each notice in one commit, so a restart can retry
+        with self._database.transaction() as connection:
+            rows = connection.execute(
+                """SELECT progress.id, progress.notice_key, progress.delivery,
+                    SUBSTR(progress.notice_key, 1, LENGTH(progress.notice_key) - 9) AS sketch_key,
+                    progress.channel, progress.chat, progress.thread, progress.conversation_id
+            FROM messages AS progress
+            WHERE progress.direction = 'out'
+              AND progress.delivery IN (?, ?)
+              AND progress.notice_key LIKE 'expert:sketch:%:progress'
+              AND NOT EXISTS (
+                SELECT 1 FROM messages AS sketch
+                WHERE sketch.direction = 'out'
+                  AND sketch.notice_key || ':progress' = progress.notice_key
+              )""",
+                (Delivery.PENDING, Delivery.SENT),
+            ).fetchall()
+            for row in rows:
+                if row["delivery"] == Delivery.PENDING:
+                    connection.execute(
+                        "UPDATE messages SET delivery = ? WHERE id = ? AND delivery = ?",
+                        (Delivery.OBSOLETE, row["id"], Delivery.PENDING),
+                    )
+                self._messages.record_outbound(
+                    signal_number=None,
+                    channel=row["channel"],
+                    chat=row["chat"],
+                    thread=row["thread"],
+                    purpose=Purpose.EXPERT,
+                    body=message,
+                    notice_key=row["sketch_key"],
+                    now=now,
+                    slot=row["sketch_key"],
+                    conversation_id=row["conversation_id"],
+                )
+
     def queue_command_reply(
         self,
         destinations: Sequence[Destination],

@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter
 
-from shikiri_yaku.domain.outbound import Purpose, message_label, refusal_notice
+from shikiri_yaku.domain.outbound import (
+    SKETCH_PHOTO_REFUSED,
+    SKETCH_PROGRESS_REFUSED,
+    Purpose,
+    message_label,
+    refusal_notice,
+)
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import Inserted, stamp
 from shikiri_yaku.journal.signals import SignalState
@@ -76,6 +82,10 @@ def _message(row: sqlite3.Row) -> StoredMessage:
 
 def _is_notice_of_refusal(notice_key: str | None) -> bool:
     return notice_key is not None and notice_key.startswith(REFUSAL_KEY_PREFIX)
+
+
+def _is_photo(body: str | None) -> bool:
+    return body is not None and _BODY.validate_json(body).photo is not None
 
 
 class MessageStore:
@@ -197,13 +207,15 @@ class MessageStore:
         refused_id: int,
         reason: str,
         now: datetime,
+        slot: str | None = None,
+        text: str | None = None,
     ) -> None:
         """Queue the PO's notice of a refusal; if it cannot be journaled, report its metadata only.
 
         The notice is a fixed text with the S-number and no refused content. It is keyed by the
         refused row, so a refusal is noticed once per chat.
         """
-        notice = Message(refusal_notice(signal_number))
+        notice = Message(refusal_notice(signal_number) if text is None else text)
         try:
             self._insert(
                 signal_number=signal_number,
@@ -215,13 +227,21 @@ class MessageStore:
                 now=now,
                 body=_BODY.dump_json(notice).decode(),
                 refusal=None,
+                slot=slot,
             )
         except sqlite3.Error:
             self._reporter.report(
                 f"{message_label(signal_number)} refused ({reason}); its notice was not journaled"
             )
 
-    def _notify_refusal(self, row: sqlite3.Row, reason: str, now: datetime) -> None:
+    def _notify_refusal(
+        self,
+        row: sqlite3.Row,
+        reason: str,
+        now: datetime,
+        slot: str | None = None,
+        text: str | None = None,
+    ) -> None:
         """Notify the PO of a refused row; a refused notice is reported instead, never noticed."""
         if _is_notice_of_refusal(row["notice_key"]):
             self._reporter.report(
@@ -236,6 +256,8 @@ class MessageStore:
             refused_id=row["id"],
             reason=reason,
             now=now,
+            slot=slot,
+            text=text,
         )
 
     def confirm_delivery(self, message_id: int, platform_message_id: str) -> None:
@@ -250,8 +272,8 @@ class MessageStore:
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT id, signal_number, channel, chat, thread, notice_key FROM messages
-                WHERE id = ? AND delivery = ?
+                SELECT id, signal_number, channel, chat, thread, notice_key, purpose, slot, body
+                FROM messages WHERE id = ? AND delivery = ?
                 """,
                 (message_id, Delivery.PENDING),
             ).fetchone()
@@ -261,7 +283,27 @@ class MessageStore:
                 "UPDATE messages SET delivery = ?, body = NULL, refusal = ? WHERE id = ?",
                 (Delivery.REFUSED, reason, message_id),
             )
-            self._notify_refusal(row, reason, now)
+            # keep: an Expert notice takes its slot, so a refused sketch photo replaces its progress
+            expert = row["purpose"] == Purpose.EXPERT and row["slot"] is not None
+            sketch_photo = expert and _is_photo(row["body"])
+            sketch_progress = (
+                expert
+                and row["notice_key"] is not None
+                and row["notice_key"].startswith("expert:sketch:")
+                and row["notice_key"].endswith(":progress")
+            )
+            refusal_text = None
+            if sketch_photo:
+                refusal_text = SKETCH_PHOTO_REFUSED
+            elif sketch_progress:
+                refusal_text = SKETCH_PROGRESS_REFUSED
+            self._notify_refusal(
+                row,
+                reason,
+                now,
+                slot=row["slot"] if expert else None,
+                text=refusal_text,
+            )
 
     def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
         """Keep the reason of a refused edit on the copy it targeted, and notify the PO of it."""

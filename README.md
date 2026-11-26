@@ -164,9 +164,11 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
   contents of files and sketches are not searched for secrets, and group members can see them.
 - **Sketches:** the Expert may answer a request for a picture with a description. A Codex rung in
   the ladder draws it, with the first Codex rung's model and effort, and the picture is sent to the
-  topic and kept with the conversation's files. Each request draws a new picture. Without a Codex
-  rung, or when the run fails or leaves no picture, the topic gets a notice. A description with a
-  secret is not sent to Codex.
+  topic and kept with the conversation's files. Each request draws a new picture. While Codex draws,
+  the topic shows *Drawing the sketch…*, which the photo or the notice replaces. Without a Codex
+  rung, or when the run fails, leaves no picture or runs past `expert.sketch_timeout_s` (300
+  seconds), the topic gets a notice. A description with a secret is not sent to Codex. A restart
+  that interrupts a sketch ends it with a notice; it is not redrawn automatically.
 - **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed,
   and each task lists the names of its files. Each proposal submits at most once. **Submit all**
   copies only the files its tasks name to `task_files/` in the instance directory, and each task

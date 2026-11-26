@@ -100,6 +100,7 @@ def queue_expert_notice(
     text: str,
     *,
     key: str,
+    slot: str | None = None,
     conversation_id: int | None = None,
 ) -> None:
     outbox.queue(
@@ -109,6 +110,7 @@ def queue_expert_notice(
         Message(text),
         key=key,
         now=clock.now(),
+        slot=slot,
         conversation_id=conversation_id,
     )
 
@@ -515,6 +517,7 @@ class ExpertTurns:
                 key=f"expert:interrupted:{turn.update_id}",
                 conversation_id=turn.conversation_id,
             )
+        self._sketches.recover()
         if self._web is not None:
             self._web.queue()
             self._web.recover()

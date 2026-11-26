@@ -227,7 +227,13 @@ class Harness:
             ),
             downloads=FakeDownloads(),
             sketches=ExpertSketches(
-                None, self.outbox, self.clock, directory=path, channel=CHANNEL, group_id=GROUP_ID
+                None,
+                self.outbox,
+                self.clock,
+                directory=path,
+                channel=CHANNEL,
+                group_id=GROUP_ID,
+                outbox_interval_s=1,
             ),
         )
 

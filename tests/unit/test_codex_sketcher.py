@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
 from shikiri_yaku.adapters.agents.codex import GENERATED_IMAGES, CodexSketcher, codex_store
-from shikiri_yaku.ports import CommandError, CommandResult, SketchError
+from shikiri_yaku.bootstrap import build_sketcher
+from shikiri_yaku.ports import CommandError, CommandResult, CommandRunner, SketchError
+from shikiri_yaku.settings import load_settings
 from tests.support.attachments import PNG
 
 if TYPE_CHECKING:
@@ -160,3 +162,42 @@ def test_codex_keeps_its_pictures_under_codex_home_or_the_default(
         monkeypatch.setenv("CODEX_HOME", variable)
 
     assert codex_store() == expected
+
+
+_UNFINISHED: Final = "codex did not finish"
+
+
+class _SilentRunner:
+    """Records the limit of each run and fails it, as a run that does not finish does."""
+
+    def __init__(self) -> None:
+        self.timeouts: list[float] = []
+
+    async def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float,
+        cwd: Path | None = None,
+        stdin: str | None = None,
+    ) -> CommandResult:
+        del argv, cwd, stdin
+        self.timeouts.append(timeout_s)
+        raise CommandError(_UNFINISHED)
+
+
+def test_a_codex_sketch_run_gets_the_sketch_limit_and_not_the_turn_limit(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text(
+        'product = "shop"\n\n[[components]]\nname = "api"\npath = "/src/shop-api"\n\n'
+        "[channels.telegram]\nowners = [123456789]\n\n"
+        '[expert]\nladder = ["codex:gpt-test"]\ntimeout_s = 99\nsketch_timeout_s = 7\n',
+        encoding="utf-8",
+    )
+    runner = _SilentRunner()
+    sketcher = build_sketcher(load_settings(tmp_path), cast("CommandRunner", runner))
+    assert sketcher is not None
+
+    with pytest.raises(SketchError):
+        asyncio.run(sketcher.draw("a graph"))
+
+    assert runner.timeouts == [7]

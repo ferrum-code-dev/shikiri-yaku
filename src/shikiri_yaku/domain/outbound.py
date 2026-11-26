@@ -31,6 +31,14 @@ def refusal_notice(number: int | None) -> str:
     return f"{prefix}A message was refused and not sent. Its text was not kept."
 
 
+# keep: the notice that replaces a sketch's progress message when the channel refuses its photo
+SKETCH_PHOTO_REFUSED: Final = "The sketch was not sent: its photo was refused."
+# keep: the notice when the channel refuses progress, so Codex never starts without it
+SKETCH_PROGRESS_REFUSED: Final = (
+    "The sketch was not drawn because its progress message was refused."
+)
+
+
 # keep: the button of a message about something that stays true until it is fixed
 STOP_REMINDERS_LABEL: Final = "Stop reminders"
 # keep: the last line of a message whose signal ended, so the PO sees why its buttons went

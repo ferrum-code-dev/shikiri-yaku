@@ -162,6 +162,17 @@ class _Outbox:
     def notice_queued(self, key: str) -> bool:
         return any(queued_key == key for *_, queued_key in self.queued)
 
+    def settled(self, key: str) -> bool:
+        del key
+        return True
+
+    def sent(self, key: str) -> bool:
+        del key
+        return False
+
+    def recover_interrupted_drawings(self, message: Message, now: datetime) -> None:
+        del message, now
+
     def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
         raise NotImplementedError
 

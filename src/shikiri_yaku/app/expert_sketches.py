@@ -18,15 +18,21 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.ports import Clock, Outbox, Sketcher
 
+DRAWING: Final = "Drawing the sketch…"
 NO_CODEX: Final = "No Codex rung is in expert.ladder, so the sketch was not drawn."
 WITHHELD: Final = "The sketch description was withheld by secret protection."
 NOT_DRAWN: Final = "The sketch was not drawn: {reason}"
 NOT_SAVED: Final = "The sketch was drawn, but it could not be saved in this conversation's files."
+INTERRUPTED: Final = "The sketch was not drawn: the bot restarted before it was finished."
 
 
 def sketch_key(update_id: int) -> str:
     """Return the notice key of an answer's sketch; a message under it means it was tried."""
     return f"expert:sketch:{update_id}"
+
+
+def progress_key(update_id: int) -> str:
+    return f"{sketch_key(update_id)}:progress"
 
 
 class ExpertSketches:
@@ -46,6 +52,7 @@ class ExpertSketches:
         directory: Path,
         channel: str,
         group_id: int,
+        outbox_interval_s: float,
         known_secrets: tuple[str, ...] = (),
     ) -> None:
         self._sketcher = sketcher
@@ -54,6 +61,7 @@ class ExpertSketches:
         self._directory = directory
         self._channel = channel
         self._group_id = group_id
+        self._outbox_interval_s = outbox_interval_s
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
     async def draw(
@@ -68,6 +76,17 @@ class ExpertSketches:
             return
         if self._withheld(description):
             self._notice(destination, WITHHELD, key, conversation.id)
+            return
+        queue_expert_notice(
+            self._outbox,
+            self._clock,
+            destination,
+            DRAWING,
+            key=progress_key(update_id),
+            slot=key,
+            conversation_id=conversation.id,
+        )
+        if not await self._await_sent(progress_key(update_id)):
             return
         try:
             drawn = await self._sketcher.draw(description)
@@ -88,8 +107,25 @@ class ExpertSketches:
             Message("", photo=str(picture)),
             key=key,
             now=self._clock.now(),
+            slot=key,
             conversation_id=conversation.id,
         )
+
+    def recover(self) -> None:
+        """Replace the progress message of each drawing a restart interrupted, and say so.
+
+        Nothing draws again after a restart, so the interrupted sketch gets its notice, which
+        takes the progress message's slot and so deletes it.
+        """
+        self._outbox.recover_interrupted_drawings(Message(INTERRUPTED), self._clock.now())
+
+    async def _await_sent(self, key: str) -> bool:
+        """Wait for delivery; a permanently refused progress message prevents the drawing."""
+        while not self._outbox.sent(key):
+            if self._outbox.settled(key):
+                return False
+            await self._clock.sleep(self._outbox_interval_s)
+        return True
 
     def _withheld(self, description: str) -> bool:
         return secret_form([description]) is not None or any(
@@ -103,5 +139,6 @@ class ExpertSketches:
             destination,
             text,
             key=key,
+            slot=key,
             conversation_id=conversation_id,
         )

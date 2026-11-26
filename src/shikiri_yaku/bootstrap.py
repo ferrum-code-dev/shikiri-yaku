@@ -445,6 +445,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             channel=TELEGRAM_CHANNEL,
             group_id=group_id,
             known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+            outbox_interval_s=settings.operator.outbox_interval_s,
         )
         turns = ExpertTurns(
             conversations,
@@ -676,7 +677,7 @@ def build_sketcher(settings: Settings, commands: CommandRunner) -> Sketcher | No
                 rung.model,
                 cast("ExpertCommandRunner", commands),
                 effort=rung.effort,
-                timeout_s=settings.expert.timeout_s,
+                timeout_s=settings.expert.sketch_timeout_s,
             )
     return None
 

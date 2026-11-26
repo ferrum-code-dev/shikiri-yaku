@@ -940,6 +940,23 @@ class Outbox(Protocol):
         """Return whether a message was journaled under this notice key, sent or not."""
         ...
 
+    def settled(self, key: str) -> bool:
+        """Return whether the message under this notice key has left the outbox, sent or refused."""
+        ...
+
+    def sent(self, key: str) -> bool:
+        """Return whether the message under this notice key was accepted by the channel."""
+        ...
+
+    def recover_interrupted_drawings(self, message: Message, now: datetime) -> None:
+        """Replace unfinished sketch progress with a notice, atomically for each recovery run.
+
+        A drawing is unfinished when its progress message was journaled and no copy of the sketch
+        followed it. Retiring pending progress and recording the restart notice share one
+        transaction, so a crash leaves the drawing discoverable for the next recovery.
+        """
+        ...
+
     def queue_command_reply(
         self,
         destinations: Sequence[Destination],

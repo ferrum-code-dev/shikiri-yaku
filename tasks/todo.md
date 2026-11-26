@@ -3,7 +3,7 @@
 ## Planned work: Expert file selection and sketch progress
 
 - [x] F3. Name only the files a task needs.
-- [ ] F4. Give sketches their own time limit and show progress, after F3.
+- [x] F4. Give sketches their own time limit and show progress, after F3.
 
 ## Planned work: Expert conversation files (T-184)
 
