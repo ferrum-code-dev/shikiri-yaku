@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: An ended conversation leaves no command replies (T-193)
+
+- [x] T-193. Erase the reply keys of an ended conversation's messages.
+
 ## Planned work: View the tasks of a proposal
 
 - [x] F5. Show the tasks of a proposal on request.

@@ -1,5 +1,19 @@
 # Task plan
 
+## Planned work: An ended conversation leaves no command replies (T-193)
+
+A live instance kept both `expert:view` command replies after its topic was closed. Their keys end in a task number or in no number, not in the tap's update id, so the erase of the conversation missed them. The tap's inbound row is not linked to the conversation. `docs/design.md` says the rows of an ended conversation are deleted.
+
+### T-193. Erase the reply keys of an ended conversation's messages
+
+Fix it once in `Conversations.erase()`: before its messages are deleted, in the same transaction, it deletes the reply key of each message tagged with the conversation. A reply message's `notice_key` is its reply key, a colon and the part index. Leave inbound rows, settings, migrations and dependencies alone. Use the ponytail skill.
+
+## Acceptance criteria
+- Ending a conversation deletes every command reply whose messages are tagged with it, whatever the tap's update id, and its messages go with it.
+- The reply keys of other conversations and of replies outside conversations stay.
+- The inbound rows of button taps stay.
+- One offline test shows these criteria; `uv run poe check` passes.
+
 ## Planned work: View the tasks of a proposal
 
 In a live run on 2026-11-26 the PO could not read the proposed tasks before *Submit all*: the list shows component, title and file names, while the action message said that all task details were above. The PO approved the paragraph "View all" in `docs/design.md`.
