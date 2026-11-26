@@ -2,7 +2,7 @@
 
 ## Planned work: View the tasks of a proposal
 
-- [ ] F5. Show the tasks of a proposal on request.
+- [x] F5. Show the tasks of a proposal on request.
 
 ## Planned work: Expert file selection and sketch progress
 

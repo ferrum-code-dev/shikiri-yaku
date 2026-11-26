@@ -14,7 +14,7 @@ from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_ad
 from shikiri_yaku.app.expert_files import TaskFiles
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
 from shikiri_yaku.app.outbox_sender import OutboxSender
-from shikiri_yaku.domain.callback import reject_all_data, submit_all_data
+from shikiri_yaku.domain.callback import reject_all_data, submit_all_data, view_all_data
 from shikiri_yaku.domain.expert import (
     MODE_ADMIN,
     MODE_EXPERT,
@@ -340,6 +340,14 @@ class Harness:
             thread=THREAD,
         )
         asyncio.run(self.proposals.tap(item))
+
+    def views(self, tap_update_id: int) -> list[str]:
+        """Return the texts that the View all tap with this update id sent, in order."""
+        rows = self.database.connection.execute(
+            "SELECT body FROM messages WHERE notice_key LIKE ? ORDER BY id",
+            (f"expert:view:{tap_update_id}:%",),
+        ).fetchall()
+        return [json.loads(row["body"])["text"] for row in rows]
 
     def said(self) -> int:
         """Count the replies the PO was given in the topic about a proposal."""
@@ -826,6 +834,80 @@ def test_a_secret_in_a_long_task_is_refused_before_the_task_is_split() -> None:
     assert row is not None
     assert row["delivery"] == "refused"
     assert row["body"] is None
+
+
+def test_the_action_message_offers_view_all_and_no_longer_points_above() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first")])
+    body = harness.body(FIRST)
+    assert "View all" in body
+    assert "above" not in body
+
+
+def test_view_all_sends_each_component_together_with_the_list_numbers() -> None:
+    harness = Harness({"alpha": FakeShikiru(), "beta": FakeShikiru()})
+    harness.answer(
+        FIRST, [("alpha", "one", False, ["a.py"]), ("beta", "two"), ("alpha", "three", True)]
+    )
+    harness.tap(2, view_all_data(FIRST))
+    first, second, third = harness.views(2)
+    assert "Project alpha tasks:" in first
+    assert "1. one" in first
+    assert "files: a.py" in first
+    assert "3. three (planning)" in second
+    assert "Project" not in second
+    assert "Project beta tasks:" in third
+    assert "2. two" in third
+
+
+def test_a_long_task_continues_in_further_messages_with_no_word_lost() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    words = [f"w{number}" for number in range(1000)]
+    harness.answer(FIRST, [("alpha", " ".join(words), False)], title="short")
+    harness.tap(2, view_all_data(FIRST))
+    sent = harness.views(2)
+    assert len(sent) > 1
+    assert all(len(text) <= MESSAGE_TEXT_LIMIT for text in sent)
+    assert [word for text in sent for word in text.split() if word.startswith("w")] == words
+
+
+def test_a_secret_in_any_task_sends_no_task_and_tells_the_po() -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(
+        FIRST, [("alpha", "harmless", False), ("alpha", "key sk-" + "a" * 20, False)], title="short"
+    )
+    harness.tap(2, view_all_data(FIRST))
+    sent = harness.views(2)
+    assert len(sent) == 1
+    assert "harmless" not in sent[0]
+
+
+def test_view_all_submits_nothing_and_each_tap_sends_the_tasks_once() -> None:
+    alpha = FakeShikiru()
+    harness = Harness({"alpha": alpha})
+    harness.answer(FIRST, [("alpha", "first")])
+    harness.tap(2, view_all_data(FIRST))
+    harness.tap(2, view_all_data(FIRST))
+    assert len(harness.views(2)) == 1
+    assert alpha.requests == []
+    harness.tap(3, view_all_data(FIRST))
+    assert len(harness.views(3)) == 1
+    harness.tap(4, submit_all_data(FIRST))
+    assert alpha.requests == ["first"]
+
+
+@pytest.mark.parametrize("settle", [submit_all_data(FIRST), reject_all_data(FIRST)])
+def test_view_all_after_a_decision_or_from_another_message_sends_nothing(settle: str) -> None:
+    harness = Harness({"alpha": FakeShikiru()})
+    harness.answer(FIRST, [("alpha", "first")])
+    harness.tap(2, view_all_data(FIRST), ref="elsewhere")
+    assert harness.views(2) == []
+    assert harness.said() == 0
+    harness.tap(3, settle)
+    harness.tap(4, view_all_data(FIRST))
+    assert harness.views(4) == []
+    assert harness.said() == 1
+    assert "View all" not in harness.final_body(FIRST)
 
 
 def test_a_crash_after_the_submit_before_the_edit_is_made_up_on_restart() -> None:

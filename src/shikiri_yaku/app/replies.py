@@ -83,8 +83,8 @@ def _confirm_op(key: str) -> int | None:
 class Replies:
     """Apply stored inbound items through their originating messages and journaled resolve ops.
 
-    A tap whose message has no signal is a proposal's *Submit all* or *Reject all*, or else a
-    *Submit again* of a goal, so it goes to the proposals and then to the goal.
+    A tap whose message has no signal is a proposal's *Submit all*, *Reject all* or *View all*,
+    or else a *Submit again* of a goal, so it goes to the proposals and then to the goal.
     """
 
     def __init__(

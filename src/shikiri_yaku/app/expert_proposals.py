@@ -1,4 +1,4 @@
-"""Submit all and Reject all for the tasks an Expert answer proposes.
+"""Submit all, Reject all and View all for the tasks an Expert answer proposes.
 
 Each task is a submit op of its proposal, journaled before Shikiru is asked. The proposal moves
 only from the state its tap expects, so a second tap, or a tap after a restart, submits nothing.
@@ -19,9 +19,11 @@ from shikiri_yaku.domain.callback import (
     ADMIN_RUN_VERB,
     REJECT_ALL_VERB,
     SUBMIT_ALL_VERB,
+    VIEW_ALL_VERB,
     decode_callback,
     reject_all_data,
     submit_all_data,
+    view_all_data,
 )
 from shikiri_yaku.domain.expert import AdminAnswer, ExpertAnswer, admin_message_text, stored_answer
 from shikiri_yaku.domain.outbound import Purpose, fit
@@ -59,7 +61,9 @@ _TURN_DONE: Final = "done"
 _CONVERSATION_OPEN: Final = "open"
 _SUBMIT_ALL: Final = "Submit all"
 _REJECT_ALL: Final = "Reject all"
+_VIEW_ALL: Final = "View all"
 _REJECTED: Final = "Rejected. Nothing submitted."
+_WITHHELD: Final = "Proposal task details were withheld by secret protection."
 _FILES_NOT_COPIED: Final = "Nothing submitted: the conversation's files could not be copied."
 _FILES_HEADING: Final = "Files attached to the conversation (absolute paths):"
 _NO_FILE_STORE: Final = "the conversation's files are not available"
@@ -70,7 +74,7 @@ _PLANNING_MARKER: Final = " (planning)"
 _PLAN_AND_EXECUTE: Final = (
     "Plan this work, then execute the plan by creating the follow-up tasks with their dependencies."
 )
-_ACTION_PROMPT: Final = "All task details are above. Choose an action."
+_ACTION_PROMPT: Final = "Choose an action."
 _NOT_OPEN: Final[dict[str | None, str]] = {
     ProposalStatus.VOIDED: "Nothing submitted: a newer proposal in this conversation replaced it.",
     ProposalStatus.REJECTED: "Nothing submitted: this proposal was rejected.",
@@ -80,7 +84,7 @@ _NOT_OPEN: Final[dict[str | None, str]] = {
         "Nothing submitted again: this proposal's submit was interrupted. Check its tasks."
     ),
     ProposalStatus.UNOFFERED: "Nothing submitted: this proposal was not offered.",
-    ProposalStatus.OFFERED: "Nothing submitted: use the buttons after the task details.",
+    ProposalStatus.OFFERED: "Nothing submitted: use the buttons under the task list.",
     None: "Nothing submitted: this proposal is no longer open.",
 }
 _STATUSES: Final = (_REJECTED, _SUPERSEDED, _INTERRUPTED)
@@ -224,6 +228,7 @@ class ExpertProposals:
                     (
                         Button(_SUBMIT_ALL, submit_all_data(update_id)),
                         Button(_REJECT_ALL, reject_all_data(update_id)),
+                        Button(_VIEW_ALL, view_all_data(update_id)),
                     ),
                 ),
             )
@@ -371,7 +376,7 @@ class ExpertProposals:
         )
 
     async def tap(self, item: Inbound) -> bool:
-        """Handle a Submit all or Reject all tap; False when the tap is not one of these.
+        """Handle a Submit all, Reject all or View all tap; False when the tap is none of these.
 
         A tap from any message other than the proposal's action message is ignored.
         """
@@ -379,7 +384,7 @@ class ExpertProposals:
             tap = decode_callback(item.data or "")
         except ValidationError:
             return False
-        if tap[0] not in (SUBMIT_ALL_VERB, REJECT_ALL_VERB):
+        if tap[0] not in (SUBMIT_ALL_VERB, REJECT_ALL_VERB, VIEW_ALL_VERB):
             return False
         proposal = self._open(tap[1])
         if proposal is not None and not self._access.admit(proposal.conversation_id, item.sender):
@@ -393,6 +398,8 @@ class ExpertProposals:
             return True
         if tap[0] == SUBMIT_ALL_VERB:
             await self._submit_all(item, tap[1])
+        elif tap[0] == VIEW_ALL_VERB:
+            self._view(item, tap[1])
         else:
             self._reject(item, tap[1])
         return True
@@ -441,6 +448,36 @@ class ExpertProposals:
             # keep: composition always gives the file store; a task that names a file needs it
             raise OSError(_NO_FILE_STORE)
         return self._files.copy_for_proposal(conversation_id, proposal_id, names)
+
+    def _view(self, item: Inbound, proposal_id: int) -> None:
+        opened = self._open(proposal_id)
+        if opened is None:
+            return
+        state = self._log.state(proposal_id)
+        if state != ProposalStatus.OFFERED:
+            self._say(item, opened, state)
+            return
+        texts = _task_texts(opened.answer.tasks)
+        # keep: every task is screened before any is queued, so one secret sends none of them
+        if secret_form([text for _, text in texts]) is not None:
+            queue_command_reply(
+                self._outbox,
+                [opened.destination],
+                _WITHHELD,
+                key=f"expert:view:{item.update_id}",
+                now=self._clock.now(),
+                conversation_id=opened.conversation_id,
+            )
+            return
+        for number, text in texts:
+            queue_command_reply(
+                self._outbox,
+                [opened.destination],
+                text,
+                key=f"expert:view:{item.update_id}:{number}",
+                now=self._clock.now(),
+                conversation_id=opened.conversation_id,
+            )
 
     def _reject(self, item: Inbound, proposal_id: int) -> None:
         opened = self._open(proposal_id)
@@ -568,7 +605,7 @@ def _settled_messages(
         return (Message(anchor_status), *_result_messages(outcomes))
     if state in (ProposalStatus.REJECTED, ProposalStatus.VOIDED):
         if secret_form(_task_lines(answer.tasks)) is not None:
-            return (Message("Proposal task details were withheld by secret protection."),)
+            return (Message(_WITHHELD),)
         status = _REJECTED if state == ProposalStatus.REJECTED else _SUPERSEDED
         return (Message(status),)
     return _initial_messages(answer)
@@ -640,6 +677,22 @@ def _payload(
         destination=destination,
         proposal=proposal_id,
     )
+
+
+def _task_texts(tasks: list[ExpertTask]) -> list[tuple[int, str]]:
+    # keep: a stable sort by first appearance keeps each component's tasks in list order
+    components = list(dict.fromkeys(task.component for task in tasks))
+    ordered = sorted(enumerate(tasks, 1), key=lambda pair: components.index(pair[1].component))
+    texts: list[tuple[int, str]] = []
+    for position, (number, task) in enumerate(ordered):
+        first = position == 0 or ordered[position - 1][1].component != task.component
+        label = f"Project {task.component} tasks:" if first else ""
+        marker = _PLANNING_MARKER if task.planning else ""
+        details = [f"{number}. {task.title}{marker}"]
+        if task.files:
+            details.append(f"   files: {', '.join(task.files)}")
+        texts.append((number, join_blocks(label, "\n".join(details), task.text)))
+    return texts
 
 
 def _task_lines(tasks: list[ExpertTask]) -> list[str]:
