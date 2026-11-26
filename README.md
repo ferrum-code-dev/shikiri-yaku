@@ -169,8 +169,10 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
   rung, or when the run fails, leaves no picture or runs past `expert.sketch_timeout_s` (300
   seconds), the topic gets a notice. A description with a secret is not sent to Codex. A restart
   that interrupts a sketch ends it with a notice; it is not redrawn automatically.
-- **Task proposals:** **Submit all** and **Reject all** appear after the proposed tasks are listed,
-  and each task lists the names of its files. Each proposal submits at most once. **Submit all**
+- **Task proposals:** **Submit all**, **Reject all** and **View all** appear after the proposed tasks
+  are listed, and each task lists the names of its files. **View all** sends each task in full,
+  grouped by component and numbered as in the list, and submits nothing; a long task continues in
+  further messages. Each proposal submits at most once. **Submit all**
   copies only the files its tasks name to `task_files/` in the instance directory, and each task
   names the absolute paths of its own copies. If a copy fails or a named file is gone, nothing is
   submitted. The copies are never deleted; the conversation's own files are deleted when it ends.

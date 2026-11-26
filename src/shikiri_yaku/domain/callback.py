@@ -9,6 +9,7 @@ type SubmitTap = tuple[Literal["s"], PositiveInt]
 type InstallTap = tuple[Literal["i", "x"], PositiveInt, PositiveInt]
 type SubmitAllTap = tuple[Literal["p"], PositiveInt]
 type RejectAllTap = tuple[Literal["r"], PositiveInt]
+type ViewAllTap = tuple[Literal["t"], PositiveInt]
 type WebTap = tuple[Literal["w", "n"], PositiveInt]
 type AdminTap = tuple[Literal["u", "v"], PositiveInt]
 type Callback = (
@@ -19,6 +20,7 @@ type Callback = (
     | InstallTap
     | SubmitAllTap
     | RejectAllTap
+    | ViewAllTap
     | WebTap
     | AdminTap
 )
@@ -34,6 +36,7 @@ INSTALL_VERB: Final = "i"
 DECLINE_VERB: Final = "x"
 SUBMIT_ALL_VERB: Final = "p"
 REJECT_ALL_VERB: Final = "r"
+VIEW_ALL_VERB: Final = "t"
 _CALLBACK = TypeAdapter[Callback](Callback)
 
 
@@ -55,6 +58,11 @@ def submit_all_data(proposal_id: int) -> str:
 def reject_all_data(proposal_id: int) -> str:
     """Return the callback data of *Reject all*; the proposal is the Expert turn's update id."""
     return f"{REJECT_ALL_VERB}:{proposal_id}"
+
+
+def view_all_data(proposal_id: int) -> str:
+    """Return the callback data of *View all*; the proposal is the Expert turn's update id."""
+    return f"{VIEW_ALL_VERB}:{proposal_id}"
 
 
 def install_data(number: int, op_id: int) -> str:

@@ -355,8 +355,8 @@ Shared group: upgrade every instance first, then update each bot's menu, in one 
 - **Expert topics:** each message is a follow-up turn. `/effort [level]`, `/summarize` and `/help`
   work there; other commands do not, and Expert commands do not work elsewhere. `/close` ends the
   conversation, as described in [`[expert]`](#expert).
-- **Task proposals:** when an answer proposes tasks, **Submit all** and **Reject all** are offered
-  only after every task-list message has been sent. See [Task proposals](#task-proposals).
+- **Task proposals:** when an answer proposes tasks, **Submit all**, **Reject all** and **View all** are
+  offered only after every task-list message has been sent. See [Task proposals](#task-proposals).
 - **Interrupted or uncertain:** an interrupted turn is reported and not repeated. If topic creation is
   uncertain, ask again.
 
@@ -397,6 +397,9 @@ Shikiru task ids.
   "not submitted, Shikiru refused it", or "unknown". The submit stops at the first task that is
   unknown or whose component is not configured; the tasks after it stay unsent.
 - **Reject all:** nothing is submitted, and the message says so.
+- **View all:** the bot sends each task in full, grouped by component, with its list number, its
+  planning mark, its file names and its text, and submits nothing; the proposal stays offered and
+  each tap sends the tasks again. If any task holds a secret, no task is sent and the bot says so.
 - **Once only:** a tap submits at most once. A second tap, a tap after a restart, and a tap on a
   proposal that a newer answer in the same conversation voided each submit nothing and say why. A
   tap counts only from the action message sent after its task list; a button tapped on any other
