@@ -153,7 +153,7 @@ class _Stack:
 
     def rebuild_commands(self) -> None:
         self.outbox = JournalOutbox(self.database, self.messages)
-        channel = TelegramChannel(self.bot, _Clock(), self.outbox)
+        channel = TelegramChannel(self.bot, _Clock())
         self.sender = OutboxSender(self.outbox, channel, _Clock(), interval_s=1)
         self.status = Status(
             self.clients, self.sources, _Clock(), JournalOpen(self.database, self.signals)

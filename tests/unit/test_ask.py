@@ -39,10 +39,11 @@ from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
-    TOPIC_GONE_REASON,
+    PLACE_GONE_REASON,
     ChannelError,
     ChannelRefusedError,
     ExpertError,
+    PlaceGoneError,
     ShikiruTask,
 )
 from tests.support.attachments import FakeDownloads
@@ -163,7 +164,7 @@ class RefusingOriginTopic(Channel):
     async def send(self, destination: Destination, message: Message) -> str:
         del message
         if destination.thread == 77:
-            raise ChannelRefusedError(TOPIC_GONE_REASON)
+            raise PlaceGoneError(PLACE_GONE_REASON)
         raise ChannelError(_RETRY_LATER)
 
 

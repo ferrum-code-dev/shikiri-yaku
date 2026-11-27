@@ -21,6 +21,7 @@ from shikiri_yaku.journal import (
     OpStore,
     SignalStore,
 )
+from shikiri_yaku.journal.messages import Delivery
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
@@ -33,6 +34,7 @@ from shikiri_yaku.ports import (
     ResolvePayload,
     ShikiruEvent,
 )
+from tests.support.secrets import SECRETS, secret_messages
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -46,6 +48,7 @@ REFS: Final = ("1001/42", "1002/17")
 _BODY: Final = TypeAdapter(Message)
 QUESTION: Final = Message("S1 · question", (Button("Keep", "a:1:1"), Button("Drop", "a:1:2")))
 OVERTAKING: Final = "Resolved: Drop at 12:09 UTC"
+SECRET_MESSAGE: Final = Message(f"Answered: {SECRETS['bot_token']}")
 
 
 class _Clock:
@@ -62,11 +65,19 @@ class _Channel:
     A `before` step runs once, while the edit of its copy is in flight, before the platform answers.
     """
 
-    def __init__(self, database: Database, *, failures: dict[str, Exception] | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        failures: dict[str, Exception] | None = None,
+        delete_failures: dict[str, Exception] | None = None,
+    ) -> None:
         self._database = database
         self.failures = failures or {}
+        self.delete_failures = delete_failures or {}
         self.before: dict[str, Callable[[], None]] = {}
         self.edits: list[tuple[str, Message, bool]] = []
+        self.deletions: list[tuple[str, str, int]] = []
 
     async def send(self, destination: Destination, message: Message) -> str:
         raise NotImplementedError
@@ -83,7 +94,30 @@ class _Channel:
             raise self.failures.pop(message_ref)
 
     async def delete(self, message_ref: str) -> None:
-        raise NotImplementedError
+        """Records the copy's state and the refusal notices the journal holds when it is asked."""
+        row = self._database.connection.execute(
+            "SELECT delivery FROM messages WHERE platform_message_id = ?", (message_ref,)
+        ).fetchone()
+        notices = self._database.connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE notice_key LIKE 'refused:%'"
+        ).fetchone()[0]
+        self.deletions.append((message_ref, row["delivery"], notices))
+        if message_ref in self.delete_failures:
+            raise self.delete_failures.pop(message_ref)
+
+
+class _UnknownCopies:
+    """A journal that holds no sent copy at the reference: nothing is journaled or deleted."""
+
+    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+        del message_ref, reason, now
+
+    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
+        del message_ref, reason, now
+        return False
+
+    def confirm_deletion(self, message_ref: str) -> None:
+        del message_ref
 
 
 class _Harness:
@@ -143,7 +177,29 @@ class _Harness:
 
     def editor(self, channel: _Channel) -> CopyEditor:
         return CopyEditor(
-            JournalFinalEdits(self.database, self.replies), channel, _Clock(), interval_s=1
+            JournalFinalEdits(self.database, self.replies),
+            MessageStore(self.database, _Reporter()),
+            channel,
+            _Clock(),
+            interval_s=1,
+        )
+
+    def delivery(self, ref: str) -> str:
+        row = self.database.connection.execute(
+            "SELECT delivery FROM messages WHERE platform_message_id = ?", (ref,)
+        ).fetchone()
+        return str(row["delivery"])
+
+    def refusal(self, ref: str) -> str | None:
+        row = self.database.connection.execute(
+            "SELECT refusal FROM messages WHERE platform_message_id = ?", (ref,)
+        ).fetchone()
+        return row["refusal"]
+
+    def secret_final(self, ref: str, body: Message) -> None:
+        self.database.connection.execute(
+            "UPDATE messages SET final_body = ? WHERE platform_message_id = ?",
+            (_BODY.dump_json(body).decode(), ref),
         )
 
     def edited(self, ref: str) -> bool:
@@ -151,6 +207,12 @@ class _Harness:
             "SELECT final_edited FROM messages WHERE platform_message_id = ?", (ref,)
         ).fetchone()
         return bool(row["final_edited"])
+
+    def notices(self) -> int:
+        row = self.database.connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE notice_key LIKE 'refused:%'"
+        ).fetchone()
+        return int(row[0])
 
     def body(self, ref: str) -> Message:
         origin = self.replies.origin("telegram", ref)
@@ -213,6 +275,51 @@ def test_an_edit_the_platform_refuses_is_not_repeated(h: _Harness) -> None:
     asyncio.run(editor.tick())
     asyncio.run(editor.tick())
     assert [ref for ref, _, _ in channel.edits].count(REFS[0]) == 1
+    assert h.refusal(REFS[0]) == "gone"
+    assert h.notices() == 1
+
+
+@pytest.mark.parametrize(("form", "message"), secret_messages())
+def test_an_edit_that_carries_a_secret_is_not_made_and_its_sent_copy_is_deleted(
+    h: _Harness, form: str, message: Message
+) -> None:
+    h.resolve()
+    h.secret_final(REFS[0], message)
+    channel = _Channel(h.database)
+    asyncio.run(h.editor(channel).tick())
+    assert [ref for ref, _, _ in channel.edits] == [REFS[1]]
+    [(ref, delivery, notices)] = channel.deletions
+    assert (ref, delivery) == (REFS[0], Delivery.DELETE_ATTEMPTED)
+    assert notices == 1
+    assert h.delivery(REFS[0]) == Delivery.DELETED
+    assert h.edited(REFS[0])
+    assert h.refusal(REFS[0]) == form
+
+
+def test_a_failed_deletion_of_a_secret_copy_is_not_repeated_and_the_edit_is_given_up(
+    h: _Harness,
+) -> None:
+    h.resolve()
+    h.secret_final(REFS[0], SECRET_MESSAGE)
+    channel = _Channel(h.database, delete_failures={REFS[0]: ChannelError("down")})
+    editor = h.editor(channel)
+    asyncio.run(editor.tick())
+    asyncio.run(editor.tick())
+    assert [ref for ref, _, _ in channel.deletions] == [REFS[0]]
+    assert h.delivery(REFS[0]) == Delivery.DELETE_ATTEMPTED
+    assert h.edited(REFS[0])
+
+
+def test_a_secret_copy_the_journal_does_not_know_is_not_deleted(h: _Harness) -> None:
+    h.resolve()
+    h.secret_final(REFS[0], SECRET_MESSAGE)
+    channel = _Channel(h.database)
+    editor = CopyEditor(
+        JournalFinalEdits(h.database, h.replies), _UnknownCopies(), channel, _Clock(), interval_s=1
+    )
+    asyncio.run(editor.tick())
+    assert channel.deletions == []
+    assert h.edited(REFS[0])
 
 
 @pytest.mark.parametrize(
@@ -238,7 +345,7 @@ def test_an_edit_overtaken_by_a_new_final_state_waits_for_its_own_edit(
     row = h.database.connection.execute(
         "SELECT refusal FROM messages WHERE platform_message_id = ?", (REFS[0],)
     ).fetchone()
-    assert row["refusal"] is None
+    assert row["refusal"] == (None if outcome is None else str(outcome))
 
 
 def test_a_long_question_is_cut_so_its_final_state_still_fits(h: _Harness) -> None:

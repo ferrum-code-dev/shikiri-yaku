@@ -156,6 +156,7 @@ if TYPE_CHECKING:
         ChannelCheck,
         Clock,
         CommandRunner,
+        Copies,
         Destinations,
         ExpertCommandRunner,
         ExpertRung,
@@ -500,7 +501,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         standing_on_failure=failure_policy(extensions),
         expiry=ending,
     )
-    channel = TelegramChannel(files_api, clock, outbox)
+    channel = TelegramChannel(files_api, clock)
     jobs.append(outbox_job(settings, outbox, clock, channel, gone=ending))
     goal = goal_command(
         journal,
@@ -534,7 +535,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
 
     jobs.append(inbound_after_admin_recovery)
     jobs.append(secret_cleanup_job(settings, journal, channel, clock))
-    jobs += copy_jobs(settings, journal, reporter, channel, clock)
+    jobs += copy_jobs(settings, journal, reporter, channel, clock, copies=outbox)
     jobs.append(reconcile_job(settings, journal, clock, clients=clients, reshower=forwarder))
     jobs.append(
         after_settled(
@@ -1063,12 +1064,15 @@ def secret_cleanup_job(
     return cleanup.run
 
 
-def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock: Clock) -> Job:
+def copy_edit_job(
+    settings: Settings, journal: Database, copies: Copies, channel: Channel, clock: Clock
+) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
     signals = SignalStore(journal)
     replies = JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL)
     editor = CopyEditor(
         JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        copies,
         channel,
         clock,
         interval_s=settings.operator.inbound_interval_s,
@@ -1077,12 +1081,18 @@ def copy_edit_job(settings: Settings, journal: Database, channel: Channel, clock
 
 
 def copy_jobs(
-    settings: Settings, journal: Database, reporter: Reporter, channel: Channel, clock: Clock
+    settings: Settings,
+    journal: Database,
+    reporter: Reporter,
+    channel: Channel,
+    clock: Clock,
+    *,
+    copies: Copies,
 ) -> list[Job]:
     """Return the jobs that finish the copies of resolved questions and delete the replaced ones."""
     messages = MessageStore(journal, reporter)
     return [
-        copy_edit_job(settings, journal, channel, clock),
+        copy_edit_job(settings, journal, copies, channel, clock),
         replacement_job(settings, journal, messages, channel, clock),
     ]
 

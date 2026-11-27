@@ -20,8 +20,7 @@ if TYPE_CHECKING:
 class JournalOutbox:
     """The outbound rows of the messages table: body and destination are stored before any send.
 
-    It is also the Copies of the Channel: refused edits and deletions are journaled on the same
-    rows.
+    It is also the Copies the CopyEditor journals refused edits and deletions on, on the same rows.
     """
 
     def __init__(

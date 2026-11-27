@@ -41,12 +41,13 @@ from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import (
     DOWNLOAD_LIMIT_BYTES,
-    TOPIC_GONE_REASON,
+    PLACE_GONE_REASON,
     ChannelRefusedError,
     ChannelUnavailableError,
     CommandResult,
     ExpertError,
     Message,
+    PlaceGoneError,
     ShikiruLinkDownError,
 )
 from tests.support.attachments import (
@@ -139,7 +140,7 @@ class Topics:
 
     async def delete(self, thread_id: int) -> None:
         if thread_id in self.deleted:
-            raise ChannelRefusedError(TOPIC_GONE_REASON)
+            raise PlaceGoneError(PLACE_GONE_REASON)
         self.deleted.append(thread_id)
 
     async def addressed(self, word: str) -> bool:

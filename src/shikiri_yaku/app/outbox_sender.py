@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from shikiri_yaku.ports import TOPIC_GONE_REASON, ChannelError, ChannelRefusedError
+from shikiri_yaku.domain.secrets import secret_form
+from shikiri_yaku.ports import ChannelError, ChannelRefusedError, PlaceGoneError
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import Channel, Clock, Outbox
+    from shikiri_yaku.ports import Channel, Clock, Outbox, Pending
 
 
 class TopicGone(Protocol):
@@ -56,13 +57,13 @@ class OutboxSender:
             if pending is None:
                 continue
             try:
-                ref = await self._channel.send(pending.destination, pending.message)
+                ref = await self._send(pending)
             except ChannelRefusedError as error:
                 self._outbox.refuse(pending.message_id, str(error), now=self._clock.now())
                 if (
                     self._gone is not None
                     and pending.conversation_id is not None
-                    and str(error) == TOPIC_GONE_REASON
+                    and isinstance(error, PlaceGoneError)
                 ):
                     await self._gone.topic_gone(pending.conversation_id, pending.destination)
                 continue
@@ -71,3 +72,8 @@ class OutboxSender:
                     conversations_with_failed_sends.add(pending.conversation_id)
                 continue
             self._outbox.confirm(pending.message_id, ref)
+
+    async def _send(self, pending: Pending) -> str:
+        if (form := secret_form(pending.message.texts())) is not None:
+            raise ChannelRefusedError(form)
+        return await self._channel.send(pending.destination, pending.message)

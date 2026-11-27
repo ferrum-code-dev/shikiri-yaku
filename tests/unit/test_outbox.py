@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter
 
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.scheduler import Scheduler
@@ -27,7 +28,7 @@ from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
 from tests.support.destinations import FixedDestinations
-from tests.support.secrets import SECRETS, secret_cases
+from tests.support.secrets import SECRETS, secret_cases, secret_messages
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -382,6 +383,27 @@ def test_a_secret_in_any_place_is_refused_when_queued_and_the_po_gets_a_notice_w
     assert reporter.lines == []
     [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (refused.delivery, refused.body, refused.refusal) == (Delivery.REFUSED, None, form)
+
+
+@pytest.mark.parametrize(("form", "message"), secret_messages())
+def test_the_sender_refuses_a_secret_form_before_any_channel_call(
+    memory: Database, form: str, message: Message
+) -> None:
+    number = _signal(memory)
+    _outbox(memory).queue(number, Purpose.QUESTION, [OWNER], QUESTION, key="forward:1", now=START)
+    [pending] = _outbox(memory).pending()
+    # keep: the journal screens a body when it is queued; this leaves a body that was not screened
+    memory.connection.execute(
+        "UPDATE messages SET body = ? WHERE id = ?",
+        (TypeAdapter(Message).dump_json(message).decode(), pending.message_id),
+    )
+    channel = _Channel()
+
+    asyncio.run(_sender(memory, channel).tick())
+
+    assert channel.attempts == 0
+    [refused, _] = MessageStore(memory, _Reporter()).for_signal(number)
+    assert (refused.delivery, refused.refusal) == (Delivery.REFUSED, form)
 
 
 @pytest.mark.parametrize(("secret", "message"), [(s, m) for _, s, m in secret_cases()])

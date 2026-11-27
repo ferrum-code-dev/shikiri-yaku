@@ -626,7 +626,11 @@ def test_a_tap_processed_after_the_buttons_were_removed_still_gets_the_recorded_
     h.resolve_in_shikiru()
     h.confirm_in_shikiru(ANSWERED_AT)
     editor = CopyEditor(
-        JournalFinalEdits(h.database, h.log()), EditChannel(), Clock(LATER_AT), interval_s=1
+        JournalFinalEdits(h.database, h.log()),
+        MessageStore(h.database, Reporter()),
+        EditChannel(),
+        Clock(LATER_AT),
+        interval_s=1,
     )
     asyncio.run(editor.tick())
     h.handle(update=701, data="a:1:2", at=LATER_AT)
