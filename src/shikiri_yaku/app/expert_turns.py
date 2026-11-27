@@ -64,7 +64,7 @@ _EXPERT_FAILURE_LINE_MINIMUM: Final = 48
 _EXPERT_FAILURE_OMISSION_RESERVE: Final = 32
 _REFUSED_COMMAND: Final = "The proposed command could not be shown exactly and was refused."
 _ATTACHED: Final = "Attached file (absolute path): "
-_TOO_LARGE: Final = "The file is larger than the {limit} MB download limit, so it was not saved."
+_TOO_LARGE: Final = "The file is larger than the {limit} download limit, so it was not saved."
 _MEGABYTE: Final = 1024 * 1024
 _NOT_DOWNLOADED: Final = "The chat did not give the file, so it was not saved."
 _NOT_SAVED: Final = "The file could not be saved in this conversation's files."
@@ -226,7 +226,7 @@ class ExpertTurns:
         """
         if attached.size is not None and attached.size > self._max_file_bytes:
             self._file_notice(
-                item, conversation, _TOO_LARGE.format(limit=self._max_file_bytes // _MEGABYTE)
+                item, conversation, _TOO_LARGE.format(limit=_size_text(self._max_file_bytes))
             )
             return
         # keep: locked from the download to the turn's end, so a later message waits behind the file
@@ -558,6 +558,13 @@ def _expert_failure_reply(error: ExpertError, known_secrets: tuple[str, ...]) ->
     if shown < len(lines):
         text += f"\n+{len(lines) - shown} more rungs not shown"
     return text
+
+
+def _size_text(size: int) -> str:
+    """Return a size the PO can compare with the file: whole megabytes, or else the exact bytes."""
+    if size % _MEGABYTE == 0:
+        return f"{size // _MEGABYTE} MB"
+    return f"{size} bytes"
 
 
 def _showable_command(command: str, reason: str, max_text: int) -> bool:

@@ -1435,6 +1435,29 @@ def test_a_file_over_the_limit_the_channel_gives_is_refused_whatever_the_default
     assert downloads.fetched == []
 
 
+MEBIBYTE: Final = 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    ("limit", "shown"),
+    [(100, "100 bytes"), (MEBIBYTE * 3 // 2, "1572864 bytes"), (MEBIBYTE * 20, "20 MB")],
+    ids=["under-a-megabyte", "fractional-megabyte", "whole-megabytes"],
+)
+def test_the_refusal_of_a_large_file_names_the_limit_the_channel_gives(
+    build: Callable[..., Harness], limit: int, shown: str
+) -> None:
+    h = build(ladder(Runner()), downloads=FakeDownloads(), max_file_bytes=limit)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    asyncio.run(h.turns.handle(_file_item(2, "file-1", "big.zip", size=limit + 1)))
+
+    row = h.database.connection.execute(
+        "SELECT body FROM messages WHERE notice_key = 'expert:file:2'"
+    ).fetchone()
+    assert row is not None
+    assert f"larger than the {shown} download limit" in json.loads(row["body"])["text"]
+
+
 def test_a_file_that_fails_for_a_passing_reason_is_tried_again(
     build: Callable[..., Harness],
 ) -> None:
