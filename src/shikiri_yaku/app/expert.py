@@ -1,4 +1,4 @@
-"""Open an Expert conversation: journal the request, create its topic, then run its first turn."""
+"""Open an Expert conversation: journal the request, create its room, then run its first turn."""
 
 from __future__ import annotations
 
@@ -33,9 +33,9 @@ _ADMIN_NOT_CONFIGURED: Final = "Admin mode is not configured."
 _ADMIN_ONLY: Final = "Only a listed admin may use /admin."
 
 
-def open_reply_keys(update_id: int) -> tuple[str, str]:
+def open_reply_keys(event_id: int) -> tuple[str, str]:
     """Return the notice keys of a conversation's /expert reply: the open and the selection one."""
-    return f"expert:open:{update_id}:0", f"expert:select:{update_id}:0"
+    return f"expert:open:{event_id}:0", f"expert:select:{event_id}:0"
 
 
 def closed_reply(closed_at: datetime) -> Message:
@@ -48,7 +48,7 @@ class ConversationLog(Protocol):
 
     def create(
         self,
-        update_id: int,
+        event_id: int,
         *,
         origin: Place,
         text: str,
@@ -56,23 +56,23 @@ class ConversationLog(Protocol):
         now: datetime,
         mode: str = MODE_EXPERT,
     ) -> bool: ...
-    def get(self, update_id: int) -> ConversationRecord | None: ...
+    def get(self, event_id: int) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
     def at_room(self, room: str) -> ConversationRecord | None: ...
-    def turn(self, update_id: int) -> TurnRecord | None: ...
+    def turn(self, event_id: int) -> TurnRecord | None: ...
     def oldest_pending(self, conversation_id: int) -> TurnRecord | None: ...
     def followups(self, conversation_id: int) -> list[TurnRecord]: ...
     def pending_admin_followups(self) -> list[tuple[int, int]]: ...
     def history(self, conversation_id: int, *, before: int) -> list[TurnRecord]: ...
-    def add_turn(self, conversation_id: int, update_id: int, text: str, now: datetime) -> bool: ...
-    def refuse_admin(self, conversation_id: int, update_id: int, now: datetime) -> int | None: ...
+    def add_turn(self, conversation_id: int, event_id: int, text: str, now: datetime) -> bool: ...
+    def refuse_admin(self, conversation_id: int, event_id: int, now: datetime) -> int | None: ...
     def set_effort(self, conversation_id: int, effort: str) -> None: ...
-    def fail(self, update_id: int) -> None: ...
-    def opened(self, update_id: int, room: str) -> None: ...
-    def start(self, update_id: int) -> bool: ...
+    def fail(self, event_id: int) -> None: ...
+    def opened(self, event_id: int, room: str) -> None: ...
+    def start(self, event_id: int) -> bool: ...
     def finish(
         self,
-        update_id: int,
+        event_id: int,
         answer: str,
         session: str | None,
         call: str | None,
@@ -87,7 +87,7 @@ class ConversationLog(Protocol):
 
 
 class Ask:
-    """Journal a request before creating its topic and starting its first turn."""
+    """Journal a request before creating its room and starting its first turn."""
 
     def __init__(
         self,
@@ -173,7 +173,7 @@ class Ask:
         if row is None or row.state != _OPEN or row.room is None:
             return
         url = self._rooms.link(row.room)
-        buttons = () if url is None else (Button("Open topic", url=url),)
+        buttons = () if url is None else (Button("Open conversation", url=url),)
         admin = row.mode == MODE_ADMIN
         message = Message(ADMIN_OPEN_REPLY if admin else OPEN_REPLY, buttons)
         if selection:
@@ -224,7 +224,7 @@ class Ask:
         if not self._configured:
             return "The Expert is not configured."
         if self._rooms is None:
-            return "The Expert requires a forum group."
+            return "The Expert needs a channel that can open conversations."
         if _is_admin(item):
             if not self._admins:
                 return _ADMIN_NOT_CONFIGURED

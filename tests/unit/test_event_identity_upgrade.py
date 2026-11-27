@@ -366,7 +366,7 @@ def test_an_upgraded_journal_loses_nothing_and_handles_nothing_twice(
     assert keys == [str(key) for key in (UNANSWERED, QUESTION_TAP, SUBMIT_TAP, RUN_TAP)]
     assert all(row["update_id"] >= OFFSET for row in stored[1:])
     assert inbound.pending() == []
-    assert [request.update_id for request in expert.requests] == [UNANSWERED]
+    assert [request.event_id for request in expert.requests] == [UNANSWERED]
     assert len(client.calls) == 1
     assert len(client.submitted) == 1
     states = journal.connection.execute(

@@ -9,7 +9,7 @@ from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.outbox_sender import OutboxSender
 
 if TYPE_CHECKING:
-    from shikiri_yaku.app.outbox_sender import TopicGone
+    from shikiri_yaku.app.outbox_sender import RoomGone
     from shikiri_yaku.domain.place import Place
     from shikiri_yaku.journal.outbox import JournalOutbox
     from shikiri_yaku.ports import Clock, Deleter, Editor, FinalEdits, Message, Sender
@@ -43,7 +43,7 @@ def deliver(
     clock: Clock,
     platform: Platform,
     *,
-    gone: TopicGone | None = None,
+    gone: RoomGone | None = None,
 ) -> None:
     """Send the queued copies, then edit the sent copies to their final state, as the workers do."""
     sender = OutboxSender(outbox, cast("Sender", platform), clock, interval_s=1, gone=gone)

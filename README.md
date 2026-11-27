@@ -105,8 +105,8 @@ see [Service](#service).
 
 To enable the Reasoner, add a `[reasoner]` table. See [Reasoner settings](docs/reference.md#reasoner).
 
-To add Expert agents, set the optional `[expert]` table. `/expert` needs a forum group. See
-[Expert settings](docs/reference.md#expert).
+To add Expert agents, set the optional `[expert]` table. Telegram needs a forum group to open an
+Expert conversation. See [Expert settings](docs/reference.md#expert).
 
 Every key and default is in the [reference](docs/reference.md#configuration).
 
@@ -137,10 +137,10 @@ was sent.
 | `/pending` | Re-shows open questions and pending approvals. |
 | `/help` | Lists the commands. Free text also returns this list. |
 | `/submit <component> <request>` | Submits a request to that component's Shikiru project. |
-| `/expert <question>` | Opens an Expert topic and answers the question. |
-| `/admin <question>` | Opens an admin Expert topic, for admins listed in `[admin]`. The chat is not private. |
+| `/expert <question>` | Opens an Expert conversation and answers the question. |
+| `/admin <question>` | Opens an admin conversation, for admins listed in `[admin]`. The chat is not private. |
 
-In a component topic, the topic names the component, so write `/submit <request>` there:
+A component chat identifies the component, so write `/submit <request>` there:
 
 ```text
 /submit api Add CSV export to the reports page
@@ -152,22 +152,22 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
 
 ### `/expert`
 
-- **Scope:** in a component topic, the Expert sees that component. In General, it sees all components.
+- **Scope:** in a component chat, the Expert sees that component. In General, it sees all components.
 - **Shared groups:** an unaddressed `/expert` in General gets a button from each Expert. Tap one, or
   write `/expert@bot <question>`.
-- **Expert topics:** each message there is a follow-up turn. `/effort [level]`, `/summarize` and
+- **Expert conversation:** each message in its chat is a follow-up turn. `/effort [level]`, `/summarize` and
   `/help` work there. `/close` ends the conversation.
-- **Files:** a photo or document sent in an Expert topic is a turn. Its caption, if any, comes with
+- **Files:** a photo or document sent in an Expert conversation is a turn. Its caption, if any, comes with
   the file's absolute path, which the Expert reads. The Expert names in each task only the files that
   task needs. Files over 20 MB, the Bot API's download limit, are not saved and get a notice. A caption with a secret is refused, and its file is not
-  downloaded. Files sent outside Expert topics, and files from other users, are ignored. The
+  downloaded. Files sent outside Expert conversations, and files from other users, are ignored. The
   contents of files and sketches are not searched for secrets, and group members can see them.
 - **Sketches:** the Expert may answer a request for a picture with a description. A Codex rung in
   the ladder draws it, with the first Codex rung's model and effort, and the picture is sent to the
-  topic and kept with the conversation's files. Each request draws a new picture. While Codex draws,
-  the topic shows *Drawing the sketch…*, which the photo or the notice replaces. Without a Codex
+  conversation and kept with its files. Each request draws a new picture. While Codex draws,
+  the conversation shows *Drawing the sketch…*, which the photo or the notice replaces. Without a Codex
   rung, or when the run fails, leaves no picture or runs past `expert.sketch_timeout_s` (300
-  seconds), the topic gets a notice. A description with a secret is not sent to Codex. A restart
+  seconds), the conversation gets a notice. A description with a secret is not sent to Codex. A restart
   that interrupts a sketch ends it with a notice; it is not redrawn automatically.
 - **Task proposals:** **Submit all**, **Reject all** and **View all** appear after the proposed tasks
   are listed, and each task lists the names of its files. **View all** sends each task in full,
@@ -176,8 +176,8 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
   copies only the files its tasks name to `task_files/` in the instance directory, and each task
   names the absolute paths of its own copies. If a copy fails or a named file is gone, nothing is
   submitted. The copies are never deleted; the conversation's own files are deleted when it ends.
-- **Restarts and uncertain topics:** an interrupted turn is not repeated. If topic creation is
-  uncertain, ask again.
+- **Restarts and uncertain conversations:** an interrupted turn is not repeated. If conversation
+  creation is uncertain, ask again.
 
 Details are in [Chat commands](docs/reference.md#chat-commands) and
 [Task proposals](docs/reference.md#task-proposals). Check Shikiru before you resubmit a task.

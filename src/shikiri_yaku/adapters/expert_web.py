@@ -19,7 +19,7 @@ class WebLog(Protocol):
     """The grants and requests shared with the Operator journal."""
 
     def granted(self, host: str) -> bool: ...
-    def request(self, update_id: int, host: str) -> None: ...
+    def request(self, event_id: int, host: str) -> None: ...
 
 
 class ExpertWeb:
@@ -28,7 +28,7 @@ class ExpertWeb:
     def __init__(
         self,
         log: WebLog,
-        update_id: int,
+        event_id: int,
         *,
         timeout_s: float,
         max_bytes: int,
@@ -36,7 +36,7 @@ class ExpertWeb:
         transport: AsyncBaseTransport | None = None,
     ) -> None:
         self._log = log
-        self._update_id = update_id
+        self._event_id = event_id
         self._timeout_s = timeout_s
         self._max_bytes = max_bytes
         self._max_redirects = max_redirects
@@ -56,7 +56,7 @@ class ExpertWeb:
                         return "Only HTTPS URLs without credentials are supported."
                     host = current.host.lower()
                     if not self._log.granted(host):
-                        self._log.request(self._update_id, host)
+                        self._log.request(self._event_id, host)
                         return f"The Product Owner has been asked to allow {host}."
                     async with client.stream("GET", current) as response:
                         if response.is_redirect and LOCATION in response.headers:

@@ -101,7 +101,7 @@ def _engine_down_on_screen(database: Database) -> int:
         number,
         stored.to_signal(),
         title="The engine is down",
-        in_topic=False,
+        in_component_place=False,
         note="Shikiru could not restart it.",
         suggestion="Start it on the host.",
         standing=True,

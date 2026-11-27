@@ -1539,7 +1539,7 @@ class ReplyLog(Protocol):
         """Return the resolution Shikiru confirmed for the signal, or None when there is none."""
         ...
 
-    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
+    def intend_resolve(self, event_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         """Keep the first payload; a secret is refused with sanitized metadata and returns None."""
         ...
 
@@ -1729,7 +1729,7 @@ class SubmitPayload(BaseModel):
     """What a submit op sends: the component whose Shikiru takes it, and the request.
 
     `place` is where the outcome is reported. `retry_of` is the unknown submit that a
-    replacement consumed; it is None for a goal the PO sent. `proposal` is the update id of the
+    replacement consumed; it is None for a goal the PO sent. `proposal` is the event id of the
     Expert proposal the task belongs to; it is None for a goal. `mode` is the Shikiru task mode;
     None leaves the choice to Shikiru, as a goal does.
     """
@@ -1756,8 +1756,8 @@ class SubmitOp:
 class SubmitLog(Protocol):
     """Submit ops in the journal. A submit is sent only from an intended op."""
 
-    def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
-        """Journal the submit once per Telegram update id, and return the op as stored."""
+    def intend(self, event_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
+        """Journal the submit once per inbox event, and return the op as stored."""
         ...
 
     def get(self, op_id: int) -> SubmitOp | None: ...
@@ -1778,8 +1778,8 @@ class SubmitLog(Protocol):
         """Mark an issued op unknown: it may have reached Shikiru, so it is never sent again."""
         ...
 
-    def retry(self, prompt_id: int, update_id: int, now: datetime) -> SubmitOp | None:
-        """Consume an unknown submit and journal its replacement under the tap's update id.
+    def retry(self, prompt_id: int, event_id: int, now: datetime) -> SubmitOp | None:
+        """Consume an unknown submit and journal its replacement under the tap's event id.
 
         The prompt keeps its unknown outcome. A replayed tap gets the replacement it made; None
         when the prompt is not unknown or another tap consumed it first.

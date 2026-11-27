@@ -12,17 +12,17 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, Outbox, Pending, Sender
 
 
-class TopicGone(Protocol):
-    """Ends a conversation whose topic the Channel no longer has."""
+class RoomGone(Protocol):
+    """Ends a conversation whose room the Channel no longer has."""
 
-    async def topic_gone(self, conversation_id: int, place: Place) -> None: ...
+    async def room_gone(self, conversation_id: int, place: Place) -> None: ...
 
 
 class OutboxSender:
     """Sends what the outbox holds and confirms each message after the Channel accepted it.
 
     A failed send stays pending and is tried again on the next tick. A message the Channel refuses
-    for good is recorded as refused and never offered again; when the refusal says the topic is
+    for good is recorded as refused and never offered again; when the refusal says the room is
     gone, its conversation ends too. A crash between the Channel accepting a message and the
     confirmation sends it once more; its body carries `S<number>`, so the PO can recognize the
     duplicate.
@@ -35,7 +35,7 @@ class OutboxSender:
         clock: Clock,
         *,
         interval_s: float,
-        gone: TopicGone | None = None,
+        gone: RoomGone | None = None,
     ) -> None:
         self._outbox = outbox
         self._sender = sender
@@ -65,7 +65,7 @@ class OutboxSender:
                     and pending.conversation_id is not None
                     and isinstance(error, PlaceGoneError)
                 ):
-                    await self._gone.topic_gone(pending.conversation_id, pending.place)
+                    await self._gone.room_gone(pending.conversation_id, pending.place)
                 continue
             except ChannelError:
                 if pending.conversation_id is not None:

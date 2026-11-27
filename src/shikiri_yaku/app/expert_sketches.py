@@ -1,4 +1,4 @@
-"""Sketches: the picture an Expert answer asks for, drawn once and sent to the answer's topic."""
+"""Sketches: the picture an Expert answer asks for, drawn once and sent to the answer's room."""
 
 from __future__ import annotations
 
@@ -26,17 +26,17 @@ NOT_SAVED: Final = "The sketch was drawn, but it could not be saved in this conv
 INTERRUPTED: Final = "The sketch was not drawn: the bot restarted before it was finished."
 
 
-def sketch_key(update_id: int) -> str:
+def sketch_key(event_id: int) -> str:
     """Return the notice key of an answer's sketch; a message under it means it was tried."""
-    return f"expert:sketch:{update_id}"
+    return f"expert:sketch:{event_id}"
 
 
-def progress_key(update_id: int) -> str:
-    return f"{sketch_key(update_id)}:progress"
+def progress_key(event_id: int) -> str:
+    return f"{sketch_key(event_id)}:progress"
 
 
 class ExpertSketches:
-    """Draws the sketch an answer asks for and sends it to the answer's topic as a photo.
+    """Draws the sketch an answer asks for and sends it to the answer's room as a photo.
 
     A turn delivered again draws nothing, because the sketch's notice key is already journaled.
     A refusal or a failure is a notice under the same key. The picture is moved into the
@@ -62,10 +62,8 @@ class ExpertSketches:
         self._outbox_interval_s = outbox_interval_s
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
-    async def draw(
-        self, conversation: ConversationRecord, update_id: int, description: str
-    ) -> None:
-        key = sketch_key(update_id)
+    async def draw(self, conversation: ConversationRecord, event_id: int, description: str) -> None:
+        key = sketch_key(event_id)
         if conversation.room is None or self._outbox.notice_queued(key):
             return
         place = self._rooms.place(conversation.room)
@@ -80,11 +78,11 @@ class ExpertSketches:
             self._clock,
             place,
             DRAWING,
-            key=progress_key(update_id),
+            key=progress_key(event_id),
             slot=key,
             conversation_id=conversation.id,
         )
-        if not await self._await_sent(progress_key(update_id)):
+        if not await self._await_sent(progress_key(event_id)):
             return
         try:
             drawn = await self._sketcher.draw(description)
@@ -93,7 +91,7 @@ class ExpertSketches:
             return
         try:
             picture = move_sketch(
-                conversation_directory(self._directory, conversation.id), update_id, drawn
+                conversation_directory(self._directory, conversation.id), event_id, drawn
             )
         except OSError:
             self._notice(place, NOT_SAVED, key, conversation.id)

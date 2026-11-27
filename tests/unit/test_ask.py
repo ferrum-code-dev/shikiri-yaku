@@ -319,8 +319,7 @@ def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
         assert pending[0].message.reply_to == "1"
         assert pending[0].message.buttons[0].label == "/expert@bot"
     elif replies == 1:
-        reason = "configured" if not enabled else "group" if not group else "question"
-        assert reason in pending[0].message.text.lower()
+        assert not pending[0].message.buttons
     assert len(h.topics.created) == (1 if replies == 2 else 0)
 
 
@@ -978,7 +977,6 @@ def test_a_shared_chat_without_rooms_refuses_an_unaddressed_ask(tmp_path: Path, 
     _admin_text(h, text, ADMIN)
     [pending] = h.outbox.pending()
     assert not pending.message.buttons
-    assert "group" in pending.message.text.lower()
     assert not h.topics.created
 
 

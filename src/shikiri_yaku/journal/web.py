@@ -37,14 +37,14 @@ class JournalWeb:
             is not None
         )
 
-    def request(self, update_id: int, host: str) -> None:
+    def request(self, event_id: int, host: str) -> None:
         self._database.connection.execute(
             "INSERT INTO web_requests (update_id, host, state) VALUES (?, ?, 'pending') "
             "ON CONFLICT (update_id, host) DO NOTHING",
-            (update_id, host),
+            (event_id, host),
         )
 
-    def pending(self, update_id: int | None = None) -> list[tuple[int, int, str, str]]:
+    def pending(self, event_id: int | None = None) -> list[tuple[int, int, str, str]]:
         rows = self._database.connection.execute(
             "SELECT w.id, t.conversation_id, c.room, w.host FROM web_requests w "
             "JOIN turns t ON t.update_id = w.update_id "
@@ -52,7 +52,7 @@ class JournalWeb:
             "WHERE w.state = 'pending' AND c.state = 'open' "
             "AND t.state IN ('done', 'interrupted') AND (? IS NULL OR w.update_id = ?) "
             "ORDER BY w.id",
-            (update_id, update_id),
+            (event_id, event_id),
         ).fetchall()
         return [(r["id"], r["conversation_id"], r["room"], r["host"]) for r in rows]
 
@@ -72,7 +72,7 @@ class JournalWeb:
         ).fetchone()
         return None if row is None else row["notice_key"]
 
-    def decide(self, request_id: int, update_id: int, *, allow: bool, now: datetime) -> int | None:
+    def decide(self, request_id: int, event_id: int, *, allow: bool, now: datetime) -> int | None:
         with self._database.transaction() as connection:
             row = connection.execute(
                 "SELECT w.host, w.state, w.decision_update_id, t.conversation_id "
@@ -84,11 +84,11 @@ class JournalWeb:
             if row is None:
                 return None
             if row["state"] != PENDING:
-                return row["conversation_id"] if row["decision_update_id"] == update_id else None
+                return row["conversation_id"] if row["decision_update_id"] == event_id else None
             state = _ALLOWED if allow else _DENIED
             connection.execute(
                 "UPDATE web_requests SET state = ?, decision_update_id = ? WHERE id = ?",
-                (state, update_id, request_id),
+                (state, event_id, request_id),
             )
             if allow:
                 connection.execute(
@@ -101,7 +101,7 @@ class JournalWeb:
                 "VALUES (?, ?, ?, 'pending')",
                 (
                     row["conversation_id"],
-                    update_id,
+                    event_id,
                     f"The Product Owner {state} web access to {row['host']}.",
                 ),
             )

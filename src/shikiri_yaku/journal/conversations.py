@@ -59,7 +59,7 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
     session = row["session"]
     return ConversationRecord(
         id=row["id"],
-        update_id=row["update_id"],
+        event_id=row["update_id"],
         origin=Place(row["origin_channel"], row["origin_place"]),
         room=row["room"],
         scope=_SCOPE.validate_json(row["scope"]),
@@ -73,7 +73,7 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
 
 def _turn(row: sqlite3.Row) -> TurnRecord:
     return TurnRecord(
-        update_id=row["update_id"],
+        event_id=row["update_id"],
         conversation_id=row["conversation_id"],
         room=row["room"],
         text=row["text"],
@@ -90,7 +90,7 @@ class Conversations:
 
     def create(
         self,
-        update_id: int,
+        event_id: int,
         *,
         origin: Place,
         text: str,
@@ -105,7 +105,7 @@ class Conversations:
                     (update_id, origin_channel, origin_place, scope, state, last_activity, mode)
                 VALUES (?, ?, ?, ?, 'creating', ?, ?) ON CONFLICT(update_id) DO NOTHING
                 """,
-                (update_id, origin.channel, origin.id, json.dumps(scope), stamp(now), mode),
+                (event_id, origin.channel, origin.id, json.dumps(scope), stamp(now), mode),
             )
             if cursor.rowcount != 1:
                 return False
@@ -114,18 +114,18 @@ class Conversations:
                 INSERT INTO turns (conversation_id, update_id, text, state)
                 VALUES (?, ?, ?, 'pending')
                 """,
-                (cursor.lastrowid, update_id, text),
+                (cursor.lastrowid, event_id, text),
             )
             return True
 
-    def add_turn(self, conversation_id: int, update_id: int, text: str, now: datetime) -> bool:
+    def add_turn(self, conversation_id: int, event_id: int, text: str, now: datetime) -> bool:
         with self._database.transaction() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO turns (conversation_id, update_id, text, state)
                 VALUES (?, ?, ?, 'pending') ON CONFLICT(update_id) DO NOTHING
                 """,
-                (conversation_id, update_id, text),
+                (conversation_id, event_id, text),
             )
             connection.execute(
                 "UPDATE conversations SET last_activity = ? WHERE id = ?",
@@ -133,14 +133,14 @@ class Conversations:
             )
             return cursor.rowcount == 1
 
-    def refuse_admin(self, conversation_id: int, update_id: int, now: datetime) -> int | None:
+    def refuse_admin(self, conversation_id: int, event_id: int, now: datetime) -> int | None:
         """Record a refused proposal without its text and schedule the Expert's next turn."""
         with self._database.transaction() as connection:
             inserted = connection.execute(
                 "INSERT INTO ops (identity, kind, project, reason, state, created_at, updated_at) "
                 "VALUES (?, 'admin', '', 'proposal refused', 'failed', ?, ?) "
                 "ON CONFLICT(identity) DO NOTHING",
-                (f"admin:refused:{update_id}", stamp(now), stamp(now)),
+                (f"admin:refused:{event_id}", stamp(now), stamp(now)),
             ).rowcount
             if not inserted:
                 return None
@@ -157,9 +157,9 @@ class Conversations:
             )
             return next_id
 
-    def get(self, update_id: int) -> ConversationRecord | None:
+    def get(self, event_id: int) -> ConversationRecord | None:
         row = self._database.connection.execute(
-            "SELECT * FROM conversations WHERE update_id = ?", (update_id,)
+            "SELECT * FROM conversations WHERE update_id = ?", (event_id,)
         ).fetchone()
         return None if row is None else _record(row)
 
@@ -176,9 +176,9 @@ class Conversations:
         ).fetchone()
         return None if row is None else _record(row)
 
-    def turn(self, update_id: int) -> TurnRecord | None:
+    def turn(self, event_id: int) -> TurnRecord | None:
         row = self._database.connection.execute(
-            f"{_TURN_SELECT} WHERE t.update_id = ?", (update_id,)
+            f"{_TURN_SELECT} WHERE t.update_id = ?", (event_id,)
         ).fetchone()
         return None if row is None else _turn(row)
 
@@ -233,32 +233,32 @@ class Conversations:
                 "UPDATE conversations SET effort = ? WHERE id = ?", (effort, conversation_id)
             )
 
-    def fail(self, update_id: int) -> None:
+    def fail(self, event_id: int) -> None:
         self._database.connection.execute(
-            "UPDATE conversations SET state = 'failed' WHERE update_id = ?", (update_id,)
+            "UPDATE conversations SET state = 'failed' WHERE update_id = ?", (event_id,)
         )
 
-    def opened(self, update_id: int, room: str) -> None:
+    def opened(self, event_id: int, room: str) -> None:
         with self._database.transaction() as connection:
             connection.execute(
                 "UPDATE conversations SET state = 'open', room = ? WHERE update_id = ?",
-                (room, update_id),
+                (room, event_id),
             )
 
-    def start(self, update_id: int) -> bool:
+    def start(self, event_id: int) -> bool:
         cursor = self._database.connection.execute(
             """
             UPDATE turns SET state = 'running'
             WHERE update_id = ? AND state = 'pending'
                 AND conversation_id IN (SELECT id FROM conversations WHERE state = 'open')
             """,
-            (update_id,),
+            (event_id,),
         )
         return cursor.rowcount == 1
 
     def finish(
         self,
-        update_id: int,
+        event_id: int,
         answer: str,
         session: str | None,
         call: str | None,
@@ -271,7 +271,7 @@ class Conversations:
         with self._database.transaction() as connection:
             connection.execute(
                 "UPDATE turns SET state = 'done', answer = ?, call = ? WHERE update_id = ?",
-                (answer, call, update_id),
+                (answer, call, event_id),
             )
             connection.execute(
                 """
@@ -280,14 +280,14 @@ class Conversations:
                     last_activity = ?
                 WHERE id = (SELECT conversation_id FROM turns WHERE update_id = ?)
                 """,
-                (clear_session, session, stamp(now), update_id),
+                (clear_session, session, stamp(now), event_id),
             )
             if refused:
                 row = connection.execute(
-                    "SELECT conversation_id FROM turns WHERE update_id = ?", (update_id,)
+                    "SELECT conversation_id FROM turns WHERE update_id = ?", (event_id,)
                 ).fetchone()
                 if row is not None:
-                    self.refuse_admin(row["conversation_id"], update_id, now)
+                    self.refuse_admin(row["conversation_id"], event_id, now)
 
     def touch(self, conversation_id: int, now: datetime) -> None:
         with self._database.transaction() as connection:
@@ -302,7 +302,7 @@ class Conversations:
         now: datetime,
         *,
         sender: str | None = None,
-        update_id: int | None = None,
+        event_id: int | None = None,
     ) -> ConversationRecord | None:
         """Mark an open conversation as ending and keep that first time for recovery."""
         with self._database.transaction() as connection:
@@ -316,7 +316,7 @@ class Conversations:
                 "payload = json_set(payload, '$.approver', NULL, '$.actor', ?, '$.update_id', ?) "
                 "WHERE kind = 'admin' AND state = 'intended' "
                 "AND json_extract(payload, '$.conversation_id') = ? RETURNING id",
-                (stamp(now), sender, update_id, conversation_id),
+                (stamp(now), sender, event_id, conversation_id),
             ).fetchall()
             for op in voided:
                 settle_notice(connection, f"admin:proposal:{op['id']}", Message("Proposal voided."))

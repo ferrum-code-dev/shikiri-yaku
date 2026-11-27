@@ -15,33 +15,33 @@ if TYPE_CHECKING:
 
 FILES_DIR: Final = "files"
 TASK_FILES_DIR: Final = "task_files"
-# keep: an attachment always starts with its update id's digits, so no attachment takes this name
+# keep: an attachment always starts with its event id's digits, so no attachment takes this name
 SKETCH_PREFIX: Final = "sketch"
 # keep: the name of a file is no path; anything but these characters, and leading dots, go
 _UNSAFE: Final = re.compile(r"[^A-Za-z0-9._-]")
 _FALLBACK_NAME: Final = "file"
 
 
-def attachment_name(update_id: int, name: str) -> str:
-    """Return the name a file is kept under: its update id, then the name's safe characters."""
+def attachment_name(event_id: int, name: str) -> str:
+    """Return the name a file is kept under: its event id, then the name's safe characters."""
     stem = _UNSAFE.sub("_", name).lstrip(".")[:EXPERT_FILE_NAME_MAX_CHARS]
-    return f"{update_id}-{stem or _FALLBACK_NAME}"
+    return f"{event_id}-{stem or _FALLBACK_NAME}"
 
 
-def save_attachment(directory: Path, update_id: int, name: str, content: bytes) -> Path:
+def save_attachment(directory: Path, event_id: int, name: str, content: bytes) -> Path:
     """Write an attachment into the conversation's files and return its absolute path."""
     folder = directory / FILES_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / attachment_name(update_id, name)
+    path = folder / attachment_name(event_id, name)
     path.write_bytes(content)
     return path.absolute()
 
 
-def move_sketch(directory: Path, update_id: int, source: Path) -> Path:
+def move_sketch(directory: Path, event_id: int, source: Path) -> Path:
     """Move a drawn picture into the conversation's files and return its absolute path."""
     folder = directory / FILES_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{SKETCH_PREFIX}-{update_id}.png"
+    target = folder / f"{SKETCH_PREFIX}-{event_id}.png"
     shutil.move(source, target)
     return target.absolute()
 

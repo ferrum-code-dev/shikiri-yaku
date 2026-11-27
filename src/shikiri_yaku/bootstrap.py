@@ -71,7 +71,7 @@ from shikiri_yaku.app.liveness_source import LivenessSource
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.notifier import Notifier
 from shikiri_yaku.app.open_command import OpenCommand
-from shikiri_yaku.app.outbox_sender import OutboxSender, TopicGone
+from shikiri_yaku.app.outbox_sender import OutboxSender, RoomGone
 from shikiri_yaku.app.project_sources import ProjectSources
 from shikiri_yaku.app.reasoner_ladder import LadderReasoner
 from shikiri_yaku.app.reconciler import ResolveReconciler
@@ -949,7 +949,7 @@ def outbox_job(
     clock: Clock,
     channel: Channel,
     *,
-    gone: TopicGone | None = None,
+    gone: RoomGone | None = None,
 ) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(

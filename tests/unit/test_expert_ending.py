@@ -695,7 +695,7 @@ def test_a_failed_directory_removal_keeps_the_rows_until_the_sweep_finishes(
 
     async def scenario() -> None:
         with pytest.raises(OSError, match="busy"):
-            await h.ending.topic_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
+            await h.ending.room_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
         assert h.remaining(conversation) > 0
         await h.ending.sweep()
 
@@ -724,7 +724,7 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="crash"):
-            await h.ending.topic_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
+            await h.ending.room_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
         assert not conversation_directory(h.directory, conversation).exists()
         assert h.remaining(conversation) > 0
         await h.ending.sweep()

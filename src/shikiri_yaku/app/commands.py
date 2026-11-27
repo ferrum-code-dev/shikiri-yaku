@@ -23,9 +23,9 @@ _EXPERT: Final = "/expert"
 _ADMIN: Final = "/admin"
 _HELP_NAME: Final = "/help"
 _HELP: Final = (
-    f"{_STATUS} · one line per component; in a component topic, its own\n"
-    f"{_DETAILS} · every task and quota of each component; in a component topic, its own\n"
-    f"{_PENDING} · pending escalations and approvals, shown again; in a component topic, its own\n"
+    f"{_STATUS} · one line per component; only this component in its chat\n"
+    f"{_DETAILS} · every task and quota per component; only this component in its chat\n"
+    f"{_PENDING} · open questions and approvals, shown again; only this component in its chat\n"
     f"{_SUBMIT} <component> <request> · submit a request to a component's Shikiru\n"
     f"{_EXPERT} <question> · open an Expert conversation\n"
     f"{_ADMIN} <question> · open an admin conversation, for listed admins\n"
@@ -43,8 +43,8 @@ class Commands:
     keyboard capitalises the first letter) and without the `@bot` of the channel's addressed form.
     In a component's place, `/status`, `/details` and `/pending` cover only it.
 
-    A command reply has no signal, so it is journaled with none. Its notice keys are the update id
-    and the part's index: a repeated delivery of the same update queues nothing.
+    A command reply has no signal, so it is journaled with none. Its notice keys are the event id
+    and the part's index: a repeated delivery of the same event queues nothing.
 
     In a shared chat, an open Expert room is routed to the Expert before this class; a message
     in a place that is neither main nor one of this instance's component places belongs to

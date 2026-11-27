@@ -26,8 +26,8 @@ class JournalSubmits:
         self._ops = ops
         self._channel_name = channel_name
 
-    def intend(self, update_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
-        return self._intend(_identity(self._channel_name, update_id), payload, now)
+    def intend(self, event_id: int, payload: SubmitPayload, now: datetime) -> SubmitOp:
+        return self._intend(_identity(self._channel_name, event_id), payload, now)
 
     def intend_task(
         self, proposal_id: int, index: int, payload: SubmitPayload, now: datetime
@@ -60,13 +60,13 @@ class JournalSubmits:
     def uncertain(self, op_id: int, now: datetime) -> None:
         self._move(op_id, OpState.ISSUED, OpState.UNKNOWN, now)
 
-    def retry(self, prompt_id: int, update_id: int, now: datetime) -> SubmitOp | None:
+    def retry(self, prompt_id: int, event_id: int, now: datetime) -> SubmitOp | None:
         """Consume the prompt and intend its replacement, in one transaction with the check.
 
         The check and the intent are one transaction, so two taps cannot both consume a prompt.
         A replay finds the replacement its tap intended, because the identity is the tap's.
         """
-        identity = _identity(self._channel_name, update_id)
+        identity = _identity(self._channel_name, event_id)
         with self._database.transaction():
             taken_by = self._taken_by(prompt_id)
             if taken_by is not None and taken_by != identity:
@@ -75,7 +75,7 @@ class JournalSubmits:
             if prompt is None or prompt.status != SubmitStatus.UNKNOWN:
                 return None
             payload = prompt.payload.model_copy(update={"retry_of": prompt_id})
-            return self.intend(update_id, payload, now)
+            return self.intend(event_id, payload, now)
 
     def unfinished(self) -> list[SubmitOp]:
         """Return the goal submits not final; a proposal's tasks are settled by their proposal."""

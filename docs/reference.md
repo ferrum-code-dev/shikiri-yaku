@@ -96,26 +96,26 @@ Replace the placeholders with model and effort values that the installed CLI acc
 The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude`, `codex` and `muse`, as the
 Reasoner does.
 `doctor` probes each configured Expert CLI with its version flag. `/expert <question>` requires a
-forum group and opens a topic, scoped to the component topic or all components in General. In a
+Telegram forum group and opens a conversation, scoped to the component chat or all components in General. In a
 shared group, each configured Expert replies to an unaddressed General request with its own
 selection button; tap it to open that Expert’s conversation. You can also address a bot directly as
-`/expert@bot <question>`. The **Open topic** button replies to its `/expert`, so concurrent requests
-keep their own buttons. An uncertain topic creation is not
+`/expert@bot <question>`. The **Open conversation** button replies to its `/expert`, so concurrent requests
+keep their own buttons. An uncertain conversation creation is not
 retried; ask again. An interrupted turn is reported and is not repeated.
 
-Each message in an Expert topic is a follow-up turn of that conversation. The turns of one
+Each message in an Expert conversation is a follow-up turn. The turns of one
 conversation run one at a time, oldest first, and each later turn resumes the agent session of
-the earlier ones. Topic commands: `/effort [level]` shows the conversation's effort or sets it
+the earlier ones. Conversation commands: `/effort [level]` shows the conversation's effort or sets it
 from the next turn;
 `/summarize` asks for a short summary; `/help` lists the commands. Other commands do not work in
-an Expert topic, and the Expert commands do not work elsewhere.
+an Expert conversation, and the Expert commands do not work elsewhere.
 
-A conversation ends in four ways: `/close` in its topic, closing the topic in Telegram, `retention_days`
+A conversation ends in four ways: `/close` in its chat, closing its room in Telegram, `retention_days`
 after its last message (the Clock counts the days, and each message from the PO restarts them), or a
-topic that Telegram reports gone when a message is sent to it. An ending deletes the topic and the
+room that Telegram reports gone when a message is sent there. An ending deletes the room and the
 conversation's rows and directory under `conversations/`; the other conversations are not touched.
-If Telegram refuses the topic deletion, the conversation stays and its ending is tried again on each
-tick; the PO is told once, in the General topic. An ending needs the bot's `can_delete_messages`
+If Telegram refuses the room deletion, the conversation stays and its ending is tried again on each
+tick; the PO is told once, in the General chat. An ending needs the bot's `can_delete_messages`
 right in the group, checked at start-up when `[expert]` is set.
 
 The defaults are `timeout_s = 120` per rung, `sketch_timeout_s = 300` for the Codex run that draws a
@@ -140,7 +140,7 @@ ladder = ["claude:sonnet", "codex:gpt-5"]
 
 Claude is restricted to file reads in the scoped directories. Codex runs read-only with web search
 and apps disabled, but its file scope is an instruction rather than a filesystem boundary. All
-Expert adapters pass the configured effort; the effort set with `/effort` in a conversation's topic
+Expert adapters pass the configured effort; the effort set with `/effort` in a conversation's chat
 overrides the rung effort.
 Muse cannot write components outside the system temporary directory; its file protection is the
 workspace boundary and the absent shell. Components under the system temporary directory are
@@ -292,9 +292,9 @@ The menu entries, which must match the table above:
 | `status` | Shows one line per component. |
 | `details` | Shows every task and quota per component. |
 | `pending` | Re-shows open questions and pending approvals. |
-| `expert` | Opens an Expert topic with a question. |
+| `expert` | Opens an Expert conversation with a question. |
 | `submit` | Submits a task request to a component. |
-| `admin` | Opens an admin Expert topic, for listed admins only. |
+| `admin` | Opens an admin conversation, for listed admins only. |
 | `help` | Lists the commands. |
 
 For each bot in the group:
@@ -315,7 +315,7 @@ For each bot in the group:
 2. Set the complete new list in the default scope. For each narrower scope or language-specific list that is configured, either set the same complete list there or delete that override so it inherits the updated list. `setMyCommands` replaces the whole list for its scope and language:
 
    ```sh
-   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/setMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"default"},"commands":[{"command":"status","description":"Shows one line per component."},{"command":"details","description":"Shows every task and quota per component."},{"command":"pending","description":"Re-shows open questions and pending approvals."},{"command":"expert","description":"Opens an Expert topic with a question."},{"command":"submit","description":"Submits a task request to a component."},{"command":"admin","description":"Opens an admin Expert topic, for listed admins only."},{"command":"help","description":"Lists the commands."}]}'
+   curl -s -X POST "https://api.telegram.org/bot<TOKEN>/setMyCommands" -H 'Content-Type: application/json' -d '{"scope":{"type":"default"},"commands":[{"command":"status","description":"Shows one line per component."},{"command":"details","description":"Shows every task and quota per component."},{"command":"pending","description":"Re-shows open questions and pending approvals."},{"command":"expert","description":"Opens an Expert conversation with a question."},{"command":"submit","description":"Submits a task request to a component."},{"command":"admin","description":"Opens an admin conversation, for listed admins only."},{"command":"help","description":"Lists the commands."}]}'
    ```
 
    For another configured scope, pass that exact `scope` and `language_code` with the same command array. To remove an override instead, call `deleteMyCommands` with that scope and language. For example, to set the group-specific list, add `"scope":{"type":"chat","chat_id":<group_id>}` to the same body.
@@ -327,13 +327,13 @@ Shared group: upgrade every instance first, then update each bot's menu, in one 
 ### `/admin`
 
 - **Availability:** `/admin <question>` works only when `[admin]` lists you in `admins`. Without that
-  table it is refused. Only a listed admin can open an admin conversation or write in its topic,
+  table it is refused. Only a listed admin can open an admin conversation or write in it,
   also in a shared group, where the selection button of an admin request works only for admins and
   an instance stays silent to an unaddressed `/admin` from anyone not on its own list. The list is
   checked on every message and every button of the conversation, such as a web-access decision.
 - **Conversation:** it is an Expert conversation with the same scope, providers and read-only
-  restrictions as `/expert`. Its topic starts with a notice that the chat is not private: members of
-  the group can read it. It ends like an Expert conversation, and also after `idle_min` without a
+  restrictions as `/expert`. Its chat starts with a notice that it is not private and other people
+  can read it. It ends like an Expert conversation, and also after `idle_min` without a
   message or button; removing `[admin]` keeps that limit at 15 minutes for conversations already open.
 - **Commands:** the Expert may propose a command and reason, both marked as model-written. A listed
   admin can tap **Run** or **Decline** before the approval expires. **Run** records the approval
@@ -347,22 +347,23 @@ Shared group: upgrade every instance first, then update each bot's menu, in one 
 
 ### `/expert`
 
-- **Scope:** `/expert` opens an Expert topic. In a component topic the Expert sees only that component;
-  in General it sees all components. `/expert` needs a forum group.
+- **Scope:** `/expert` opens an Expert conversation. In a component chat the Expert sees only that component;
+  in General it sees all components. Telegram needs a forum group for conversations.
 - **Shared groups:** in a shared group, an unaddressed `/expert` in General gets one selection button per
   configured Expert. Tap a button, or address a bot directly as `/expert@bot <question>`. The **Open
-  topic** button replies to its `/expert`, so concurrent questions keep their own buttons.
-- **Expert topics:** each message is a follow-up turn. `/effort [level]`, `/summarize` and `/help`
+  conversation** button replies to its `/expert`, so concurrent questions keep their own buttons.
+- **Expert conversation:** each message is a follow-up turn. `/effort [level]`, `/summarize` and `/help`
   work there; other commands do not, and Expert commands do not work elsewhere. `/close` ends the
   conversation, as described in [`[expert]`](#expert).
 - **Task proposals:** when an answer proposes tasks, **Submit all**, **Reject all** and **View all** are
   offered only after every task-list message has been sent. See [Task proposals](#task-proposals).
-- **Interrupted or uncertain:** an interrupted turn is reported and not repeated. If topic creation is
+- **Interrupted or uncertain:** an interrupted turn is reported and not repeated. If conversation creation is
   uncertain, ask again.
 
 ### `/submit`
 
-The request goes to Shikiru as written. It is not split across components or rewritten into a plan. In a component topic, the topic names the component, so write `/submit <request>` there:
+The request goes to Shikiru as written. It is not split across components or rewritten into a plan.
+A component chat identifies the component, so write `/submit <request>` there:
 
 ```text
 /submit api Add CSV export to the reports page
