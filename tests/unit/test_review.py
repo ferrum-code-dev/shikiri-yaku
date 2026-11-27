@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward, Notified
@@ -119,6 +120,7 @@ def _handler(database: Database, client: _Client, outbox: Outbox) -> ReviewHandl
         _Clock(),
         product=PRODUCT,
         destinations=FixedDestinations([OWNER]),
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -207,6 +209,7 @@ def test_the_review_header_names_the_component_only_outside_its_topic(
         _Clock(),
         product=PRODUCT,
         destinations=destinations,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
     asyncio.run(handler.handle(signal))

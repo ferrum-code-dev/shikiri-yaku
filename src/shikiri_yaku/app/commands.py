@@ -62,6 +62,7 @@ class Commands:
         *,
         destinations: Destinations,
         channel: str,
+        max_text: int,
         name_max_chars: int,
         shared_group: bool = False,
         ask: Ask | None = None,
@@ -73,6 +74,7 @@ class Commands:
         self._goal = goal
         self._destinations = destinations
         self._channel = channel
+        self._max_text = max_text
         self._name_max_chars = name_max_chars
         self._shared_group = shared_group
         self._ask = ask
@@ -111,6 +113,7 @@ class Commands:
             await self._answer(word, name, component),
             key=key,
             now=self._clock.now(),
+            max_text=self._max_text,
         )
 
     async def tap(self, item: Inbound) -> bool:

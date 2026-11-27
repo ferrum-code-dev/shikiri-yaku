@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import (
     CLOSED_UNMERGED_LINE,
@@ -36,12 +37,12 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.replies import JournalReplies
-from shikiri_yaku.ports import ShikiruEvent
+from shikiri_yaku.ports import Deleter, Editor, ShikiruEvent
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from shikiri_yaku.ports import Channel, Message, ShikiruClient
+    from shikiri_yaku.ports import Message, ShikiruClient
 
 PROJECT: Final = "api"
 NOW: Final = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
@@ -128,7 +129,13 @@ def _review_on_screen(database: Database) -> int:
     stored = signals.get(number)
     assert stored is not None
     body = review_message(
-        number, stored.to_signal(), PULL, "Add retries", product=PRODUCT, in_topic=False
+        number,
+        stored.to_signal(),
+        PULL,
+        "Add retries",
+        product=PRODUCT,
+        in_topic=False,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     messages = MessageStore(database, _Reporter())
     for index, ref in enumerate(REFS):
@@ -163,9 +170,10 @@ def _close(database: Database, event: ShikiruEvent) -> None:
 
 def _tick(database: Database, channel: _Channel) -> None:
     editor = CopyEditor(
-        JournalFinalEdits(database, _replies(database)),
+        JournalFinalEdits(database, _replies(database), max_text=MESSAGE_TEXT_LIMIT),
         MessageStore(database, _Reporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         _Clock(),
         interval_s=1,
     )

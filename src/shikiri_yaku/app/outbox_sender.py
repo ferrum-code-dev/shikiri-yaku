@@ -9,7 +9,7 @@ from shikiri_yaku.ports import ChannelError, ChannelRefusedError, PlaceGoneError
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import Channel, Clock, Outbox, Pending
+    from shikiri_yaku.ports import Clock, Outbox, Pending, Sender
 
 
 class TopicGone(Protocol):
@@ -31,14 +31,14 @@ class OutboxSender:
     def __init__(
         self,
         outbox: Outbox,
-        channel: Channel,
+        sender: Sender,
         clock: Clock,
         *,
         interval_s: float,
         gone: TopicGone | None = None,
     ) -> None:
         self._outbox = outbox
-        self._channel = channel
+        self._sender = sender
         self._clock = clock
         self._interval_s = interval_s
         self._gone = gone
@@ -76,4 +76,4 @@ class OutboxSender:
     async def _send(self, pending: Pending) -> str:
         if (form := secret_form(pending.message.texts())) is not None:
             raise ChannelRefusedError(form)
-        return await self._channel.send(pending.destination, pending.message)
+        return await self._sender.send(pending.destination, pending.message)

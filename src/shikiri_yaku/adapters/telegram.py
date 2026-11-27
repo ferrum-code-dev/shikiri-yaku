@@ -18,8 +18,6 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.ports import (
-    CALLBACK_DATA_LIMIT,
-    MESSAGE_TEXT_LIMIT,
     PLACE_GONE_REASON,
     Button,
     ChannelError,
@@ -37,6 +35,9 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, Message
 
 TELEGRAM_CHANNEL: Final = "telegram"
+# keep: Telegram's limits; the core gets them through the Channel, never by importing this module
+MESSAGE_TEXT_LIMIT: Final = 4096
+CALLBACK_DATA_LIMIT: Final = 64
 TOKEN_MODE: Final = 0o600
 OTHER_MEMBERS_NOTE: Final = "Other members of the group can read the messages; only owners can act"
 SEND_MESSAGE: Final = "sendMessage"

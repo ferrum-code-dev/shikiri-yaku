@@ -13,6 +13,8 @@ import pytest
 
 from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.adapters.agents.muse import MuseExpert
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
 from shikiri_yaku.app.expert_admin import AdminAccess
@@ -40,7 +42,6 @@ from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.web import JournalWeb
 from shikiri_yaku.ports import (
-    DOWNLOAD_LIMIT_BYTES,
     PLACE_GONE_REASON,
     ChannelRefusedError,
     ChannelUnavailableError,
@@ -236,6 +237,7 @@ class Harness:
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
         auto_progress_delivery: bool = True,
+        max_file_bytes: int = DOWNLOAD_LIMIT_BYTES,
     ) -> None:
         self.database = Database.open(":memory:")
         self.log = Conversations(self.database)
@@ -250,7 +252,7 @@ class Harness:
         replies = JournalReplies(
             self.database, SignalStore(self.database), OpStore(self.database), channel_name=CHANNEL
         )
-        self.final = JournalFinalEdits(self.database, replies)
+        self.final = JournalFinalEdits(self.database, replies, max_text=MESSAGE_TEXT_LIMIT)
         self.ending = ExpertEnding(
             self.log,
             self.runs,
@@ -310,6 +312,8 @@ class Harness:
                 group_id=GROUP_ID,
                 access=AdminAccess(self.log, Clock(), admins=admins),
             ),
+            max_text=MESSAGE_TEXT_LIMIT,
+            max_file_bytes=max_file_bytes,
         )
         self.ask = Ask(
             self.log,
@@ -320,6 +324,7 @@ class Harness:
             turns=self.turns,
             scope=scope,
             channel=CHANNEL,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         self.commands = Commands(
             self.outbox,
@@ -332,6 +337,7 @@ class Harness:
             name_max_chars=40,
             shared_group=shared_group,
             ask=self.ask,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
 
@@ -349,6 +355,7 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
         auto_progress_delivery: bool = True,
+        max_file_bytes: int = DOWNLOAD_LIMIT_BYTES,
     ) -> Harness:
         harness = Harness(
             tmp_path,
@@ -360,6 +367,7 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
             downloads=downloads,
             sketcher=sketcher,
             auto_progress_delivery=auto_progress_delivery,
+            max_file_bytes=max_file_bytes,
         )
         made.append(harness)
         return harness
@@ -849,6 +857,7 @@ def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_co
             commands=h.commands,
             goal=cast("GoalCommand", None),
             expert_turns=h.turns,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         service = InboundService(
             cast("InboundPoller", _Poller()),
@@ -905,6 +914,7 @@ def test_shared_group_inbound_routing_in_foreign_expert_topic(
             commands=h.commands,
             goal=cast("GoalCommand", None),
             expert_turns=h.turns,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         service = InboundService(
             cast("InboundPoller", _Poller()),
@@ -1009,6 +1019,7 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
         commands=h.commands,
         goal=cast("GoalCommand", None),
         expert_turns=h.turns,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     service = InboundService(
         cast("InboundPoller", _Poller()),
@@ -1306,7 +1317,9 @@ class _AutoProgressOutbox:
 
 
 def _superseded(h: Harness) -> list[str]:
-    return JournalReplacements(h.database, MessageStore(h.database, Reporter())).superseded()
+    return JournalReplacements(
+        h.database, MessageStore(h.database, Reporter()), max_text=MESSAGE_TEXT_LIMIT
+    ).superseded()
 
 
 def _file_item(
@@ -1409,6 +1422,19 @@ def test_a_file_not_saved_gets_a_notice_and_no_turn(
     assert downloads.fetched == ([] if file_size is not None else ["file-1"])
 
 
+def test_a_file_over_the_limit_the_channel_gives_is_refused_whatever_the_default(
+    build: Callable[..., Harness],
+) -> None:
+    downloads = FakeDownloads({"file-1": b"unused"})
+    h = build(ladder(Runner()), downloads=downloads, max_file_bytes=100)
+    asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
+
+    asyncio.run(h.turns.handle(_file_item(2, "file-1", "small.txt", size=101)))
+
+    assert h.log.turn(2) is None
+    assert downloads.fetched == []
+
+
 def test_a_file_that_fails_for_a_passing_reason_is_tried_again(
     build: Callable[..., Harness],
 ) -> None:
@@ -1438,6 +1464,7 @@ def test_a_file_outside_an_expert_topic_is_not_run_as_a_command() -> None:
         channel=CHANNEL,
         commands=cast("Commands", None),
         goal=cast("GoalCommand", None),
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     caption = Inbound(
         9, InboundKind.FILE, OWNER, OWNER, "9", text="/status", file=FileRef(id="f", name="a")

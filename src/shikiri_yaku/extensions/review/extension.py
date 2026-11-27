@@ -27,10 +27,17 @@ def review_extension(
     *,
     product: str,
     destinations: Destinations,
+    max_text: int,
 ) -> Extension:
     """Return the review category; it is registered before the product catch-all."""
     handler = ReviewHandler(
-        clients, numbers, outbox, clock, product=product, destinations=destinations
+        clients,
+        numbers,
+        outbox,
+        clock,
+        product=product,
+        destinations=destinations,
+        max_text=max_text,
     )
     return Extension(
         REVIEW,

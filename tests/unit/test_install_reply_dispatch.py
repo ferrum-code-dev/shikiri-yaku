@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Literal, cast
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.callback import decline_data, install_data
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -76,6 +77,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
         commands=cast("Commands", object()),
         goal=cast("GoalCommand", object()),
         install_replies=cast("InstallReplyHandler", handler),
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
     async def handle_items() -> None:

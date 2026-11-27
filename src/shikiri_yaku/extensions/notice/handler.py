@@ -9,7 +9,7 @@ from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose, fit
 from shikiri_yaku.domain.outcome import Forward, Informed, Notified, Resolved
 from shikiri_yaku.domain.signal import Kind
 from shikiri_yaku.extensions.notice.family import family_of
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Button, Message, TaskStatus
+from shikiri_yaku.ports import Button, Message, TaskStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -56,8 +56,10 @@ class NoticeHandler:
         *,
         destinations: Destinations,
         tasks_max: int,
+        max_text: int,
     ) -> None:
         self._clients = clients
+        self._max_text = max_text
         self._numbers = numbers
         self._outbox = outbox
         self._notifier = notifier
@@ -82,10 +84,10 @@ class NoticeHandler:
             return Resolved(WAITING)
         # keep: a notice in its component's topic already names the component, so it is left out
         prefix = "" if self._in_component_topic(signal) else f"{signal.project} · "
-        text = _notice_text(prefix, family, self._tasks_max)
+        text = _notice_text(prefix, family, self._tasks_max, self._max_text)
         self._notifier.tell(
             signal,
-            fit(text, MESSAGE_TEXT_LIMIT),
+            fit(text, self._max_text),
             key=f"{INTEGRATED_KEY}:{signal.project}:{family.root.id}",
         )
         return Informed(SENT)
@@ -107,7 +109,7 @@ class NoticeHandler:
             Purpose.NOTICE,
             self._destinations.for_signal(signal.project, signal.kind),
             Message(
-                fit(signal.text, MESSAGE_TEXT_LIMIT),
+                fit(signal.text, self._max_text),
                 (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),),
             ),
             key=f"{HEALTH_KEY}:{number}",
@@ -136,13 +138,13 @@ def _task_line(task: ShikiruTask) -> str:
     return line
 
 
-def _notice_text(prefix: str, family: Family, tasks_max: int) -> str:
+def _notice_text(prefix: str, family: Family, tasks_max: int, max_text: int) -> str:
     integrated = sum(task.status == TaskStatus.DONE for task in family.members)
     total = len(family.members)
     count_suffix = f" — {integrated} of {_tasks(total)} integrated"
     warning = f"{_WARNING_MARK} " if integrated != total else ""
     omission = f"\n+{total} more"
-    title_room = MESSAGE_TEXT_LIMIT - len(prefix) - len(warning) - len(count_suffix) - len(omission)
+    title_room = max_text - len(prefix) - len(warning) - len(count_suffix) - len(omission)
     title = fit(family.root.title, title_room) if title_room > 0 else ""
     headline = f"{warning}{prefix}{title}{count_suffix}"
     lines = [_task_line(task) for task in family.members]
@@ -153,7 +155,7 @@ def _notice_text(prefix: str, family: Family, tasks_max: int) -> str:
         if remaining:
             parts.append(f"+{remaining} more")
         text = "\n".join(parts)
-        if len(text) <= MESSAGE_TEXT_LIMIT or not shown:
+        if len(text) <= max_text or not shown:
             return text
         shown = shown[:-1]
         remaining += 1

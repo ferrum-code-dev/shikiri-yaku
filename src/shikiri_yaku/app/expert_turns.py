@@ -27,8 +27,6 @@ from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
-    DOWNLOAD_LIMIT_BYTES,
-    MESSAGE_TEXT_LIMIT,
     ChannelRefusedError,
     ExpertError,
     Message,
@@ -66,7 +64,8 @@ _EXPERT_FAILURE_LINE_MINIMUM: Final = 48
 _EXPERT_FAILURE_OMISSION_RESERVE: Final = 32
 _REFUSED_COMMAND: Final = "The proposed command could not be shown exactly and was refused."
 _ATTACHED: Final = "Attached file (absolute path): "
-_TOO_LARGE: Final = "The file is larger than the 20 MB download limit, so it was not saved."
+_TOO_LARGE: Final = "The file is larger than the {limit} MB download limit, so it was not saved."
+_MEGABYTE: Final = 1024 * 1024
 _NOT_DOWNLOADED: Final = "The chat did not give the file, so it was not saved."
 _NOT_SAVED: Final = "The file could not be saved in this conversation's files."
 _EFFORT: Final = "/effort"
@@ -139,6 +138,8 @@ class ExpertTurns:
         directory: Path,
         channel: str,
         group_id: int,
+        max_text: int,
+        max_file_bytes: int,
         runs: ConversationRuns,
         ending: ExpertEnding,
         proposals: ExpertProposals,
@@ -162,6 +163,8 @@ class ExpertTurns:
         self._directory = directory
         self._channel = channel
         self._group_id = group_id
+        self._max_text = max_text
+        self._max_file_bytes = max_file_bytes
         self._runs = runs
         self._ending = ending
         self._proposals = proposals
@@ -221,8 +224,10 @@ class ExpertTurns:
         A file over the Bot API's limit, or one the Bot API will not give, gets a notice and no
         turn. A transient failure raises ChannelError, so the item stays pending and is tried again.
         """
-        if attached.size is not None and attached.size > DOWNLOAD_LIMIT_BYTES:
-            self._file_notice(item, conversation, _TOO_LARGE)
+        if attached.size is not None and attached.size > self._max_file_bytes:
+            self._file_notice(
+                item, conversation, _TOO_LARGE.format(limit=self._max_file_bytes // _MEGABYTE)
+            )
             return
         # keep: locked from the download to the turn's end, so a later message waits behind the file
         async with self._runs.lock(conversation.id):
@@ -388,7 +393,7 @@ class ExpertTurns:
             refused = (
                 isinstance(stored, AdminAnswer)
                 and stored.command is not None
-                and not _showable_command(stored.command, stored.reason)
+                and not _showable_command(stored.command, stored.reason, self._max_text)
             )
             refused_proposal = (
                 isinstance(stored, AdminAnswer)
@@ -489,6 +494,7 @@ class ExpertTurns:
             key=f"expert:command:{item.update_id}",
             now=self._clock.now(),
             conversation_id=conversation_id,
+            max_text=self._max_text,
         )
 
     async def resume_admin_followups(self) -> None:
@@ -554,9 +560,9 @@ def _expert_failure_reply(error: ExpertError, known_secrets: tuple[str, ...]) ->
     return text
 
 
-def _showable_command(command: str, reason: str) -> bool:
+def _showable_command(command: str, reason: str, max_text: int) -> bool:
     text = admin_message_text(command, reason)
-    return len(text) <= MESSAGE_TEXT_LIMIT and all(
+    return len(text) <= max_text and all(
         character in _DISPLAY_WHITESPACE
         or (
             category(character) not in _DISPLAY_CONTROL_CATEGORIES

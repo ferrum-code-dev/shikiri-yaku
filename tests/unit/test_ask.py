@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
@@ -63,7 +65,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.expert import ExpertRequest
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.replies import JournalReplies
-    from shikiri_yaku.ports import EscalationView, Message, ShikiruClient, Updates
+    from shikiri_yaku.ports import EscalationView, Inbox, Message, ShikiruClient
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _RETRY_LATER = "retry later"
@@ -200,7 +202,9 @@ class Harness:
             group_id=-100123,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),
-            final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
+            final=JournalFinalEdits(
+                self.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT
+            ),
         )
         clients = clients or {name: cast("ShikiruClient", Client()) for name in ("api", "web")}
         self.turns = ExpertTurns(
@@ -237,6 +241,8 @@ class Harness:
             ),
             admins=admins if turn_admins is None else turn_admins,
             known_secrets=known_secrets,
+            max_text=MESSAGE_TEXT_LIMIT,
+            max_file_bytes=DOWNLOAD_LIMIT_BYTES,
         )
         self.ask = Ask(
             self.log,
@@ -247,8 +253,11 @@ class Harness:
             turns=self.turns,
             scope={name: path / name for name in ("api", "web")},
             channel="telegram",
-            final=JournalFinalEdits(self.database, cast("JournalReplies", None)),
+            final=JournalFinalEdits(
+                self.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT
+            ),
             admins=admins,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         self.commands = Commands(
             self.outbox,
@@ -261,6 +270,7 @@ class Harness:
             name_max_chars=40,
             shared_group=shared,
             ask=self.ask,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
     def send(self, text: str = "/expert hello", thread: int | None = None) -> None:
@@ -693,7 +703,7 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
     assert asyncio.run(h.commands.tap(tap))
     assert asyncio.run(h.commands.tap(tap))
     assert len(h.topics.created) == len(h.expert.requests) == 1
-    final = JournalFinalEdits(h.database, cast("JournalReplies", None))
+    final = JournalFinalEdits(h.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT)
     [edit] = final.to_edit()
     assert edit.message_ref == tap.message_ref
     assert edit.message.buttons[0].url == "https://t.me/c/123/22"
@@ -737,7 +747,7 @@ def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
     assert asyncio.run(h.commands.tap(tap))
     assert not h.topics.created
     assert len(h.expert.requests) == 1
-    final = JournalFinalEdits(h.database, cast("JournalReplies", None))
+    final = JournalFinalEdits(h.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT)
     assert len(final.to_edit()) == 1
 
 
@@ -770,7 +780,7 @@ def test_selection_rejects_non_owner_before_delivery(tmp_path: Path) -> None:
             return Batch(2, (tap,))
 
     poller = InboundPoller(
-        cast("Updates", FakeUpdates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
+        cast("Inbox", FakeUpdates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
     )
     asyncio.run(poller.poll_once())
     assert all(item.update_id != 2 for item in inbound.pending())
@@ -989,7 +999,9 @@ def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Pa
         group_id=-100123,
         retention=timedelta(days=14),
         admin_idle=timedelta(minutes=15),
-        final=JournalFinalEdits(h.database, cast("JournalReplies", None)),
+        final=JournalFinalEdits(
+            h.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT
+        ),
     )
     asyncio.run(ending.sweep())
     admin, expert = h.log.get(1), h.log.get(2)

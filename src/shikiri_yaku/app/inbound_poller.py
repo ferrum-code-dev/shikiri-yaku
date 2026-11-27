@@ -8,19 +8,19 @@ if TYPE_CHECKING:
     from collections.abc import Collection
 
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, InboundLog, Updates
+    from shikiri_yaku.ports import Clock, InboundLog, Inbox
 
 
 class InboundPoller:
     """Poll once, retaining owners' items and advancing the offset atomically.
 
     An item is kept when an owner sent it. Anything else is dropped, and the offset still moves past
-    it. The Updates decide which chats an item may come from.
+    it. The Inbox decides which chats an item may come from.
     """
 
     def __init__(
         self,
-        updates: Updates,
+        inbox: Inbox,
         log: InboundLog,
         clock: Clock,
         *,
@@ -28,7 +28,7 @@ class InboundPoller:
         owners: Collection[int],
         wait_s: float,
     ) -> None:
-        self._updates = updates
+        self._inbox = inbox
         self._log = log
         self._clock = clock
         self._channel = channel
@@ -36,7 +36,7 @@ class InboundPoller:
         self._wait_s = wait_s
 
     async def poll_once(self) -> None:
-        batch = await self._updates.fetch(self._log.next_offset(self._channel), self._wait_s)
+        batch = await self._inbox.fetch(self._log.next_offset(self._channel), self._wait_s)
         if batch.last_update_id is None:
             return
         items = [item for item in batch.items if self._served(item)]

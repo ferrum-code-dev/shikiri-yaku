@@ -16,7 +16,6 @@ from shikiri_yaku.domain.inbound import InboundKind, is_command
 from shikiri_yaku.domain.outbound import TIME_FORMAT, Purpose, fit, refusal_notice
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     AgentOption,
     Button,
     EscalationStatus,
@@ -95,6 +94,7 @@ class Replies:
         clients: Mapping[str, ShikiruClient],
         *,
         channel: str,
+        max_text: int,
         commands: Commands,
         goal: GoalCommand,
         install_replies: InstallReplyHandler | None = None,
@@ -103,6 +103,7 @@ class Replies:
     ) -> None:
         self._log = log
         self._outbox = outbox
+        self._max_text = max_text
         self._clock = clock
         self._clients = clients
         self._channel = channel
@@ -293,7 +294,7 @@ class Replies:
             return
         head = f"S{origin.number} · Already resolved: "
         tail = f" at {recorded.at.astimezone(UTC).strftime(TIME_FORMAT)}"
-        label = fit(recorded.label, MESSAGE_TEXT_LIMIT - len(head) - len(tail))
+        label = fit(recorded.label, self._max_text - len(head) - len(tail))
         self._queue(
             origin,
             Message(f"{head}{label}{tail}"),
@@ -317,10 +318,10 @@ class Replies:
                 key=f"details:{item.update_id}:refused",
             )
             return
-        for offset in range(0, len(view.packet), MESSAGE_TEXT_LIMIT):
+        for offset in range(0, len(view.packet), self._max_text):
             self._queue(
                 origin,
-                Message(view.packet[offset : offset + MESSAGE_TEXT_LIMIT]),
+                Message(view.packet[offset : offset + self._max_text]),
                 Purpose.NOTICE,
                 key=f"details:{item.update_id}:{offset}",
             )

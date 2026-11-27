@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import TypeAdapter
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.domain.outbound import REPLACED_LINE, Purpose
 from shikiri_yaku.journal import (
@@ -89,7 +90,9 @@ class _Journal:
         self.database = Database.open(":memory:")
         self.signals = SignalStore(self.database)
         self.messages = MessageStore(self.database, _Reporter())
-        self.replacements = JournalReplacements(self.database, self.messages)
+        self.replacements = JournalReplacements(
+            self.database, self.messages, max_text=MESSAGE_TEXT_LIMIT
+        )
         self.numbers = {index: self._signal(index) for index in (1, 2)}
 
     def _signal(self, index: int) -> int:
@@ -144,7 +147,7 @@ class _Journal:
         replies = JournalReplies(
             self.database, self.signals, OpStore(self.database), channel_name="telegram"
         )
-        return JournalFinalEdits(self.database, replies).to_edit()
+        return JournalFinalEdits(self.database, replies, max_text=MESSAGE_TEXT_LIMIT).to_edit()
 
     def notices(self) -> int:
         row = self.database.connection.execute(

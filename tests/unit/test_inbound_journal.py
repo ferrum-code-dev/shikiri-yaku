@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-    from shikiri_yaku.ports import Updates
+    from shikiri_yaku.ports import Inbox
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
@@ -68,7 +68,7 @@ def journal(database: Database) -> JournalInbound:
     return JournalInbound(database)
 
 
-def _poll(updates: Updates, journal: JournalInbound) -> None:
+def _poll(updates: Inbox, journal: JournalInbound) -> None:
     poller = InboundPoller(
         updates, journal, _Clock(), channel=CHANNEL, owners=[OWNER], wait_s=WAIT_S
     )

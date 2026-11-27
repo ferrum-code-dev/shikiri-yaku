@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import TypeAdapter
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
@@ -343,6 +344,7 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
         clock,
         FixedDestinations([OWNER]),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     signal = Signal("api", Kind.PR_REVIEW, "7", "review_ready", "A review is ready.")
     asyncio.run(forwarder.forward(number, signal, "note", "", standing=True))

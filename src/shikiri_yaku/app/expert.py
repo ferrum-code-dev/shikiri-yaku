@@ -110,6 +110,7 @@ class Ask:
         turns: ExpertTurns | None,
         scope: Mapping[str, Path],
         channel: str,
+        max_text: int,
         final: FinalEdits | None = None,
         admins: frozenset[int] = frozenset(),
     ) -> None:
@@ -121,6 +122,7 @@ class Ask:
         self._turns = turns
         self._scope = scope
         self._channel = channel
+        self._max_text = max_text
         self._final = final
         self._admins = admins
 
@@ -178,6 +180,7 @@ class Ask:
                 reason,
                 key=f"expert:refusal:{item.update_id}",
                 now=self._clock.now(),
+                max_text=self._max_text,
             )
             return
         if self._topics is None or self._turns is None:

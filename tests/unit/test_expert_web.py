@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from shikiri_yaku.adapters.expert_web import ExpertWeb
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -253,7 +254,7 @@ def test_web_tap_settles_request_message_after_decision(data: str, word: str, st
     assert final["buttons"] == []
     assert "docs.example" in final["text"]
     assert word in final["text"]
-    edits = JournalFinalEdits(database, cast("object", None)).to_edit()  # type: ignore[arg-type]
+    edits = JournalFinalEdits(database, cast("object", None), max_text=MESSAGE_TEXT_LIMIT).to_edit()  # type: ignore[arg-type]
     assert [edit.message_ref for edit in edits] == ["9"]
     assert edits[0].message.text == final["text"]
     assert edits[0].message.buttons == ()
@@ -345,7 +346,7 @@ def test_web_recovery_settles_a_decision_left_without_its_edit() -> None:
     assert final["buttons"] == []
     assert "denied" in final["text"]
     assert "docs.example" in final["text"]
-    final_edits = JournalFinalEdits(database, cast("object", None))  # type: ignore[arg-type]
+    final_edits = JournalFinalEdits(database, cast("object", None), max_text=MESSAGE_TEXT_LIMIT)  # type: ignore[arg-type]
     (edit,) = final_edits.to_edit()
     final_edits.confirm_edit(edit.message_ref, edit.message)
     # keep: settling the same text again does not reopen an edit already confirmed

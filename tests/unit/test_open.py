@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -81,7 +82,16 @@ def _open(h: Harness, update: int = 700, thread: int | None = None, at: datetime
         h.clients,
         channel="telegram",
         commands=h.commands(at, TOPICS),
-        goal=goal_command(h.database, h.clients, h.outbox, Clock(at), FixedDestinations()),
+        goal=goal_command(
+            h.database,
+            h.clients,
+            h.outbox,
+            Clock(at),
+            FixedDestinations(),
+            channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
+        ),
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     asyncio.run(
         replies.handle(
@@ -189,7 +199,9 @@ def test_a_question_shown_again_by_open_replaces_the_copy_it_repeats(h: Harness)
     first, _ = _deliver(h)
     _open(h, update=701)
     _deliver(h)
-    assert JournalReplacements(h.database, h.messages).superseded() == [first]
+    assert JournalReplacements(
+        h.database, h.messages, max_text=MESSAGE_TEXT_LIMIT
+    ).superseded() == [first]
 
 
 def test_two_confirm_copies_of_one_approval_issue_one_resolve(h: Harness) -> None:
@@ -276,7 +288,7 @@ def test_an_expired_install_approval_is_not_listed(h: Harness) -> None:
 def test_a_re_shown_copy_takes_the_final_edit_like_the_original(h: Harness) -> None:
     _open(h)
     copy, _ = _deliver(h)
-    edits = JournalFinalEdits(h.database, h.log())
+    edits = JournalFinalEdits(h.database, h.log(), max_text=MESSAGE_TEXT_LIMIT)
     edits.settle(h.number, "Resolved in Shikiri: Keep existing behavior")
     assert copy in {edit.message_ref for edit in edits.to_edit()}
 

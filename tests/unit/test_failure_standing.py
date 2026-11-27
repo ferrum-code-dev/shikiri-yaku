@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.notifier import Notifier
@@ -42,7 +43,13 @@ from shikiri_yaku.journal import (
     SignalState,
     SignalStore,
 )
-from shikiri_yaku.ports import DoctorCheck, ShikiruLinkDownError, ShikiruRejectedError
+from shikiri_yaku.ports import (
+    Deleter,
+    DoctorCheck,
+    Editor,
+    ShikiruLinkDownError,
+    ShikiruRejectedError,
+)
 from shikiri_yaku.settings import (
     BUTTON_LABEL_MAX_CHARS,
     MESSAGE_TITLE_MAX_CHARS,
@@ -56,7 +63,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
 
     from shikiri_yaku.domain.outcome import Outcome
-    from shikiri_yaku.ports import Channel, Message, ShikiruClient
+    from shikiri_yaku.ports import Message, ShikiruClient
 
 PROJECT: Final = "api"
 REF: Final = "1001/77"
@@ -169,6 +176,7 @@ def _forwarder(h: Harness, clock: _Clock, clients: Mapping[str, ShikiruClient]) 
         clock,
         FixedDestinations([OWNER]),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -209,9 +217,10 @@ def _restarting(h: Harness, clock: _Clock, failure: str) -> Router:
 
 def _edit_copies(h: Harness, clock: _Clock, channel: _Channel) -> None:
     editor = CopyEditor(
-        JournalFinalEdits(h.database, h.log()),
+        JournalFinalEdits(h.database, h.log(), max_text=MESSAGE_TEXT_LIMIT),
         MessageStore(h.database, _Reporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         clock,
         interval_s=1,
     )
@@ -288,6 +297,7 @@ def test_a_failed_notice_is_information_and_closes_its_signal(h: Harness) -> Non
         clock,
         destinations=destinations,
         tasks_max=NOTICE_TASKS_MAX,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     router = Router(
         RuleClassifier([extension, product_extension()]),

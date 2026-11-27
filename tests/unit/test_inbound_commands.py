@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
@@ -106,6 +107,7 @@ class Harness:
             _Clock(),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -115,6 +117,7 @@ class Harness:
             _Clock(),
             destinations=FixedDestinations([OWNER]),
             channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         goal = goal_command(
             self.database,
@@ -123,6 +126,8 @@ class Harness:
             _Clock(),
             FixedDestinations(),
             shared_group=self.shared_group,
+            channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         commands = Commands(
             self.outbox,
@@ -134,6 +139,7 @@ class Harness:
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
             shared_group=self.shared_group,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         return Replies(
             JournalReplies(
@@ -148,6 +154,7 @@ class Harness:
             channel="telegram",
             commands=commands,
             goal=goal,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
     def send(

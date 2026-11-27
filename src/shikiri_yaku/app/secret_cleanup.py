@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.ports import Channel, Clock, SecretLog
+    from shikiri_yaku.ports import Clock, Deleter, SecretLog
 
 
 class SecretCleanup:
@@ -21,10 +21,10 @@ class SecretCleanup:
     """
 
     def __init__(
-        self, log: SecretLog, channel: Channel, clock: Clock, *, interval_s: float
+        self, log: SecretLog, deleter: Deleter, clock: Clock, *, interval_s: float
     ) -> None:
         self._log = log
-        self._channel = channel
+        self._deleter = deleter
         self._clock = clock
         self._interval_s = interval_s
 
@@ -37,7 +37,7 @@ class SecretCleanup:
         for item in self._log.to_delete():
             self._log.record_deletion(item.update_id)
             try:
-                await self._channel.delete(item.message_ref)
+                await self._deleter.delete(item.message_ref)
             except ChannelRefusedError:
                 continue
             except ChannelError:

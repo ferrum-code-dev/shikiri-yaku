@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.app.expert import OPEN_REPLY
 from shikiri_yaku.app.expert_ending import ExpertEnding
 from shikiri_yaku.app.expert_runs import ConversationRuns, conversation_directory
@@ -37,6 +39,7 @@ from shikiri_yaku.ports import (
     Expert,
     Message,
     PlaceGoneError,
+    Sender,
     ShikiruTask,
 )
 from tests.support.attachments import FakeDownloads
@@ -49,7 +52,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.domain.expert import ExpertRequest
-    from shikiri_yaku.ports import Channel, EscalationView, ShikiruClient
+    from shikiri_yaku.ports import EscalationView, ShikiruClient
 
 OWNER: Final = 1001
 CHAT: Final = -100123
@@ -189,7 +192,7 @@ class Harness:
         replies = JournalReplies(
             self.database, SignalStore(self.database), OpStore(self.database), channel_name=CHANNEL
         )
-        self.final = JournalFinalEdits(self.database, replies)
+        self.final = JournalFinalEdits(self.database, replies, max_text=MESSAGE_TEXT_LIMIT)
         self.ending = ExpertEnding(
             self.log,
             self.runs,
@@ -236,6 +239,8 @@ class Harness:
                 group_id=GROUP_ID,
                 outbox_interval_s=1,
             ),
+            max_text=MESSAGE_TEXT_LIMIT,
+            max_file_bytes=DOWNLOAD_LIMIT_BYTES,
         )
 
     def open_conversation(self, update_id: int, thread: int, *, origin_chat: int = CHAT) -> int:
@@ -332,7 +337,7 @@ async def _topic_gone_on_send(h: Harness, conversation: int, thread: int) -> Non
     )
     sender = OutboxSender(
         h.outbox,
-        cast("Channel", RefusingChannel(PlaceGoneError(PLACE_GONE_REASON))),
+        cast("Sender", RefusingChannel(PlaceGoneError(PLACE_GONE_REASON))),
         h.clock,
         interval_s=1,
         gone=h.ending,
@@ -549,7 +554,7 @@ def test_a_gone_command_reply_ends_only_its_expert_topic(build: Callable[..., Ha
 
     sender = OutboxSender(
         h.outbox,
-        cast("Channel", RefusingThreadChannel(TARGET_THREAD)),
+        cast("Sender", RefusingThreadChannel(TARGET_THREAD)),
         h.clock,
         interval_s=1,
         gone=h.ending,

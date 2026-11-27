@@ -15,7 +15,7 @@
 
 ### F7
 
-- [ ] F7. Bundle the channel and inject its limits, after F6.
+- [x] F7. Bundle the channel and inject its limits, after F6.
 
 ## Acceptance criteria
 - Each consumer takes only the part it uses.

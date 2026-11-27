@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Final
 from shikiri_yaku.domain.callback import stop_reminders_data
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, fit
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     AgentOption,
     Button,
     Message,
@@ -75,6 +74,7 @@ def escalation_message(
     note: str,
     suggestion: str,
     label_max_chars: int,
+    max_text: int,
 ) -> Message:
     choices = _choices(view, label_max_chars)
     buttons = tuple(
@@ -88,10 +88,10 @@ def escalation_message(
         _hint(signal, view),
     )
     message = Message(text, buttons, heading)
-    if len(message.shown()) <= MESSAGE_TEXT_LIMIT:
+    if len(message.shown()) <= max_text:
         return message
     details = Button(DETAILS_LABEL, f"{Tap.DETAILS}:{number}")
-    return Message(fit(text, text_room(heading)), (*buttons, details), heading)
+    return Message(fit(text, text_room(heading, max_text)), (*buttons, details), heading)
 
 
 def information_message(
@@ -103,6 +103,7 @@ def information_message(
     note: str,
     suggestion: str,
     standing: bool,
+    max_text: int,
 ) -> Message:
     """Return a message about a signal without a question; only a standing one has a button.
 
@@ -111,7 +112,7 @@ def information_message(
     heading = _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION)
     text = join_blocks(signal.text, _notes(note, suggestion))
     buttons = (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),) if standing else ()
-    return Message(fit(text, text_room(heading)), buttons, heading)
+    return Message(fit(text, text_room(heading, max_text)), buttons, heading)
 
 
 def _hint(signal: Signal, view: EscalationView) -> str:

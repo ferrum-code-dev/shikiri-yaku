@@ -28,12 +28,13 @@ from shikiri_yaku.adapters.install_files import InstanceInstallFiles
 from shikiri_yaku.adapters.shikiru_mcp import ShikiruMcpClient, probe_link, stdio_connector
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import (
+    MESSAGE_TEXT_LIMIT,
     TELEGRAM_CHANNEL,
     TelegramChannel,
     TelegramChannelCheck,
     TelegramForumTopics,
 )
-from shikiri_yaku.adapters.telegram_files import TelegramFiles
+from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES, TelegramFiles
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_topics import (
     TelegramDestinations,
@@ -130,7 +131,7 @@ from shikiri_yaku.journal.stats import JournalStats
 from shikiri_yaku.journal.submits import JournalSubmits
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.journal.web import JournalWeb
-from shikiri_yaku.ports import CompositionError
+from shikiri_yaku.ports import Channel, CompositionError
 from shikiri_yaku.settings import (
     ADMIN_APPROVAL_EXPIRY_MIN,
     SHIKIRU_EXECUTABLE,
@@ -152,7 +153,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         AdminCommandRunner,
-        Channel,
         ChannelCheck,
         Clock,
         CommandRunner,
@@ -224,6 +224,59 @@ def http_bot(settings: Settings) -> BotApi:
     return HttpBotApi(settings.telegram.token_file, settings.operator.telegram_call_timeout_s)
 
 
+def build_channel(
+    settings: Settings, journal: Database, clock: Clock, bot: BotFactory
+) -> tuple[Channel, TelegramForumTopics | None]:
+    """Build the instance's chat channel from its `[channels.telegram]` section.
+
+    The Expert topic operations come with it, until the channel carries its own rooms; they are
+    None without a group.
+    """
+    telegram = settings.telegram
+    group_id = telegram.group_id
+    bot_api = bot(settings)
+    # keep: the factory builds HttpBotApi, which also uploads and downloads; tests may pass less
+    files_api = cast("FileApi", bot_api)
+    topics = TopicStore(journal)
+    reconciler = (
+        None
+        if group_id is None
+        else TopicReconciler(
+            topics,
+            TelegramForumTopics(bot_api, group_id),
+            [component.name for component in settings.components],
+            product=settings.product,
+        )
+    )
+    sending = TelegramChannel(files_api, clock)
+    channel = Channel(
+        name=TELEGRAM_CHANNEL,
+        inbox=TelegramUpdates(bot_api, group_id=group_id),
+        sender=sending,
+        editor=sending,
+        deleter=sending,
+        downloads=TelegramFiles(files_api),
+        places=TelegramDestinations(
+            topics, owners=telegram.owners, group_id=group_id, reconciler=reconciler
+        ),
+        check=TelegramChannelCheck(
+            bot_api,
+            telegram.token_file,
+            group_id,
+            telegram.owners,
+            allow_other_members=telegram.allow_other_members,
+            shared_group=telegram.shared_group,
+            delete_right=settings.expert is not None,
+        ),
+        owners=frozenset(telegram.owners),
+        max_text=MESSAGE_TEXT_LIMIT,
+        max_file_bytes=DOWNLOAD_LIMIT_BYTES,
+        secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+    )
+    expert_topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
+    return channel, expert_topics
+
+
 def compose(  # noqa: PLR0915 -- composition wires each job
     settings: Settings,
     directory: Path,
@@ -285,24 +338,9 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     outbox = JournalOutbox(
         journal, MessageStore(journal, reporter), ending_prefixes=ENDING_NOTICE_PREFIXES
     )
-    bot_api = bot(settings)
-    # keep: the factory builds HttpBotApi, which also uploads and downloads; tests may pass less
-    files_api = cast("FileApi", bot_api)
-    topics = TopicStore(journal)
+    channel, expert_topics = build_channel(settings, journal, clock, bot)
+    destinations = channel.places
     group_id = settings.telegram.group_id
-    reconciler = (
-        None
-        if group_id is None
-        else TopicReconciler(
-            topics,
-            TelegramForumTopics(bot_api, group_id),
-            [component.name for component in settings.components],
-            product=settings.product,
-        )
-    )
-    destinations = TelegramDestinations(
-        topics, owners=settings.telegram.owners, group_id=group_id, reconciler=reconciler
-    )
     guard = LoopGuard(
         JournalActions(OpStore(journal)),
         clock,
@@ -340,6 +378,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         outbox=outbox,
         destinations=destinations,
         notice_tasks_max=settings.handlers.notice.tasks_max,
+        max_text=channel.max_text,
     )
     # keep: copies of an older journal are marked before any signal is routed or any copy is sent
     Repairs(journal).adopt_legacy_standing(
@@ -354,6 +393,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         clock,
         destinations,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
+        max_text=channel.max_text,
     )
     host_lock = FileHostLock(
         directory.parent / HOST_LOCK_FILE_NAME, clock, infrastructure.host_lock_poll_s
@@ -375,7 +415,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     conversations = Conversations(journal)
     admins = frozenset(() if settings.admin is None else settings.admin.admins)
     access = AdminAccess(conversations, clock, admins=admins)
-    topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
+    topics = expert_topics
     runs = ConversationRuns()
     ending: ExpertEnding | None = None
     proposals: ExpertProposals | None = None
@@ -393,16 +433,18 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             outbox,
             clock,
             directory=directory,
-            channel=TELEGRAM_CHANNEL,
+            channel=channel.name,
             group_id=group_id,
             retention=timedelta(days=settings.expert.retention_days),
             admin_idle=timedelta(minutes=settings.admin_idle_min),
-            final=JournalFinalEdits(journal, _journal_replies(journal)),
+            final=JournalFinalEdits(
+                journal, _journal_replies(journal, channel.name), max_text=channel.max_text
+            ),
         )
         admin_executor = None
         if settings.admin is not None:
             admin_executor = AdminExecutor(
-                JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+                JournalProposals(journal, OpStore(journal), channel_name=channel.name),
                 conversations,
                 cast("AdminCommandRunner", commands),
                 host_lock,
@@ -412,22 +454,26 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 shell=install_shell,
                 timeout_s=settings.admin.command_timeout_s,
                 max_bytes=settings.admin.output_max_bytes,
-                secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
-                channel=TELEGRAM_CHANNEL,
+                secrets=channel.secrets,
+                channel=channel.name,
+                max_text=channel.max_text,
                 group_id=group_id,
             )
         proposals = ExpertProposals(
-            JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+            JournalProposals(journal, OpStore(journal), channel_name=channel.name),
             conversations,
             Submitter(
-                JournalSubmits(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+                JournalSubmits(journal, OpStore(journal), channel_name=channel.name),
                 clients,
                 clock,
             ),
-            JournalFinalEdits(journal, _journal_replies(journal)),
+            JournalFinalEdits(
+                journal, _journal_replies(journal, channel.name), max_text=channel.max_text
+            ),
             outbox,
             clock,
-            channel=TELEGRAM_CHANNEL,
+            channel=channel.name,
+            max_text=channel.max_text,
             group_id=group_id,
             access=access,
             approval_expiry_min=(
@@ -443,9 +489,9 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             outbox,
             clock,
             directory=directory,
-            channel=TELEGRAM_CHANNEL,
+            channel=channel.name,
             group_id=group_id,
-            known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+            known_secrets=channel.secrets,
             outbox_interval_s=settings.operator.outbox_interval_s,
         )
         turns = ExpertTurns(
@@ -457,21 +503,23 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             clients=clients,
             scope={component.name: component.path for component in settings.components},
             directory=directory,
-            channel=TELEGRAM_CHANNEL,
+            channel=channel.name,
             group_id=group_id,
+            max_text=channel.max_text,
+            max_file_bytes=channel.max_file_bytes,
             runs=runs,
             ending=ending,
             proposals=proposals,
-            downloads=TelegramFiles(files_api),
+            downloads=channel.downloads,
             sketches=sketches,
             admins=admins,
-            known_secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+            known_secrets=channel.secrets,
             admin_executor=admin_executor,
             web=ExpertWebRequests(
                 JournalWeb(journal),
                 outbox,
                 clock,
-                channel=TELEGRAM_CHANNEL,
+                channel=channel.name,
                 group_id=group_id,
                 access=access,
             ),
@@ -484,8 +532,11 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         topics=topics,
         turns=turns,
         scope={component.name: component.path for component in settings.components},
-        channel=TELEGRAM_CHANNEL,
-        final=JournalFinalEdits(journal, _journal_replies(journal)),
+        channel=channel.name,
+        max_text=channel.max_text,
+        final=JournalFinalEdits(
+            journal, _journal_replies(journal, channel.name), max_text=channel.max_text
+        ),
         admins=admins,
     )
     assess = None if reasoning is None else reasoning.assessor.assess
@@ -501,7 +552,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         standing_on_failure=failure_policy(extensions),
         expiry=ending,
     )
-    channel = TelegramChannel(files_api, clock)
     jobs.append(outbox_job(settings, outbox, clock, channel, gone=ending))
     goal = goal_command(
         journal,
@@ -509,6 +559,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         outbox,
         clock,
         destinations,
+        channel=channel.name,
+        max_text=channel.max_text,
         shared_group=settings.telegram.shared_group,
     )
     inbound = inbound_job(
@@ -519,7 +571,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         clients=clients,
         reshower=forwarder,
         forwarder=forwarder,
-        bot_api=bot_api,
+        channel=channel,
         goal=goal,
         destinations=destinations,
         install_runner=install_executor,
@@ -559,11 +611,11 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
         recover_admin(
-            JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+            JournalProposals(journal, OpStore(journal), channel_name=channel.name),
             conversations,
             clock,
             outbox,
-            channel_name=TELEGRAM_CHANNEL,
+            channel_name=channel.name,
             group_id=group_id,
         )
         if turns is not None:
@@ -576,15 +628,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         clock=clock,
         journal=journal,
         link_probes=probes,
-        channel_check=TelegramChannelCheck(
-            bot_api,
-            settings.telegram.token_file,
-            settings.telegram.group_id,
-            settings.telegram.owners,
-            allow_other_members=settings.telegram.allow_other_members,
-            shared_group=settings.telegram.shared_group,
-            delete_right=settings.expert is not None,
-        ),
+        channel_check=channel.check,
         rung_probes=rung_probes,
         expert_probes={rung.name: rung.probe for rung in expert_rungs},
         expert=expert,
@@ -750,6 +794,7 @@ def registered_extensions(
     outbox: Outbox,
     destinations: Destinations,
     notice_tasks_max: int,
+    max_text: int,
 ) -> list[Extension]:
     """Return the extensions of this build, in classification order; the catch-all comes last."""
     install = InstallAction(
@@ -776,7 +821,13 @@ def registered_extensions(
         restart_poll=restart_poll,
     )
     review = review_extension(
-        clients, numbers, outbox, clock, product=product, destinations=destinations
+        clients,
+        numbers,
+        outbox,
+        clock,
+        product=product,
+        destinations=destinations,
+        max_text=max_text,
     )
     notice = notice_extension(
         clients,
@@ -786,6 +837,7 @@ def registered_extensions(
         clock,
         destinations=destinations,
         tasks_max=notice_tasks_max,
+        max_text=max_text,
     )
     return [infrastructure, review, notice, product_extension()]
 
@@ -919,7 +971,7 @@ def outbox_job(
 ) -> Job:
     """Return the one sender of the outbox; it delivers questions, notices and reminders alike."""
     sender = OutboxSender(
-        outbox, channel, clock, interval_s=settings.operator.outbox_interval_s, gone=gone
+        outbox, channel.sender, clock, interval_s=settings.operator.outbox_interval_s, gone=gone
     )
     return sender.run
 
@@ -933,7 +985,7 @@ def inbound_job(
     clients: Mapping[str, ShikiruClient],
     reshower: Reshower,
     forwarder: Forwarder,
-    bot_api: BotApi,
+    channel: Channel,
     goal: GoalCommand,
     destinations: Destinations,
     install_runner: InstallRunner,
@@ -946,11 +998,11 @@ def inbound_job(
     signals = SignalStore(journal)
     log = JournalInbound(journal)
     poller = InboundPoller(
-        TelegramUpdates(bot_api, group_id=settings.telegram.group_id),
+        channel.inbox,
         log,
         clock,
-        channel=TELEGRAM_CHANNEL,
-        owners=settings.telegram.owners,
+        channel=channel.name,
+        owners=channel.owners,
         wait_s=operator.telegram_poll_wait_s,
     )
     sources = JournalSources(CursorStore(journal, signals), signals)
@@ -962,7 +1014,8 @@ def inbound_job(
         outbox,
         clock,
         destinations=destinations,
-        channel=TELEGRAM_CHANNEL,
+        channel=channel.name,
+        max_text=channel.max_text,
         install_approval=InstallApprovalPresenter(),
         approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
     )
@@ -979,17 +1032,19 @@ def inbound_job(
         opened,
         goal,
         destinations=destinations,
-        channel=TELEGRAM_CHANNEL,
+        channel=channel.name,
+        max_text=channel.max_text,
         name_max_chars=operator.command_name_max_chars,
         shared_group=settings.telegram.shared_group,
         ask=ask,
     )
     replies = Replies(
-        JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+        JournalReplies(journal, signals, OpStore(journal), channel_name=channel.name),
         outbox,
         clock,
         clients,
-        channel=TELEGRAM_CHANNEL,
+        channel=channel.name,
+        max_text=channel.max_text,
         commands=commands,
         goal=goal,
         install_replies=InstallApprovalReplies(
@@ -1018,9 +1073,9 @@ def inbound_job(
     return service.run
 
 
-def _journal_replies(journal: Database) -> JournalReplies:
+def _journal_replies(journal: Database, channel_name: str) -> JournalReplies:
     return JournalReplies(
-        journal, SignalStore(journal), OpStore(journal), channel_name=TELEGRAM_CHANNEL
+        journal, SignalStore(journal), OpStore(journal), channel_name=channel_name
     )
 
 
@@ -1031,15 +1086,15 @@ def goal_command(
     clock: Clock,
     destinations: Destinations,
     *,
+    channel: str,
+    max_text: int,
     shared_group: bool = False,
 ) -> GoalCommand:
     """Return the /submit command, which journals its submits and replies."""
     submitter = Submitter(
-        JournalSubmits(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL), clients, clock
+        JournalSubmits(journal, OpStore(journal), channel_name=channel), clients, clock
     )
-    replies = JournalReplies(
-        journal, SignalStore(journal), OpStore(journal), channel_name=TELEGRAM_CHANNEL
-    )
+    replies = JournalReplies(journal, SignalStore(journal), OpStore(journal), channel_name=channel)
     return GoalCommand(
         submitter,
         replies,
@@ -1047,7 +1102,8 @@ def goal_command(
         outbox,
         clock,
         destinations=destinations,
-        channel=TELEGRAM_CHANNEL,
+        channel=channel,
+        max_text=max_text,
         shared_group=shared_group,
     )
 
@@ -1057,7 +1113,10 @@ def secret_cleanup_job(
 ) -> Job:
     """Return the job that deletes the PO's messages which carried a secret."""
     cleanup = SecretCleanup(
-        JournalInbound(journal), channel, clock, interval_s=settings.operator.inbound_interval_s
+        JournalInbound(journal),
+        channel.deleter,
+        clock,
+        interval_s=settings.operator.inbound_interval_s,
     )
     return cleanup.run
 
@@ -1067,11 +1126,17 @@ def copy_edit_job(
 ) -> Job:
     """Return the job that removes the buttons from every copy of a resolved question."""
     signals = SignalStore(journal)
-    replies = JournalReplies(journal, signals, OpStore(journal), channel_name=TELEGRAM_CHANNEL)
+    replies = JournalReplies(journal, signals, OpStore(journal), channel_name=channel.name)
     editor = CopyEditor(
-        JournalFinalEdits(journal, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        JournalFinalEdits(
+            journal,
+            replies,
+            max_text=channel.max_text,
+            ending_prefixes=ENDING_NOTICE_PREFIXES,
+        ),
         copies,
-        channel,
+        channel.editor,
+        channel.deleter,
         clock,
         interval_s=settings.operator.inbound_interval_s,
     )
@@ -1100,8 +1165,8 @@ def replacement_job(
 ) -> Job:
     """Return the job that deletes the copies a newer copy of the same slot has replaced."""
     replacer = CopyReplacer(
-        JournalReplacements(journal, messages),
-        channel,
+        JournalReplacements(journal, messages, max_text=channel.max_text),
+        channel.deleter,
         clock,
         interval_s=settings.operator.inbound_interval_s,
     )

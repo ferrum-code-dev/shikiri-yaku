@@ -12,21 +12,15 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import (
     BUTTON_DATA_TOO_LONG,
+    CALLBACK_DATA_LIMIT,
+    MESSAGE_TEXT_LIMIT,
     PHOTO_UNREADABLE,
     PLATFORM_REFUSED,
     TEXT_TOO_LONG,
     TelegramChannel,
 )
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.ports import (
-    BLOCK_SEPARATOR,
-    CALLBACK_DATA_LIMIT,
-    MESSAGE_TEXT_LIMIT,
-    Button,
-    ChannelError,
-    ChannelRefusedError,
-    Message,
-)
+from shikiri_yaku.ports import BLOCK_SEPARATOR, Button, ChannelError, ChannelRefusedError, Message
 from tests.support.attachments import PNG
 
 if TYPE_CHECKING:

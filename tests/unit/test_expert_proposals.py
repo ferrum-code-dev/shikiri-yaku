@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_files import TaskFiles
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
@@ -34,7 +35,6 @@ from shikiri_yaku.journal.proposals import JournalProposals
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     Ack,
     AckStatus,
     AdminCommandResult,
@@ -160,7 +160,7 @@ class FlakyFinal(JournalFinalEdits):
         replies = JournalReplies(
             database, SignalStore(database), OpStore(database), channel_name=CHANNEL
         )
-        super().__init__(database, replies)
+        super().__init__(database, replies, max_text=MESSAGE_TEXT_LIMIT)
         self.failures = 0
 
     def settle_notice(
@@ -1347,6 +1347,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
             secrets=(),
             channel=CHANNEL,
             group_id=CHAT,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         turns: list[tuple[int, int]] = []
 
@@ -1442,6 +1443,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
         secrets=(),
         channel=CHANNEL,
         group_id=CHAT,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     asyncio.run(executor.execute(op, run))
     assert len(turns) == 1
@@ -1694,6 +1696,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
             secrets=("SECRET",),
             channel=CHANNEL,
             group_id=CHAT,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         turns: list[int] = []
 

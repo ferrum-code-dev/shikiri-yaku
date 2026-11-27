@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX, decline_data, install_data
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -71,7 +72,7 @@ def _assert_selection_opens_once(path: Path, *, admin: bool) -> None:
     assert len(h.topics.created) == len(h.expert.requests) == 1
     [asked] = h.expert.requests
     assert asked.admin is admin
-    final = JournalFinalEdits(h.database, cast("JournalReplies", None))
+    final = JournalFinalEdits(h.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT)
     edits = {edit.message_ref: edit.message for edit in final.to_edit()}
     assert edits[OFFER_REF].buttons[0].url == "https://t.me/c/123/22"
 

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.dispatcher import Dispatcher
 from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.reconciler import RETRY_AGAIN_NOTE, ResolveReconciler
@@ -163,6 +164,7 @@ class World:
             self.clock,
             destinations,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         self.reshower = Reshower(forwarder)
         self.fallback = Fallback(forwarder)
