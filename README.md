@@ -140,7 +140,8 @@ was sent.
 | `/expert <question>` | Opens an Expert conversation and answers the question. |
 | `/admin <question>` | Opens an admin conversation, for admins listed in `[admin]`. The chat is not private. |
 
-A component chat identifies the component, so write `/submit <request>` there:
+In a Telegram forum group, each component has its own topic. Write `/submit <request>` in that
+component's topic to scope it:
 
 ```text
 /submit api Add CSV export to the reports page
@@ -152,11 +153,13 @@ may have been accepted. Details are in [Request outcomes](docs/reference.md#requ
 
 ### `/expert`
 
-- **Scope:** in a component chat, the Expert sees that component. In General, it sees all components.
+- **Scope:** in a Telegram component topic, the Expert sees that component. In General, it sees all
+  components.
 - **Shared groups:** an unaddressed `/expert` in General gets a button from each Expert. Tap one, or
   write `/expert@bot <question>`.
-- **Expert conversation:** each message in its chat is a follow-up turn. `/effort [level]`, `/summarize` and
-  `/help` work there. `/close` ends the conversation.
+- **Expert conversation:** in Telegram, each conversation has its own topic; each message there is
+  a follow-up turn. `/effort [level]`, `/summarize` and `/help` work there. `/close` or closing the
+  topic in Telegram ends the conversation.
 - **Files:** a photo or document sent in an Expert conversation is a turn. Its caption, if any, comes with
   the file's absolute path, which the Expert reads. The Expert names in each task only the files that
   task needs. Files over 20 MB, the Bot API's download limit, are not saved and get a notice. A caption with a secret is refused, and its file is not

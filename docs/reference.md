@@ -96,8 +96,9 @@ Replace the placeholders with model and effort values that the installed CLI acc
 The optional Expert ladder accepts `adapter:model[:effort]` entries for `claude`, `codex` and `muse`, as the
 Reasoner does.
 `doctor` probes each configured Expert CLI with its version flag. `/expert <question>` requires a
-Telegram forum group and opens a conversation, scoped to the component chat or all components in General. In a
-shared group, each configured Expert replies to an unaddressed General request with its own
+Telegram forum group and opens a new topic for the conversation, scoped to the component topic or
+all components in General. In a shared group, each configured Expert replies to an unaddressed
+General request with its own
 selection button; tap it to open that Expert’s conversation. You can also address a bot directly as
 `/expert@bot <question>`. The **Open conversation** button replies to its `/expert`, so concurrent requests
 keep their own buttons. An uncertain conversation creation is not
@@ -110,13 +111,14 @@ from the next turn;
 `/summarize` asks for a short summary; `/help` lists the commands. Other commands do not work in
 an Expert conversation, and the Expert commands do not work elsewhere.
 
-A conversation ends in four ways: `/close` in its chat, closing its room in Telegram, `retention_days`
-after its last message (the Clock counts the days, and each message from the PO restarts them), or a
-room that Telegram reports gone when a message is sent there. An ending deletes the room and the
-conversation's rows and directory under `conversations/`; the other conversations are not touched.
-If Telegram refuses the room deletion, the conversation stays and its ending is tried again on each
-tick; the PO is told once, in the General chat. An ending needs the bot's `can_delete_messages`
-right in the group, checked at start-up when `[expert]` is set.
+A conversation ends in four ways: `/close` in its Telegram topic, closing that topic in Telegram,
+`retention_days` after its last message (the Clock counts the days, and each message from the PO
+restarts them), or Telegram reporting that topic gone when a message is sent there. An ending
+deletes the Telegram topic and the conversation's rows and directory under `conversations/`; the
+other conversations are not touched. If Telegram refuses to delete the topic, the conversation
+stays and its ending is tried again on each tick; the PO is told once, in the General topic. An
+ending needs the bot's `can_delete_messages` right in the group, checked at start-up when `[expert]`
+is set.
 
 The defaults are `timeout_s = 120` per rung, `sketch_timeout_s = 300` for the Codex run that draws a
 sketch (`timeout_s` limits turns only), `cooldown_min = 5`, `max_parallel = 2`,
@@ -347,8 +349,9 @@ Shared group: upgrade every instance first, then update each bot's menu, in one 
 
 ### `/expert`
 
-- **Scope:** `/expert` opens an Expert conversation. In a component chat the Expert sees only that component;
-  in General it sees all components. Telegram needs a forum group for conversations.
+- **Scope:** `/expert` opens an Expert conversation in a Telegram topic. In a component topic the
+  Expert sees only that component; in General it sees all components. Telegram needs a forum group
+  for conversations.
 - **Shared groups:** in a shared group, an unaddressed `/expert` in General gets one selection button per
   configured Expert. Tap a button, or address a bot directly as `/expert@bot <question>`. The **Open
   conversation** button replies to its `/expert`, so concurrent questions keep their own buttons.
@@ -363,7 +366,8 @@ Shared group: upgrade every instance first, then update each bot's menu, in one 
 ### `/submit`
 
 The request goes to Shikiru as written. It is not split across components or rewritten into a plan.
-A component chat identifies the component, so write `/submit <request>` there:
+In a Telegram forum group, each component has its own topic. Write `/submit <request>` in that
+component's topic to scope it:
 
 ```text
 /submit api Add CSV export to the reports page

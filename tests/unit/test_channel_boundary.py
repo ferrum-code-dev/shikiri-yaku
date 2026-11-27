@@ -142,7 +142,7 @@ def test_core_channel_vocabulary_is_platform_neutral() -> None:
             path
             for layer in ("app", "domain", "extensions")
             for path in sorted((root / layer).rglob("*"))
-            if path.is_file() and path.suffix == ".py"
+            if path.is_file() and "__pycache__" not in path.parts
         ),
         root / "ports.py",
     ]
