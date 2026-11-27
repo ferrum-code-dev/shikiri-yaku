@@ -14,16 +14,16 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         EscalationView,
         Message,
         Outbox,
+        Places,
         ShikiruClient,
     )
 
 
 class ProductForwarder:
-    """The Router's Forwarder: queues the message of a forwarded signal for each destination.
+    """The Router's Forwarder: queues the message of a forwarded signal for each place.
 
     A signal with an escalation is shown as its structured view. A signal without one, or whose
     escalation Shikiru no longer returns, is shown as information; a standing message keeps its Stop
@@ -38,7 +38,7 @@ class ProductForwarder:
         clients: Mapping[str, ShikiruClient],
         outbox: Outbox,
         clock: Clock,
-        destinations: Destinations,
+        places: Places,
         *,
         button_label_max_chars: int,
         max_text: int,
@@ -49,7 +49,7 @@ class ProductForwarder:
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
-        self._destinations = destinations
+        self._places = places
 
     async def forward(
         self,
@@ -123,8 +123,8 @@ class ProductForwarder:
     ) -> None:
         now = self._clock.now()
         # keep: a handler may run twice for one signal, and the key makes the second queue nothing
-        for destination in self._destinations.for_signal(signal.project, signal.kind):
-            in_topic = self._destinations.component_of(destination.thread) == signal.project
+        for place in self._places.for_signal(signal.project, signal.kind):
+            in_topic = self._places.component_of(place) == signal.project
             purpose, message = self._render(
                 number,
                 signal,
@@ -142,7 +142,7 @@ class ProductForwarder:
             self._outbox.queue(
                 number,
                 purpose,
-                [destination],
+                [place],
                 message,
                 key=key,
                 now=now,

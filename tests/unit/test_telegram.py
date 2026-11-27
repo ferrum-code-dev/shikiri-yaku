@@ -18,8 +18,9 @@ from shikiri_yaku.adapters.telegram import (
     PLATFORM_REFUSED,
     TEXT_TOO_LONG,
     TelegramChannel,
+    telegram_place,
 )
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.ports import BLOCK_SEPARATOR, Button, ChannelError, ChannelRefusedError, Message
 from tests.support.attachments import PNG
 
@@ -71,7 +72,7 @@ class _Clock:
 
 
 def _send(api: _Api, clock: _Clock, message: Message = MESSAGE) -> str:
-    return asyncio.run(TelegramChannel(api, clock).send(Destination("telegram", "1001"), message))
+    return asyncio.run(TelegramChannel(api, clock).send(Place("telegram", "1001"), message))
 
 
 def test_a_photo_is_uploaded_with_its_text_as_the_caption(tmp_path: Path) -> None:
@@ -168,10 +169,10 @@ def test_a_message_takes_buttons_or_a_reply_box_but_not_both() -> None:
         Message("S1 · Which way?", (Button("1", "a:1:1"),), expects_reply=True)
 
 
-def test_send_posts_a_topic_thread_when_the_destination_has_one() -> None:
+def test_send_posts_a_topic_thread_when_the_place_has_one() -> None:
     api = _Api([_recorded("send_ok.json")])
 
-    asyncio.run(TelegramChannel(api, _Clock()).send(Destination("telegram", "-1009", 73), MESSAGE))
+    asyncio.run(TelegramChannel(api, _Clock()).send(telegram_place(-1009, 73), MESSAGE))
 
     assert api.calls[0][1]["chat_id"] == "-1009"
     assert api.calls[0][1]["message_thread_id"] == 73
@@ -218,7 +219,7 @@ def test_a_question_is_sent_and_then_edited_with_its_text_escaped_and_its_headin
     api = _Api([_recorded("send_ok.json"), _recorded("edit_ok.json")])
     channel = TelegramChannel(api, _Clock())
 
-    ref = asyncio.run(channel.send(Destination("telegram", "1001"), question))
+    ref = asyncio.run(channel.send(Place("telegram", "1001"), question))
     asyncio.run(channel.edit(ref, Message("Answered: <b> & more", heading="Q & <A>")))
 
     escaped_heading = "<b>Q &amp; &lt;A&gt;</b>"

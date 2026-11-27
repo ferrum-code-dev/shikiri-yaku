@@ -52,7 +52,7 @@
 
 ### F10
 
-- [ ] F10. One opaque place, after F9.
+- [x] F10. One opaque place, after F9.
 
 ## Acceptance criteria
 - No module of `app`, `domain`, `extensions` or `ports` reads, splits or builds a place id.

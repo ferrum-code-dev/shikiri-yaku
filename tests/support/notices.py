@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.app.notifier import Notifier
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal import JournalOutbox, MessageStore
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from shikiri_yaku.journal import Database
     from shikiri_yaku.ports import Clock
 
-WHERE = Destination("telegram", "100", 7)
+WHERE = telegram_place(100, 7)
 
 
 class FailingReporter:
@@ -28,4 +28,4 @@ def journal_outbox(database: Database) -> JournalOutbox:
 
 
 def journal_notifier(outbox: JournalOutbox, clock: Clock) -> Notifier:
-    return Notifier(outbox, FixedDestinations([WHERE]), clock)
+    return Notifier(outbox, FixedPlaces([WHERE]), clock)

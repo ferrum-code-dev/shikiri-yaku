@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
 from shikiri_yaku.app.replies import Replies
@@ -14,7 +14,7 @@ from shikiri_yaku.app.status import Status
 from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
@@ -33,7 +33,7 @@ from shikiri_yaku.settings import (
     COMMAND_NAME_MAX_CHARS,
     MESSAGE_TITLE_MAX_CHARS,
 )
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.support.rooms import FakeSharedChat
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import EscalationView, ShikiruClient, ShikiruTask
 
 NOW = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
-OWNER = Destination("telegram", "1001")
+OWNER = Place("telegram", "1001")
 COMMANDS = ("/status", "/details", "/pending", "/submit", "/help")
 NOTHING = "Nothing is waiting for you."
 DONE = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
@@ -106,7 +106,7 @@ class Harness:
             self.clients,
             self.outbox,
             _Clock(),
-            FixedDestinations([OWNER]),
+            FixedPlaces([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -116,8 +116,7 @@ class Harness:
             reshower,
             self.outbox,
             _Clock(),
-            destinations=FixedDestinations([OWNER]),
-            channel="telegram",
+            places=FixedPlaces([OWNER]),
             max_text=MESSAGE_TEXT_LIMIT,
         )
         goal = goal_command(
@@ -125,7 +124,7 @@ class Harness:
             self.clients,
             self.outbox,
             _Clock(),
-            FixedDestinations(),
+            FixedPlaces(),
             shared_group=self.shared_group,
             channel="telegram",
             max_text=MESSAGE_TEXT_LIMIT,
@@ -136,8 +135,7 @@ class Harness:
             Status(self.clients, sources, _Clock(), JournalOpen(self.database, self.signals)),
             opened,
             goal,
-            destinations=FixedDestinations([OWNER], topics=TOPICS),
-            channel="telegram",
+            places=FixedPlaces([OWNER], topics=TOPICS),
             name_max_chars=COMMAND_NAME_MAX_CHARS,
             shared=FakeSharedChat() if self.shared_group else None,
             max_text=MESSAGE_TEXT_LIMIT,
@@ -171,11 +169,10 @@ class Harness:
             key=str(update),
             kind=kind,
             sender="1001",
-            chat=1001,
+            place=telegram_place(1001, thread),
             message_ref="1001/90",
             reply_to_ref=reply_to,
             text=text,
-            thread=thread,
         )
         asyncio.run(self.replies().handle(item))
 
@@ -187,7 +184,7 @@ class Harness:
                     key=str(update),
                     kind=InboundKind.TAP,
                     sender="1001",
-                    chat=1001,
+                    place=telegram_place(1001),
                     message_ref=ref,
                     data=data,
                 )
@@ -213,7 +210,7 @@ def test_status_is_answered_once_in_the_senders_chat_with_no_signal(h: Harness) 
     h.send("/status")
 
     [pending] = h.outbox.pending()
-    assert pending.destination == OWNER
+    assert pending.place == OWNER
     [stored] = h.messages.unconfirmed()
     assert (stored.signal_number, stored.purpose) == (None, Purpose.NOTICE)
 
@@ -257,7 +254,7 @@ def test_a_command_sent_as_a_reply_runs_where_it_was_sent(
 
     [pending] = h.outbox.pending()
     text = pending.message.text
-    assert pending.destination == Destination("telegram", "1001", thread)
+    assert pending.place == telegram_place(1001, thread)
     if command in ("/status", "/details"):
         assert [name for name in ("api", "web") if f" {name}" in text] == sections
     elif command == "/pending":

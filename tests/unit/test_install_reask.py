@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.domain.callback import install_data
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
 from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
@@ -27,8 +28,8 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.ops import OpState
 from shikiri_yaku.ports import Button, EscalationStatus, Message, ReplyOrigin
 from tests.support.clock import NapClock
-from tests.support.destinations import FixedDestinations
 from tests.support.notices import FailingReporter
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Forwarder, InstallOp, ShikiruClient
 
 NOW: Final = datetime(2026, 10, 31, tzinfo=UTC)
-OWNER: Final = Destination("telegram", "1001")
+OWNER: Final = Place("telegram", "1001")
 SIGNAL = Signal(
     "api",
     Kind.ESCALATION,
@@ -82,7 +83,7 @@ class _World:
             self.ops,
             InstallApprovalPresenter(),
             self.outbox,
-            FixedDestinations([OWNER]),
+            FixedPlaces([OWNER]),
             self.clock,
         )
 
@@ -204,7 +205,7 @@ def test_tap_on_the_replaced_approval_is_void_and_tap_on_the_new_one_runs(memory
                 key=str(1),
                 kind=InboundKind.TAP,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="approval",
                 data=install_data(world.number, op.id),
             )

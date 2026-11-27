@@ -14,8 +14,8 @@ from shikiri_yaku.app.loop_guard import LoopGuard
 from shikiri_yaku.app.reconciler import RETRY_AGAIN_NOTE, ResolveReconciler
 from shikiri_yaku.app.router import Router
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.rule_classifier import RuleClassifier
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Lifecycle, LifecycleState, Resolved, Signal
 from shikiri_yaku.extensions.infrastructure.extension import infrastructure_extension
 from shikiri_yaku.extensions.product.extension import product_extension
@@ -41,9 +41,9 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.reconcile import JournalReconcile
 from shikiri_yaku.ports import Ack, EngineStatus
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
-from tests.support.destinations import FixedDestinations
 from tests.support.install import UnusedInstallAction
 from tests.support.notices import journal_notifier, journal_outbox
+from tests.support.places import FixedPlaces
 from tests.unit.test_replies import Client
 
 if TYPE_CHECKING:
@@ -154,15 +154,13 @@ class World:
         self.clock = Clock()
         self.messages = MessageStore(self.database, Reporter())
         outbox = JournalOutbox(self.database, self.messages)
-        destinations = FixedDestinations(
-            [Destination("telegram", "owner-1"), Destination("telegram", "owner-2")]
-        )
+        places = FixedPlaces([Place("telegram", "owner-1"), Place("telegram", "owner-2")])
         forwarder = ProductForwarder(
             MESSAGE_TITLE_MAX_CHARS,
             self.clients,
             outbox,
             self.clock,
-            destinations,
+            places,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -271,7 +269,7 @@ class World:
 
     def question_chats(self) -> list[str]:
         return [
-            message.chat
+            message.place.id
             for message in self.messages.for_signal(self.number)
             if message.purpose == Purpose.QUESTION
         ]
@@ -352,7 +350,7 @@ def test_recovered_queued_retry_waits_for_confirmation_without_forwarding(world:
         ("after_ack", "reconcile_first"),
     ],
 )
-def test_reconciliation_and_dispatch_queue_one_recovered_question_per_destination(
+def test_reconciliation_and_dispatch_queue_one_recovered_question_per_place(
     world: World, crash_point: str, order: str
 ) -> None:
     if crash_point == "after_ack":

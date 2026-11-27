@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.expert_turns import CREATION_UNCERTAIN, queue_expert_notice
 from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX
 from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_turns import ExpertTurns
     from shikiri_yaku.domain.expert import ConversationRecord, TurnRecord
     from shikiri_yaku.domain.inbound import Inbound
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Rooms, SharedChat
 
 _OPEN: Final = "open"
@@ -49,8 +50,7 @@ class ConversationLog(Protocol):
         self,
         update_id: int,
         *,
-        chat: int,
-        thread: int | None,
+        origin: Place,
         text: str,
         scope: list[str],
         now: datetime,
@@ -100,7 +100,6 @@ class Ask:
         shared: SharedChat | None = None,
         turns: ExpertTurns | None,
         scope: Mapping[str, Path],
-        channel: str,
         max_text: int,
         final: FinalEdits | None = None,
         admins: frozenset[str] = frozenset(),
@@ -113,7 +112,6 @@ class Ask:
         self._shared = shared
         self._turns = turns
         self._scope = scope
-        self._channel = channel
         self._max_text = max_text
         self._final = final
         self._admins = admins
@@ -133,7 +131,7 @@ class Ask:
             return
         label = await self._shared.command_label(ADMIN_COMMAND if _is_admin(item) else "/expert")
         self._outbox.queue_command_reply(
-            [item_destination(self._channel, item)],
+            [item.place],
             [
                 Message(
                     "Choose an Expert.",
@@ -146,7 +144,7 @@ class Ask:
         )
 
     async def tap(self, item: Inbound) -> bool:
-        original = self._outbox.expert_selection(self._channel, item)
+        original = self._outbox.expert_selection(item)
         if original is None:
             return False
         if _is_admin(original) and item.sender not in self._admins:
@@ -162,7 +160,7 @@ class Ask:
         if reason:
             queue_command_reply(
                 self._outbox,
-                [item_destination(self._channel, item)],
+                [item.place],
                 reason,
                 key=f"expert:refusal:{item.id}",
                 now=self._clock.now(),
@@ -184,7 +182,7 @@ class Ask:
                 self._final.settle_notice(selection_key, message, conversation_id=row.id)
         else:
             self._outbox.queue_command_reply(
-                [item_destination(self._channel, item)],
+                [item.place],
                 [Message(message.text, message.buttons, reply_to=item.message_ref)],
                 key=f"expert:open:{item.id}",
                 now=self._clock.now(),
@@ -200,8 +198,7 @@ class Ask:
         names = [component] if component is not None else list(self._scope)
         created = self._log.create(
             item.id,
-            chat=item.chat,
-            thread=item.thread,
+            origin=item.place,
             text=text,
             scope=names,
             now=self._clock.now(),
@@ -215,7 +212,7 @@ class Ask:
                 queue_expert_notice(
                     self._outbox,
                     self._clock,
-                    item_destination(self._channel, item),
+                    item.place,
                     CREATION_UNCERTAIN,
                     key=f"expert:creation:{item.id}",
                 )

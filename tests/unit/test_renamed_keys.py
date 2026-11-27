@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.journal import Repairs
 from shikiri_yaku.ports import Message
@@ -62,8 +63,7 @@ def test_a_key_under_an_old_command_name_is_renamed_in_notices_and_replies(
 ) -> None:
     h.messages.record_outbound(
         signal_number=h.number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=Purpose.NOTICE,
         body=Message("notice"),
         notice_key=old,

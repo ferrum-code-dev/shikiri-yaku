@@ -9,8 +9,8 @@ import pytest
 from shikiri_yaku.domain.classification import InstallProposal, Verdict
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.outcome import Notified
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.extensions.infrastructure.install import InstallAction
 from shikiri_yaku.extensions.infrastructure.preparation import InstallPreparation
@@ -26,14 +26,14 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.ops import OpState
 from shikiri_yaku.ports import HostObservation
 from tests.support.clock import NapClock
-from tests.support.destinations import FixedDestinations
 from tests.support.notices import FailingReporter
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
 NOW = datetime(2026, 10, 29, tzinfo=UTC)
-OWNER = Destination("telegram", "1001")
+OWNER = Place("telegram", "1001")
 SIGNAL = Signal(
     project="api",
     kind=Kind.ESCALATION,
@@ -100,7 +100,7 @@ class Harness:
             installs=self.ops,
             outbox=self.outbox,
             clock=NapClock(),
-            destinations=FixedDestinations([OWNER]),
+            places=FixedPlaces([OWNER]),
         )
 
 

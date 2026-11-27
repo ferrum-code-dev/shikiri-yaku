@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING, Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, ValidationError
 
-from shikiri_yaku.adapters.telegram import REF_SEPARATOR, UNEXPECTED_REPLY
+from shikiri_yaku.adapters.telegram import (
+    REF_SEPARATOR,
+    UNEXPECTED_REPLY,
+    chat_and_thread,
+    telegram_place,
+)
 from shikiri_yaku.domain.inbound import Batch, FileRef, InboundKind, Received
 from shikiri_yaku.ports import ChannelProtocolError
 
@@ -63,6 +68,8 @@ class _Message(_Payload):
 class _Tapped(_Payload):
     message_id: int
     chat: _Identity
+    message_thread_id: StrictInt | None = None
+    is_topic_message: bool = False
 
 
 class _Callback(_Payload):
@@ -126,30 +133,32 @@ class TelegramUpdates:
         return Batch(None if last is None else str(last + 1), tuple(events))
 
     def _served_chat(self, event: Received) -> bool:
-        return event.chat == self._group_id or str(event.chat) == event.sender
+        chat, _ = chat_and_thread(event.place)
+        return chat in (str(self._group_id), event.sender)
 
 
 def _event(update: _Update) -> Received | None:
     if update.callback_query is not None:
         tap = update.callback_query
-        ref = _ref(tap.message.chat.id, tap.message.message_id)
+        tapped = tap.message
+        # keep: outside a topic, a thread names a chain of replies, which is no place
+        thread = _thread(tapped.message_thread_id) if tapped.is_topic_message else None
         return Received(
             key=str(update.update_id),
             kind=InboundKind.TAP,
             sender=str(tap.sender.id),
-            chat=tap.message.chat.id,
-            message_ref=ref,
+            place=telegram_place(tapped.chat.id, thread),
+            message_ref=_ref(tapped.chat.id, tapped.message_id),
             data=tap.data,
         )
     if update.message is not None and update.message.forum_topic_closed is not None:
         closed = update.message
         return Received(
             key=str(update.update_id),
-            kind=InboundKind.TOPIC_CLOSED,
+            kind=InboundKind.ROOM_CLOSED,
             sender=str(closed.sender.id),
-            chat=closed.chat.id,
+            place=telegram_place(closed.chat.id, _thread(closed.message_thread_id)),
             message_ref=_ref(closed.chat.id, closed.message_id),
-            thread=_thread(closed.message_thread_id),
         )
     if update.message is not None and (attached := _file(update.message)) is not None:
         sent = update.message
@@ -157,10 +166,9 @@ def _event(update: _Update) -> Received | None:
             key=str(update.update_id),
             kind=InboundKind.FILE,
             sender=str(sent.sender.id),
-            chat=sent.chat.id,
+            place=telegram_place(sent.chat.id, _thread(sent.message_thread_id)),
             message_ref=_ref(sent.chat.id, sent.message_id),
             text=sent.caption,
-            thread=_thread(sent.message_thread_id),
             file=attached,
         )
     if update.message is not None and update.message.text is not None:
@@ -170,11 +178,10 @@ def _event(update: _Update) -> Received | None:
             key=str(update.update_id),
             kind=InboundKind.TEXT if replied is None else InboundKind.REPLY,
             sender=str(sent.sender.id),
-            chat=sent.chat.id,
+            place=telegram_place(sent.chat.id, _thread(sent.message_thread_id)),
             message_ref=_ref(sent.chat.id, sent.message_id),
             reply_to_ref=None if replied is None else _ref(sent.chat.id, replied.message_id),
             text=sent.text,
-            thread=_thread(sent.message_thread_id),
         )
     return None
 

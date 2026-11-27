@@ -17,11 +17,11 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         InstallLog,
         InstallPreparer,
         InstallProposalLog,
         Outbox,
+        Places,
         SignalNumbers,
     )
 
@@ -48,7 +48,7 @@ class InstallAction:
         installs: InstallLog,
         outbox: Outbox,
         clock: Clock,
-        destinations: Destinations,
+        places: Places,
     ) -> None:
         self._preparation = preparation
         self._proposals = proposals
@@ -56,7 +56,7 @@ class InstallAction:
         self._installs = installs
         self._outbox = outbox
         self._clock = clock
-        self._destinations = destinations
+        self._places = places
 
     async def run(self, signal: Signal) -> Outcome:
         operation = self._installs.get_install(f"{OP_IDENTITY}{signal.id}")
@@ -92,7 +92,7 @@ class InstallAction:
         self._outbox.queue(
             operation.payload.number,
             Purpose.APPROVAL,
-            self._destinations.for_signal(signal.project, signal.kind),
+            self._places.for_signal(signal.project, signal.kind),
             message,
             key=f"{OP_IDENTITY}{operation.id}",
             now=self._clock.now(),

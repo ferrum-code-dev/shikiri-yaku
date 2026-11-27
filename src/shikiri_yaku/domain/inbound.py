@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from shikiri_yaku.domain.place import Place
 
 
 class InboundKind(StrEnum):
     TAP = "tap"
     REPLY = "reply"
     TEXT = "text"
-    TOPIC_CLOSED = "topic_closed"
+    ROOM_CLOSED = "room_closed"
     FILE = "file"
 
 
@@ -49,23 +53,21 @@ class Received:
 
     `key` is the channel's id of the event, which only keeps it from being stored twice.
 
-    `chat` is the chat the item was sent in: the sender's private chat, or a shared chat.
+    `place` is where the item was sent; for a tap it is the place of the tapped message.
     `message_ref` names the message the item was sent in; for a tap it is the message whose button
     was pressed.
     `reply_to_ref` is set on a reply. `text` is the text of a reply or text, and `data` the callback
-    data of a tap. For a file, `text` is its caption and `file` names it. `thread` is the thread a
-    reply, text or file was sent in, None outside a thread.
+    data of a tap. For a file, `text` is its caption and `file` names it.
     """
 
     key: str
     kind: InboundKind
     sender: str
-    chat: int
+    place: Place
     message_ref: str
     reply_to_ref: str | None = None
     text: str | None = None
     data: str | None = None
-    thread: int | None = None
     file: FileRef | None = None
 
     @property

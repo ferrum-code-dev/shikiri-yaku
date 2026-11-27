@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.inbound import FileRef, Inbound, InboundKind, Received
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
@@ -23,12 +24,11 @@ def _inbound(row: sqlite3.Row) -> Inbound:
         key=row["event_key"],
         kind=kind,
         sender=row["sender"],
-        chat=int(row["chat"]),
+        place=Place(row["channel"], row["place"]),
         message_ref=row["message_ref"],
         reply_to_ref=row["reply_to_ref"],
         text=row["body"],
         data=None if is_file else row["data"],
-        thread=row["thread"],
         file=FileRef.model_validate_json(row["data"]) if is_file else None,
     )
 
@@ -135,15 +135,15 @@ class JournalInbound:
         ).fetchone()["last_id"]
         connection.execute(
             """
-            INSERT INTO messages (direction, channel, chat, update_id, event_key, kind, sender,
+            INSERT INTO messages (direction, channel, place, update_id, event_key, kind, sender,
                                   message_ref, reply_to_ref, body, data, delivery, refusal,
-                                  created_at, thread)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 Direction.IN,
                 channel,
-                str(event.chat),
+                event.place.id,
                 number,
                 event.key,
                 event.kind,
@@ -155,6 +155,5 @@ class JournalInbound:
                 Delivery.RECEIVED if form is None else Delivery.REFUSED,
                 form,
                 stamp(now),
-                event.thread,
             ),
         )

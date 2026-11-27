@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Literal, cast
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.domain.callback import decline_data, install_data
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.signal import Kind, Signal
 from shikiri_yaku.ports import Button, Message, ReplyOrigin
 
@@ -57,7 +57,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
         Purpose.APPROVAL,
         Message("approval", buttons),
         "install:8",
-        Destination("telegram", "1001"),
+        Place("telegram", "1001"),
     )
     notice = ReplyOrigin(
         1,
@@ -65,7 +65,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
         Purpose.NOTICE,
         Message("notice", buttons),
         "notice",
-        Destination("telegram", "1001"),
+        Place("telegram", "1001"),
     )
     handler = Recorder()
     replies = Replies(
@@ -87,7 +87,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
                 key=str(1),
                 kind=InboundKind.TAP,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="approval",
                 data=install_data(1, 8),
             )
@@ -98,7 +98,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
                 key=str(2),
                 kind=InboundKind.TAP,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="approval",
                 data=decline_data(1, 8),
             )
@@ -109,7 +109,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
                 key=str(3),
                 kind=InboundKind.TAP,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="approval",
                 data="a:1:1",
             )
@@ -120,7 +120,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
                 key=str(4),
                 kind=InboundKind.TAP,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="notice",
                 data=install_data(1, 8),
             )
@@ -131,7 +131,7 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
                 key=str(5),
                 kind=InboundKind.REPLY,
                 sender="1",
-                chat=1001,
+                place=telegram_place(1001),
                 message_ref="reply",
                 reply_to_ref="approval",
                 text="please install it",

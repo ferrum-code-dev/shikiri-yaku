@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import MERGED_LINE
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
@@ -96,8 +96,7 @@ def _record(h: Harness, number: int, ref: str, key: str, buttons: tuple[str, ...
     """Record a sent notice with the buttons it was sent with, as the outbox did before standing."""
     row = h.messages.record_outbound(
         signal_number=number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=Purpose.NOTICE,
         body=Message("notice", tuple(Button(STOP_LABEL, data) for data in buttons)),
         notice_key=key,
@@ -108,7 +107,7 @@ def _record(h: Harness, number: int, ref: str, key: str, buttons: tuple[str, ...
 
 def _stop_data(h: Harness, ref: str) -> str:
     """Return the callback data the copy was sent with, read back from the journal."""
-    message = h.log().sent_message(OWNER, ref)
+    message = h.log().sent_message(OWNER.channel, ref)
     assert message is not None
     (button,) = message.buttons
     return button.data

@@ -34,13 +34,13 @@ class CopyReplacer:
             await self._clock.sleep(self._interval_s)
 
     async def tick(self) -> None:
-        for message_ref in self._log.superseded():
-            self._log.begin_deletion(message_ref)
+        for copy in self._log.superseded():
+            self._log.begin_deletion(copy.message_id)
             try:
-                await self._deleter.delete(message_ref)
+                await self._deleter.delete(copy.message_ref)
             except ChannelRefusedError as error:
-                self._log.keep_replaced(message_ref, REPLACED_LINE, str(error))
+                self._log.keep_replaced(copy.message_id, REPLACED_LINE, str(error))
             except ChannelError:
-                self._log.undo_deletion(message_ref)
+                self._log.undo_deletion(copy.message_id)
             else:
-                self._log.confirm_deletion(message_ref)
+                self._log.confirm_deletion(copy.message_id)

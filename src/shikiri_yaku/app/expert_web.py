@@ -24,7 +24,7 @@ class WebRequests(Protocol):
 
     def pending(self, update_id: int | None = None) -> list[tuple[int, int, str, str]]: ...
     def conversation_of(self, request_id: int) -> int | None: ...
-    def bound(self, channel: str, chat: str, message_ref: str) -> str | None: ...
+    def bound(self, channel: str, message_ref: str) -> str | None: ...
     def decide(
         self, request_id: int, update_id: int, *, allow: bool, now: datetime
     ) -> int | None: ...
@@ -40,14 +40,12 @@ class ExpertWebRequests:
         outbox: Outbox,
         clock: Clock,
         *,
-        channel: str,
         rooms: Rooms,
         access: AdminAccess,
     ) -> None:
         self._log = log
         self._outbox = outbox
         self._clock = clock
-        self._channel = channel
         self._rooms = rooms
         self._access = access
 
@@ -79,7 +77,7 @@ class ExpertWebRequests:
             return False
         if tap[0] not in (WEB_ALLOW_VERB, WEB_DENY_VERB):
             return False
-        bound = self._log.bound(self._channel, str(item.chat), item.message_ref)
+        bound = self._log.bound(item.place.channel, item.message_ref)
         if bound != f"expert:web:{tap[1]}":
             return True
         owner = self._log.conversation_of(tap[1])

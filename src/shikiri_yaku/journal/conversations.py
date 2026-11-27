@@ -13,6 +13,7 @@ from shikiri_yaku.domain.expert import (
     ExpertSession,
     TurnRecord,
 )
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal.database import parse_stamp, stamp
 from shikiri_yaku.journal.final_edits import settle_notice
 from shikiri_yaku.ports import Message
@@ -21,18 +22,17 @@ if TYPE_CHECKING:
     import sqlite3
     from datetime import datetime
 
-    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.database import Database
 
 _SCOPE = TypeAdapter(list[str])
 _TURN_SELECT: Final = """
-    SELECT t.update_id, t.conversation_id, c.thread_id, t.text, t.state, t.answer
+    SELECT t.update_id, t.conversation_id, c.room, t.text, t.state, t.answer
     FROM turns t JOIN conversations c ON c.id = t.conversation_id
 """
 _OWNED_UPDATES: Final = """
     SELECT update_id FROM messages
     WHERE (conversation_id = :id OR update_id = :update_id OR
-           (chat = :room_chat AND thread = :room_thread))
+           (channel = :room_channel AND place = :room_place))
         AND update_id IS NOT NULL
 """
 # keep: only these reply keys end in an event's id; other keys end in numbers an id may equal
@@ -51,13 +51,8 @@ _EVENT_REPLIES: Final = (
 _ERASE_MESSAGES: Final = """
     DELETE FROM messages
     WHERE conversation_id = :id OR update_id = :update_id OR
-          (chat = :room_chat AND thread = :room_thread)
+          (channel = :room_channel AND place = :room_place)
 """
-
-
-def _room_id(thread_id: int | None) -> str | None:
-    """Return the room id of the stored thread number."""
-    return None if thread_id is None else str(thread_id)
 
 
 def _record(row: sqlite3.Row) -> ConversationRecord:
@@ -65,9 +60,8 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
     return ConversationRecord(
         id=row["id"],
         update_id=row["update_id"],
-        chat=row["chat"],
-        origin_thread=row["origin_thread"],
-        room=_room_id(row["thread_id"]),
+        origin=Place(row["origin_channel"], row["origin_place"]),
+        room=row["room"],
         scope=_SCOPE.validate_json(row["scope"]),
         state=row["state"],
         effort=row["effort"],
@@ -81,7 +75,7 @@ def _turn(row: sqlite3.Row) -> TurnRecord:
     return TurnRecord(
         update_id=row["update_id"],
         conversation_id=row["conversation_id"],
-        room=_room_id(row["thread_id"]),
+        room=row["room"],
         text=row["text"],
         state=row["state"],
         answer=row["answer"],
@@ -98,8 +92,7 @@ class Conversations:
         self,
         update_id: int,
         *,
-        chat: int,
-        thread: int | None,
+        origin: Place,
         text: str,
         scope: list[str],
         now: datetime,
@@ -109,10 +102,10 @@ class Conversations:
             cursor = connection.execute(
                 """
                 INSERT INTO conversations
-                    (update_id, chat, origin_thread, scope, state, last_activity, mode)
+                    (update_id, origin_channel, origin_place, scope, state, last_activity, mode)
                 VALUES (?, ?, ?, ?, 'creating', ?, ?) ON CONFLICT(update_id) DO NOTHING
                 """,
-                (update_id, chat, thread, json.dumps(scope), stamp(now), mode),
+                (update_id, origin.channel, origin.id, json.dumps(scope), stamp(now), mode),
             )
             if cursor.rowcount != 1:
                 return False
@@ -178,7 +171,7 @@ class Conversations:
 
     def at_room(self, room: str) -> ConversationRecord | None:
         row = self._database.connection.execute(
-            "SELECT * FROM conversations WHERE thread_id = ? AND state = 'open'",
+            "SELECT * FROM conversations WHERE room = ? AND state = 'open'",
             (room,),
         ).fetchone()
         return None if row is None else _record(row)
@@ -248,7 +241,7 @@ class Conversations:
     def opened(self, update_id: int, room: str) -> None:
         with self._database.transaction() as connection:
             connection.execute(
-                "UPDATE conversations SET state = 'open', thread_id = ? WHERE update_id = ?",
+                "UPDATE conversations SET state = 'open', room = ? WHERE update_id = ?",
                 (room, update_id),
             )
 
@@ -347,7 +340,7 @@ class Conversations:
         ).fetchall()
         return [_record(row) for row in rows]
 
-    def erase(self, conversation_id: int, *, room_place: Destination) -> None:
+    def erase(self, conversation_id: int, *, room_place: Place) -> None:
         """Delete every row of a conversation.
 
         That is its messages and replies, turns, request, and its proposals with their tasks, whose
@@ -366,8 +359,8 @@ class Conversations:
             owned = {
                 "id": conversation_id,
                 "update_id": row["update_id"],
-                "room_chat": room_place.chat,
-                "room_thread": room_place.thread,
+                "room_channel": room_place.channel,
+                "room_place": room_place.id,
             }
             updates = connection.execute(_OWNED_UPDATES, owned).fetchall()
             connection.executemany(

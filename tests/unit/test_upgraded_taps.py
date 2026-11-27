@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.callback import EXPERT_SELECTION_PREFIX, decline_data, install_data
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal import JournalFinalEdits, OpState, Repairs
 from shikiri_yaku.journal.inbound import JournalInbound
 from shikiri_yaku.ports import Button, Message
@@ -46,7 +46,7 @@ def _offer_before_rename(path: Path, *, admin: bool) -> tuple[test_ask.Harness, 
         key=str(1),
         kind=InboundKind.TEXT,
         sender=str(SENDER),
-        chat=CHAT,
+        place=telegram_place(CHAT),
         message_ref="-100123/71",
         text=f"{command} question",
     )
@@ -57,7 +57,7 @@ def _offer_before_rename(path: Path, *, admin: bool) -> tuple[test_ask.Harness, 
         reply_to=request.message_ref,
     )
     h.outbox.queue_command_reply(
-        [Destination("telegram", str(CHAT), None)],
+        [Place("telegram", str(CHAT))],
         [offer],
         key="ask:select:1",
         now=NOW,
@@ -75,7 +75,7 @@ def _assert_selection_opens_once(path: Path, *, admin: bool) -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender=str(SENDER),
-        chat=CHAT,
+        place=telegram_place(CHAT),
         message_ref=OFFER_REF,
         data=f"{EXPERT_SELECTION_PREFIX}1",
     )

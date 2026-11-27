@@ -46,7 +46,7 @@ class JournalWeb:
 
     def pending(self, update_id: int | None = None) -> list[tuple[int, int, str, str]]:
         rows = self._database.connection.execute(
-            "SELECT w.id, t.conversation_id, c.thread_id, w.host FROM web_requests w "
+            "SELECT w.id, t.conversation_id, c.room, w.host FROM web_requests w "
             "JOIN turns t ON t.update_id = w.update_id "
             "JOIN conversations c ON c.id = t.conversation_id "
             "WHERE w.state = 'pending' AND c.state = 'open' "
@@ -54,7 +54,7 @@ class JournalWeb:
             "ORDER BY w.id",
             (update_id, update_id),
         ).fetchall()
-        return [(r["id"], r["conversation_id"], str(r["thread_id"]), r["host"]) for r in rows]
+        return [(r["id"], r["conversation_id"], r["room"], r["host"]) for r in rows]
 
     def conversation_of(self, request_id: int) -> int | None:
         row = self._database.connection.execute(
@@ -64,11 +64,11 @@ class JournalWeb:
         ).fetchone()
         return None if row is None else row["conversation_id"]
 
-    def bound(self, channel: str, chat: str, message_ref: str) -> str | None:
+    def bound(self, channel: str, message_ref: str) -> str | None:
         row = self._database.connection.execute(
-            "SELECT notice_key FROM messages WHERE channel = ? AND chat = ? "
+            "SELECT notice_key FROM messages WHERE channel = ? "
             "AND platform_message_id = ? AND direction = 'out' AND delivery = 'sent'",
-            (channel, chat, message_ref),
+            (channel, message_ref),
         ).fetchone()
         return None if row is None else row["notice_key"]
 

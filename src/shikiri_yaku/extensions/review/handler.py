@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.outcome import Outcome
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import Clock, Destinations, Outbox, ShikiruClient, SignalNumbers
+    from shikiri_yaku.ports import Clock, Outbox, Places, ShikiruClient, SignalNumbers
 
 NOTHING_TRIED: Final = "nothing, the pull request of the signal is not on record"
 SENT: Final = "sent the review message to the PO"
@@ -37,7 +37,7 @@ class ReviewHandler:
         clock: Clock,
         *,
         product: str,
-        destinations: Destinations,
+        places: Places,
         max_text: int,
     ) -> None:
         self._product = product
@@ -45,7 +45,7 @@ class ReviewHandler:
         self._clients = clients
         self._numbers = numbers
         self._outbox = outbox
-        self._destinations = destinations
+        self._places = places
         self._clock = clock
 
     async def handle(self, signal: Signal) -> Outcome:
@@ -57,15 +57,12 @@ class ReviewHandler:
             message = f"{signal.id} is not in the journal"
             raise LookupError(message)
         title = await self._title(signal)
-        destinations = self._destinations.for_signal(signal.project, signal.kind)
-        in_topic = all(
-            self._destinations.component_of(destination.thread) == signal.project
-            for destination in destinations
-        )
+        places = self._places.for_signal(signal.project, signal.kind)
+        in_topic = all(self._places.component_of(place) == signal.project for place in places)
         self._outbox.queue(
             number,
             Purpose.NOTICE,
-            destinations,
+            places,
             review_message(
                 number,
                 signal,

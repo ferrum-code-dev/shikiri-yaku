@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 from unicodedata import category
 from unicodedata import name as unicode_name
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.expert_files import conversation_file_names, save_attachment
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import (
@@ -24,7 +24,6 @@ from shikiri_yaku.domain.expert import (
 )
 from shikiri_yaku.domain.inbound import InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     ChannelRefusedError,
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_web import ExpertWebRequests
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.domain.inbound import FileRef, Inbound
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, Downloads, Expert, Outbox, Rooms, ShikiruClient
 
 CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
@@ -95,7 +95,7 @@ _INVISIBLE_NAMES: Final = (
 def queue_expert_notice(
     outbox: Outbox,
     clock: Clock,
-    destination: Destination,
+    place: Place,
     text: str,
     *,
     key: str,
@@ -105,7 +105,7 @@ def queue_expert_notice(
     outbox.queue(
         None,
         Purpose.EXPERT,
-        [destination],
+        [place],
         Message(text),
         key=key,
         now=clock.now(),
@@ -136,7 +136,6 @@ class ExpertTurns:
         clients: Mapping[str, ShikiruClient],
         scope: Mapping[str, Path],
         directory: Path,
-        channel: str,
         max_text: int,
         max_file_bytes: int,
         runs: ConversationRuns,
@@ -160,7 +159,6 @@ class ExpertTurns:
         self._clients = clients
         self._scope = scope
         self._directory = directory
-        self._channel = channel
         self._max_text = max_text
         self._max_file_bytes = max_file_bytes
         self._runs = runs
@@ -171,22 +169,22 @@ class ExpertTurns:
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
     def owns(self, item: Inbound) -> bool:
-        """Return whether a text, reply, file or closed topic belongs to an open Expert topic."""
+        """Return whether a text, reply, file or closed room belongs to an open Expert topic."""
         return (
             item.kind
-            in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.FILE, InboundKind.TOPIC_CLOSED)
+            in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.FILE, InboundKind.ROOM_CLOSED)
             and self._conversation_of(item) is not None
         )
 
     def _conversation_of(self, item: Inbound) -> ConversationRecord | None:
-        room = self._rooms.room_of(item_destination(self._channel, item))
+        room = self._rooms.room_of(item.place)
         return None if room is None else self._log.at_room(room)
 
     async def handle(self, item: Inbound) -> None:
         conversation = self._conversation_of(item)
         if conversation is None:
             return
-        if item.kind is InboundKind.TOPIC_CLOSED:
+        if item.kind is InboundKind.ROOM_CLOSED:
             await self._ending.end(conversation.id, sender=item.sender, update_id=item.id)
             return
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
@@ -488,7 +486,7 @@ class ExpertTurns:
     def _reply(self, item: Inbound, text: str, conversation_id: int) -> None:
         queue_command_reply(
             self._outbox,
-            [item_destination(self._channel, item)],
+            [item.place],
             text,
             key=f"expert:command:{item.id}",
             now=self._clock.now(),
@@ -508,7 +506,7 @@ class ExpertTurns:
             queue_expert_notice(
                 self._outbox,
                 self._clock,
-                Destination(self._channel, str(row.chat), row.origin_thread),
+                row.origin,
                 CREATION_UNCERTAIN,
                 key=f"expert:creation:{row.update_id}",
                 conversation_id=row.id,

@@ -8,7 +8,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.reconciler import ResolveReconciler
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import OpState
@@ -24,7 +24,7 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
 )
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.unit.test_replies import Client, Harness
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ class _World:
             h.clients,
             h.outbox,
             self.clock,
-            FixedDestinations([Destination("telegram", "1001")]),
+            FixedPlaces([Place("telegram", "1001")]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )

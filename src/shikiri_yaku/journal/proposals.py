@@ -17,7 +17,6 @@ from shikiri_yaku.ports import Message, ProposalStatus, SubmitStatus
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.database import Database
     from shikiri_yaku.journal.ops import OpStore
     from shikiri_yaku.ports import SubmitOp, SubmitPayload
@@ -310,24 +309,14 @@ class JournalProposals:
         ).fetchall()
         return [row["update_id"] for row in rows]
 
-    def bound(self, destination: Destination, message_ref: str) -> str | None:
-        """Return the notice key of the sent message a tap came from, if the journal has it.
-
-        A message id is unique within its chat, so the thread is not needed to find it.
-        """
+    def bound(self, channel: str, message_ref: str) -> str | None:
+        """Return the notice key of the sent message a tap came from, if the journal has it."""
         row = self._database.connection.execute(
             """
             SELECT notice_key FROM messages
-            WHERE channel = ? AND chat = ? AND platform_message_id = ?
-                AND direction = ? AND delivery = ?
+            WHERE channel = ? AND platform_message_id = ? AND direction = ? AND delivery = ?
             """,
-            (
-                destination.channel,
-                destination.chat,
-                message_ref,
-                Direction.OUT,
-                Delivery.SENT,
-            ),
+            (channel, message_ref, Direction.OUT, Delivery.SENT),
         ).fetchone()
         return None if row is None else row["notice_key"]
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, chat_and_thread, telegram_place
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.app.expert import OPEN_REPLY
 from shikiri_yaku.app.expert_ending import ExpertEnding
@@ -20,7 +20,7 @@ from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
 from shikiri_yaku.domain.inbound import Inbound, InboundKind, Received
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal import Repairs
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database
@@ -45,9 +45,9 @@ from shikiri_yaku.ports import (
 from tests.support.attachments import FakeDownloads
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
-from tests.support.destinations import FixedDestinations
 from tests.support.event_numbers import number_next_event
 from tests.support.expert_proposals import expert_proposals
+from tests.support.places import FixedPlaces
 from tests.support.rooms import FakeRooms
 
 if TYPE_CHECKING:
@@ -67,7 +67,8 @@ NOW: Final = datetime(2026, 1, 1, tzinfo=UTC)
 CREATED: Final = 500
 TARGET_THREAD: Final = 22
 BYSTANDER_THREAD: Final = 33
-OPERATOR_PLACE: Final = Destination(CHANNEL, "operator")
+_IN_PLACE: Final = "SELECT COUNT(*) FROM messages WHERE place = ?"
+OPERATOR_PLACE: Final = Place(CHANNEL, "operator")
 
 
 class Clock:
@@ -154,8 +155,8 @@ class RefusingChannel:
     def __init__(self, error: Exception) -> None:
         self._error = error
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        del destination, message
+    async def send(self, place: Place, message: Message) -> str:
+        del place, message
         raise self._error
 
 
@@ -163,11 +164,11 @@ class RefusingThreadChannel:
     def __init__(self, thread_id: int) -> None:
         self._thread_id = thread_id
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         del message
-        if destination.thread == self._thread_id:
+        if chat_and_thread(place)[1] == self._thread_id:
             raise PlaceGoneError(PLACE_GONE_REASON)
-        return f"{destination.chat}/{destination.thread}"
+        return place.id
 
 
 class Harness:
@@ -189,7 +190,7 @@ class Harness:
             self.topics,
             self.outbox,
             self.clock,
-            places=FixedDestinations([OPERATOR_PLACE]),
+            places=FixedPlaces([OPERATOR_PLACE]),
             directory=path,
             retention=RETENTION,
             admin_idle=timedelta(minutes=15),
@@ -205,7 +206,6 @@ class Harness:
             clients=clients,
             scope={"api": path / "api"},
             directory=path,
-            channel=CHANNEL,
             runs=self.runs,
             ending=self.ending,
             proposals=expert_proposals(
@@ -234,8 +234,7 @@ class Harness:
         """Open a conversation as a creation does, with its directory and one file in it."""
         self.log.create(
             update_id,
-            chat=origin_chat,
-            thread=None,
+            origin=telegram_place(origin_chat),
             text="question",
             scope=["api"],
             now=self.clock.now(),
@@ -298,16 +297,15 @@ def _inbound(kind: InboundKind, thread: int, text: str | None = None) -> Inbound
         key=str(501),
         kind=kind,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, thread),
         message_ref="501",
         text=text,
-        thread=thread,
     )
 
 
 async def _topic_closed(h: Harness, conversation: int, thread: int) -> None:
     del conversation
-    await h.turns.handle(_inbound(InboundKind.TOPIC_CLOSED, thread))
+    await h.turns.handle(_inbound(InboundKind.ROOM_CLOSED, thread))
 
 
 async def _close_command(h: Harness, conversation: int, thread: int) -> None:
@@ -325,7 +323,7 @@ async def _topic_gone_on_send(h: Harness, conversation: int, thread: int) -> Non
     h.outbox.queue(
         None,
         Purpose.EXPERT,
-        [Destination(CHANNEL, str(GROUP_ID), thread)],
+        [telegram_place(GROUP_ID, thread)],
         Message("the answer"),
         key="expert:answer:501",
         now=h.clock.now(),
@@ -401,7 +399,7 @@ def test_a_refused_deletion_keeps_the_conversation_reports_once_and_is_retried(
     asyncio.run(scenario())
 
     [report] = [item for item in h.outbox.pending() if item.conversation_id is None]
-    assert report.destination == OPERATOR_PLACE
+    assert report.place == OPERATOR_PLACE
     assert h.remaining(conversation) == 0
     assert not conversation_directory(h.directory, conversation).exists()
     assert h.topics.deleted == [TARGET_THREAD]
@@ -485,7 +483,7 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
             key=str(CREATED),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=PRIVATE_CHAT,
+            place=telegram_place(PRIVATE_CHAT),
             message_ref=str(CREATED),
             text="/expert question",
         ),
@@ -494,40 +492,36 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
             key=str(501),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=CHAT,
+            place=telegram_place(CHAT, TARGET_THREAD),
             message_ref="501",
             text="/help",
-            thread=TARGET_THREAD,
         ),
         Inbound(
             id=502,
             key=str(502),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=CHAT,
+            place=telegram_place(CHAT, BYSTANDER_THREAD),
             message_ref="502",
             text="/help",
-            thread=BYSTANDER_THREAD,
         ),
         Inbound(
             id=503,
             key=str(503),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=CHAT,
+            place=telegram_place(CHAT, TARGET_THREAD),
             message_ref="503",
             text="/close",
-            thread=TARGET_THREAD,
         ),
         Inbound(
             id=504,
             key=str(504),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=CHAT,
+            place=telegram_place(CHAT, 77),
             message_ref="504",
             text="component",
-            thread=77,
         ),
     ]
     number_next_event(h.database, CHANNEL, CREATED)
@@ -535,7 +529,7 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
     target = h.open_conversation(CREATED, TARGET_THREAD, origin_chat=PRIVATE_CHAT)
     bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
     h.outbox.queue_command_reply(
-        [Destination(CHANNEL, str(PRIVATE_CHAT), None)],
+        [Place(CHANNEL, str(PRIVATE_CHAT))],
         [Message("Open the Expert conversation.")],
         key=f"expert:open:{CREATED}",
         now=NOW,
@@ -556,7 +550,7 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
         return int(row[0])
 
     assert h.remaining(target) == 0
-    assert count("SELECT COUNT(*) FROM messages WHERE thread = ?", (TARGET_THREAD,)) == 0
+    assert count(_IN_PLACE, (telegram_place(GROUP_ID, TARGET_THREAD).id,)) == 0
     assert (
         count("SELECT COUNT(*) FROM messages WHERE update_id IN (?, ?, ?)", (CREATED, 501, 503))
         == 0
@@ -573,7 +567,7 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
         == 0
     )
     assert h.remaining(bystander) > 0
-    assert count("SELECT COUNT(*) FROM messages WHERE thread = ?", (BYSTANDER_THREAD,)) > 0
+    assert count(_IN_PLACE, (telegram_place(GROUP_ID, BYSTANDER_THREAD).id,)) > 0
     assert count("SELECT COUNT(*) FROM messages WHERE update_id = ?", (502,)) == 1
     assert (
         count("SELECT COUNT(*) FROM command_replies WHERE reply_key = ?", ("expert:command:502",))
@@ -592,37 +586,34 @@ def test_a_gone_command_reply_ends_only_its_expert_topic(build: Callable[..., Ha
             key=str(501),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP_ID,
+            place=telegram_place(GROUP_ID, TARGET_THREAD),
             message_ref="501",
             text="/help",
-            thread=TARGET_THREAD,
         ),
         Inbound(
             id=502,
             key=str(502),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP_ID,
+            place=telegram_place(GROUP_ID, BYSTANDER_THREAD),
             message_ref="502",
             text="/help",
-            thread=BYSTANDER_THREAD,
         ),
         Inbound(
             id=503,
             key=str(503),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP_ID,
+            place=telegram_place(GROUP_ID, 77),
             message_ref="503",
             text="/help",
-            thread=77,
         ),
     ]
     JournalInbound(h.database).record_batch(CHANNEL, items, cursor="504", now=NOW)
     asyncio.run(h.turns.handle(items[0]))
     asyncio.run(h.turns.handle(items[1]))
     h.outbox.queue_command_reply(
-        [Destination(CHANNEL, str(GROUP_ID), 77)],
+        [telegram_place(GROUP_ID, 77)],
         [Message("component reply")],
         key="component:reply:503",
         now=NOW,
@@ -659,12 +650,8 @@ def test_a_gone_command_reply_ends_only_its_expert_topic(build: Callable[..., Ha
         ).fetchone()[0]
         == 1
     )
-    assert (
-        h.database.connection.execute("SELECT COUNT(*) FROM messages WHERE thread = 77").fetchone()[
-            0
-        ]
-        == 2
-    )
+    kept = h.database.connection.execute(_IN_PLACE, (telegram_place(GROUP_ID, 77).id,)).fetchone()
+    assert kept[0] == 2
 
 
 def test_closing_a_conversation_stops_a_turn_that_is_still_gathering_its_context(
@@ -708,9 +695,7 @@ def test_a_failed_directory_removal_keeps_the_rows_until_the_sweep_finishes(
 
     async def scenario() -> None:
         with pytest.raises(OSError, match="busy"):
-            await h.ending.topic_gone(
-                conversation, Destination(CHANNEL, str(GROUP_ID), TARGET_THREAD)
-            )
+            await h.ending.topic_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
         assert h.remaining(conversation) > 0
         await h.ending.sweep()
 
@@ -729,7 +714,7 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
     real_erase = h.log.erase
     crashes: list[RuntimeError] = [RuntimeError("crash")]
 
-    def crashing_erase(conversation_id: int, *, room_place: Destination) -> None:
+    def crashing_erase(conversation_id: int, *, room_place: Place) -> None:
         if crashes:
             raise crashes.pop()
         real_erase(conversation_id, room_place=room_place)
@@ -739,9 +724,7 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="crash"):
-            await h.ending.topic_gone(
-                conversation, Destination(CHANNEL, str(GROUP_ID), TARGET_THREAD)
-            )
+            await h.ending.topic_gone(conversation, telegram_place(GROUP_ID, TARGET_THREAD))
         assert not conversation_directory(h.directory, conversation).exists()
         assert h.remaining(conversation) > 0
         await h.ending.sweep()
@@ -762,7 +745,7 @@ def _queue_ask_reply(
         key = f"{prefix}:select:{update_id}"
         message = Message("Choose an Expert.", (Button("/expert@bot", data=f"expert:{update_id}"),))
     h.outbox.queue_command_reply(
-        [Destination(CHANNEL, str(PRIVATE_CHAT), None)],
+        [Place(CHANNEL, str(PRIVATE_CHAT))],
         [message],
         key=key,
         now=NOW,
@@ -937,21 +920,20 @@ def test_erasing_an_event_keeps_the_reply_keys_that_only_end_in_the_same_number(
             key="900",
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=CHAT,
+            place=telegram_place(CHAT, TARGET_THREAD),
             message_ref="900",
             text="/help",
-            thread=TARGET_THREAD,
         )
         JournalInbound(database).record_batch(CHANNEL, [asked], "901", NOW)
         [stored] = JournalInbound(database).pending()
-        conversations.create(stored.id, chat=CHAT, thread=None, text="hi", scope=[], now=NOW)
+        conversations.create(stored.id, origin=telegram_place(CHAT), text="hi", scope=[], now=NOW)
         others = {f"submit:{stored.id}", f"expert:view:700:{stored.id}"}
         for key in (f"expert:command:{stored.id}", *others):
             outbox.queue_command_reply([], [], key=key, now=NOW)
 
         conversations.erase(
             _conversation_row(database, stored.id),
-            room_place=Destination(CHANNEL, str(CHAT), TARGET_THREAD),
+            room_place=telegram_place(CHAT, TARGET_THREAD),
         )
 
         kept = {
@@ -968,31 +950,33 @@ def test_erasing_a_conversation_deletes_the_reply_keys_of_its_own_replies_only()
         conversations = Conversations(database)
         outbox = JournalOutbox(database, MessageStore(database, Reporter()))
         for update_id, thread in ((CREATED, TARGET_THREAD), (CREATED + 100, BYSTANDER_THREAD)):
-            conversations.create(update_id, chat=CHAT, thread=None, text="hi", scope=[], now=NOW)
+            conversations.create(
+                update_id, origin=telegram_place(CHAT), text="hi", scope=[], now=NOW
+            )
             conversations.opened(update_id, str(thread))
         target = _conversation_row(database, CREATED)
         bystander = _conversation_row(database, CREATED + 100)
-        destination = [Destination(CHANNEL, str(CHAT), TARGET_THREAD)]
+        place = [telegram_place(CHAT, TARGET_THREAD)]
         outbox.queue_command_reply(
-            destination,
+            place,
             [Message("a"), Message("b")],
             key="expert:view:601:1",
             now=NOW,
             conversation_id=target,
         )
         outbox.queue_command_reply(
-            destination, [Message("c")], key="expert:view:601", now=NOW, conversation_id=target
+            place, [Message("c")], key="expert:view:601", now=NOW, conversation_id=target
         )
         outbox.queue_command_reply(
-            destination,
+            place,
             [Message("d")],
             key="expert:view:602:1",
             now=NOW,
             conversation_id=bystander,
         )
-        outbox.queue_command_reply(destination, [Message("e")], key="expert:select:603", now=NOW)
+        outbox.queue_command_reply(place, [Message("e")], key="expert:select:603", now=NOW)
 
-        conversations.erase(target, room_place=destination[0])
+        conversations.erase(target, room_place=place[0])
 
         kept = {
             row[0] for row in database.connection.execute("SELECT reply_key FROM command_replies")

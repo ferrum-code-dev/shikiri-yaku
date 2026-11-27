@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytest
+from pydantic import TypeAdapter
 
 from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
@@ -45,8 +46,8 @@ from shikiri_yaku.journal.migrations import MIGRATIONS
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.ports import Ack, AckStatus, Button, Message
 from tests.support.attachments import FakeDownloads
-from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.places import FixedPlaces
 from tests.support.rooms import GROUP, FakeRooms
 from tests.unit import test_ask, test_replies
 
@@ -82,23 +83,28 @@ def _at_schema(monkeypatch: pytest.MonkeyPatch, path: Path, number: int) -> Data
         monkeypatch.undo()
 
 
-def _sent(messages: MessageStore, ref: str, chat: str, key: str, body: Message) -> None:
-    row = messages.record_outbound(
-        signal_number=None,
-        channel=CHANNEL,
-        chat=chat,
-        purpose=Purpose.EXPERT,
-        body=body,
-        notice_key=key,
-        now=NOW,
+def _sent(
+    journal: Database,
+    ref: str,
+    chat: str,
+    key: str,
+    body: Message,
+    *,
+    number: int | None = None,
+    purpose: Purpose = Purpose.EXPERT,
+) -> None:
+    """Write a sent copy as the old code stored it: by chat, before places."""
+    journal.connection.execute(
+        "INSERT INTO messages (signal_number, direction, channel, chat, platform_message_id,"
+        " purpose, notice_key, delivery, body, created_at)"
+        " VALUES (?, 'out', ?, ?, ?, ?, ?, 'sent', ?, ?)",
+        (number, CHANNEL, chat, ref, purpose, key, TypeAdapter(Message).dump_json(body), THEN),
     )
-    messages.confirm_delivery(row.row_id, ref)
 
 
 def _old_records(journal: Database) -> int:
     """Write what an old journal holds with work under way; return the admin op's number."""
     connection = journal.connection
-    messages = MessageStore(journal, test_ask.Reporter())
     number = (
         SignalStore(journal)
         .insert_if_absent(
@@ -115,16 +121,15 @@ def _old_records(journal: Database) -> int:
         )
         .row_id
     )
-    question = messages.record_outbound(
-        signal_number=number,
-        channel=CHANNEL,
-        chat=str(OWNER),
+    _sent(
+        journal,
+        QUESTION_REF,
+        str(OWNER),
+        f"forward:{number}",
+        Message("question", (Button("Choice", f"a:{number}:1"),)),
+        number=number,
         purpose=Purpose.QUESTION,
-        body=Message("question", (Button("Choice", f"a:{number}:1"),)),
-        notice_key=f"forward:{number}",
-        now=NOW,
     )
-    messages.confirm_delivery(question.row_id, QUESTION_REF)
 
     connection.execute(
         "INSERT INTO conversations (id, update_id, chat, scope, state, thread_id, last_activity)"
@@ -145,7 +150,7 @@ def _old_records(journal: Database) -> int:
         )
     connection.execute("INSERT INTO proposals VALUES (?, 1, 'offered')", (PROPOSED,))
     _sent(
-        messages,
+        journal,
         PROPOSAL_REF,
         str(GROUP),
         action_key(PROPOSED),
@@ -166,7 +171,7 @@ def _old_records(journal: Database) -> int:
         .row_id
     )
     _sent(
-        messages,
+        journal,
         ADMIN_REF,
         str(GROUP),
         f"admin:proposal:{op}",
@@ -254,7 +259,6 @@ def _service(
         clients=clients,
         scope={"api": directory / "api"},
         directory=directory,
-        channel=CHANNEL,
         max_text=MESSAGE_TEXT_LIMIT,
         max_file_bytes=DOWNLOAD_LIMIT_BYTES,
         runs=runs,
@@ -264,7 +268,7 @@ def _service(
             rooms,
             outbox,
             clock,
-            places=FixedDestinations(),
+            places=FixedPlaces(),
             directory=directory,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import TypeAdapter
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.domain.outbound import REPLACED_LINE, Purpose
 from shikiri_yaku.journal import (
@@ -28,7 +28,7 @@ from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Messag
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import FinalEdit
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -59,7 +59,7 @@ class _Channel:
         self.deleted: list[str] = []
         self.states: list[str] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -119,9 +119,7 @@ class _Journal:
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.numbers[signal],
-            channel="telegram",
-            chat=chat,
-            thread=thread,
+            place=telegram_place(chat, thread),
             purpose=Purpose.QUESTION,
             body=QUESTION,
             notice_key=f"question:{ref}",
@@ -195,7 +193,9 @@ def test_a_copy_is_replaced_only_by_a_sent_newer_copy_of_its_own_slot(
     journal.send(OLDER)
     journal.send(NEWER, signal=signal, chat=chat, thread=thread, slot=slot, sent=sent)
 
-    assert journal.replacements.superseded() == ([OLDER] if replaced else [])
+    assert [copy.message_ref for copy in journal.replacements.superseded()] == (
+        [OLDER] if replaced else []
+    )
 
 
 def test_a_copy_whose_final_state_is_journaled_is_left_to_the_copy_editor(
@@ -269,7 +269,7 @@ def test_a_transient_failure_is_tried_again_by_the_next_tick(journal: _Journal) 
 def test_an_attempt_cut_short_by_a_crash_is_not_repeated(journal: _Journal) -> None:
     journal.send(OLDER)
     journal.send(NEWER)
-    journal.replacements.begin_deletion(OLDER)
+    journal.replacements.begin_deletion(journal.replacements.superseded()[0].message_id)
     channel = _Channel(journal.database)
 
     _tick(journal.replacer(channel))
@@ -280,8 +280,18 @@ def test_an_attempt_cut_short_by_a_crash_is_not_repeated(journal: _Journal) -> N
 
 def test_undo_leaves_alone_a_copy_whose_body_a_secret_deletion_dropped(journal: _Journal) -> None:
     journal.send(OLDER, slot=None)
-    journal.messages.record_deletion(OLDER, "a secret", now=NOW)
+    journal.messages.record_deletion(
+        journal.database.connection.execute(
+            "SELECT id FROM messages WHERE platform_message_id = ?", (OLDER,)
+        ).fetchone()[0],
+        "a secret",
+        now=NOW,
+    )
 
-    journal.replacements.undo_deletion(OLDER)
+    journal.replacements.undo_deletion(
+        journal.database.connection.execute(
+            "SELECT id FROM messages WHERE platform_message_id = ?", (OLDER,)
+        ).fetchone()[0]
+    )
 
     assert journal.state(OLDER) == Delivery.DELETE_ATTEMPTED

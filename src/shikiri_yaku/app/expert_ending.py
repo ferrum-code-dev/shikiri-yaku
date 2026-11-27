@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert_runs import ConversationRuns
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import Clock, Destinations, FinalEdits, Outbox, Rooms
+    from shikiri_yaku.domain.place import Place
+    from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Places, Rooms
 
 _REFUSED_DELETION: Final = (
     "The channel refused to delete the Expert topic of conversation {number}. The conversation "
@@ -49,7 +49,7 @@ class EndingLog(Protocol):
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
     def idle_before(self, cutoff: datetime, mode: str) -> list[ConversationRecord]: ...
     def ending(self) -> list[ConversationRecord]: ...
-    def erase(self, conversation_id: int, *, room_place: Destination) -> None: ...
+    def erase(self, conversation_id: int, *, room_place: Place) -> None: ...
 
 
 class ExpertEnding:
@@ -71,7 +71,7 @@ class ExpertEnding:
         outbox: Outbox,
         clock: Clock,
         *,
-        places: Destinations,
+        places: Places,
         directory: Path,
         retention: timedelta,
         admin_idle: timedelta,
@@ -112,7 +112,7 @@ class ExpertEnding:
             return
         self._erase_when_settled(row.id, row.room)
 
-    async def topic_gone(self, conversation_id: int, destination: Destination) -> None:
+    async def topic_gone(self, conversation_id: int, place: Place) -> None:
         """Erase a conversation whose topic no longer exists; there is nothing to delete.
 
         The directory goes before the rows: the closing rows are the retry state, so a crash or a
@@ -120,7 +120,7 @@ class ExpertEnding:
         qualifies.
         """
         row = self._log.conversation(conversation_id)
-        if row is None or row.room is None or self._rooms.room_of(destination) != row.room:
+        if row is None or row.room is None or self._rooms.room_of(place) != row.room:
             return
         room = row.room
         row = self._log.begin_ending(conversation_id, self._clock.now())

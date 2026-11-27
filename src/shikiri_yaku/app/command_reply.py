@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.outbound import split_reply
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import Message
 
@@ -13,18 +12,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from shikiri_yaku.domain.inbound import Inbound
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Outbox
-
-
-def item_destination(channel: str, item: Inbound) -> Destination:
-    """Return the chat and thread the PO sent the item in, where its command reply goes."""
-    return Destination(channel, str(item.chat), item.thread)
 
 
 def queue_command_reply(
     outbox: Outbox,
-    destinations: Sequence[Destination],
+    places: Sequence[Place],
     text: str,
     *,
     key: str,
@@ -43,7 +37,7 @@ def queue_command_reply(
         return
     parts = [text] if secret_form([text]) is not None else split_reply(text, max_text)
     outbox.queue_command_reply(
-        destinations,
+        places,
         [Message(part) for part in parts],
         key=key,
         now=now,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.replies import answer_data, confirm_key, confirm_message
 from shikiri_yaku.domain.outbound import INSTALL_SLOT, Purpose
 from shikiri_yaku.domain.signal import Kind
@@ -24,13 +24,13 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.inbound import Inbound
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         EscalationView,
         InstallApprovalRenderer,
         InstallOp,
         Message,
         OpenLog,
         Outbox,
+        Places,
         Reshower,
         ShikiruClient,
     )
@@ -48,7 +48,7 @@ def _nothing(component: str | None) -> str:
 
 
 class OpenCommand:
-    """Re-shows what the PO can still answer, to the owners and the sender's chat.
+    """Re-shows what the PO can still answer, to the owners and the sender's place.
 
     A question is shown again by the Reshower from Shikiru's current view. An approval is rebuilt
     from that view too, and each copy's key names the op and the update, so the Confirm of every
@@ -57,7 +57,7 @@ class OpenCommand:
 
     The reply groups the shown items under Questions and Approvals headings.
 
-    A command sent in a thread that names a component asks only that component's Shikiru, so only
+    A command sent in a component's place asks only that component's Shikiru, so only
     its items are shown and only its name is reported.
 
     An update is answered once. Its completion is journaled after every part, so a repeat of the
@@ -73,8 +73,7 @@ class OpenCommand:
         outbox: Outbox,
         clock: Clock,
         *,
-        destinations: Destinations,
-        channel: str,
+        places: Places,
         max_text: int,
         install_approval: InstallApprovalRenderer | None = None,
         approval_expiry_h: int | None = None,
@@ -84,8 +83,7 @@ class OpenCommand:
         self._reshower = reshower
         self._outbox = outbox
         self._clock = clock
-        self._destinations = destinations
-        self._channel = channel
+        self._places = places
         self._max_text = max_text
         self._install_approval = install_approval
         self._approval_expiry_h = approval_expiry_h
@@ -173,7 +171,7 @@ class OpenCommand:
     def _reply(self, item: Inbound, text: str, key: str) -> None:
         queue_command_reply(
             self._outbox,
-            [item_destination(self._channel, item)],
+            [item.place],
             text,
             key=key,
             now=self._clock.now(),
@@ -214,7 +212,7 @@ class OpenCommand:
         self._outbox.queue(
             number,
             purpose,
-            self._destinations.for_signal(project, Kind.ESCALATION),
+            self._places.for_signal(project, Kind.ESCALATION),
             message,
             key=key,
             now=self._clock.now(),

@@ -19,8 +19,8 @@ from shikiri_yaku.adapters.telegram import (
     TelegramForumTopics,
     TelegramSharedChat,
     probe_bot,
+    telegram_place,
 )
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import ChannelError, ChannelUnavailableError
 
 if TYPE_CHECKING:
@@ -310,7 +310,7 @@ def test_only_a_topic_of_the_group_can_be_a_room(
     chat: int, thread: int | None, room: str | None
 ) -> None:
     rooms = TelegramForumTopics(_Group(administrators=[], count=0), GROUP_ID)
-    place = Destination("telegram", str(chat), thread)
+    place = telegram_place(chat, thread)
 
     assert rooms.room_of(place) == room
     if room is not None:

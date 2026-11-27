@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.extensions.product.message import escalation_message
@@ -36,7 +36,7 @@ def test_input_requests_are_durable_question_messages_matched_by_reply_reference
     h.handle(data=f"a:1:{option}")
     h.handle(data=f"a:1:{option}")
     (pending,) = h.outbox.pending()
-    assert pending.destination.chat == "1001"
+    assert pending.place.id == "1001"
     assert h.client.calls == []
     h.outbox.confirm(pending.message_id, "1001/43")
     h.handle(update=701, ref="1001/43", text="My complete answer")
@@ -103,7 +103,7 @@ def test_details_queue_full_packet_in_parts_once_per_update(h: Harness) -> None:
     parts = h.outbox.pending()
     assert [len(part.message.text) for part in parts] == [MESSAGE_TEXT_LIMIT, 1]
     assert "".join(part.message.text for part in parts) == packet
-    assert all(part.destination.chat == "1001" for part in parts)
+    assert all(part.place.id == "1001" for part in parts)
     assert h.client.calls == []
 
 
@@ -221,8 +221,7 @@ def test_secret_in_an_option_label_is_refused_before_journaling(h: Harness, form
     assert secret_form(rendered.texts()) == form
     h.messages.record_outbound(
         signal_number=h.number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=Purpose.QUESTION,
         body=rendered,
         notice_key=None,
@@ -262,8 +261,7 @@ def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving
     assert secret_form(rendered.texts()) is None
     row = h.messages.record_outbound(
         signal_number=h.number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=Purpose.QUESTION,
         body=rendered,
         notice_key=None,

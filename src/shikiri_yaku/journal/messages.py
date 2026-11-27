@@ -15,6 +15,7 @@ from shikiri_yaku.domain.outbound import (
     message_label,
     refusal_notice,
 )
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import Inserted, stamp
 from shikiri_yaku.journal.signals import SignalState
@@ -53,9 +54,7 @@ _BODY = TypeAdapter(Message)
 class StoredMessage:
     id: int
     signal_number: int | None
-    channel: str
-    chat: str
-    thread: int | None
+    place: Place
     platform_message_id: str | None
     purpose: Purpose | None
     delivery: Delivery
@@ -68,9 +67,7 @@ def _message(row: sqlite3.Row) -> StoredMessage:
     return StoredMessage(
         id=row["id"],
         signal_number=row["signal_number"],
-        channel=row["channel"],
-        chat=row["chat"],
-        thread=row["thread"],
+        place=Place(row["channel"], row["place"]),
         platform_message_id=row["platform_message_id"],
         purpose=None if row["purpose"] is None else Purpose(row["purpose"]),
         delivery=Delivery(row["delivery"]),
@@ -97,9 +94,7 @@ class MessageStore:
         self,
         *,
         signal_number: int | None,
-        channel: str,
-        chat: str,
-        thread: int | None = None,
+        place: Place,
         purpose: Purpose,
         body: Message,
         notice_key: str | None,
@@ -108,7 +103,7 @@ class MessageStore:
         standing: bool = False,
         conversation_id: int | None = None,
     ) -> Inserted:
-        """Journal a message and its body before it is sent; a key queued for that chat is known.
+        """Journal a message and its body before it is sent; a key queued for that place is known.
 
         A body that carries a secret is refused here: its form is kept, its text is not, and the PO
         gets the notice of the refusal. A standing copy keeps its reminders until the PO stops them.
@@ -117,9 +112,7 @@ class MessageStore:
         with self._database.transaction():
             inserted = self._insert(
                 signal_number=signal_number,
-                channel=channel,
-                chat=chat,
-                thread=thread,
+                place=place,
                 purpose=purpose,
                 notice_key=notice_key,
                 now=now,
@@ -132,9 +125,7 @@ class MessageStore:
             if form is not None and inserted.is_new:
                 self._notify(
                     signal_number=signal_number,
-                    channel=channel,
-                    chat=chat,
-                    thread=thread,
+                    place=place,
                     refused_id=inserted.row_id,
                     reason=form,
                     now=now,
@@ -145,9 +136,7 @@ class MessageStore:
         self,
         *,
         signal_number: int | None,
-        channel: str,
-        chat: str,
-        thread: int | None,
+        place: Place,
         purpose: Purpose,
         notice_key: str | None,
         now: datetime,
@@ -157,24 +146,23 @@ class MessageStore:
         standing: bool = False,
         conversation_id: int | None = None,
     ) -> Inserted:
-        """Insert an outbound row, or find the row that has its notice key for that chat."""
+        """Insert an outbound row, or find the row that has its notice key for that place."""
         connection = self._database.connection
         delivery = Delivery.PENDING if refusal is None else Delivery.REFUSED
         created = connection.execute(
             """
             INSERT INTO messages (
-                signal_number, direction, channel, chat, thread, purpose, notice_key,
+                signal_number, direction, channel, place, purpose, notice_key,
                 delivery, body, refusal, created_at, slot, standing, conversation_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (notice_key, channel, chat, COALESCE(thread, -1)) DO NOTHING
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (notice_key, channel, place) DO NOTHING
             """,
             (
                 signal_number,
                 Direction.OUT,
-                channel,
-                chat,
-                thread,
+                place.channel,
+                place.id,
                 purpose,
                 notice_key,
                 delivery,
@@ -191,9 +179,9 @@ class MessageStore:
         row = connection.execute(
             """
             SELECT id FROM messages
-            WHERE notice_key = ? AND channel = ? AND chat = ? AND thread IS ?
+            WHERE notice_key = ? AND channel = ? AND place = ?
             """,
-            (notice_key, channel, chat, thread),
+            (notice_key, place.channel, place.id),
         ).fetchone()
         return Inserted(row["id"], is_new=False)
 
@@ -201,9 +189,7 @@ class MessageStore:
         self,
         *,
         signal_number: int | None,
-        channel: str,
-        chat: str,
-        thread: int | None,
+        place: Place,
         refused_id: int,
         reason: str,
         now: datetime,
@@ -213,15 +199,13 @@ class MessageStore:
         """Queue the PO's notice of a refusal; if it cannot be journaled, report its metadata only.
 
         The notice is a fixed text with the S-number and no refused content. It is keyed by the
-        refused row, so a refusal is noticed once per chat.
+        refused row, so a refusal is noticed once per place.
         """
         notice = Message(refusal_notice(signal_number) if text is None else text)
         try:
             self._insert(
                 signal_number=signal_number,
-                channel=channel,
-                chat=chat,
-                thread=thread,
+                place=place,
                 purpose=Purpose.NOTICE,
                 notice_key=f"{REFUSAL_KEY_PREFIX}{refused_id}",
                 now=now,
@@ -250,9 +234,7 @@ class MessageStore:
             return
         self._notify(
             signal_number=row["signal_number"],
-            channel=row["channel"],
-            chat=row["chat"],
-            thread=row["thread"],
+            place=Place(row["channel"], row["place"]),
             refused_id=row["id"],
             reason=reason,
             now=now,
@@ -272,7 +254,7 @@ class MessageStore:
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT id, signal_number, channel, chat, thread, notice_key, purpose, slot, body
+                SELECT id, signal_number, channel, place, notice_key, purpose, slot, body
                 FROM messages WHERE id = ? AND delivery = ?
                 """,
                 (message_id, Delivery.PENDING),
@@ -305,27 +287,27 @@ class MessageStore:
                 text=refusal_text,
             )
 
-    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+    def record_refused_edit(self, message_id: int, reason: str, *, now: datetime) -> None:
         """Keep the reason of a refused edit on the copy it targeted, and notify the PO of it."""
-        self._refuse_copy(message_ref, reason, now=now, delete=False)
+        self._refuse_copy(message_id, reason, now=now, delete=False)
 
-    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
-        """Journal an attempt to delete the copy at this reference, before it is invoked.
+    def record_deletion(self, message_id: int, reason: str, *, now: datetime) -> bool:
+        """Journal an attempt to delete the copy, before it is invoked.
 
-        The body of the copy is dropped. False means the journal has no sent copy at the reference.
+        The body of the copy is dropped. False means the journal has no sent copy at this id.
         """
-        return self._refuse_copy(message_ref, reason, now=now, delete=True)
+        return self._refuse_copy(message_id, reason, now=now, delete=True)
 
-    def _refuse_copy(self, message_ref: str, reason: str, *, now: datetime, delete: bool) -> bool:
-        """Mark the sent copy at this reference as refused, and notify the PO; False if unknown."""
+    def _refuse_copy(self, message_id: int, reason: str, *, now: datetime, delete: bool) -> bool:
+        """Mark the sent copy as refused, and notify the PO; False if unknown."""
         connection = self._database.connection
         with self._database.transaction():
             row = connection.execute(
                 """
-                SELECT id, signal_number, channel, chat, thread, notice_key FROM messages
-                WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+                SELECT id, signal_number, channel, place, notice_key FROM messages
+                WHERE id = ? AND direction = ? AND delivery = ?
                 """,
-                (message_ref, Direction.OUT, Delivery.SENT),
+                (message_id, Direction.OUT, Delivery.SENT),
             ).fetchone()
             if row is None:
                 return False
@@ -341,13 +323,13 @@ class MessageStore:
             self._notify_refusal(row, reason, now)
         return True
 
-    def confirm_deletion(self, message_ref: str) -> None:
+    def confirm_deletion(self, message_id: int) -> None:
         self._database.connection.execute(
             """
             UPDATE messages SET delivery = ?
-            WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+            WHERE id = ? AND direction = ? AND delivery = ?
             """,
-            (Delivery.DELETED, message_ref, Direction.OUT, Delivery.DELETE_ATTEMPTED),
+            (Delivery.DELETED, message_id, Direction.OUT, Delivery.DELETE_ATTEMPTED),
         )
 
     def unconfirmed(self) -> list[StoredMessage]:

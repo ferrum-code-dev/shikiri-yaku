@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import ValidationError
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.domain.callback import (
     ADMIN_DECLINE_VERB,
     ADMIN_RUN_VERB,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.expert import ExpertTask
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Rooms, SubmitOp
 
 _ADMIN_INTENDED: Final = "intended"
@@ -163,14 +163,14 @@ class ProposalLog(Protocol):
         """Return offered proposals to resume delivering after a restart."""
         ...
 
-    def bound(self, destination: Destination, message_ref: str) -> str | None:
+    def bound(self, channel: str, message_ref: str) -> str | None:
         """Return the notice key of the sent message a tap came from."""
         ...
 
 
 @dataclass(frozen=True, slots=True)
 class _Proposal:
-    destination: Destination
+    place: Place
     conversation_id: int
     answer: ExpertAnswer
 
@@ -187,7 +187,6 @@ class ExpertProposals:
         outbox: Outbox,
         clock: Clock,
         *,
-        channel: str,
         max_text: int,
         rooms: Rooms,
         access: AdminAccess,
@@ -200,7 +199,6 @@ class ExpertProposals:
         self._final = final
         self._outbox = outbox
         self._clock = clock
-        self._channel = channel
         self._max_text = max_text
         self._rooms = rooms
         self._access = access
@@ -250,7 +248,7 @@ class ExpertProposals:
             self._outbox.queue(
                 None,
                 Purpose.EXPERT,
-                [opened.destination],
+                [opened.place],
                 message,
                 key=key,
                 now=self._clock.now(),
@@ -279,7 +277,7 @@ class ExpertProposals:
         self._outbox.queue(
             None,
             Purpose.EXPERT,
-            [opened.destination],
+            [opened.place],
             Message(
                 admin_message_text(answer.command, answer.reason),
                 (
@@ -317,9 +315,8 @@ class ExpertProposals:
         if conversation is None or conversation.room is None:
             self._admin_reply(item, "Conversation is closed.")
             return True
-        destination = self._rooms.place(conversation.room)
-        place = item_destination(self._channel, item)
-        if self._log.bound(place, item.message_ref) != f"admin:proposal:{tap[1]}":
+        room_place = self._rooms.place(conversation.room)
+        if self._log.bound(item.place.channel, item.message_ref) != f"admin:proposal:{tap[1]}":
             return True
         now = self._clock.now()
         admin = self._access.is_admin(item.sender)
@@ -360,7 +357,7 @@ class ExpertProposals:
             reason = "Proposal is no longer pending."
         queue_command_reply(
             self._outbox,
-            [destination],
+            [room_place],
             reason,
             key=f"admin:decision:{item.id}",
             now=now,
@@ -372,7 +369,7 @@ class ExpertProposals:
     def _admin_reply(self, item: Inbound, reason: str) -> None:
         queue_command_reply(
             self._outbox,
-            [item_destination(self._channel, item)],
+            [item.place],
             reason,
             key=f"admin:decision:{item.id}",
             now=self._clock.now(),
@@ -393,8 +390,7 @@ class ExpertProposals:
         proposal = self._open(tap[1])
         if proposal is not None and not self._access.admit(proposal.conversation_id, item.sender):
             return True
-        place = item_destination(self._channel, item)
-        message_key = self._log.bound(place, item.message_ref)
+        message_key = self._log.bound(item.place.channel, item.message_ref)
         if message_key != action_key(tap[1]):
             if message_key == answer_key(tap[1]):
                 opened = self._open(tap[1])
@@ -419,7 +415,7 @@ class ExpertProposals:
         except OSError:
             queue_command_reply(
                 self._outbox,
-                [opened.destination],
+                [opened.place],
                 _FILES_NOT_COPIED,
                 key=f"expert:files:{item.id}",
                 now=self._clock.now(),
@@ -429,7 +425,7 @@ class ExpertProposals:
             return
         payloads = [
             _payload(
-                opened.destination,
+                opened.place,
                 proposal_id,
                 task,
                 [copies[name] for name in task.files],
@@ -468,7 +464,7 @@ class ExpertProposals:
         if secret_form([text for _, text in texts]) is not None:
             queue_command_reply(
                 self._outbox,
-                [opened.destination],
+                [opened.place],
                 _WITHHELD,
                 key=f"expert:view:{item.id}",
                 now=self._clock.now(),
@@ -479,7 +475,7 @@ class ExpertProposals:
         for number, text in texts:
             queue_command_reply(
                 self._outbox,
-                [opened.destination],
+                [opened.place],
                 text,
                 key=f"expert:view:{item.id}:{number}",
                 now=self._clock.now(),
@@ -526,7 +522,7 @@ class ExpertProposals:
             self._outbox.queue(
                 None,
                 Purpose.EXPERT,
-                [opened.destination],
+                [opened.place],
                 message,
                 key=f"expert:proposal:{proposal_id}:interrupted{suffix}",
                 now=self._clock.now(),
@@ -549,7 +545,7 @@ class ExpertProposals:
     def _say(self, item: Inbound, opened: _Proposal, state: str | None) -> None:
         queue_command_reply(
             self._outbox,
-            [opened.destination],
+            [opened.place],
             _NOT_OPEN[state],
             key=f"expert:proposal:{item.id}",
             now=self._clock.now(),
@@ -572,7 +568,7 @@ class ExpertProposals:
             self._outbox.queue(
                 None,
                 Purpose.EXPERT,
-                [opened.destination],
+                [opened.place],
                 message,
                 key=f"expert:proposal:{proposal_id}:result:{index}",
                 now=self._clock.now(),
@@ -669,22 +665,20 @@ def _pack_lines(lines: list[str], first_room: int, other_room: int) -> list[str]
     return chunks
 
 
-def _payload(
-    destination: Destination, proposal_id: int, task: ExpertTask, files: list[str]
-) -> SubmitPayload:
+def _payload(place: Place, proposal_id: int, task: ExpertTask, files: list[str]) -> SubmitPayload:
     text = join_blocks(task.text, "\n".join([_FILES_HEADING, *files]) if files else "")
     if task.planning:
         return SubmitPayload(
             component=task.component,
             request=join_blocks(_PLAN_AND_EXECUTE, text),
-            destination=destination,
+            place=place,
             proposal=proposal_id,
             mode=SubmitMode.PLAN,
         )
     return SubmitPayload(
         component=task.component,
         request=text,
-        destination=destination,
+        place=place,
         proposal=proposal_id,
     )
 

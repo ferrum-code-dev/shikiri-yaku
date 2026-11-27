@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, chat_and_thread, telegram_place
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.commands import Commands
@@ -49,8 +49,8 @@ from shikiri_yaku.ports import (
     ShikiruTask,
 )
 from tests.support.attachments import FakeDownloads
-from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.places import FixedPlaces
 from tests.support.rooms import FakeRooms, FakeSharedChat
 
 if TYPE_CHECKING:
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.replies import Replies
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.expert import ExpertRequest
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.journal.replies import JournalReplies
     from shikiri_yaku.ports import EscalationView, Inbox, Message, ShikiruClient
 
@@ -139,11 +139,11 @@ class Expert:
 
 class Channel:
     def __init__(self) -> None:
-        self.sent: list[tuple[Destination, Message]] = []
+        self.sent: list[tuple[Place, Message]] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        self.sent.append((destination, message))
-        return f"{destination.chat}/{len(self.sent)}"
+    async def send(self, place: Place, message: Message) -> str:
+        self.sent.append((place, message))
+        return f"{chat_and_thread(place)[0]}/{len(self.sent)}"
 
     async def edit(self, message_ref: str, message: Message) -> None:
         raise NotImplementedError
@@ -153,9 +153,9 @@ class Channel:
 
 
 class RefusingOriginTopic(Channel):
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         del message
-        if destination.thread == 77:
+        if place == telegram_place(-100123, 77):
             raise PlaceGoneError(PLACE_GONE_REASON)
         raise ChannelError(_RETRY_LATER)
 
@@ -187,7 +187,7 @@ class Harness:
             self.topics,
             self.outbox,
             Clock(),
-            places=FixedDestinations(),
+            places=FixedPlaces(),
             directory=path,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),
@@ -205,7 +205,6 @@ class Harness:
             clients=clients,
             scope={name: path / name for name in ("api", "web")},
             directory=path,
-            channel="telegram",
             runs=self.runs,
             ending=self.ending,
             downloads=FakeDownloads(),
@@ -240,7 +239,6 @@ class Harness:
             shared=FakeSharedChat() if shared else None,
             turns=self.turns,
             scope={name: path / name for name in ("api", "web")},
-            channel="telegram",
             final=JournalFinalEdits(
                 self.database, cast("JournalReplies", None), max_text=MESSAGE_TEXT_LIMIT
             ),
@@ -253,8 +251,7 @@ class Harness:
             cast("Status", None),
             cast("OpenCommand", None),
             cast("GoalCommand", None),
-            destinations=FixedDestinations(topics={77: "api"}),
-            channel="telegram",
+            places=FixedPlaces(topics={77: "api"}),
             name_max_chars=40,
             shared=FakeSharedChat() if shared else None,
             ask=self.ask,
@@ -269,10 +266,9 @@ class Harness:
                     key=str(1),
                     kind=InboundKind.TEXT,
                     sender="5",
-                    chat=-100123,
+                    place=telegram_place(-100123, thread),
                     message_ref="1",
                     text=text,
-                    thread=thread,
                 )
             )
         )
@@ -289,7 +285,7 @@ def test_scope_and_duplicate(tmp_path: Path, thread: int | None, expected: set[s
     asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
     assert len(channel.sent) == 2
     assert channel.sent[0][1].buttons[0].url == "https://t.me/c/123/22"
-    assert channel.sent[1][0].thread == 22
+    assert channel.sent[1][0] == telegram_place(-100123, 22)
     assert channel.sent[1][1].text == "answer"
 
 
@@ -330,7 +326,7 @@ def test_refusals_and_shared_group(  # noqa: PLR0917 -- table columns
 
 def test_crash_before_topic_is_uncertain(tmp_path: Path) -> None:
     h = Harness(tmp_path)
-    h.log.create(1, chat=-100123, thread=None, text="hello", scope=["api"], now=NOW)
+    h.log.create(1, origin=telegram_place(-100123), text="hello", scope=["api"], now=NOW)
     h.turns.recover()
     h.send()
     assert not h.topics.created
@@ -340,7 +336,7 @@ def test_crash_before_topic_is_uncertain(tmp_path: Path) -> None:
 
 def test_crash_after_topic_resumes_once(tmp_path: Path) -> None:
     h = Harness(tmp_path)
-    h.log.create(1, chat=-100123, thread=None, text="hello", scope=["api"], now=NOW)
+    h.log.create(1, origin=telegram_place(-100123), text="hello", scope=["api"], now=NOW)
     h.log.opened(1, "22")
     h.turns.recover()
     h.send()
@@ -408,7 +404,7 @@ def test_independent_asks_run_concurrently_and_are_not_scheduled_twice(tmp_path:
                 key=str(update),
                 kind=InboundKind.TEXT,
                 sender="5",
-                chat=-100123,
+                place=telegram_place(-100123),
                 message_ref=str(update),
                 text="/expert hello",
             )
@@ -496,10 +492,9 @@ def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path
                 key=str(1),
                 kind=InboundKind.TEXT,
                 sender="5",
-                chat=-100123,
+                place=telegram_place(-100123, 77),
                 message_ref="1",
                 text="/expert hello",
-                thread=77,
             ),
             "api",
         )
@@ -518,14 +513,13 @@ def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path
 
 def test_private_origin_interrupted_turn_is_reported_in_the_group_topic(tmp_path: Path) -> None:
     h = Harness(tmp_path)
-    h.log.create(1, chat=5, thread=None, text="hello", scope=["api"], now=NOW)
+    h.log.create(1, origin=telegram_place(5), text="hello", scope=["api"], now=NOW)
     h.log.opened(1, "22")
     assert h.log.start(1)
     h.turns.recover()
 
     [pending] = h.outbox.pending()
-    assert pending.destination.chat == "-100123"
-    assert pending.destination.thread == 22
+    assert pending.place == telegram_place(-100123, 22)
     assert "interrupted" in pending.message.text
 
 
@@ -536,7 +530,7 @@ def test_refused_topic_rename_does_not_prevent_answer(tmp_path: Path) -> None:
     h.send()
 
     pending = h.outbox.pending()
-    answers = [item for item in pending if item.destination.thread == 22]
+    answers = [item for item in pending if item.place == telegram_place(-100123, 22)]
     assert len(answers) == 1
     assert answers[0].message.text == "answer"
     assert len(h.expert.requests) == 1
@@ -549,7 +543,7 @@ def _ask(update_id: int, message_ref: str) -> Inbound:
         key=str(update_id),
         kind=InboundKind.TEXT,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref=message_ref,
         text=f"/expert question {update_id}",
     )
@@ -585,11 +579,11 @@ class FlakyChannel(Channel):
         super().__init__()
         self.failed = False
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         if not self.failed:
             self.failed = True
             raise ChannelError(_RETRY_LATER)
-        return await super().send(destination, message)
+        return await super().send(place, message)
 
 
 def test_the_reply_target_survives_a_failed_send(tmp_path: Path) -> None:
@@ -692,7 +686,7 @@ def test_ask_in_general_through_the_inbound_service(
     assert len(pending) == (2 if opened else 1)
     if opened:
         [button] = [item for item in pending if item.message.buttons]
-        assert button.destination.thread is None
+        assert button.place == telegram_place(-100123)
         assert button.message.reply_to == "-100123/91"
         assert button.message.buttons[0].url == "https://t.me/c/123/22"
 
@@ -714,7 +708,7 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -723,7 +717,7 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
         key=str(3),
         kind=InboundKind.TAP,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/999",
         data="expert:1",
     )
@@ -756,7 +750,7 @@ def test_a_selection_from_an_ask_sent_as_a_reply_opens_once(tmp_path: Path) -> N
         key=str(2),
         kind=InboundKind.TAP,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -776,7 +770,9 @@ def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
     assert len(h.outbox.pending()) == 1
     asyncio.run(sender.tick())
     assert channel.sent[0][1].reply_to == original.message_ref
-    h.log.create(1, chat=-100123, thread=None, text="question 1", scope=["api", "web"], now=NOW)
+    h.log.create(
+        1, origin=telegram_place(-100123), text="question 1", scope=["api", "web"], now=NOW
+    )
     h.log.opened(1, "22")
     h.turns.recover()
     tap = Inbound(
@@ -784,7 +780,7 @@ def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -808,7 +804,7 @@ def test_shared_instances_offer_independently(tmp_path: Path) -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="5",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -830,7 +826,7 @@ def test_selection_rejects_non_owner_before_delivery(tmp_path: Path) -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="99",
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -885,7 +881,7 @@ def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> N
                 key=str(3),
                 kind=InboundKind.TAP,
                 sender="5",
-                chat=-100123,
+                place=telegram_place(-100123),
                 message_ref="-100123/1",
                 data="expert:1",
             ),
@@ -894,7 +890,7 @@ def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> N
                 key=str(4),
                 kind=InboundKind.TAP,
                 sender="5",
-                chat=-100123,
+                place=telegram_place(-100123),
                 message_ref="-100123/2",
                 data="expert:2",
             ),
@@ -903,7 +899,7 @@ def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> N
                 key=str(5),
                 kind=InboundKind.TEXT,
                 sender="5",
-                chat=-100123,
+                place=telegram_place(-100123),
                 message_ref="-100123/73",
                 text="hello",
             ),
@@ -963,7 +959,7 @@ def _admin_text(h: Harness, text: str, sender: int, update_id: int = 1) -> None:
         key=str(update_id),
         kind=InboundKind.TEXT,
         sender=str(sender),
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref=str(update_id),
         text=text,
     )
@@ -1045,10 +1041,9 @@ def test_only_a_listed_admin_takes_part_in_an_admin_topic(tmp_path: Path) -> Non
             key=str(update_id),
             kind=InboundKind.TEXT,
             sender=str(sender),
-            chat=-100123,
+            place=telegram_place(-100123, int(topic.room)),
             message_ref=str(update_id),
             text="more",
-            thread=int(topic.room),
         )
         asyncio.run(h.turns.handle(item))
         asyncio.run(h.turns.handle(item))
@@ -1066,10 +1061,9 @@ def test_a_removed_admin_cannot_continue_an_admin_topic(tmp_path: Path) -> None:
         key=str(2),
         kind=InboundKind.TEXT,
         sender=str(ADMIN),
-        chat=-100123,
+        place=telegram_place(-100123, int(topic.room)),
         message_ref="2",
         text="more",
-        thread=int(topic.room),
     )
     asyncio.run(h.turns.handle(item))
     assert len(h.expert.requests) == 1
@@ -1082,7 +1076,7 @@ def test_a_shared_group_selection_of_admin_needs_an_admin_tap(tmp_path: Path) ->
         key=str(1),
         kind=InboundKind.TEXT,
         sender=str(ADMIN),
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/71",
         text="/admin hello",
     )
@@ -1096,7 +1090,7 @@ def test_a_shared_group_selection_of_admin_needs_an_admin_tap(tmp_path: Path) ->
         key=str(2),
         kind=InboundKind.TAP,
         sender=str(OTHER_OWNER),
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -1107,7 +1101,7 @@ def test_a_shared_group_selection_of_admin_needs_an_admin_tap(tmp_path: Path) ->
         key=str(3),
         kind=InboundKind.TAP,
         sender=str(ADMIN),
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/1",
         data="expert:1",
     )
@@ -1136,7 +1130,7 @@ def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Pa
         _DeletableTopics(),
         h.outbox,
         _Later(),
-        places=FixedDestinations(),
+        places=FixedPlaces(),
         directory=tmp_path,
         retention=timedelta(days=14),
         admin_idle=timedelta(minutes=15),
@@ -1181,7 +1175,7 @@ def test_an_unlisted_owner_gets_no_reply_to_admin_in_a_shared_group(
         key=str(1),
         kind=InboundKind.TEXT,
         sender=str(ADMIN),
-        chat=-100123,
+        place=telegram_place(-100123),
         message_ref="-100123/71",
         text=f"{command} hello",
     )
@@ -1272,10 +1266,9 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
                 key=str(2),
                 kind=InboundKind.TEXT,
                 sender=str(ADMIN),
-                chat=-100123,
+                place=telegram_place(-100123, int(conversation.room)),
                 message_ref="2",
                 text="next",
-                thread=int(conversation.room),
             )
         )
     )
@@ -1293,10 +1286,9 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
                 key=str(3),
                 kind=InboundKind.TEXT,
                 sender=str(ADMIN),
-                chat=-100123,
+                place=telegram_place(-100123, int(conversation.room)),
                 message_ref="3",
                 text="continue",
-                thread=int(conversation.room),
             )
         )
     )

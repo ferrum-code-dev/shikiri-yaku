@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import TypeAdapter
 
 from shikiri_yaku.domain.outbound import ACKNOWLEDGED_LINE, Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState, OpStore
@@ -73,17 +73,17 @@ class JournalReplies:
             Purpose(row["purpose"]),
             _BODY.validate_json(row["body"]),
             row["notice_key"],
-            Destination(row["channel"], row["chat"], row["thread"]),
+            Place(row["channel"], row["place"]),
             signal.classification_note or "",
         )
 
-    def sent_message(self, destination: Destination, message_ref: str) -> Message | None:
+    def sent_message(self, channel: str, message_ref: str) -> Message | None:
         row = self._database.connection.execute(
             """
-            SELECT body FROM messages WHERE channel = ? AND chat = ? AND platform_message_id = ?
+            SELECT body FROM messages WHERE channel = ? AND platform_message_id = ?
                 AND direction = ? AND delivery = ?
             """,
-            (destination.channel, destination.chat, message_ref, Direction.OUT, Delivery.SENT),
+            (channel, message_ref, Direction.OUT, Delivery.SENT),
         ).fetchone()
         return None if row is None or row["body"] is None else _BODY.validate_json(row["body"])
 

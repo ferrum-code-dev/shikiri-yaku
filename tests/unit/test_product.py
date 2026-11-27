@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import CALLBACK_DATA_LIMIT, MESSAGE_TEXT_LIMIT
-from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, TelegramDestinations
+from shikiri_yaku.adapters.telegram import CALLBACK_DATA_LIMIT, MESSAGE_TEXT_LIMIT, telegram_place
+from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, TelegramPlaces
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind, Signal
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.extensions.product.handler import NOTHING_TRIED, ProductHandler
@@ -35,7 +35,7 @@ from shikiri_yaku.ports import (
     TaskDetail,
 )
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -136,13 +136,13 @@ class _Client:
 
 class _Outbox:
     def __init__(self) -> None:
-        self.queued: list[tuple[Purpose, tuple[Destination, ...], Message, str]] = []
+        self.queued: list[tuple[Purpose, tuple[Place, ...], Message, str]] = []
 
     def queue(
         self,
         number: int | None,
         purpose: Purpose,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         message: Message,
         *,
         key: str,
@@ -152,7 +152,7 @@ class _Outbox:
         conversation_id: int | None = None,
     ) -> None:
         del number, now, slot, standing, conversation_id
-        self.queued.append((purpose, tuple(destinations), message, key))
+        self.queued.append((purpose, tuple(places), message, key))
 
     def command_reply_queued(self, key: str) -> bool:
         del key
@@ -172,19 +172,19 @@ class _Outbox:
     def recover_interrupted_drawings(self, message: Message, now: datetime) -> None:
         del message, now
 
-    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+    def expert_selection(self, item: Inbound) -> Inbound | None:
         raise NotImplementedError
 
     def queue_command_reply(
         self,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         parts: Sequence[Message],
         *,
         key: str,
         now: datetime,
         conversation_id: int | None = None,
     ) -> None:
-        del destinations, parts, key, now, conversation_id
+        del places, parts, key, now, conversation_id
         raise NotImplementedError
 
     def pending(self) -> list[Pending]:
@@ -210,13 +210,13 @@ class _Clock:
 
 
 def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarder:
-    destinations = [Destination("telegram", chat) for chat in chats]
+    places = [Place("telegram", chat) for chat in chats]
     return ProductForwarder(
         MESSAGE_TITLE_MAX_CHARS,
         {"api": cast("ShikiruClient", client)},
         outbox,
         _Clock(),
-        FixedDestinations(destinations),
+        FixedPlaces(places),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -267,29 +267,29 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
 def test_every_signal_of_a_component_goes_to_its_topic_and_the_operators_to_general(
     topics: TopicStore, project: str, kind: Kind, thread: int | None
 ) -> None:
-    destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
+    places = TelegramPlaces(topics, owners=(1001,), group_id=-1009, reconciler=None)
 
-    assert destinations.for_signal(project, kind) == [Destination("telegram", "-1009", thread)]
+    assert places.for_signal(project, kind) == [telegram_place(-1009, thread)]
 
 
 @pytest.mark.parametrize("kind", list(Kind))
 def test_without_a_group_every_signal_goes_to_the_owners_private_chats(
     topics: TopicStore, kind: Kind
 ) -> None:
-    private = TelegramDestinations(topics, owners=(1001, 1002), group_id=None, reconciler=None)
+    private = TelegramPlaces(topics, owners=(1001, 1002), group_id=None, reconciler=None)
 
     assert private.for_signal("api", kind) == [
-        Destination("telegram", "1001"),
-        Destination("telegram", "1002"),
+        Place("telegram", "1001"),
+        Place("telegram", "1002"),
     ]
 
 
 def test_a_component_whose_topic_is_not_open_fails_loudly(topics: TopicStore) -> None:
     topics.save("api", 73, TOPIC_CLOSED)
-    destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
+    places = TelegramPlaces(topics, owners=(1001,), group_id=-1009, reconciler=None)
 
     with pytest.raises(CompositionError):
-        destinations.for_signal("api", Kind.TASK_DONE)
+        places.for_signal("api", Kind.TASK_DONE)
 
 
 def test_only_an_open_topic_names_its_component() -> None:
@@ -298,11 +298,11 @@ def test_only_an_open_topic_names_its_component() -> None:
         topics = TopicStore(database)
         topics.save("api", 73, TOPIC_OPEN)
         topics.save("web", 74, TOPIC_CLOSED)
-        destinations = TelegramDestinations(topics, owners=(1001,), group_id=-1009, reconciler=None)
+        places = TelegramPlaces(topics, owners=(1001,), group_id=-1009, reconciler=None)
 
-        assert destinations.component_of(73) == "api"
-        assert destinations.component_of(74) is None
-        assert destinations.component_of(99) is None
+        assert places.component_of(telegram_place(-1009, 73)) == "api"
+        assert places.component_of(telegram_place(-1009, 74)) is None
+        assert places.component_of(telegram_place(-1009, 99)) is None
     finally:
         database.close()
 
@@ -559,13 +559,14 @@ def test_callback_data_fits_the_platform_limit() -> None:
     assert all(len(button.data.encode()) <= CALLBACK_DATA_LIMIT for button in message.buttons)
 
 
-def test_forwarder_queues_one_message_per_destination_keyed_by_the_signal() -> None:
+def test_forwarder_queues_one_message_per_place_keyed_by_the_signal() -> None:
     outbox = _Outbox()
     forwarder = _forwarder(_Client(view=_fixture_view()), outbox, "1001", "1002")
     asyncio.run(forwarder.forward(NUMBER, ESCALATION, NOTE, SUGGESTION, standing=False))
-    assert [
-        (purpose, destinations[0].chat, key) for purpose, destinations, _, key in outbox.queued
-    ] == [(Purpose.QUESTION, "1001", "forward:41"), (Purpose.QUESTION, "1002", "forward:41")]
+    assert [(purpose, places[0].id, key) for purpose, places, _, key in outbox.queued] == [
+        (Purpose.QUESTION, "1001", "forward:41"),
+        (Purpose.QUESTION, "1002", "forward:41"),
+    ]
     message = outbox.queued[0][2]
     assert "S41" in message.heading
     assert "Which behavior should remain?" in message.text
@@ -636,7 +637,7 @@ def test_decision_header_names_the_project_only_outside_its_topic(
     header: str,
 ) -> None:
     group_id = None if private else -1009
-    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    places = TelegramPlaces(topics, owners=(1001,), group_id=group_id, reconciler=None)
     client = _Client(
         _fixture_view(),
         title=title,
@@ -648,7 +649,7 @@ def test_decision_header_names_the_project_only_outside_its_topic(
         {"api": cast("ShikiruClient", client)},
         outbox,
         _Clock(),
-        destinations,
+        places,
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         max_text=MESSAGE_TEXT_LIMIT,
     )

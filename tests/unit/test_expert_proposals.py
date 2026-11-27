@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.expert_admin import AdminAccess, AdminExecutor, recover_admin
 from shikiri_yaku.app.expert_files import TaskFiles
 from shikiri_yaku.app.expert_proposals import action_key, answer_key
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert_proposals import ExpertProposals
     from shikiri_yaku.domain.outbound import Purpose
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import ShikiruClient, ShikiruError
 
 OWNER: Final = 1001
@@ -130,22 +130,22 @@ class FakeShikiru:
 
 class FakeChannel:
     def __init__(self, *, delay_on: int | None = None, refuse_on: int | None = None) -> None:
-        self.sent: list[tuple[Destination, Message]] = []
-        self.attempts: list[tuple[Destination, Message]] = []
+        self.sent: list[tuple[Place, Message]] = []
+        self.attempts: list[tuple[Place, Message]] = []
         self.delay_on = delay_on
         self.refuse_on = refuse_on
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        self.attempts.append((destination, message))
+    async def send(self, place: Place, message: Message) -> str:
+        self.attempts.append((place, message))
         attempt = len(self.attempts)
         if attempt == self.delay_on:
             self.started.set()
             await self.release.wait()
         if attempt == self.refuse_on or len(message.shown()) > MESSAGE_TEXT_LIMIT:
             raise ChannelRefusedError(REFUSED)
-        self.sent.append((destination, message))
+        self.sent.append((place, message))
         return f"channel-{attempt}"
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -229,8 +229,7 @@ class Harness:
         if update_id == FIRST:
             self.conversations.create(
                 update_id,
-                chat=CHAT,
-                thread=None,
+                origin=telegram_place(CHAT),
                 text="ask",
                 scope=list(self.clients),
                 now=NOW,
@@ -339,10 +338,9 @@ class Harness:
             key=str(update_id),
             kind=InboundKind.TAP,
             sender=str(sender),
-            chat=CHAT,
+            place=telegram_place(CHAT, THREAD),
             message_ref=ref,
             data=data,
-            thread=THREAD,
         )
         asyncio.run(self.proposals.tap(item))
 
@@ -597,10 +595,9 @@ def test_action_waits_for_every_task_part_to_be_delivered() -> None:
                 key=str(2),
                 kind=InboundKind.TAP,
                 sender=str(OWNER),
-                chat=CHAT,
+                place=telegram_place(CHAT, THREAD),
                 message_ref="channel-1",
                 data=submit_all_data(FIRST),
-                thread=THREAD,
             )
         )
         assert alpha.requests == []
@@ -624,10 +621,9 @@ def test_action_waits_for_every_task_part_to_be_delivered() -> None:
                 key=str(3),
                 kind=InboundKind.TAP,
                 sender=str(OWNER),
-                chat=CHAT,
+                place=telegram_place(CHAT, THREAD),
                 message_ref=action_ref,
                 data=submit_all_data(FIRST),
-                thread=THREAD,
             )
         )
 
@@ -987,7 +983,9 @@ def test_admin_op_decisions_are_conditional_and_duplicate_safe() -> None:
     database = Database.open(":memory:")
     _DATABASES.append(database)
     conversations = Conversations(database)
-    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.create(
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
     conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
@@ -1026,7 +1024,9 @@ def test_admin_expiry_only_changes_pending_operations() -> None:
     database = Database.open(":memory:")
     _DATABASES.append(database)
     conversations = Conversations(database)
-    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.create(
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
     conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
@@ -1077,10 +1077,9 @@ def test_admin_proposal_delivery_and_decision(verb: str) -> None:
             key=str(update_id),
             kind=InboundKind.TAP,
             sender=str(sender),
-            chat=CHAT,
+            place=telegram_place(CHAT, THREAD),
             message_ref="admin-ref",
             data=f"{verb}:{op['id']}",
-            thread=THREAD,
         )
         assert await harness.proposals.admin_tap(item, run)
 
@@ -1170,10 +1169,9 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
         key=str(2),
         kind=InboundKind.TEXT,
         sender=str(ADMIN),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref="2",
         text="new",
-        thread=THREAD,
     )
     number_next_event(harness.database, CHANNEL, item.id)
     JournalInbound(harness.database).record_batch(CHANNEL, [item], "3", NOW)
@@ -1247,7 +1245,9 @@ def test_admin_issue_and_recovery_never_repeat() -> None:
     database = Database.open(":memory:")
     _DATABASES.append(database)
     conversations = Conversations(database)
-    conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
+    conversations.create(
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
     conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
@@ -1299,7 +1299,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
 
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1414,7 +1414,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
 ) -> None:
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1497,7 +1497,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
 def test_admin_restart_notices_are_not_replayed() -> None:
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1542,11 +1542,11 @@ def test_admin_restart_notices_are_not_replayed() -> None:
 class _DownOnce(FakeChannel):
     """Fails the first send as a transient platform outage does, then accepts every send."""
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         if not self.attempts:
-            self.attempts.append((destination, message))
+            self.attempts.append((place, message))
             raise ChannelError
-        return await super().send(destination, message)
+        return await super().send(place, message)
 
 
 class _CrashingOutbox(JournalOutbox):
@@ -1560,7 +1560,7 @@ class _CrashingOutbox(JournalOutbox):
         self,
         number: int | None,
         purpose: Purpose,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         message: Message,
         *,
         key: str,
@@ -1575,7 +1575,7 @@ class _CrashingOutbox(JournalOutbox):
         super().queue(
             number,
             purpose,
-            destinations,
+            places,
             message,
             key=key,
             now=now,
@@ -1589,7 +1589,7 @@ def _issued_admin_op() -> tuple[Harness, JournalProposals, int, int]:
     """Return a harness whose admin conversation has one issued command, and that command."""
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1640,8 +1640,8 @@ def test_an_interrupted_admin_notice_whose_delivery_fails_is_delivered_once_afte
     asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
     asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
 
-    [(destination, message)] = channel.sent
-    assert (destination.chat, destination.thread) == (str(CHAT), THREAD)
+    [(place, message)] = channel.sent
+    assert place == telegram_place(CHAT, THREAD)
     assert message.text == "Command is unknown after restart. Please check the host."
     assert _interrupted_notice_rows(database, op) == [conversation_id]
     assert _admin_state(journal, op) == "unknown"
@@ -1674,7 +1674,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
 
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1747,7 +1747,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
 def test_admin_result_and_output_notice_roll_back_together() -> None:
     harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
-        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+        1, origin=telegram_place(CHAT), text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
     harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
@@ -1761,12 +1761,11 @@ def test_admin_result_and_output_notice_roll_back_together() -> None:
 
     def crash() -> None:
         from shikiri_yaku.domain.outbound import Purpose  # noqa: PLC0415
-        from shikiri_yaku.domain.schedule import Destination  # noqa: PLC0415
 
         harness.outbox.queue(
             None,
             Purpose.EXPERT,
-            [Destination(CHANNEL, str(CHAT), THREAD)],
+            [telegram_place(CHAT, THREAD)],
             Message("safe"),
             key=f"admin:result:{op}",
             now=NOW,

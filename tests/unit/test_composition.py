@@ -23,7 +23,7 @@ from shikiri_yaku.adapters.agents.common import AgentAdapter
 from shikiri_yaku.adapters.agents.muse import MuseRung
 from shikiri_yaku.adapters.agents.registry import AGENTS
 from shikiri_yaku.adapters.clock import SystemClock
-from shikiri_yaku.adapters.telegram import BAD_REQUEST
+from shikiri_yaku.adapters.telegram import BAD_REQUEST, telegram_place
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN
 from shikiri_yaku.adapters.telegram_updates import GET_UPDATES
 from shikiri_yaku.app.event_source import CLOSED_UNMERGED_LINE, MERGED_LINE, PR_CLOSED_REASON
@@ -676,8 +676,7 @@ def _sent_engine_forward_with_stop(directory: Path) -> int:
         messages = MessageStore(database, Reporter())
         row = messages.record_outbound(
             signal_number=number,
-            channel="telegram",
-            chat=str(_OWNER),
+            place=telegram_place(_OWNER),
             purpose=Purpose.NOTICE,
             body=Message("forward", (Button("Stop reminders", stop_reminders_data(number)),)),
             notice_key=f"forward:{number}",
@@ -2099,7 +2098,9 @@ def test_admin_operations_settle_after_admin_mode_is_disabled(tmp_path: Path) ->
     database = Database.open(directory / JOURNAL_FILE_NAME)
     conversations = Conversations(database)
     now = _NOW
-    conversations.create(1, chat=_OWNER, thread=None, text="q", scope=[], now=now, mode="admin")
+    conversations.create(
+        1, origin=telegram_place(_OWNER), text="q", scope=[], now=now, mode="admin"
+    )
     conversations.opened(1, str(_TOPIC))
     conversation = conversations.get(1)
     assert conversation is not None

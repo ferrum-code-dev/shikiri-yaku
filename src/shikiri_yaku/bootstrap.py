@@ -38,7 +38,7 @@ from shikiri_yaku.adapters.telegram import (
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES, TelegramFiles
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
 from shikiri_yaku.adapters.telegram_topics import (
-    TelegramDestinations,
+    TelegramPlaces,
     TopicReconciler,
     TopicRepair,
 )
@@ -158,7 +158,6 @@ if TYPE_CHECKING:
         Clock,
         CommandRunner,
         Copies,
-        Destinations,
         ExpertCommandRunner,
         ExpertRung,
         Forwarder,
@@ -169,6 +168,7 @@ if TYPE_CHECKING:
         InstallRunner,
         InstallToolCheck,
         Outbox,
+        Places,
         ReasonerRung,
         Reporter,
         Reshower,
@@ -252,7 +252,7 @@ def build_channel(settings: Settings, journal: Database, clock: Clock, bot: BotF
         editor=sending,
         deleter=sending,
         downloads=TelegramFiles(files_api),
-        places=TelegramDestinations(
+        places=TelegramPlaces(
             topics, owners=telegram.owners, group_id=group_id, reconciler=reconciler
         ),
         check=TelegramChannelCheck(
@@ -335,14 +335,14 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         journal, MessageStore(journal, reporter), ending_prefixes=ENDING_NOTICE_PREFIXES
     )
     channel = build_channel(settings, journal, clock, bot)
-    destinations = channel.places
+    places = channel.places
     guard = LoopGuard(
         JournalActions(OpStore(journal)),
         clock,
         retry_budget_per_day=settings.handlers.infrastructure.retry_budget_per_day,
         restart_budget_per_hour=settings.handlers.infrastructure.restart_budget_per_hour,
     )
-    notifier = Notifier(outbox, destinations, clock)
+    notifier = Notifier(outbox, places, clock)
     infrastructure = settings.handlers.infrastructure
     install_shell = os.environ.get("SHELL", FALLBACK_SHELL)
     install_timeout_s = timedelta(minutes=infrastructure.command_timeout_min).total_seconds()
@@ -371,7 +371,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         product=settings.product,
         numbers=SignalStore(journal),
         outbox=outbox,
-        destinations=destinations,
+        places=places,
         notice_tasks_max=settings.handlers.notice.tasks_max,
         max_text=channel.max_text,
     )
@@ -386,7 +386,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         clients,
         outbox,
         clock,
-        destinations,
+        places,
         button_label_max_chars=settings.handlers.product.button_label_max_chars,
         max_text=channel.max_text,
     )
@@ -422,7 +422,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             rooms,
             outbox,
             clock,
-            places=destinations,
+            places=places,
             directory=directory,
             retention=timedelta(days=settings.expert.retention_days),
             admin_idle=timedelta(minutes=settings.admin_idle_min),
@@ -460,7 +460,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             ),
             outbox,
             clock,
-            channel=channel.name,
             max_text=channel.max_text,
             rooms=rooms,
             access=access,
@@ -490,7 +489,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             clients=clients,
             scope={component.name: component.path for component in settings.components},
             directory=directory,
-            channel=channel.name,
             max_text=channel.max_text,
             max_file_bytes=channel.max_file_bytes,
             runs=runs,
@@ -505,7 +503,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 JournalWeb(journal),
                 outbox,
                 clock,
-                channel=channel.name,
                 rooms=rooms,
                 access=access,
             ),
@@ -519,7 +516,6 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         shared=channel.shared,
         turns=turns,
         scope={component.name: component.path for component in settings.components},
-        channel=channel.name,
         max_text=channel.max_text,
         final=JournalFinalEdits(
             journal, _journal_replies(journal, channel.name), max_text=channel.max_text
@@ -545,7 +541,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         clients,
         outbox,
         clock,
-        destinations,
+        places,
         channel=channel.name,
         max_text=channel.max_text,
         shared_group=channel.shared is not None,
@@ -560,7 +556,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         forwarder=forwarder,
         channel=channel,
         goal=goal,
-        destinations=destinations,
+        places=places,
         install_runner=install_executor,
         ask=ask,
         turns=turns,
@@ -588,7 +584,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 runner=install_executor,
                 check=install_check,
                 outbox=outbox,
-                destinations=destinations,
+                places=places,
             ),
         )
     )
@@ -606,7 +602,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         )
         if turns is not None:
             turns.recover()
-        asyncio.run(destinations.prepare())
+        asyncio.run(places.prepare())
 
     rung_probes = {} if reasoning is None else {rung.name: rung.probe for rung in reasoning.rungs}
     return Composition(
@@ -778,7 +774,7 @@ def registered_extensions(
     product: str,
     numbers: SignalNumbers,
     outbox: Outbox,
-    destinations: Destinations,
+    places: Places,
     notice_tasks_max: int,
     max_text: int,
 ) -> list[Extension]:
@@ -790,7 +786,7 @@ def registered_extensions(
         installs=installs,
         outbox=outbox,
         clock=clock,
-        destinations=destinations,
+        places=places,
     )
     infrastructure = infrastructure_extension(
         clients,
@@ -812,7 +808,7 @@ def registered_extensions(
         outbox,
         clock,
         product=product,
-        destinations=destinations,
+        places=places,
         max_text=max_text,
     )
     notice = notice_extension(
@@ -821,7 +817,7 @@ def registered_extensions(
         outbox,
         notifier,
         clock,
-        destinations=destinations,
+        places=places,
         tasks_max=notice_tasks_max,
         max_text=max_text,
     )
@@ -973,7 +969,7 @@ def inbound_job(
     forwarder: Forwarder,
     channel: Channel,
     goal: GoalCommand,
-    destinations: Destinations,
+    places: Places,
     install_runner: InstallRunner,
     ask: Ask | None = None,
     turns: ExpertTurns | None = None,
@@ -999,8 +995,7 @@ def inbound_job(
         reshower,
         outbox,
         clock,
-        destinations=destinations,
-        channel=channel.name,
+        places=places,
         max_text=channel.max_text,
         install_approval=InstallApprovalPresenter(),
         approval_expiry_h=settings.handlers.infrastructure.approval_expiry_h,
@@ -1017,8 +1012,7 @@ def inbound_job(
         ),
         opened,
         goal,
-        destinations=destinations,
-        channel=channel.name,
+        places=places,
         max_text=channel.max_text,
         name_max_chars=operator.command_name_max_chars,
         shared=channel.shared,
@@ -1070,7 +1064,7 @@ def goal_command(
     clients: Mapping[str, ShikiruClient],
     outbox: Outbox,
     clock: Clock,
-    destinations: Destinations,
+    places: Places,
     *,
     channel: str,
     max_text: int,
@@ -1087,8 +1081,7 @@ def goal_command(
         clients,
         outbox,
         clock,
-        destinations=destinations,
-        channel=channel,
+        places=places,
         max_text=max_text,
         shared_group=shared_group,
     )
@@ -1192,13 +1185,11 @@ def install_reconcile_job(
     runner: InstallRunner,
     check: InstallToolCheck,
     outbox: Outbox,
-    destinations: Destinations,
+    places: Places,
 ) -> Job:
     """Return the recurring install recovery job."""
     signals = SignalStore(journal)
-    reasker = InstallReasker(
-        OpStore(journal), InstallApprovalPresenter(), outbox, destinations, clock
-    )
+    reasker = InstallReasker(OpStore(journal), InstallApprovalPresenter(), outbox, places, clock)
     reconciler = InstallReconciler(
         JournalInstallReconcile(journal, signals, OpStore(journal)),
         JournalSources(CursorStore(journal, signals), signals),

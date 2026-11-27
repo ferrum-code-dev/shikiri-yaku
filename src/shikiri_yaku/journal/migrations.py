@@ -36,6 +36,9 @@ Migration 31 numbers inbound events itself: the channel's id of an event becomes
 also apart from the message so that it outlives it, the sender becomes text, and the polling offset
 becomes an opaque cursor beside the counter, which starts past every id the journal holds or has
 polled.
+Migration 32 keeps where a message is as one place, which only the channel reads: of every message,
+of the request that opened a conversation and of each submit op. A sent reference is unique within
+its channel, a conversation keeps its room id as text, and a closed topic is a closed room.
 """
 
 from __future__ import annotations
@@ -297,5 +300,47 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         )
         """,
         "ALTER TABLE polling DROP COLUMN next_offset",
+    ),
+    (
+        "ALTER TABLE messages ADD COLUMN place TEXT NOT NULL DEFAULT ''",
+        # keep: a thread of NULL adds nothing, so such a place is the chat alone
+        "UPDATE messages SET place = chat || COALESCE('/' || thread, '')",
+        "DROP INDEX messages_platform",
+        "DROP INDEX messages_notice",
+        "ALTER TABLE messages DROP COLUMN chat",
+        "ALTER TABLE messages DROP COLUMN thread",
+        """
+        CREATE UNIQUE INDEX messages_platform
+            ON messages (channel, platform_message_id, direction)
+            WHERE platform_message_id IS NOT NULL
+        """,
+        "CREATE UNIQUE INDEX messages_notice ON messages (notice_key, channel, place)",
+        "UPDATE messages SET kind = 'room_closed' WHERE kind = 'topic_closed'",
+        "ALTER TABLE conversations ADD COLUMN origin_channel TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE conversations ADD COLUMN origin_place TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE conversations ADD COLUMN room TEXT",
+        # keep: the request's message names the channel; the polled one covers a missing message
+        """
+        UPDATE conversations SET
+            origin_channel = COALESCE(
+                (SELECT channel FROM messages
+                    WHERE messages.update_id = conversations.update_id),
+                (SELECT MIN(channel) FROM polling),
+                ''),
+            origin_place = chat || COALESCE('/' || origin_thread, ''),
+            room = CAST(thread_id AS TEXT)
+        """,
+        "ALTER TABLE conversations DROP COLUMN chat",
+        "ALTER TABLE conversations DROP COLUMN origin_thread",
+        "ALTER TABLE conversations DROP COLUMN thread_id",
+        """
+        UPDATE ops SET payload = json_remove(
+            json_set(payload, '$.place', json_object(
+                'channel', json_extract(payload, '$.destination.channel'),
+                'id', json_extract(payload, '$.destination.chat')
+                    || COALESCE('/' || json_extract(payload, '$.destination.thread'), ''))),
+            '$.destination')
+        WHERE kind = 'submit' AND json_type(payload, '$.destination') = 'object'
+        """,
     ),
 )
