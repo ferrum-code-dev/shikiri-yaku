@@ -193,7 +193,9 @@ def test_a_copy_is_replaced_only_by_a_sent_newer_copy_of_its_own_slot(
     journal.send(OLDER)
     journal.send(NEWER, signal=signal, chat=chat, thread=thread, slot=slot, sent=sent)
 
-    assert journal.replacements.superseded() == ([OLDER] if replaced else [])
+    assert [copy.message_ref for copy in journal.replacements.superseded()] == (
+        [OLDER] if replaced else []
+    )
 
 
 def test_a_copy_whose_final_state_is_journaled_is_left_to_the_copy_editor(
@@ -267,7 +269,7 @@ def test_a_transient_failure_is_tried_again_by_the_next_tick(journal: _Journal) 
 def test_an_attempt_cut_short_by_a_crash_is_not_repeated(journal: _Journal) -> None:
     journal.send(OLDER)
     journal.send(NEWER)
-    journal.replacements.begin_deletion(OLDER)
+    journal.replacements.begin_deletion(journal.replacements.superseded()[0].message_id)
     channel = _Channel(journal.database)
 
     _tick(journal.replacer(channel))
@@ -278,8 +280,18 @@ def test_an_attempt_cut_short_by_a_crash_is_not_repeated(journal: _Journal) -> N
 
 def test_undo_leaves_alone_a_copy_whose_body_a_secret_deletion_dropped(journal: _Journal) -> None:
     journal.send(OLDER, slot=None)
-    journal.messages.record_deletion(OLDER, "a secret", now=NOW)
+    journal.messages.record_deletion(
+        journal.database.connection.execute(
+            "SELECT id FROM messages WHERE platform_message_id = ?", (OLDER,)
+        ).fetchone()[0],
+        "a secret",
+        now=NOW,
+    )
 
-    journal.replacements.undo_deletion(OLDER)
+    journal.replacements.undo_deletion(
+        journal.database.connection.execute(
+            "SELECT id FROM messages WHERE platform_message_id = ?", (OLDER,)
+        ).fetchone()[0]
+    )
 
     assert journal.state(OLDER) == Delivery.DELETE_ATTEMPTED

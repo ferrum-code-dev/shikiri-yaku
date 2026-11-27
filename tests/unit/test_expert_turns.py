@@ -1345,9 +1345,12 @@ class _AutoProgressOutbox:
 
 
 def _superseded(h: Harness) -> list[str]:
-    return JournalReplacements(
-        h.database, MessageStore(h.database, Reporter()), max_text=MESSAGE_TEXT_LIMIT
-    ).superseded()
+    return [
+        copy.message_ref
+        for copy in JournalReplacements(
+            h.database, MessageStore(h.database, Reporter()), max_text=MESSAGE_TEXT_LIMIT
+        ).superseded()
+    ]
 
 
 def _file_item(

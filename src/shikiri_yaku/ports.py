@@ -1072,24 +1072,33 @@ class Copies(Protocol):
     """The journal's record of a sent message, which an edit of it can be refused for.
 
     Each call is journaled before the platform is asked. False means the journal does not know a
-    sent copy at that reference: then nothing is journaled and nothing is deleted.
+    sent copy at that journal id: then nothing is journaled and nothing is deleted.
     """
 
-    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+    def record_refused_edit(self, message_id: int, reason: str, *, now: datetime) -> None:
         """Keep the reason on the copy and queue the PO a notice; the copy itself stays."""
         ...
 
-    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
+    def record_deletion(self, message_id: int, reason: str, *, now: datetime) -> bool:
         """Drop the copy's body, mark its deletion as attempted, and queue the PO a notice."""
         ...
 
-    def confirm_deletion(self, message_ref: str) -> None: ...
+    def confirm_deletion(self, message_id: int) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SentCopy:
+    """A sent copy's journal identity and channel reference."""
+
+    message_id: int
+    message_ref: str
 
 
 @dataclass(frozen=True, slots=True)
 class FinalEdit:
     """A journaled edit of one sent copy to its final state."""
 
+    message_id: int
     message_ref: str
     message: Message
 
@@ -1132,11 +1141,11 @@ class FinalEdits(Protocol):
 
     def to_edit(self) -> list[FinalEdit]: ...
 
-    def confirm_edit(self, message_ref: str, message: Message) -> None:
+    def confirm_edit(self, message_id: int, message: Message) -> None:
         """Mark the copy edited to the message that was sent; a final state settled since waits."""
         ...
 
-    def give_up(self, message_ref: str, message: Message, reason: str) -> None:
+    def give_up(self, message_id: int, message: Message, reason: str) -> None:
         """Give up the edit of the message that was refused; a final state settled since waits."""
         ...
 
@@ -1167,15 +1176,15 @@ class Replacements(Protocol):
     says it was replaced and no buttons; one that fails for a transient reason is tried again.
     """
 
-    def superseded(self) -> list[str]: ...
+    def superseded(self) -> list[SentCopy]: ...
 
-    def begin_deletion(self, message_ref: str) -> None: ...
+    def begin_deletion(self, message_id: int) -> None: ...
 
-    def keep_replaced(self, message_ref: str, line: str, reason: str) -> None: ...
+    def keep_replaced(self, message_id: int, line: str, reason: str) -> None: ...
 
-    def undo_deletion(self, message_ref: str) -> None: ...
+    def undo_deletion(self, message_id: int) -> None: ...
 
-    def confirm_deletion(self, message_ref: str) -> None: ...
+    def confirm_deletion(self, message_id: int) -> None: ...
 
 
 class Reporter(Protocol):

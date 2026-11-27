@@ -50,29 +50,27 @@ class CopyEditor:
             self._log.settle(number, line)
         for edit in self._log.to_edit():
             if (form := secret_form(edit.message.texts())) is not None:
-                await self._delete_copy(edit.message_ref, form)
-                self._log.give_up(edit.message_ref, edit.message, form)
+                await self._delete_copy(edit.message_id, edit.message_ref, form)
+                self._log.give_up(edit.message_id, edit.message, form)
                 continue
             try:
                 await self._editor.edit(edit.message_ref, edit.message)
             except ChannelRefusedError as error:
-                self._copies.record_refused_edit(
-                    edit.message_ref, str(error), now=self._clock.now()
-                )
-                self._log.give_up(edit.message_ref, edit.message, str(error))
+                self._copies.record_refused_edit(edit.message_id, str(error), now=self._clock.now())
+                self._log.give_up(edit.message_id, edit.message, str(error))
             except ChannelError:
                 continue
             else:
-                self._log.confirm_edit(edit.message_ref, edit.message)
+                self._log.confirm_edit(edit.message_id, edit.message)
 
-    async def _delete_copy(self, message_ref: str, reason: str) -> None:
+    async def _delete_copy(self, message_id: int, message_ref: str, reason: str) -> None:
         """Delete the copy a secret was to be edited into, when the journal knows it.
 
         The attempt is journaled, and the PO's notice queued, before the platform is asked. A failed
         deletion stays journaled and is not retried; the give-up stands either way.
         """
-        if not self._copies.record_deletion(message_ref, reason, now=self._clock.now()):
+        if not self._copies.record_deletion(message_id, reason, now=self._clock.now()):
             return
         with contextlib.suppress(ChannelError, ChannelRefusedError):
             await self._deleter.delete(message_ref)
-            self._copies.confirm_deletion(message_ref)
+            self._copies.confirm_deletion(message_id)

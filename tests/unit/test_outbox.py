@@ -480,7 +480,9 @@ def test_a_refused_edit_keeps_its_reason_on_the_copy_and_notices_the_po(memory: 
     number = _sent(memory)
     channel = _Channel()
 
-    _outbox(memory).record_refused_edit(SENT, "text_too_long", now=START)
+    _outbox(memory).record_refused_edit(
+        MessageStore(memory, _Reporter()).for_signal(number)[0].id, "text_too_long", now=START
+    )
     asyncio.run(_sender(memory, channel).tick())
 
     [(_, notice)] = channel.sent
@@ -495,7 +497,8 @@ def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platf
     number = _sent(memory)
     outbox = _outbox(memory)
 
-    assert outbox.record_deletion(SENT, "bot_token", now=START)
+    message_id = MessageStore(memory, _Reporter()).for_signal(number)[0].id
+    assert outbox.record_deletion(message_id, "bot_token", now=START)
     [attempted, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert (attempted.delivery, attempted.body, attempted.refusal) == (
         Delivery.DELETE_ATTEMPTED,
@@ -504,7 +507,7 @@ def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platf
     )
     assert not any(TOKEN in str(value) for value in _stored_values(memory))
 
-    outbox.confirm_deletion(SENT)
+    outbox.confirm_deletion(message_id)
     [deleted, _] = MessageStore(memory, _Reporter()).for_signal(number)
     assert deleted.delivery == Delivery.DELETED
 
@@ -512,7 +515,7 @@ def test_a_deletion_is_journaled_as_attempted_and_confirmed_only_after_the_platf
 def test_a_deletion_of_a_copy_the_journal_does_not_know_journals_nothing(memory: Database) -> None:
     number = _signal(memory)
 
-    assert _outbox(memory).record_deletion("9/9", "bot_token", now=START) is False
+    assert _outbox(memory).record_deletion(999, "bot_token", now=START) is False
     assert MessageStore(memory, _Reporter()).for_signal(number) == []
 
 

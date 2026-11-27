@@ -109,15 +109,15 @@ class _Channel:
 class _UnknownCopies:
     """A journal that holds no sent copy at the reference: nothing is journaled or deleted."""
 
-    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
-        del message_ref, reason, now
+    def record_refused_edit(self, message_id: int, reason: str, *, now: datetime) -> None:
+        del message_id, reason, now
 
-    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
-        del message_ref, reason, now
+    def record_deletion(self, message_id: int, reason: str, *, now: datetime) -> bool:
+        del message_id, reason, now
         return False
 
-    def confirm_deletion(self, message_ref: str) -> None:
-        del message_ref
+    def confirm_deletion(self, message_id: int) -> None:
+        del message_id
 
 
 class _Harness:

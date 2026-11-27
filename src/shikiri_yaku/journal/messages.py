@@ -287,27 +287,27 @@ class MessageStore:
                 text=refusal_text,
             )
 
-    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
+    def record_refused_edit(self, message_id: int, reason: str, *, now: datetime) -> None:
         """Keep the reason of a refused edit on the copy it targeted, and notify the PO of it."""
-        self._refuse_copy(message_ref, reason, now=now, delete=False)
+        self._refuse_copy(message_id, reason, now=now, delete=False)
 
-    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
-        """Journal an attempt to delete the copy at this reference, before it is invoked.
+    def record_deletion(self, message_id: int, reason: str, *, now: datetime) -> bool:
+        """Journal an attempt to delete the copy, before it is invoked.
 
-        The body of the copy is dropped. False means the journal has no sent copy at the reference.
+        The body of the copy is dropped. False means the journal has no sent copy at this id.
         """
-        return self._refuse_copy(message_ref, reason, now=now, delete=True)
+        return self._refuse_copy(message_id, reason, now=now, delete=True)
 
-    def _refuse_copy(self, message_ref: str, reason: str, *, now: datetime, delete: bool) -> bool:
-        """Mark the sent copy at this reference as refused, and notify the PO; False if unknown."""
+    def _refuse_copy(self, message_id: int, reason: str, *, now: datetime, delete: bool) -> bool:
+        """Mark the sent copy as refused, and notify the PO; False if unknown."""
         connection = self._database.connection
         with self._database.transaction():
             row = connection.execute(
                 """
                 SELECT id, signal_number, channel, place, notice_key FROM messages
-                WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+                WHERE id = ? AND direction = ? AND delivery = ?
                 """,
-                (message_ref, Direction.OUT, Delivery.SENT),
+                (message_id, Direction.OUT, Delivery.SENT),
             ).fetchone()
             if row is None:
                 return False
@@ -323,13 +323,13 @@ class MessageStore:
             self._notify_refusal(row, reason, now)
         return True
 
-    def confirm_deletion(self, message_ref: str) -> None:
+    def confirm_deletion(self, message_id: int) -> None:
         self._database.connection.execute(
             """
             UPDATE messages SET delivery = ?
-            WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+            WHERE id = ? AND direction = ? AND delivery = ?
             """,
-            (Delivery.DELETED, message_ref, Direction.OUT, Delivery.DELETE_ATTEMPTED),
+            (Delivery.DELETED, message_id, Direction.OUT, Delivery.DELETE_ATTEMPTED),
         )
 
     def unconfirmed(self) -> list[StoredMessage]:

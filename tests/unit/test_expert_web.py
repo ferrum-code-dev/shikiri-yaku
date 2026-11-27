@@ -410,7 +410,7 @@ def test_web_recovery_settles_a_decision_left_without_its_edit() -> None:
     assert "docs.example" in final["text"]
     final_edits = JournalFinalEdits(database, cast("object", None), max_text=MESSAGE_TEXT_LIMIT)  # type: ignore[arg-type]
     (edit,) = final_edits.to_edit()
-    final_edits.confirm_edit(edit.message_ref, edit.message)
+    final_edits.confirm_edit(edit.message_id, edit.message)
     # keep: settling the same text again does not reopen an edit already confirmed
     presenter.recover()
     assert (

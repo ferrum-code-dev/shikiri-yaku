@@ -243,11 +243,11 @@ class JournalOutbox:
     def refuse(self, message_id: int, reason: str, *, now: datetime) -> None:
         self._messages.refuse_delivery(message_id, reason, now)
 
-    def record_refused_edit(self, message_ref: str, reason: str, *, now: datetime) -> None:
-        self._messages.record_refused_edit(message_ref, reason, now=now)
+    def record_refused_edit(self, message_id: int, reason: str, *, now: datetime) -> None:
+        self._messages.record_refused_edit(message_id, reason, now=now)
 
-    def record_deletion(self, message_ref: str, reason: str, *, now: datetime) -> bool:
-        return self._messages.record_deletion(message_ref, reason, now=now)
+    def record_deletion(self, message_id: int, reason: str, *, now: datetime) -> bool:
+        return self._messages.record_deletion(message_id, reason, now=now)
 
-    def confirm_deletion(self, message_ref: str) -> None:
-        self._messages.confirm_deletion(message_ref)
+    def confirm_deletion(self, message_id: int) -> None:
+        self._messages.confirm_deletion(message_id)

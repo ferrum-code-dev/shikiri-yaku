@@ -207,9 +207,12 @@ def test_a_question_shown_again_by_open_replaces_the_copy_it_repeats(h: Harness)
     first, _ = _deliver(h)
     _open(h, update=701)
     _deliver(h)
-    assert JournalReplacements(
-        h.database, h.messages, max_text=MESSAGE_TEXT_LIMIT
-    ).superseded() == [first]
+    assert [
+        copy.message_ref
+        for copy in JournalReplacements(
+            h.database, h.messages, max_text=MESSAGE_TEXT_LIMIT
+        ).superseded()
+    ] == [first]
 
 
 def test_two_confirm_copies_of_one_approval_issue_one_resolve(h: Harness) -> None:

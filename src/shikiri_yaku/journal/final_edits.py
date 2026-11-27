@@ -148,40 +148,40 @@ class JournalFinalEdits:
     def to_edit(self) -> list[FinalEdit]:
         rows = self._database.connection.execute(
             """
-            SELECT platform_message_id, final_body FROM messages
+            SELECT id, platform_message_id, final_body FROM messages
             WHERE direction = ? AND delivery = ? AND final_body IS NOT NULL
               AND final_edited = 0 ORDER BY id
             """,
             (Direction.OUT, Delivery.SENT),
         )
         return [
-            FinalEdit(row["platform_message_id"], _BODY.validate_json(row["final_body"]))
+            FinalEdit(row["id"], row["platform_message_id"], _BODY.validate_json(row["final_body"]))
             for row in rows
         ]
 
-    def confirm_edit(self, message_ref: str, message: Message) -> None:
-        for row_id in self._showing(message_ref, message):
+    def confirm_edit(self, message_id: int, message: Message) -> None:
+        for row_id in self._showing(message_id, message):
             self._database.connection.execute(
                 "UPDATE messages SET final_edited = 1 WHERE id = ?", (row_id,)
             )
 
-    def give_up(self, message_ref: str, message: Message, reason: str) -> None:
-        for row_id in self._showing(message_ref, message):
+    def give_up(self, message_id: int, message: Message, reason: str) -> None:
+        for row_id in self._showing(message_id, message):
             # keep: an identical settlement must not reopen a state the channel refused.
             self._database.connection.execute(
                 "UPDATE messages SET final_edited = 1, refusal = COALESCE(refusal, ?) WHERE id = ?",
                 (reason, row_id),
             )
 
-    def _showing(self, message_ref: str, message: Message) -> list[int]:
+    def _showing(self, message_id: int, message: Message) -> list[int]:
         """Return the rows of a copy whose final state is the message; a later state is not."""
         # keep: an edit in flight when the copy's final state changed is stale, and its result waits
         rows = self._database.connection.execute(
             """
             SELECT id, final_body FROM messages
-            WHERE platform_message_id = ? AND direction = ? AND final_body IS NOT NULL
+            WHERE id = ? AND direction = ? AND final_body IS NOT NULL
             """,
-            (message_ref, Direction.OUT),
+            (message_id, Direction.OUT),
         ).fetchall()
         return [row["id"] for row in rows if _BODY.validate_json(row["final_body"]) == message]
 

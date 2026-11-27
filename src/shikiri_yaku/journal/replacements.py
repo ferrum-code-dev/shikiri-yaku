@@ -13,7 +13,7 @@ from pydantic import TypeAdapter
 
 from shikiri_yaku.journal.final_edits import final_copy
 from shikiri_yaku.journal.messages import Delivery, Direction
-from shikiri_yaku.ports import Message
+from shikiri_yaku.ports import Message, SentCopy
 
 if TYPE_CHECKING:
     from shikiri_yaku.journal.database import Database
@@ -34,10 +34,10 @@ class JournalReplacements:
         self._messages = messages
         self._max_text = max_text
 
-    def superseded(self) -> list[str]:
+    def superseded(self) -> list[SentCopy]:
         rows = self._database.connection.execute(
             """
-            SELECT platform_message_id FROM messages AS old
+            SELECT old.id, old.platform_message_id FROM messages AS old
             WHERE old.direction = :out AND old.delivery = :sent AND old.slot IS NOT NULL
               AND old.body IS NOT NULL AND old.final_body IS NULL
               AND EXISTS (
@@ -50,16 +50,15 @@ class JournalReplacements:
             """,
             {"out": Direction.OUT, "sent": Delivery.SENT},
         ).fetchall()
-        return [row["platform_message_id"] for row in rows]
+        return [SentCopy(row["id"], row["platform_message_id"]) for row in rows]
 
-    def begin_deletion(self, message_ref: str) -> None:
+    def begin_deletion(self, message_id: int) -> None:
         self._database.connection.execute(
-            "UPDATE messages SET delivery = ? WHERE platform_message_id = ? AND direction = ? "
-            "AND delivery = ?",
-            (Delivery.DELETE_ATTEMPTED, message_ref, Direction.OUT, Delivery.SENT),
+            "UPDATE messages SET delivery = ? WHERE id = ? AND direction = ? AND delivery = ?",
+            (Delivery.DELETE_ATTEMPTED, message_id, Direction.OUT, Delivery.SENT),
         )
 
-    def keep_replaced(self, message_ref: str, line: str, reason: str) -> None:
+    def keep_replaced(self, message_id: int, line: str, reason: str) -> None:
         """Keep the copy as its final state, with the line and no buttons, and no slot to replace.
 
         The slot is cleared so the copy is never offered for deletion again, and the reason of the
@@ -68,9 +67,8 @@ class JournalReplacements:
         connection = self._database.connection
         with self._database.transaction():
             row = connection.execute(
-                "SELECT id, body FROM messages WHERE platform_message_id = ? AND direction = ? "
-                "AND delivery = ?",
-                (message_ref, Direction.OUT, Delivery.DELETE_ATTEMPTED),
+                "SELECT id, body FROM messages WHERE id = ? AND direction = ? AND delivery = ?",
+                (message_id, Direction.OUT, Delivery.DELETE_ATTEMPTED),
             ).fetchone()
             if row is None:
                 return
@@ -84,7 +82,7 @@ class JournalReplacements:
                 (Delivery.SENT, _BODY.dump_json(final).decode(), reason, row["id"]),
             )
 
-    def undo_deletion(self, message_ref: str) -> None:
+    def undo_deletion(self, message_id: int) -> None:
         """Put a copy back to sent after a transient failure, so the next tick tries again.
 
         Only a copy this journal began to replace is put back: it has a slot and its body is kept.
@@ -93,11 +91,11 @@ class JournalReplacements:
         self._database.connection.execute(
             """
             UPDATE messages SET delivery = ?
-            WHERE platform_message_id = ? AND direction = ? AND delivery = ?
+            WHERE id = ? AND direction = ? AND delivery = ?
               AND slot IS NOT NULL AND body IS NOT NULL
             """,
-            (Delivery.SENT, message_ref, Direction.OUT, Delivery.DELETE_ATTEMPTED),
+            (Delivery.SENT, message_id, Direction.OUT, Delivery.DELETE_ATTEMPTED),
         )
 
-    def confirm_deletion(self, message_ref: str) -> None:
-        self._messages.confirm_deletion(message_ref)
+    def confirm_deletion(self, message_id: int) -> None:
+        self._messages.confirm_deletion(message_id)
