@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.reconciler import ResolveReconciler
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Lifecycle, LifecycleState
@@ -90,6 +91,7 @@ class _World:
             self.clock,
             FixedDestinations([Destination("telegram", "1001")]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         return ResolveReconciler(
             JournalReconcile(h.database, h.signals, h.ops),

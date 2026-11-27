@@ -75,6 +75,7 @@ class OpenCommand:
         *,
         destinations: Destinations,
         channel: str,
+        max_text: int,
         install_approval: InstallApprovalRenderer | None = None,
         approval_expiry_h: int | None = None,
     ) -> None:
@@ -85,6 +86,7 @@ class OpenCommand:
         self._clock = clock
         self._destinations = destinations
         self._channel = channel
+        self._max_text = max_text
         self._install_approval = install_approval
         self._approval_expiry_h = approval_expiry_h
 
@@ -175,6 +177,7 @@ class OpenCommand:
             text,
             key=key,
             now=self._clock.now(),
+            max_text=self._max_text,
         )
 
     def _complete(self, item: Inbound) -> None:

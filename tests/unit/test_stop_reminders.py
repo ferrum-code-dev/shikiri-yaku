@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from shikiri_yaku.domain.schedule import Parked
-    from shikiri_yaku.ports import Channel, Message
+    from shikiri_yaku.ports import Deleter, Editor, Message
 
 PROJECT: Final = "api"
 CHAT: Final = "1001"
@@ -104,6 +105,7 @@ def _engine_down_on_screen(database: Database) -> int:
         note="Shikiru could not restart it.",
         suggestion="Start it on the host.",
         standing=True,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     messages = MessageStore(database, _Reporter())
     row = messages.record_outbound(
@@ -143,9 +145,10 @@ def _remind(database: Database, clock: _Clock) -> list[str]:
 
 def _edit_copies(database: Database, clock: _Clock, channel: _Channel) -> None:
     editor = CopyEditor(
-        JournalFinalEdits(database, _replies(database)),
+        JournalFinalEdits(database, _replies(database), max_text=MESSAGE_TEXT_LIMIT),
         MessageStore(database, _Reporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         clock,
         interval_s=1,
     )

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 from pydantic import TypeAdapter
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.domain.outbound import Purpose
@@ -25,7 +26,6 @@ from shikiri_yaku.journal.messages import Delivery
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     Ack,
     Button,
     ChannelError,
@@ -177,8 +177,9 @@ class _Harness:
 
     def editor(self, channel: _Channel) -> CopyEditor:
         return CopyEditor(
-            JournalFinalEdits(self.database, self.replies),
+            JournalFinalEdits(self.database, self.replies, max_text=MESSAGE_TEXT_LIMIT),
             MessageStore(self.database, _Reporter()),
+            channel,
             channel,
             _Clock(),
             interval_s=1,
@@ -315,7 +316,12 @@ def test_a_secret_copy_the_journal_does_not_know_is_not_deleted(h: _Harness) -> 
     h.secret_final(REFS[0], SECRET_MESSAGE)
     channel = _Channel(h.database)
     editor = CopyEditor(
-        JournalFinalEdits(h.database, h.replies), _UnknownCopies(), channel, _Clock(), interval_s=1
+        JournalFinalEdits(h.database, h.replies, max_text=MESSAGE_TEXT_LIMIT),
+        _UnknownCopies(),
+        channel,
+        channel,
+        _Clock(),
+        interval_s=1,
     )
     asyncio.run(editor.tick())
     assert channel.deletions == []
@@ -332,7 +338,9 @@ def test_an_edit_overtaken_by_a_new_final_state_waits_for_its_own_edit(
     channel = _Channel(h.database, failures={} if outcome is None else {REFS[0]: outcome})
 
     def overtake() -> None:
-        JournalFinalEdits(h.database, h.replies).settle(h.number, OVERTAKING)
+        JournalFinalEdits(h.database, h.replies, max_text=MESSAGE_TEXT_LIMIT).settle(
+            h.number, OVERTAKING
+        )
 
     channel.before[REFS[0]] = overtake
     editor = h.editor(channel)

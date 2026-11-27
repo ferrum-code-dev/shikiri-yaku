@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.submit import Submitter
@@ -84,6 +85,7 @@ class _Submit:
             ),
             channel="telegram",
             shared_group=shared_group,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
     def send(self, text: str, update: int = 1, chat: int = 1001, thread: int | None = None) -> None:

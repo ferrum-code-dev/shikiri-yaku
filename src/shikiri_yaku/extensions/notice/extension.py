@@ -35,10 +35,18 @@ def notice_extension(
     *,
     destinations: Destinations,
     tasks_max: int,
+    max_text: int,
 ) -> Extension:
     """Return the notice category; it is registered before the product catch-all."""
     handler = NoticeHandler(
-        clients, numbers, outbox, notifier, clock, destinations=destinations, tasks_max=tasks_max
+        clients,
+        numbers,
+        outbox,
+        notifier,
+        clock,
+        destinations=destinations,
+        tasks_max=tasks_max,
+        max_text=max_text,
     )
     return Extension(
         NOTICE,

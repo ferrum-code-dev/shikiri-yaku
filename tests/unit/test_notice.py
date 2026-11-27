@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.health_source import LINK_SCOPE, RECOVERED_LINE
@@ -39,8 +40,9 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     Button,
+    Deleter,
+    Editor,
     Message,
     ShikiruLinkDownError,
     ShikiruTask,
@@ -54,7 +56,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
     from shikiri_yaku.domain.signal import Signal
-    from shikiri_yaku.ports import Channel, ShikiruClient
+    from shikiri_yaku.ports import ShikiruClient
 
 PROJECT: Final = "api"
 NOW: Final = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
@@ -161,6 +163,7 @@ def _handler(
         _Clock(),
         destinations=FixedDestinations([WHERE]),
         tasks_max=tasks_max,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -368,9 +371,10 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
     channel = _Channel()
     replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     editor = CopyEditor(
-        JournalFinalEdits(memory, replies),
+        JournalFinalEdits(memory, replies, max_text=MESSAGE_TEXT_LIMIT),
         MessageStore(memory, StderrReporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         _Clock(),
         interval_s=1,
     )
@@ -419,9 +423,12 @@ def test_a_health_copy_sent_before_the_upgrade_is_edited_to_recovered_and_never_
     replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     channel = _Channel()
     editor = CopyEditor(
-        JournalFinalEdits(memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        JournalFinalEdits(
+            memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES, max_text=MESSAGE_TEXT_LIMIT
+        ),
         MessageStore(memory, StderrReporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         _Clock(),
         interval_s=1,
     )
@@ -448,6 +455,7 @@ def _router(database: Database, client: _Tasks, fallback: _Fallback) -> Router:
         _Clock(),
         destinations=FixedDestinations([WHERE]),
         tasks_max=NOTICE_TASKS_MAX,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     return Router(
         RuleClassifier([extension, product_extension()]),
@@ -510,6 +518,7 @@ def test_the_integrated_notice_names_the_component_only_outside_its_topic(
         _Clock(),
         destinations=destinations,
         tasks_max=NOTICE_TASKS_MAX,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     _, signal = _done(memory, "T-1")
 

@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.extensions.product.message import escalation_message
 from shikiri_yaku.journal import NewSignal, OpState, SignalState
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS
 from tests.support.secrets import SECRETS
 from tests.unit.test_replies import ANSWERED_AT, LATER_AT, NOW, Harness
@@ -216,6 +216,7 @@ def test_secret_in_an_option_label_is_refused_before_journaling(h: Harness, form
         note="",
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert secret_form(rendered.texts()) == form
     h.messages.record_outbound(
@@ -256,6 +257,7 @@ def test_truncated_rendered_option_refuses_secret_before_journaling_or_resolving
         note="",
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert secret_form(rendered.texts()) is None
     row = h.messages.record_outbound(

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import CALLBACK_DATA_LIMIT, MESSAGE_TEXT_LIMIT
 from shikiri_yaku.adapters.telegram_topics import TOPIC_CLOSED, TOPIC_OPEN, TelegramDestinations
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward
@@ -24,8 +25,6 @@ from shikiri_yaku.extensions.product.message import (
 from shikiri_yaku.journal import Database
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import (
-    CALLBACK_DATA_LIMIT,
-    MESSAGE_TEXT_LIMIT,
     Button,
     CompositionError,
     EscalationView,
@@ -219,6 +218,7 @@ def _forwarder(client: _Client, outbox: _Outbox, *chats: str) -> ProductForwarde
         _Clock(),
         FixedDestinations(destinations),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -241,6 +241,7 @@ def test_fixture_view_message_has_question_options_and_one_recommended_mark() ->
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert "Which behavior should remain?" in message.text
     assert "Keep existing behavior" in message.text
@@ -316,6 +317,7 @@ def test_fixture_view_offers_options_then_resolutions_with_numbered_callback_dat
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert message.buttons == (
         Button("★ 1. Keep existing behavior", "a:41:1"),
@@ -355,6 +357,7 @@ def test_escalation_without_agent_options_offers_only_its_resolutions(
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert list(message.buttons) == expected
 
@@ -371,6 +374,7 @@ def test_option_that_needs_input_uses_the_same_callback_as_the_others(*, needs_i
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert message.buttons == (Button("1. Keep", "a:41:1"),)
 
@@ -386,6 +390,7 @@ def test_resolution_kind_the_operator_does_not_know_is_not_offered_and_keeps_its
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert message.buttons == (Button("Retry", "a:41:2"),)
 
@@ -412,6 +417,7 @@ def test_recommended_resolution_keeps_its_button_label_and_is_marked_on_its_line
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert message.buttons == (Button(label, "a:41:1"),)
     assert f"{RECOMMENDED} {label}" in message.text
@@ -436,6 +442,7 @@ def test_reason_hint_is_shown_only_where_retry_is_offered(
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert ("Log in to the agent again" in message.text) is hinted
 
@@ -458,6 +465,7 @@ def _asked(options: list[dict[str, object]], *, resolutions: list[dict[str, obje
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -497,6 +505,7 @@ def _asked(options: list[dict[str, object]], *, resolutions: list[dict[str, obje
                 note=NOTE,
                 suggestion="",
                 standing=True,
+                max_text=MESSAGE_TEXT_LIMIT,
             ),
             INFORMATION_HEADING,
             [STOP_REMINDERS_LABEL],
@@ -524,6 +533,7 @@ def test_message_over_the_limit_is_cut_with_a_details_button() -> None:
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert len(message.shown()) == MESSAGE_TEXT_LIMIT
     assert message.text.endswith(CUT_MARK)
@@ -543,6 +553,7 @@ def test_callback_data_fits_the_platform_limit() -> None:
         note=NOTE,
         suggestion="",
         label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     assert message.buttons
     assert all(len(button.data.encode()) <= CALLBACK_DATA_LIMIT for button in message.buttons)
@@ -639,6 +650,7 @@ def test_decision_header_names_the_project_only_outside_its_topic(
         _Clock(),
         destinations,
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
     asyncio.run(forwarder.forward(NUMBER, signal, NOTE, "", standing=False))
     [(_, _, message, _)] = outbox.queued

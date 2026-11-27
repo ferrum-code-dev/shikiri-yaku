@@ -29,9 +29,10 @@ class JournalReplacements:
     state. A copy whose final state is already journaled is finished by the CopyEditor instead.
     """
 
-    def __init__(self, database: Database, messages: MessageStore) -> None:
+    def __init__(self, database: Database, messages: MessageStore, *, max_text: int) -> None:
         self._database = database
         self._messages = messages
+        self._max_text = max_text
 
     def superseded(self) -> list[str]:
         rows = self._database.connection.execute(
@@ -74,7 +75,7 @@ class JournalReplacements:
             ).fetchone()
             if row is None:
                 return
-            final = final_copy(_BODY.validate_json(row["body"]), line)
+            final = final_copy(_BODY.validate_json(row["body"]), line, self._max_text)
             connection.execute(
                 """
                 UPDATE messages

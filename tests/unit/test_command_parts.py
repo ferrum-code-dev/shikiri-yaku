@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Final, Self, cast, overload
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import TelegramChannel
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, TelegramChannel
 from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
@@ -33,13 +33,7 @@ from shikiri_yaku.journal import (
     SignalStore,
 )
 from shikiri_yaku.journal.open import JournalOpen
-from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
-    EngineStatus,
-    Message,
-    ShikiruLinkDownError,
-    ShikiruTask,
-)
+from shikiri_yaku.ports import EngineStatus, Message, ShikiruLinkDownError, ShikiruTask
 from shikiri_yaku.settings import (
     BUTTON_LABEL_MAX_CHARS,
     COMMAND_NAME_MAX_CHARS,
@@ -165,6 +159,7 @@ class _Stack:
             _Clock(),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -174,8 +169,17 @@ class _Stack:
             _Clock(),
             destinations=FixedDestinations([OWNER]),
             channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
         )
-        goal = goal_command(self.database, self.clients, self.outbox, _Clock(), FixedDestinations())
+        goal = goal_command(
+            self.database,
+            self.clients,
+            self.outbox,
+            _Clock(),
+            FixedDestinations(),
+            channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
+        )
         self.commands = Commands(
             self.outbox,
             _Clock(),
@@ -185,6 +189,7 @@ class _Stack:
             destinations=FixedDestinations([OWNER]),
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
     def __enter__(self) -> Self:
@@ -318,11 +323,25 @@ def test_interruption_during_part_insertion_rolls_back_the_group() -> None:
     assert sent == ["alpha", "beta"]
 
 
+def test_a_reply_is_cut_to_the_text_limit_its_caller_gives() -> None:
+    reply = "one two three four five six seven"
+    with _Stack(_Client) as stack:
+        queue_command_reply(stack.outbox, [OWNER], reply, key="command:701", now=NOW, max_text=12)
+        stack.deliver()
+        sent = stack.sent()
+
+    assert len(sent) > 1
+    assert all(len(part) <= 12 for part in sent)
+    assert " ".join(sent).split() == reply.split()
+
+
 def test_a_secret_that_a_cut_would_split_is_refused_whole_and_no_part_of_it_is_sent() -> None:
     # keep: the token starts before the first cut and ends after it, so no part holds all of it
     reply = "b" * 4060 + TOKEN + "c" * 100
     with _Stack(_Client) as stack:
-        queue_command_reply(stack.outbox, [OWNER], reply, key="command:700", now=NOW)
+        queue_command_reply(
+            stack.outbox, [OWNER], reply, key="command:700", now=NOW, max_text=MESSAGE_TEXT_LIMIT
+        )
         stack.deliver()
         sent = stack.sent()
 

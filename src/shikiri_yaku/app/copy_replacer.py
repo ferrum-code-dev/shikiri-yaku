@@ -8,7 +8,7 @@ from shikiri_yaku.domain.outbound import REPLACED_LINE
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.ports import Channel, Clock, Replacements
+    from shikiri_yaku.ports import Clock, Deleter, Replacements
 
 
 class CopyReplacer:
@@ -21,10 +21,10 @@ class CopyReplacer:
     """
 
     def __init__(
-        self, log: Replacements, channel: Channel, clock: Clock, *, interval_s: float
+        self, log: Replacements, deleter: Deleter, clock: Clock, *, interval_s: float
     ) -> None:
         self._log = log
-        self._channel = channel
+        self._deleter = deleter
         self._clock = clock
         self._interval_s = interval_s
 
@@ -37,7 +37,7 @@ class CopyReplacer:
         for message_ref in self._log.superseded():
             self._log.begin_deletion(message_ref)
             try:
-                await self._channel.delete(message_ref)
+                await self._deleter.delete(message_ref)
             except ChannelRefusedError as error:
                 self._log.keep_replaced(message_ref, REPLACED_LINE, str(error))
             except ChannelError:

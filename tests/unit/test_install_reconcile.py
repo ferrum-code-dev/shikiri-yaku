@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.install_executor import ANSWER, FINAL_LINE, REFUSED, InstallExecutor
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.app.install_reconciler import InstallReconciler
@@ -419,6 +420,7 @@ def _product_forwarder(world: _World) -> ProductForwarder:
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
 
@@ -722,6 +724,7 @@ def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
     asyncio.run(world.reconciler(reshower=forwarder).tick())
@@ -764,6 +767,7 @@ def test_rejection_is_durable_when_reshow_lookup_fails_then_escalation_closes(
         _Clock(),
         FixedDestinations([OWNER]),
         button_label_max_chars=32,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
 
     asyncio.run(world.reconciler(reshower=forwarder).tick())

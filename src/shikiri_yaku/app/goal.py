@@ -11,7 +11,6 @@ from shikiri_yaku.domain.callback import SUBMIT_VERB, decode_callback, submit_da
 from shikiri_yaku.domain.outbound import Purpose, fit
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     Button,
     Message,
     SubmitPayload,
@@ -54,6 +53,7 @@ class GoalCommand:
         *,
         destinations: Destinations,
         channel: str,
+        max_text: int,
         shared_group: bool = False,
     ) -> None:
         self._submitter = submitter
@@ -63,6 +63,7 @@ class GoalCommand:
         self._clock = clock
         self._destinations = destinations
         self._channel = channel
+        self._max_text = max_text
         self._shared_group = shared_group
 
     async def handle(self, item: Inbound) -> None:
@@ -78,6 +79,7 @@ class GoalCommand:
                 f"Usage: /submit <component> <request>. Components: {names}.",
                 key=f"submit:usage:{item.update_id}",
                 now=self._clock.now(),
+                max_text=self._max_text,
             )
             return
         payload = SubmitPayload(component=component, request=request, destination=destination)
@@ -126,12 +128,16 @@ class GoalCommand:
         now = self._clock.now()
         if op.status == SubmitStatus.CONFIRMED:
             text = f"Request submitted as task {op.task_id}."
-            queue_command_reply(self._outbox, destinations, text, key=key, now=now)
+            queue_command_reply(
+                self._outbox, destinations, text, key=key, now=now, max_text=self._max_text
+            )
         elif op.status == SubmitStatus.FAILED:
             text = "Shikiru did not take this request; it was not submitted."
-            queue_command_reply(self._outbox, destinations, text, key=key, now=now)
+            queue_command_reply(
+                self._outbox, destinations, text, key=key, now=now, max_text=self._max_text
+            )
         elif op.status == SubmitStatus.UNKNOWN:
-            room = MESSAGE_TEXT_LIMIT - len(_ASK_HEAD) - len(_ASK_TAIL)
+            room = self._max_text - len(_ASK_HEAD) - len(_ASK_TAIL)
             text = f"{_ASK_HEAD}{fit(op.payload.request, room)}{_ASK_TAIL}"
             button = Button(_SUBMIT_AGAIN, submit_data(op.id))
             self._outbox.queue(

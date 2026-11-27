@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 from shikiri_yaku.domain.expert import MODE_ADMIN
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Message
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -100,6 +100,7 @@ class AdminExecutor:
         max_bytes: int,
         secrets: Sequence[str],
         channel: str,
+        max_text: int,
         group_id: int,
     ) -> None:
         self._log = log
@@ -114,6 +115,7 @@ class AdminExecutor:
         self._max_bytes = max_bytes
         self._secrets = secrets
         self._channel = channel
+        self._max_text = max_text
         self._group_id = group_id
 
     async def execute(self, op_id: int, run: Callable[[int, int], Awaitable[None]]) -> None:
@@ -132,7 +134,7 @@ class AdminExecutor:
             )
             now = self._clock.now()
             duration = (now - started).total_seconds()
-            text = _result_text(result, duration)
+            text = _result_text(result, duration, self._max_text)
             conversation = self._conversations.conversation(conversation_id)
             thread = None if conversation is None else conversation.thread_id
             notice = (
@@ -164,7 +166,7 @@ class AdminExecutor:
         )
 
 
-def _result_text(result: AdminCommandResult, duration: float) -> str:
+def _result_text(result: AdminCommandResult, duration: float, max_text: int) -> str:
     if result.returncode is None:
         exit_code = "Exit code unavailable: killed at timeout or did not start"
     else:
@@ -172,9 +174,9 @@ def _result_text(result: AdminCommandResult, duration: float) -> str:
     head = f"{exit_code} after {duration:.1f} s."
     body = result.output or "(no output)"
     # keep: both notes have the same length, so the tail budget does not depend on the choice
-    cut = result.cut or len(head) + len(_CUT_NOTE) + 1 + len(body) > MESSAGE_TEXT_LIMIT
+    cut = result.cut or len(head) + len(_CUT_NOTE) + 1 + len(body) > max_text
     status = head + (_CUT_NOTE if cut else _WHOLE_NOTE)
-    return f"{status}\n{body[-(MESSAGE_TEXT_LIMIT - len(status) - 1) :]}"
+    return f"{status}\n{body[-(max_text - len(status) - 1) :]}"
 
 
 def recover_admin(

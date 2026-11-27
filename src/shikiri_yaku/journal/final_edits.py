@@ -68,10 +68,12 @@ class JournalFinalEdits:
         database: Database,
         replies: JournalReplies,
         *,
+        max_text: int,
         ending_prefixes: tuple[str, ...] = (),
     ) -> None:
         self._database = database
         self._replies = replies
+        self._max_text = max_text
         self._endings = ending_prefixes
 
     def _arguments(self) -> dict[str, str]:
@@ -115,7 +117,7 @@ class JournalFinalEdits:
                 {**self._arguments(), "number": number, "line": line},
             ).fetchall()
             for row in rows:
-                final = final_copy(_BODY.validate_json(row["body"]), line)
+                final = final_copy(_BODY.validate_json(row["body"]), line, self._max_text)
                 connection.execute(
                     "UPDATE messages SET final_body = ?, final_line = ?, final_edited = 0,"
                     " refusal = NULL"
@@ -184,9 +186,9 @@ class JournalFinalEdits:
         return [row["id"] for row in rows if _BODY.validate_json(row["final_body"]) == message]
 
 
-def final_copy(original: Message, line: str) -> Message:
+def final_copy(original: Message, line: str, max_text: int) -> Message:
     """Return a sent copy's final state: its heading, as much text as fits, then the line."""
-    room = text_room(original.heading)
+    room = text_room(original.heading, max_text)
     shown = fit(line, room)
     left = room - len(shown) - len(BLOCK_SEPARATOR)
     kept = fit(original.text, left) if left > len(BLOCK_SEPARATOR) else ""

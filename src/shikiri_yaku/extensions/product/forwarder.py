@@ -41,8 +41,10 @@ class ProductForwarder:
         destinations: Destinations,
         *,
         button_label_max_chars: int,
+        max_text: int,
     ) -> None:
         self._title_max_chars = title_max_chars
+        self._max_text = max_text
         self._button_label_max_chars = button_label_max_chars
         self._clients = clients
         self._outbox = outbox
@@ -169,6 +171,7 @@ class ProductForwarder:
                 note=note,
                 suggestion=suggestion,
                 standing=standing,
+                max_text=self._max_text,
             )
             return Purpose.NOTICE, information
         question = escalation_message(
@@ -180,6 +183,7 @@ class ProductForwarder:
             note=note,
             suggestion=suggestion,
             label_max_chars=self._button_label_max_chars,
+            max_text=self._max_text,
         )
         return Purpose.QUESTION, question
 

@@ -38,8 +38,10 @@ class ReviewHandler:
         *,
         product: str,
         destinations: Destinations,
+        max_text: int,
     ) -> None:
         self._product = product
+        self._max_text = max_text
         self._clients = clients
         self._numbers = numbers
         self._outbox = outbox
@@ -64,7 +66,15 @@ class ReviewHandler:
             number,
             Purpose.NOTICE,
             destinations,
-            review_message(number, signal, pull, title, product=self._product, in_topic=in_topic),
+            review_message(
+                number,
+                signal,
+                pull,
+                title,
+                product=self._product,
+                in_topic=in_topic,
+                max_text=self._max_text,
+            ),
             key=f"{NOTICE_KEY}:{number}",
             now=self._clock.now(),
             standing=True,

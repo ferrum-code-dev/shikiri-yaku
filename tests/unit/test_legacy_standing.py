@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import MERGED_LINE
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
@@ -35,14 +36,13 @@ from shikiri_yaku.journal import (
 )
 from shikiri_yaku.journal.migrations import MIGRATIONS
 from shikiri_yaku.journal.replies import SILENCE
-from shikiri_yaku.ports import Button, Message
+from shikiri_yaku.ports import Button, Deleter, Editor, Message
 from tests.support.expert_migration import remove_expert_schema
 from tests.unit.test_replies import OWNER, Harness, Reporter
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from shikiri_yaku.ports import Channel
 
 PROJECT: Final = "api"
 REF: Final = "1001/77"
@@ -141,9 +141,12 @@ def _awaiting(h: Harness) -> list[int]:
 
 def _edit(h: Harness, channel: _Channel) -> None:
     editor = CopyEditor(
-        JournalFinalEdits(h.database, h.log(), ending_prefixes=ENDING_NOTICE_PREFIXES),
+        JournalFinalEdits(
+            h.database, h.log(), ending_prefixes=ENDING_NOTICE_PREFIXES, max_text=MESSAGE_TEXT_LIMIT
+        ),
         MessageStore(h.database, Reporter()),
-        cast("Channel", channel),
+        cast("Editor", channel),
+        cast("Deleter", channel),
         _Clock(),
         interval_s=1,
     )

@@ -41,7 +41,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BLOCK_SEPARATOR",
-    "CALLBACK_DATA_LIMIT",
     "INSTALL_APPROVED",
     "INSTALL_DECLINED",
     "INSTALL_EXPIRED",
@@ -49,7 +48,6 @@ __all__ = [
     "INSTALL_INTENDED",
     "INSTALL_ISSUED",
     "INSTALL_VOID",
-    "MESSAGE_TEXT_LIMIT",
     "TASK_CANCELLED_REASON",
     "Ack",
     "AckStatus",
@@ -76,10 +74,12 @@ __all__ = [
     "CompletedEscalation",
     "CompositionError",
     "Copies",
+    "Deleter",
     "Destinations",
     "DispatchLog",
     "DoctorCheck",
     "DoctorReport",
+    "Editor",
     "EngineStatus",
     "EscalationRecord",
     "EscalationResolution",
@@ -92,6 +92,7 @@ __all__ = [
     "HostLock",
     "HostObservation",
     "InboundLog",
+    "Inbox",
     "InstallApprovalRenderer",
     "InstallClaim",
     "InstallFacts",
@@ -134,6 +135,7 @@ __all__ = [
     "RungStates",
     "ScheduleLog",
     "SecretLog",
+    "Sender",
     "ShikiruClient",
     "ShikiruError",
     "ShikiruEvent",
@@ -155,7 +157,6 @@ __all__ = [
     "TaskStatus",
     "Unsettled",
     "UnsettledStart",
-    "Updates",
     "WaitAttempt",
     "WaitLog",
     "WakeTarget",
@@ -734,11 +735,6 @@ class LivenessJournal(LifecycleJournal, SignalLog, Protocol):
     """Everything the liveness source needs of the journal."""
 
 
-# keep: Telegram's limits, named here because the Channel is the only user of them
-MESSAGE_TEXT_LIMIT: Final = 4096
-CALLBACK_DATA_LIMIT: Final = 64
-# keep: the largest file the Bot API gives a bot; Telegram's limit, not a setting of ours
-DOWNLOAD_LIMIT_BYTES: Final = 20 * 1024 * 1024
 # keep: the blank line that sets each block of a message off from the next
 BLOCK_SEPARATOR: Final = "\n\n"
 
@@ -748,10 +744,10 @@ def join_blocks(*blocks: str) -> str:
     return BLOCK_SEPARATOR.join(block for block in blocks if block)
 
 
-def text_room(heading: str) -> int:
-    """Return how many characters of text fit in a message under this heading, within the limit."""
+def text_room(heading: str, max_text: int) -> int:
+    """Return how many characters of text fit under this heading in a message of `max_text`."""
     overhead = len(heading) + len(BLOCK_SEPARATOR) if heading else 0
-    return MESSAGE_TEXT_LIMIT - overhead
+    return max_text - overhead
 
 
 @dataclass(frozen=True, slots=True)
@@ -811,19 +807,48 @@ class Message:
         return (self.heading, self.text, *labels, *data, *urls)
 
 
-class Channel(Protocol):
-    """The PO's chat, Telegram first.
+class Sender(Protocol):
+    """Sends a message to a destination and returns the reference the platform gives it.
 
-    `send` returns the reference the platform gives the message, and `edit` and `delete` take it
-    back. A message the platform refuses for good raises ChannelRefusedError; any other failure
-    raises ChannelError and is tried again. What the PO sends comes through `Updates`.
+    A message the platform refuses for good raises ChannelRefusedError; any other failure raises
+    ChannelError and is tried again.
     """
 
     async def send(self, destination: Destination, message: Message) -> str: ...
 
+
+class Editor(Protocol):
+    """Shows a sent message in its final state, named by the reference `send` returned."""
+
     async def edit(self, message_ref: str, message: Message) -> None: ...
 
+
+class Deleter(Protocol):
+    """Deletes a sent message, named by its reference."""
+
     async def delete(self, message_ref: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class Channel:
+    """One connected chat platform: the parts the core uses, and the limits it must respect.
+
+    `max_text` is the longest text a message may carry, and `max_file_bytes` the largest file the
+    PO may send. `secrets` are the secret values the platform holds, which no message may show.
+    """
+
+    name: str
+    inbox: Inbox
+    sender: Sender
+    editor: Editor
+    deleter: Deleter
+    downloads: Downloads
+    places: Destinations
+    check: ChannelCheck
+    owners: frozenset[int]
+    max_text: int
+    max_file_bytes: int
+    secrets: tuple[str, ...]
 
 
 class ChannelCheck(Protocol):
@@ -861,8 +886,8 @@ class Destinations(Protocol):
     async def prepare(self) -> None: ...
 
 
-class Updates(Protocol):
-    """Poll from `offset` for up to `wait_s`.
+class Inbox(Protocol):
+    """What the PO sends, read from `offset` for up to `wait_s`.
 
     A transport failure raises ChannelError; an unreadable reply raises ChannelProtocolError.
     """

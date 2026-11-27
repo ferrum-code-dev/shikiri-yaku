@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.callback import stop_reminders_data
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, fit
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Button, Message
+from shikiri_yaku.ports import Button, Message
 
 if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import PullRequest, Signal
@@ -26,6 +26,7 @@ def review_message(
     *,
     product: str,
     in_topic: bool,
+    max_text: int,
 ) -> Message:
     """Return the review message: its header, the title and commit count, and two buttons.
 
@@ -42,7 +43,7 @@ def review_message(
         Button(OPEN_PR_LABEL, url=pull.url),
         Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),
     )
-    return Message(fit(text, MESSAGE_TEXT_LIMIT), buttons)
+    return Message(fit(text, max_text), buttons)
 
 
 def _header(number: int, signal: Signal, product: str, *, in_topic: bool) -> str:

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from shikiri_yaku.domain.outbound import split_reply
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Message
+from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -29,6 +29,7 @@ def queue_command_reply(
     *,
     key: str,
     now: datetime,
+    max_text: int,
     conversation_id: int | None = None,
 ) -> None:
     """Queue the reply as one journaled set of parts, each under its key and index.
@@ -40,7 +41,7 @@ def queue_command_reply(
     """
     if outbox.command_reply_queued(key):
         return
-    parts = [text] if secret_form([text]) is not None else split_reply(text, MESSAGE_TEXT_LIMIT)
+    parts = [text] if secret_form([text]) is not None else split_reply(text, max_text)
     outbox.queue_command_reply(
         destinations,
         [Message(part) for part in parts],

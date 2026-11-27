@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import ValidationError
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.signal import Kind
@@ -148,7 +149,7 @@ def test_a_tap_on_information_closes_it_and_edits_every_copy_once(memory: Databa
         )
         messages.confirm_delivery(stored.row_id, reference)
     replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
-    final = JournalFinalEdits(memory, replies)
+    final = JournalFinalEdits(memory, replies, max_text=MESSAGE_TEXT_LIMIT)
 
     replies.stop_notice(number, NOW)
     edits = _settle_all(final)

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
 
     from shikiri_yaku.app.replies import Replies
-    from shikiri_yaku.ports import Updates
+    from shikiri_yaku.ports import Inbox
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = 1001
@@ -84,7 +84,7 @@ class _Replies:
 
 
 class Harness:
-    def __init__(self, database: Database, updates: Updates) -> None:
+    def __init__(self, database: Database, updates: Inbox) -> None:
         self.database = database
         self.log = JournalInbound(database)
         self.replies = _Replies()

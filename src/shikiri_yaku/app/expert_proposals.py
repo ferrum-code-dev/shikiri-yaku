@@ -31,7 +31,6 @@ from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     BLOCK_SEPARATOR,
-    MESSAGE_TEXT_LIMIT,
     Button,
     Message,
     ProposalStatus,
@@ -189,6 +188,7 @@ class ExpertProposals:
         clock: Clock,
         *,
         channel: str,
+        max_text: int,
         group_id: int,
         access: AdminAccess,
         approval_expiry_min: int = ADMIN_APPROVAL_EXPIRY_MIN,
@@ -201,6 +201,7 @@ class ExpertProposals:
         self._outbox = outbox
         self._clock = clock
         self._channel = channel
+        self._max_text = max_text
         self._group_id = group_id
         self._access = access
         self._admin_expiry = timedelta(minutes=approval_expiry_min)
@@ -216,13 +217,13 @@ class ExpertProposals:
         unless it is still offered.
         """
         if not answer.tasks:
-            return (Message(fit(answer.reply, MESSAGE_TEXT_LIMIT)),)
+            return (Message(fit(answer.reply, self._max_text)),)
         for voided in self._log.offer(conversation_id, update_id, offered=True):
             self._settle(voided)
         state = self._log.state(update_id)
         if state == ProposalStatus.OFFERED:
             return (
-                *_initial_messages(answer),
+                *_initial_messages(answer, self._max_text),
                 Message(
                     _ACTION_PROMPT,
                     (
@@ -232,7 +233,7 @@ class ExpertProposals:
                     ),
                 ),
             )
-        return _initial_messages(answer)
+        return _initial_messages(answer, self._max_text)
 
     def queue_answer(self, update_id: int) -> None:
         """Queue every answer part before its action message, using stable outbox keys."""
@@ -363,6 +364,7 @@ class ExpertProposals:
             key=f"admin:decision:{item.update_id}",
             now=now,
             conversation_id=conversation_id,
+            max_text=self._max_text,
         )
         return True
 
@@ -373,6 +375,7 @@ class ExpertProposals:
             reason,
             key=f"admin:decision:{item.update_id}",
             now=self._clock.now(),
+            max_text=self._max_text,
         )
 
     async def tap(self, item: Inbound) -> bool:
@@ -419,6 +422,7 @@ class ExpertProposals:
                 key=f"expert:files:{item.update_id}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
+                max_text=self._max_text,
             )
             return
         payloads = [
@@ -467,6 +471,7 @@ class ExpertProposals:
                 key=f"expert:view:{item.update_id}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
+                max_text=self._max_text,
             )
             return
         for number, text in texts:
@@ -477,6 +482,7 @@ class ExpertProposals:
                 key=f"expert:view:{item.update_id}:{number}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
+                max_text=self._max_text,
             )
 
     def _reject(self, item: Inbound, proposal_id: int) -> None:
@@ -511,7 +517,9 @@ class ExpertProposals:
         opened = self._open(proposal_id)
         if opened is None:
             return
-        for index, message in enumerate(_interrupted_notices(self._log.ops(proposal_id))):
+        for index, message in enumerate(
+            _interrupted_notices(self._log.ops(proposal_id), self._max_text)
+        ):
             suffix = "" if index == 0 else f":part:{index}"
             self._outbox.queue(
                 None,
@@ -547,6 +555,7 @@ class ExpertProposals:
             key=f"expert:proposal:{item.update_id}",
             now=self._clock.now(),
             conversation_id=opened.conversation_id,
+            max_text=self._max_text,
         )
 
     def _settle(self, proposal_id: int) -> None:
@@ -555,7 +564,9 @@ class ExpertProposals:
         opened = self._open(proposal_id)
         if opened is None or state not in _FINAL:
             return
-        messages = _settled_messages(state, opened.answer, self._log.ops(proposal_id))
+        messages = _settled_messages(
+            state, opened.answer, self._log.ops(proposal_id), self._max_text
+        )
         # keep: the channel refuses an edit to unchanged text, which the PO reads as a refusal
         self._final.settle_notice(action_key(proposal_id), messages[0])
         for index, message in enumerate(messages[1:], 1):
@@ -570,11 +581,11 @@ class ExpertProposals:
             )
 
 
-def _initial_messages(answer: ExpertAnswer) -> tuple[Message, ...]:
+def _initial_messages(answer: ExpertAnswer, max_text: int) -> tuple[Message, ...]:
     lines = _task_lines(answer.tasks)
     if secret_form([answer.reply, *lines]) is not None:
         return (Message(join_blocks(answer.reply, "\n".join(lines))),)
-    usable = MESSAGE_TEXT_LIMIT - _STATUS_RESERVE
+    usable = max_text - _STATUS_RESERVE
     reply = fit(answer.reply, usable)
     first_room = usable - len(reply) - (len(BLOCK_SEPARATOR) if reply else 0)
     if first_room <= 0 and reply:
@@ -587,7 +598,7 @@ def _initial_messages(answer: ExpertAnswer) -> tuple[Message, ...]:
 
 
 def _settled_messages(
-    state: str | None, answer: ExpertAnswer, ops: list[SubmitOp]
+    state: str | None, answer: ExpertAnswer, ops: list[SubmitOp], max_text: int
 ) -> tuple[Message, ...]:
     """Return the edited action message and results that show every complete task id."""
     if state in (ProposalStatus.SUBMITTED, ProposalStatus.INTERRUPTED):
@@ -600,15 +611,15 @@ def _settled_messages(
             status = _submitted_line(ops, ".")
             anchor_status = _submitted_line(ops, "; results follow.")
         complete = join_blocks("\n".join(outcomes), status)
-        if len(complete) <= MESSAGE_TEXT_LIMIT:
+        if len(complete) <= max_text:
             return (Message(complete),)
-        return (Message(anchor_status), *_result_messages(outcomes))
+        return (Message(anchor_status), *_result_messages(outcomes, max_text))
     if state in (ProposalStatus.REJECTED, ProposalStatus.VOIDED):
         if secret_form(_task_lines(answer.tasks)) is not None:
             return (Message(_WITHHELD),)
         status = _REJECTED if state == ProposalStatus.REJECTED else _SUPERSEDED
         return (Message(status),)
-    return _initial_messages(answer)
+    return _initial_messages(answer, max_text)
 
 
 def _submitted_line(ops: list[SubmitOp], ending: str) -> str:
@@ -616,12 +627,12 @@ def _submitted_line(ops: list[SubmitOp], ending: str) -> str:
     return f"Submitted: {confirmed} of {len(ops)} tasks{ending}"
 
 
-def _result_messages(lines: list[str]) -> tuple[Message, ...]:
+def _result_messages(lines: list[str], max_text: int) -> tuple[Message, ...]:
     header = _RESULTS
     chunks = _pack_lines(
         lines,
-        MESSAGE_TEXT_LIMIT - len(header) - len(BLOCK_SEPARATOR),
-        MESSAGE_TEXT_LIMIT,
+        max_text - len(header) - len(BLOCK_SEPARATOR),
+        max_text,
     )
     if not chunks:
         return (Message(header),)
@@ -722,7 +733,7 @@ def _outcome(op: SubmitOp) -> str:
     return "not submitted"
 
 
-def _interrupted_notices(ops: list[SubmitOp]) -> tuple[Message, ...]:
+def _interrupted_notices(ops: list[SubmitOp], max_text: int) -> tuple[Message, ...]:
     numbered = list(enumerate(ops, 1))
     submitted = [number for number, op in numbered if op.status == SubmitStatus.CONFIRMED]
     unknown = [number for number, op in numbered if op.status == SubmitStatus.UNKNOWN]
@@ -732,15 +743,13 @@ def _interrupted_notices(ops: list[SubmitOp]) -> tuple[Message, ...]:
         if op.status not in (SubmitStatus.CONFIRMED, SubmitStatus.UNKNOWN)
     ]
     lines = ["Submit all was interrupted by a restart."]
-    lines.extend(_number_lines("Submitted", submitted))
-    lines.extend(_number_lines("Unknown, not sent again", unknown))
-    lines.extend(_number_lines("Not submitted", unsent))
-    return tuple(
-        Message(text) for text in _pack_lines(lines, MESSAGE_TEXT_LIMIT, MESSAGE_TEXT_LIMIT)
-    )
+    lines.extend(_number_lines("Submitted", submitted, max_text))
+    lines.extend(_number_lines("Unknown, not sent again", unknown, max_text))
+    lines.extend(_number_lines("Not submitted", unsent, max_text))
+    return tuple(Message(text) for text in _pack_lines(lines, max_text, max_text))
 
 
-def _number_lines(label: str, numbers: list[int]) -> list[str]:
+def _number_lines(label: str, numbers: list[int], max_text: int) -> list[str]:
     if not numbers:
         return [f"{label}: none"]
     prefix = f"{label}: "
@@ -750,7 +759,7 @@ def _number_lines(label: str, numbers: list[int]) -> list[str]:
     for number in numbers:
         value = str(number)
         separator = ", " if current not in (prefix, continued) else ""
-        if len(current) + len(separator) + len(value) > MESSAGE_TEXT_LIMIT:
+        if len(current) + len(separator) + len(value) > max_text:
             lines.append(current)
             current = continued + value
         else:

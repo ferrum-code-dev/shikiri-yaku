@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.adapters.telegram import FileApi
 
 GET_FILE: Final = "getFile"
+# keep: the largest file the Bot API gives a bot; Telegram's limit, not a setting of ours
+DOWNLOAD_LIMIT_BYTES: Final = 20 * 1024 * 1024
 
 
 class _Payload(BaseModel):

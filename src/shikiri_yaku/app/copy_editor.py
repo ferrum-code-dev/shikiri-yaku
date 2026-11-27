@@ -9,7 +9,7 @@ from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.ports import Channel, Clock, Copies, FinalEdits
+    from shikiri_yaku.ports import Clock, Copies, Deleter, Editor, FinalEdits
 
 
 class CopyEditor:
@@ -27,14 +27,16 @@ class CopyEditor:
         self,
         log: FinalEdits,
         copies: Copies,
-        channel: Channel,
+        editor: Editor,
+        deleter: Deleter,
         clock: Clock,
         *,
         interval_s: float,
     ) -> None:
         self._log = log
         self._copies = copies
-        self._channel = channel
+        self._editor = editor
+        self._deleter = deleter
         self._clock = clock
         self._interval_s = interval_s
 
@@ -52,7 +54,7 @@ class CopyEditor:
                 self._log.give_up(edit.message_ref, edit.message, form)
                 continue
             try:
-                await self._channel.edit(edit.message_ref, edit.message)
+                await self._editor.edit(edit.message_ref, edit.message)
             except ChannelRefusedError as error:
                 self._copies.record_refused_edit(
                     edit.message_ref, str(error), now=self._clock.now()
@@ -72,5 +74,5 @@ class CopyEditor:
         if not self._copies.record_deletion(message_ref, reason, now=self._clock.now()):
             return
         with contextlib.suppress(ChannelError, ChannelRefusedError):
-            await self._channel.delete(message_ref)
+            await self._deleter.delete(message_ref)
             self._copies.confirm_deletion(message_ref)

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.open_command import OpenCommand
@@ -41,7 +42,6 @@ from shikiri_yaku.journal.open import JournalOpen
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import NewSignal
 from shikiri_yaku.ports import (
-    MESSAGE_TEXT_LIMIT,
     Ack,
     Button,
     EscalationView,
@@ -193,6 +193,7 @@ class Harness:
             Clock(at),
             destinations,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         opened = OpenCommand(
             JournalOpen(self.database, self.signals),
@@ -204,9 +205,16 @@ class Harness:
             channel="telegram",
             install_approval=InstallApprovalPresenter(),
             approval_expiry_h=InfrastructureSettings().approval_expiry_h,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         goal = goal_command(
-            self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
+            self.database,
+            self.clients,
+            self.outbox,
+            Clock(at),
+            FixedDestinations(),
+            channel="telegram",
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         return Commands(
             self.outbox,
@@ -217,6 +225,7 @@ class Harness:
             destinations=destinations,
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
 
     def open(self, update: int = 700, at: datetime = NOW) -> None:
@@ -248,9 +257,16 @@ class Harness:
             channel="telegram",
             commands=self.commands(at),
             goal=goal_command(
-                self.database, self.clients, self.outbox, Clock(at), FixedDestinations()
+                self.database,
+                self.clients,
+                self.outbox,
+                Clock(at),
+                FixedDestinations(),
+                channel="telegram",
+                max_text=MESSAGE_TEXT_LIMIT,
             ),
             install_replies=install_replies,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         item = Inbound(
             update,
@@ -311,6 +327,7 @@ class Harness:
             Clock(clock_at),
             FixedDestinations([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
+            max_text=MESSAGE_TEXT_LIMIT,
         )
         replies = InstallApprovalReplies(
             self.ops,
@@ -626,8 +643,9 @@ def test_a_tap_processed_after_the_buttons_were_removed_still_gets_the_recorded_
     h.resolve_in_shikiru()
     h.confirm_in_shikiru(ANSWERED_AT)
     editor = CopyEditor(
-        JournalFinalEdits(h.database, h.log()),
+        JournalFinalEdits(h.database, h.log(), max_text=MESSAGE_TEXT_LIMIT),
         MessageStore(h.database, Reporter()),
+        EditChannel(),
         EditChannel(),
         Clock(LATER_AT),
         interval_s=1,

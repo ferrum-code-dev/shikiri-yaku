@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
 from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_proposals import ExpertProposals
 from shikiri_yaku.app.submit import Submitter
@@ -45,11 +46,12 @@ def expert_proposals(
         Submitter(
             JournalSubmits(database, OpStore(database), channel_name=channel), clients, clock
         ),
-        final or JournalFinalEdits(database, replies),
+        final or JournalFinalEdits(database, replies, max_text=MESSAGE_TEXT_LIMIT),
         outbox,
         clock,
         channel=channel,
         group_id=group_id,
         access=access or AdminAccess(conversations, clock, admins=frozenset()),
         files=files,
+        max_text=MESSAGE_TEXT_LIMIT,
     )
