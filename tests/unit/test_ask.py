@@ -872,6 +872,16 @@ def _sent_texts(h: Harness) -> list[str]:
     return [message.text for _, message in channel.sent]
 
 
+@pytest.mark.parametrize("text", ["/expert hello", "/admin hello"])
+def test_a_shared_chat_without_rooms_refuses_an_unaddressed_ask(tmp_path: Path, text: str) -> None:
+    h = Harness(tmp_path, group=False, shared=True, admins=frozenset({ADMIN}))
+    _admin_text(h, text, ADMIN)
+    [pending] = h.outbox.pending()
+    assert not pending.message.buttons
+    assert "group" in pending.message.text.lower()
+    assert not h.topics.created
+
+
 @pytest.mark.parametrize(
     ("admins", "sender", "opened"),
     [

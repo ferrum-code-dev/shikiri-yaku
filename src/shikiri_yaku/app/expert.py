@@ -122,7 +122,7 @@ class Ask:
         return sender in self._admins
 
     async def offer(self, item: Inbound) -> None:
-        if not self._configured or self._rooms is None or self._shared is None:
+        if not self._configured or self._shared is None:
             return
         text = _question(item)
         if _is_admin(item) and item.sender not in self._admins:
