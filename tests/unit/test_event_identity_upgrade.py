@@ -372,6 +372,19 @@ def test_an_upgraded_journal_loses_nothing_and_handles_nothing_twice(
     ).fetchone()
     assert tuple(states) == ("approved", "submitted", 3)
     assert journal.connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    # keep: the erasure takes the old event's row, and the poll after it delivers the event again
+    Conversations(journal).erase(1, room_place=FakeRooms().place(str(ROOM)))
+    asyncio.run(poll_repeatedly())
+
+    assert inbound.pending() == []
+    assert (
+        journal.connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE event_key = ?", (str(UNANSWERED),)
+        ).fetchone()[0]
+        == 0
+    )
+    assert len(expert.requests) == 1
     journal.close()
 
 
@@ -417,7 +430,8 @@ def test_the_first_new_id_is_past_the_stored_offset_and_every_id_held(
     api = _Api([_tap(900, OWNER, QUESTION_REF, "a:1:1")])
     batch = asyncio.run(TelegramUpdates(api, group_id=None).fetch(inbound.cursor(CHANNEL), 1))
     assert batch.cursor is not None
+    inbound.record_batch("later", batch.events, batch.cursor, NOW)
     inbound.record_batch(CHANNEL, batch.events, batch.cursor, NOW)
 
-    assert [item.id for item in inbound.pending()] == [first]
+    assert [item.id for item in inbound.pending()] == [first, first + 1]
     journal.close()

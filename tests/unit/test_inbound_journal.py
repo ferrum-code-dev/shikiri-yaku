@@ -129,7 +129,7 @@ def test_the_same_update_delivered_twice_is_stored_once(journal: JournalInbound)
     assert updates.cursors == [None, "after"]
 
 
-def test_the_id_of_an_erased_event_is_never_used_again(
+def test_an_erased_event_is_not_stored_again_and_its_id_is_never_used_again(
     database: Database, journal: JournalInbound
 ) -> None:
     journal.record_batch(CHANNEL, ITEMS[:1], "first", NOW)
@@ -141,10 +141,22 @@ def test_the_id_of_an_erased_event_is_never_used_again(
     conversations.erase(conversation.id, room_place=Destination(CHANNEL, str(GROUP), 7))
     assert journal.pending() == []
 
+    journal.record_batch(CHANNEL, ITEMS[:1], "again", NOW)
+    assert journal.pending() == []
     journal.record_batch(CHANNEL, ITEMS[1:2], "second", NOW)
 
     [later] = journal.pending()
     assert later.id > asked.id
+
+
+def test_channels_never_share_an_id_or_a_key(journal: JournalInbound) -> None:
+    journal.record_batch(CHANNEL, ITEMS[:2], "a", NOW)
+    journal.record_batch("later", ITEMS[:1], "b", NOW)
+    journal.record_batch(CHANNEL, ITEMS[2:], "c", NOW)
+
+    assert journal.pending() == [
+        _stored(number, ITEMS[at]) for number, at in enumerate((0, 1, 0, 2), 1)
+    ]
 
 
 def test_an_update_of_someone_but_an_owner_is_not_stored_and_the_offset_moves_on(

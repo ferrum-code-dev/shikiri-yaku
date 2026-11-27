@@ -952,9 +952,10 @@ class InboundLog(Protocol):
     ) -> None:
         """Store the new events and the cursor, in one transaction.
 
-        Each stored event gets an id the channel has never had before, greater than all earlier
-        ones. An event whose key is known is not stored again. Text that carries a secret form is
-        stored as refused, without its text.
+        Each stored event gets an id no event has had before, greater than all earlier ones. An
+        event whose key the channel has delivered before is not stored again, also after its
+        conversation is erased. Text that carries a secret form is stored as refused, without its
+        text.
         """
         ...
 

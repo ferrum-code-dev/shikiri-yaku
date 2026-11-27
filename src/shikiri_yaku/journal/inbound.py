@@ -37,7 +37,8 @@ class JournalInbound:
     """What the PO sent: inbound rows of the messages table, one per channel and event key.
 
     The journal numbers the events of a channel from a counter it never moves back, and keeps the
-    number in the update_id column. It identifies an event everywhere else.
+    number in the update_id column. The number is unique across channels and identifies an event
+    everywhere else. The keys stay when an event's row is erased.
     """
 
     def __init__(self, database: Database) -> None:
@@ -118,11 +119,18 @@ class JournalInbound:
         connection: sqlite3.Connection, channel: str, event: Received, now: datetime
     ) -> None:
         """Insert an event once; a secret keeps its form and loses its text and data."""
+        new = connection.execute(
+            "INSERT INTO event_keys (channel, event_key) VALUES (?, ?) ON CONFLICT DO NOTHING",
+            (channel, event.key),
+        ).rowcount
+        if not new:
+            return
         data = event.data if event.file is None else event.file.model_dump_json()
         form = secret_form([text for text in (event.text, data) if text is not None])
-        # keep: an event delivered again uses up a number, which only leaves a gap
+        # keep: rows of all channels share the id columns, so each channel counts past them all
         number = connection.execute(
-            "UPDATE polling SET last_id = last_id + 1 WHERE channel = ? RETURNING last_id",
+            "UPDATE polling SET last_id = 1 + (SELECT MAX(last_id) FROM polling)"
+            " WHERE channel = ? RETURNING last_id",
             (channel,),
         ).fetchone()["last_id"]
         connection.execute(
@@ -131,7 +139,6 @@ class JournalInbound:
                                   message_ref, reply_to_ref, body, data, delivery, refusal,
                                   created_at, thread)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (channel, event_key) WHERE event_key IS NOT NULL DO NOTHING
             """,
             (
                 Direction.IN,

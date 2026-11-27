@@ -11,7 +11,7 @@ class Connection(Protocol):
 
 def remove_event_identity(connection: Connection) -> None:
     """Put back the polled offset and take out the event keys, so migration 31 can run again."""
-    connection.execute("DROP INDEX messages_event")
+    connection.execute("DROP TABLE event_keys")
     connection.execute("ALTER TABLE messages DROP COLUMN event_key")
     connection.execute("ALTER TABLE polling DROP COLUMN cursor")
     connection.execute("ALTER TABLE polling DROP COLUMN last_id")

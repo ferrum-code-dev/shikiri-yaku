@@ -32,9 +32,10 @@ Migration 26 keeps the effort a conversation was given with `/effort`, which its
 to the agent.
 Migration 27 keeps the state of each Expert task proposal, so its buttons act at most once.
 Migration 28 keeps the time an Expert conversation began ending, so recovery preserves its reply.
-Migration 31 numbers inbound events itself: the channel's id of an event becomes its key, the
-sender becomes text, and the polling offset becomes an opaque cursor beside the counter, which
-starts past every id the journal holds or has polled.
+Migration 31 numbers inbound events itself: the channel's id of an event becomes its key, kept
+also apart from the message so that it outlives it, the sender becomes text, and the polling offset
+becomes an opaque cursor beside the counter, which starts past every id the journal holds or has
+polled.
 """
 
 from __future__ import annotations
@@ -258,8 +259,12 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         "ALTER TABLE messages ADD COLUMN event_key TEXT",
         "UPDATE messages SET event_key = CAST(update_id AS TEXT) WHERE update_id IS NOT NULL",
         (
-            "CREATE UNIQUE INDEX messages_event ON messages (channel, event_key) "
-            "WHERE event_key IS NOT NULL"
+            "CREATE TABLE event_keys (channel TEXT NOT NULL, event_key TEXT NOT NULL, "
+            "PRIMARY KEY (channel, event_key))"
+        ),
+        (
+            "INSERT INTO event_keys (channel, event_key) "
+            "SELECT channel, event_key FROM messages WHERE event_key IS NOT NULL"
         ),
         "ALTER TABLE messages ADD COLUMN sender_text TEXT",
         "UPDATE messages SET sender_text = CAST(sender AS TEXT)",
