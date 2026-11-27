@@ -44,6 +44,7 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
     ShikiruRejectedError,
 )
+from tests.support.event_numbers import number_next_event
 from tests.support.expert_proposals import expert_proposals
 from tests.support.rooms import FakeRooms
 
@@ -179,7 +180,7 @@ class Harness:
         clients: Mapping[str, FakeShikiru],
         *,
         mode: str = MODE_EXPERT,
-        admins: frozenset[int] = frozenset(),
+        admins: frozenset[str] = frozenset(),
         files: TaskFiles | None = None,
     ) -> None:
         self.mode = mode
@@ -334,9 +335,10 @@ class Harness:
     def tap(self, update_id: int, data: str, *, ref: str = FIRST_REF, sender: int = OWNER) -> None:
         """Tap a button on the message `ref`; the answer of FIRST by default."""
         item = Inbound(
-            update_id=update_id,
+            id=update_id,
+            key=str(update_id),
             kind=InboundKind.TAP,
-            sender=sender,
+            sender=str(sender),
             chat=CHAT,
             message_ref=ref,
             data=data,
@@ -456,7 +458,7 @@ def test_settling_edits_the_action_message_and_never_the_answer(settle: str) -> 
 
 def test_only_a_listed_admin_may_settle_proposals_of_an_admin_conversation() -> None:
     alpha = FakeShikiru()
-    harness = Harness({"alpha": alpha}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({"alpha": alpha}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.answer(FIRST, [("alpha", "first")])
     harness.tap(2, submit_all_data(FIRST))
     harness.tap(3, reject_all_data(FIRST))
@@ -466,7 +468,7 @@ def test_only_a_listed_admin_may_settle_proposals_of_an_admin_conversation() -> 
     harness.proposals = harness.restart()
     harness.tap(4, submit_all_data(FIRST), sender=ADMIN)
     assert alpha.requests == []
-    harness.admins = frozenset({ADMIN})
+    harness.admins = frozenset({str(ADMIN)})
     harness.proposals = harness.restart()
     harness.tap(5, submit_all_data(FIRST), sender=ADMIN)
     assert alpha.requests == ["first"]
@@ -591,9 +593,10 @@ def test_action_waits_for_every_task_part_to_be_delivered() -> None:
         assert all(not message.buttons for _, message in channel.sent)
         await harness.proposals.tap(
             Inbound(
-                update_id=2,
+                id=2,
+                key=str(2),
                 kind=InboundKind.TAP,
-                sender=OWNER,
+                sender=str(OWNER),
                 chat=CHAT,
                 message_ref="channel-1",
                 data=submit_all_data(FIRST),
@@ -617,9 +620,10 @@ def test_action_waits_for_every_task_part_to_be_delivered() -> None:
         action_ref = f"channel-{action_index + 1}"
         await harness.proposals.tap(
             Inbound(
-                update_id=3,
+                id=3,
+                key=str(3),
                 kind=InboundKind.TAP,
-                sender=OWNER,
+                sender=str(OWNER),
                 chat=CHAT,
                 message_ref=action_ref,
                 data=submit_all_data(FIRST),
@@ -991,24 +995,30 @@ def test_admin_op_decisions_are_conditional_and_duplicate_safe() -> None:
     op, voided = journal.intend_admin(conversation.id, 1, "echo test", "reason", NOW)
     assert not voided
     cutoff = NOW - timedelta(minutes=10)
-    assert not journal.decide_admin(op, 2, OWNER, admin=False, approve=True, now=NOW, cutoff=cutoff)
-    assert journal.decide_admin(op, 3, ADMIN, admin=True, approve=True, now=NOW, cutoff=cutoff)
-    assert not journal.decide_admin(op, 3, ADMIN, admin=True, approve=True, now=NOW, cutoff=cutoff)
+    assert not journal.decide_admin(
+        op, 2, str(OWNER), admin=False, approve=True, now=NOW, cutoff=cutoff
+    )
+    assert journal.decide_admin(op, 3, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=cutoff)
+    assert not journal.decide_admin(
+        op, 3, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=cutoff
+    )
     row = database.connection.execute(
         "SELECT state, payload FROM ops WHERE id = ?", (op,)
     ).fetchone()
     assert row["state"] == "approved"
-    assert json.loads(row["payload"])["approver"] == ADMIN
+    assert json.loads(row["payload"])["approver"] == str(ADMIN)
     assert json.loads(row["payload"])["update_id"] == 3
     expired, _ = journal.intend_admin(conversation.id, 4, "echo old", "reason", NOW)
     assert not journal.decide_admin(
-        expired, 5, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW
+        expired, 5, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW
     )
     new, replaced = journal.intend_admin(conversation.id, 6, "echo new", "reason", NOW)
     assert replaced == [expired]
-    assert journal.decide_admin(new, 7, ADMIN, admin=True, approve=False, now=NOW, cutoff=cutoff)
+    assert journal.decide_admin(
+        new, 7, str(ADMIN), admin=True, approve=False, now=NOW, cutoff=cutoff
+    )
     assert not journal.decide_admin(
-        new, 8, ADMIN, admin=True, approve=False, now=NOW, cutoff=cutoff
+        new, 8, str(ADMIN), admin=True, approve=False, now=NOW, cutoff=cutoff
     )
 
 
@@ -1026,13 +1036,13 @@ def test_admin_expiry_only_changes_pending_operations() -> None:
     assert journal.expire_admin(NOW, NOW) == [op]
     assert journal.expire_admin(NOW, NOW) == []
     assert not journal.decide_admin(
-        op, 2, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+        op, 2, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
     )
 
 
 @pytest.mark.parametrize("verb", ["u", "v"])
 def test_admin_proposal_delivery_and_decision(verb: str) -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.answer(FIRST, [])
     answer = AdminAnswer(
         reply="Ready", title="", tasks=[], findings="", command="echo hi", reason="test"
@@ -1063,11 +1073,12 @@ def test_admin_proposal_delivery_and_decision(verb: str) -> None:
 
     async def tap(update_id: int, sender: int) -> None:
         item = Inbound(
-            update_id,
-            InboundKind.TAP,
-            sender,
-            CHAT,
-            "admin-ref",
+            id=update_id,
+            key=str(update_id),
+            kind=InboundKind.TAP,
+            sender=str(sender),
+            chat=CHAT,
+            message_ref="admin-ref",
             data=f"{verb}:{op['id']}",
             thread=THREAD,
         )
@@ -1096,7 +1107,7 @@ def test_admin_proposal_delivery_and_decision(verb: str) -> None:
 
 
 def test_new_admin_proposal_voids_previous_message_and_expiry_removes_buttons() -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.answer(FIRST, [])
     answer = AdminAnswer(
         reply="Ready", title="", tasks=[], findings="", command="echo first", reason="test"
@@ -1138,7 +1149,7 @@ def test_new_admin_proposal_voids_previous_message_and_expiry_removes_buttons() 
 
 @pytest.mark.parametrize("action", ["void", "expire", "approve", "decline", "close", "idle"])
 def test_admin_state_and_final_edit_commit_together(action: str) -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.answer(FIRST, [])
     answer = AdminAnswer(
         reply="Ready", title="", tasks=[], findings="", command="echo first", reason="test"
@@ -1154,8 +1165,18 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
         "SELECT id FROM messages WHERE notice_key = ?", (key,)
     ).fetchone()[0]
     harness.messages.confirm_delivery(message_id, "admin-ref")
-    item = Inbound(2, InboundKind.TEXT, ADMIN, CHAT, "2", text="new", thread=THREAD)
-    JournalInbound(harness.database).record_batch(CHANNEL, [item], 3, NOW)
+    item = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TEXT,
+        sender=str(ADMIN),
+        chat=CHAT,
+        message_ref="2",
+        text="new",
+        thread=THREAD,
+    )
+    number_next_event(harness.database, CHANNEL, item.id)
+    JournalInbound(harness.database).record_batch(CHANNEL, [item], "3", NOW)
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
 
     def change() -> None:
@@ -1165,7 +1186,7 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
             journal.expire_admin(NOW, NOW)
         elif action == "close":
             harness.conversations.begin_ending(
-                harness.conversation_id, NOW, sender=ADMIN, update_id=2
+                harness.conversation_id, NOW, sender=str(ADMIN), update_id=2
             )
         elif action == "idle":
             harness.conversations.begin_ending(harness.conversation_id, NOW)
@@ -1173,7 +1194,7 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
             journal.decide_admin(
                 op_id,
                 2,
-                ADMIN,
+                str(ADMIN),
                 admin=True,
                 approve=action == "approve",
                 now=NOW,
@@ -1214,8 +1235,8 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
     )
     audit = json.loads(row["payload"])
     assert audit["update_id"] == (None if action in ("expire", "idle") else 2)
-    assert audit["actor"] == (None if action in ("expire", "idle") else ADMIN)
-    assert audit["approver"] == (ADMIN if action in ("approve", "decline") else None)
+    assert audit["actor"] == (None if action in ("expire", "idle") else str(ADMIN))
+    assert audit["approver"] == (str(ADMIN) if action in ("approve", "decline") else None)
     final = harness.database.connection.execute(
         "SELECT final_body FROM messages WHERE id = ?", (message_id,)
     ).fetchone()[0]
@@ -1237,7 +1258,7 @@ def test_admin_issue_and_recovery_never_repeat() -> None:
         assert journal.decide_admin(
             op,
             update + 1,
-            ADMIN,
+            str(ADMIN),
             admin=True,
             approve=True,
             now=NOW,
@@ -1276,7 +1297,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
     tmp_path: Path,
 ) -> None:
 
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1290,7 +1311,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
         assert journal.decide_admin(
             op,
             update + 1,
-            ADMIN,
+            str(ADMIN),
             admin=True,
             approve=True,
             now=NOW,
@@ -1391,7 +1412,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
     shown_cut: bool,
     killed: bool,
 ) -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1401,7 +1422,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
     op, _ = journal.intend_admin(conversation.id, 10, "run it", "reason", NOW)
     assert journal.decide_admin(
-        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+        op, 11, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
     )
 
     class Lock:
@@ -1474,7 +1495,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
 
 
 def test_admin_restart_notices_are_not_replayed() -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1488,7 +1509,7 @@ def test_admin_restart_notices_are_not_replayed() -> None:
         assert journal.decide_admin(
             op,
             update + 1,
-            ADMIN,
+            str(ADMIN),
             admin=True,
             approve=True,
             now=NOW,
@@ -1566,7 +1587,7 @@ class _CrashingOutbox(JournalOutbox):
 
 def _issued_admin_op() -> tuple[Harness, JournalProposals, int, int]:
     """Return a harness whose admin conversation has one issued command, and that command."""
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1576,7 +1597,7 @@ def _issued_admin_op() -> tuple[Harness, JournalProposals, int, int]:
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
     op, _ = journal.intend_admin(conversation.id, 10, "echo test", "reason", NOW)
     assert journal.decide_admin(
-        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+        op, 11, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
     )
     assert journal.issue_admin(op, NOW) is not None
     return harness, journal, op, conversation.id
@@ -1651,7 +1672,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
 ) -> None:
     from shikiri_yaku.adapters.commands import ProcessCommandRunner  # noqa: PLC0415
 
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1663,7 +1684,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
         conversation.id, 10, "printf xx; printf SEC; printf RET; printf extra", "reason", NOW
     )
     assert journal.decide_admin(
-        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+        op, 11, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
     )
 
     async def scenario() -> None:
@@ -1724,7 +1745,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
 
 
 def test_admin_result_and_output_notice_roll_back_together() -> None:
-    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({str(ADMIN)}))
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
@@ -1734,7 +1755,7 @@ def test_admin_result_and_output_notice_roll_back_together() -> None:
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
     op, _ = journal.intend_admin(conversation.id, 10, "echo safe", "reason", NOW)
     assert journal.decide_admin(
-        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+        op, 11, str(ADMIN), admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
     )
     assert journal.issue_admin(op, NOW) is not None
 

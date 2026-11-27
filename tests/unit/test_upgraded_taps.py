@@ -38,11 +38,19 @@ OFFER_REF: Final = "-100123/1"
 
 def _offer_before_rename(path: Path, *, admin: bool) -> tuple[test_ask.Harness, Inbound]:
     """Journal a request and the selection offer it was answered with, under the old key."""
-    admins = frozenset({SENDER}) if admin else frozenset[int]()
+    admins = frozenset({str(SENDER)}) if admin else frozenset[str]()
     h = test_ask.Harness(path, shared=True, admins=admins)
     command = "/admin" if admin else "/expert"
-    request = Inbound(1, InboundKind.TEXT, SENDER, CHAT, "-100123/71", text=f"{command} question")
-    JournalInbound(h.database).record_batch("telegram", [request], 2, NOW)
+    request = Inbound(
+        id=1,
+        key=str(1),
+        kind=InboundKind.TEXT,
+        sender=str(SENDER),
+        chat=CHAT,
+        message_ref="-100123/71",
+        text=f"{command} question",
+    )
+    JournalInbound(h.database).record_batch("telegram", [request], "2", NOW)
     offer = Message(
         "Choose an Expert.",
         (Button(f"{command}@bot", f"{EXPERT_SELECTION_PREFIX}1"),),
@@ -62,7 +70,15 @@ def _offer_before_rename(path: Path, *, admin: bool) -> tuple[test_ask.Harness, 
 
 def _assert_selection_opens_once(path: Path, *, admin: bool) -> None:
     h, _ = _offer_before_rename(path, admin=admin)
-    tap = Inbound(2, InboundKind.TAP, SENDER, CHAT, OFFER_REF, data=f"{EXPERT_SELECTION_PREFIX}1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender=str(SENDER),
+        chat=CHAT,
+        message_ref=OFFER_REF,
+        data=f"{EXPERT_SELECTION_PREFIX}1",
+    )
 
     assert Repairs(h.database).rename_keys() > 0
     assert asyncio.run(h.commands.tap(tap))

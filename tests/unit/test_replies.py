@@ -229,7 +229,15 @@ class Harness:
         )
 
     def open(self, update: int = 700, at: datetime = NOW) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/pending")
+        item = Inbound(
+            id=update,
+            key=str(update),
+            kind=InboundKind.TEXT,
+            sender="1001",
+            chat=1001,
+            message_ref="1001/90",
+            text="/pending",
+        )
         asyncio.run(self.commands(at).handle(item))
 
     def resolve_in_shikiru(self) -> None:
@@ -269,11 +277,12 @@ class Harness:
             max_text=MESSAGE_TEXT_LIMIT,
         )
         item = Inbound(
-            update,
-            InboundKind.TAP if text is None else InboundKind.REPLY,
-            1001,
-            1001,
-            ref if text is None else "1001/90",
+            id=update,
+            key=str(update),
+            kind=InboundKind.TAP if text is None else InboundKind.REPLY,
+            sender="1001",
+            chat=1001,
+            message_ref=ref if text is None else "1001/90",
             reply_to_ref=ref if text else None,
             text=text,
             data=data,

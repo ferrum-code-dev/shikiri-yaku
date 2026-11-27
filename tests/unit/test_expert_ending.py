@@ -18,7 +18,7 @@ from shikiri_yaku.app.expert_sketches import ExpertSketches
 from shikiri_yaku.app.expert_turns import ExpertTurns
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.domain.expert import ExpertAnswer, ExpertResult, ExpertSession
-from shikiri_yaku.domain.inbound import Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Inbound, InboundKind, Received
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.journal import Repairs
@@ -46,6 +46,7 @@ from tests.support.attachments import FakeDownloads
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
+from tests.support.event_numbers import number_next_event
 from tests.support.expert_proposals import expert_proposals
 from tests.support.rooms import FakeRooms
 
@@ -292,7 +293,16 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
 
 
 def _inbound(kind: InboundKind, thread: int, text: str | None = None) -> Inbound:
-    return Inbound(501, kind, OWNER, CHAT, "501", text=text, thread=thread)
+    return Inbound(
+        id=501,
+        key=str(501),
+        kind=kind,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref="501",
+        text=text,
+        thread=thread,
+    )
 
 
 async def _topic_closed(h: Harness, conversation: int, thread: int) -> None:
@@ -471,14 +481,57 @@ def test_an_ending_erases_the_recorded_messages_and_replies_of_its_topic_only(
     h = build()
     items = [
         Inbound(
-            CREATED, InboundKind.TEXT, OWNER, PRIVATE_CHAT, str(CREATED), text="/expert question"
+            id=CREATED,
+            key=str(CREATED),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=PRIVATE_CHAT,
+            message_ref=str(CREATED),
+            text="/expert question",
         ),
-        Inbound(501, InboundKind.TEXT, OWNER, CHAT, "501", text="/help", thread=TARGET_THREAD),
-        Inbound(502, InboundKind.TEXT, OWNER, CHAT, "502", text="/help", thread=BYSTANDER_THREAD),
-        Inbound(503, InboundKind.TEXT, OWNER, CHAT, "503", text="/close", thread=TARGET_THREAD),
-        Inbound(504, InboundKind.TEXT, OWNER, CHAT, "504", text="component", thread=77),
+        Inbound(
+            id=501,
+            key=str(501),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=CHAT,
+            message_ref="501",
+            text="/help",
+            thread=TARGET_THREAD,
+        ),
+        Inbound(
+            id=502,
+            key=str(502),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=CHAT,
+            message_ref="502",
+            text="/help",
+            thread=BYSTANDER_THREAD,
+        ),
+        Inbound(
+            id=503,
+            key=str(503),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=CHAT,
+            message_ref="503",
+            text="/close",
+            thread=TARGET_THREAD,
+        ),
+        Inbound(
+            id=504,
+            key=str(504),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=CHAT,
+            message_ref="504",
+            text="component",
+            thread=77,
+        ),
     ]
-    JournalInbound(h.database).record_batch(CHANNEL, items, next_offset=505, now=NOW)
+    number_next_event(h.database, CHANNEL, CREATED)
+    JournalInbound(h.database).record_batch(CHANNEL, items, cursor="505", now=NOW)
     target = h.open_conversation(CREATED, TARGET_THREAD, origin_chat=PRIVATE_CHAT)
     bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
     h.outbox.queue_command_reply(
@@ -534,13 +587,38 @@ def test_a_gone_command_reply_ends_only_its_expert_topic(build: Callable[..., Ha
     target = h.open_conversation(CREATED, TARGET_THREAD)
     bystander = h.open_conversation(CREATED + 100, BYSTANDER_THREAD)
     items = [
-        Inbound(501, InboundKind.TEXT, OWNER, GROUP_ID, "501", text="/help", thread=TARGET_THREAD),
         Inbound(
-            502, InboundKind.TEXT, OWNER, GROUP_ID, "502", text="/help", thread=BYSTANDER_THREAD
+            id=501,
+            key=str(501),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP_ID,
+            message_ref="501",
+            text="/help",
+            thread=TARGET_THREAD,
         ),
-        Inbound(503, InboundKind.TEXT, OWNER, GROUP_ID, "503", text="/help", thread=77),
+        Inbound(
+            id=502,
+            key=str(502),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP_ID,
+            message_ref="502",
+            text="/help",
+            thread=BYSTANDER_THREAD,
+        ),
+        Inbound(
+            id=503,
+            key=str(503),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP_ID,
+            message_ref="503",
+            text="/help",
+            thread=77,
+        ),
     ]
-    JournalInbound(h.database).record_batch(CHANNEL, items, next_offset=504, now=NOW)
+    JournalInbound(h.database).record_batch(CHANNEL, items, cursor="504", now=NOW)
     asyncio.run(h.turns.handle(items[0]))
     asyncio.run(h.turns.handle(items[1]))
     h.outbox.queue_command_reply(
@@ -848,6 +926,40 @@ def _conversation_row(database: Database, update_id: int) -> int:
         "SELECT id FROM conversations WHERE update_id = ?", (update_id,)
     ).fetchone()
     return int(row[0])
+
+
+def test_erasing_an_event_keeps_the_reply_keys_that_only_end_in_the_same_number() -> None:
+    database = Database.open(":memory:")
+    try:
+        conversations = Conversations(database)
+        outbox = JournalOutbox(database, MessageStore(database, Reporter()))
+        asked = Received(
+            key="900",
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=CHAT,
+            message_ref="900",
+            text="/help",
+            thread=TARGET_THREAD,
+        )
+        JournalInbound(database).record_batch(CHANNEL, [asked], "901", NOW)
+        [stored] = JournalInbound(database).pending()
+        conversations.create(stored.id, chat=CHAT, thread=None, text="hi", scope=[], now=NOW)
+        others = {f"submit:{stored.id}", f"expert:view:700:{stored.id}"}
+        for key in (f"expert:command:{stored.id}", *others):
+            outbox.queue_command_reply([], [], key=key, now=NOW)
+
+        conversations.erase(
+            _conversation_row(database, stored.id),
+            room_place=Destination(CHANNEL, str(CHAT), TARGET_THREAD),
+        )
+
+        kept = {
+            row[0] for row in database.connection.execute("SELECT reply_key FROM command_replies")
+        }
+        assert kept == others
+    finally:
+        database.close()
 
 
 def test_erasing_a_conversation_deletes_the_reply_keys_of_its_own_replies_only() -> None:

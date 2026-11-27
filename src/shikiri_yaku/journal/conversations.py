@@ -35,6 +35,19 @@ _OWNED_UPDATES: Final = """
            (chat = :room_chat AND thread = :room_thread))
         AND update_id IS NOT NULL
 """
+# keep: only these reply keys end in an event's id; other keys end in numbers an id may equal
+_EVENT_REPLIES: Final = (
+    "command",
+    "submit:usage",
+    "admin:decision",
+    "expert:command",
+    "expert:files",
+    "expert:open",
+    "expert:proposal",
+    "expert:refusal",
+    "expert:select",
+    "expert:view",
+)
 _ERASE_MESSAGES: Final = """
     DELETE FROM messages
     WHERE conversation_id = :id OR update_id = :update_id OR
@@ -295,7 +308,7 @@ class Conversations:
         conversation_id: int,
         now: datetime,
         *,
-        sender: int | None = None,
+        sender: str | None = None,
         update_id: int | None = None,
     ) -> ConversationRecord | None:
         """Mark an open conversation as ending and keep that first time for recovery."""
@@ -358,8 +371,12 @@ class Conversations:
             }
             updates = connection.execute(_OWNED_UPDATES, owned).fetchall()
             connection.executemany(
-                "DELETE FROM command_replies WHERE reply_key LIKE '%:' || ?",
-                [(update["update_id"],) for update in updates],
+                "DELETE FROM command_replies WHERE reply_key = ?",
+                [
+                    (f"{reply}:{update['update_id']}",)
+                    for update in updates
+                    for reply in _EVENT_REPLIES
+                ],
             )
             # keep: a reply part's key is its reply key and index, read before its messages go
             notices = connection.execute(

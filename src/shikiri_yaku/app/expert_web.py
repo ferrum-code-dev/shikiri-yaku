@@ -86,8 +86,8 @@ class ExpertWebRequests:
         if owner is None or not self._access.admit(owner, item.sender):
             return True
         conversation_id = self._log.decide(
-            tap[1], item.update_id, allow=tap[0] == WEB_ALLOW_VERB, now=self._clock.now()
+            tap[1], item.id, allow=tap[0] == WEB_ALLOW_VERB, now=self._clock.now()
         )
         if conversation_id is not None:
-            await run(conversation_id, item.update_id)
+            await run(conversation_id, item.id)
         return True

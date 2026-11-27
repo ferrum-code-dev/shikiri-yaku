@@ -43,7 +43,7 @@ class EndingLog(Protocol):
         conversation_id: int,
         now: datetime,
         *,
-        sender: int | None = None,
+        sender: str | None = None,
         update_id: int | None = None,
     ) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
@@ -90,7 +90,7 @@ class ExpertEnding:
         self.admin_expiry: Callable[[], None] | None = None
 
     async def end(
-        self, conversation_id: int, *, sender: int | None = None, update_id: int | None = None
+        self, conversation_id: int, *, sender: str | None = None, update_id: int | None = None
     ) -> None:
         """End the conversation: its topic is deleted now, or retried by `sweep` if refused."""
         row = self._log.begin_ending(

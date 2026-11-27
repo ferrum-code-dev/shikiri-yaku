@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.domain.classification import Assessment, Classification, InstallProposal
     from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
-    from shikiri_yaku.domain.inbound import Batch, Inbound
+    from shikiri_yaku.domain.inbound import Batch, Inbound, Received
     from shikiri_yaku.domain.loop_guard import AutoOp, Cause, Granted, Refused
     from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.outcome import Forward
@@ -847,7 +847,7 @@ class Channel:
     downloads: Downloads
     places: Destinations
     check: ChannelCheck
-    owners: frozenset[int]
+    owners: frozenset[str]
     max_text: int
     max_file_bytes: int
     secrets: tuple[str, ...]
@@ -929,27 +929,31 @@ class Destinations(Protocol):
 
 
 class Inbox(Protocol):
-    """What the PO sends, read from `offset` for up to `wait_s`.
+    """What users send to the channel, read after `cursor` for up to `wait_s`.
+
+    Passing a batch's cursor back confirms that the batch is stored. Only then may the channel
+    acknowledge it to its platform; until then it delivers it again.
 
     A transport failure raises ChannelError; an unreadable reply raises ChannelProtocolError.
     """
 
-    async def fetch(self, offset: int, wait_s: float) -> Batch: ...
+    async def fetch(self, cursor: str | None, wait_s: float) -> Batch: ...
 
 
 class InboundLog(Protocol):
-    """Inbound items in the journal, kept until Replies has handled them."""
+    """Inbound events in the journal, kept until Replies has handled them."""
 
-    def next_offset(self, channel: str) -> int:
-        """Return the offset to poll from: past the last batch that was journaled, 0 at first."""
+    def cursor(self, channel: str) -> str | None:
+        """Return the cursor of the last batch that was journaled, None at first."""
         ...
 
     def record_batch(
-        self, channel: str, items: Sequence[Inbound], next_offset: int, now: datetime
+        self, channel: str, events: Sequence[Received], cursor: str, now: datetime
     ) -> None:
-        """Store the new items and move the offset, in one transaction.
+        """Store the new events and the cursor, in one transaction.
 
-        An item whose update id is known is not stored again. Text that carries a secret form is
+        Each stored event gets an id the channel has never had before, greater than all earlier
+        ones. An event whose key is known is not stored again. Text that carries a secret form is
         stored as refused, without its text.
         """
         ...
@@ -958,7 +962,7 @@ class InboundLog(Protocol):
         """Return the stored items not yet handled, oldest first."""
         ...
 
-    def mark_handled(self, update_id: int) -> None: ...
+    def mark_handled(self, event_id: int) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -1147,11 +1151,11 @@ class SecretLog(Protocol):
         """Return the messages still to delete, oldest first."""
         ...
 
-    def record_deletion(self, update_id: int) -> None: ...
+    def record_deletion(self, event_id: int) -> None: ...
 
-    def defer_deletion(self, update_id: int) -> None: ...
+    def defer_deletion(self, event_id: int) -> None: ...
 
-    def confirm_deletion(self, update_id: int) -> None: ...
+    def confirm_deletion(self, event_id: int) -> None: ...
 
 
 class Replacements(Protocol):

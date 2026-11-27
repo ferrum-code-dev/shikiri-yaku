@@ -12,6 +12,7 @@ from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.journal import Database, Delivery, JournalInbound
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError, Message
+from tests.support.event_numbers import number_next_event
 from tests.support.secrets import SECRETS
 
 if TYPE_CHECKING:
@@ -74,11 +75,21 @@ def database() -> Generator[Database]:
 
 def _message(kind: InboundKind, text: str) -> Inbound:
     origin = QUESTION_REF if kind == InboundKind.REPLY else None
-    return Inbound(TEXT, kind, OWNER, OWNER, TEXT_REF, reply_to_ref=origin, text=text)
+    return Inbound(
+        id=TEXT,
+        key=str(TEXT),
+        kind=kind,
+        sender=str(OWNER),
+        chat=OWNER,
+        message_ref=TEXT_REF,
+        reply_to_ref=origin,
+        text=text,
+    )
 
 
 def _store(database: Database, item: Inbound) -> None:
-    JournalInbound(database).record_batch(CHANNEL, [item], item.update_id + 1, NOW)
+    number_next_event(database, CHANNEL, item.id)
+    JournalInbound(database).record_batch(CHANNEL, [item], str(item.id + 1), NOW)
 
 
 def _cleanup(database: Database, channel: _Channel) -> SecretCleanup:
@@ -127,7 +138,16 @@ def test_a_tap_with_a_secret_in_its_data_is_refused_but_the_bots_message_is_kept
     database: Database,
 ) -> None:
     _store(
-        database, Inbound(TAP, InboundKind.TAP, OWNER, OWNER, QUESTION_REF, data=SECRETS["sk_key"])
+        database,
+        Inbound(
+            id=TAP,
+            key=str(TAP),
+            kind=InboundKind.TAP,
+            sender=str(OWNER),
+            chat=OWNER,
+            message_ref=QUESTION_REF,
+            data=SECRETS["sk_key"],
+        ),
     )
     channel = _Channel(database)
 

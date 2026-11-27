@@ -32,6 +32,9 @@ Migration 26 keeps the effort a conversation was given with `/effort`, which its
 to the agent.
 Migration 27 keeps the state of each Expert task proposal, so its buttons act at most once.
 Migration 28 keeps the time an Expert conversation began ending, so recovery preserves its reply.
+Migration 31 numbers inbound events itself: the channel's id of an event becomes its key, the
+sender becomes text, and the polling offset becomes an opaque cursor beside the counter, which
+starts past every id the journal holds or has polled.
 """
 
 from __future__ import annotations
@@ -251,4 +254,43 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     ),
     ("ALTER TABLE conversations ADD COLUMN ending_at TEXT",),
     ("ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'expert'",),
+    (
+        "ALTER TABLE messages ADD COLUMN event_key TEXT",
+        "UPDATE messages SET event_key = CAST(update_id AS TEXT) WHERE update_id IS NOT NULL",
+        (
+            "CREATE UNIQUE INDEX messages_event ON messages (channel, event_key) "
+            "WHERE event_key IS NOT NULL"
+        ),
+        "ALTER TABLE messages ADD COLUMN sender_text TEXT",
+        "UPDATE messages SET sender_text = CAST(sender AS TEXT)",
+        "ALTER TABLE messages DROP COLUMN sender",
+        "ALTER TABLE messages RENAME COLUMN sender_text TO sender",
+        "ALTER TABLE polling ADD COLUMN cursor TEXT",
+        "ALTER TABLE polling ADD COLUMN last_id INTEGER NOT NULL DEFAULT 0",
+        # keep: an erased conversation leaves its ids in ops only, so those are read too
+        """
+        UPDATE polling SET cursor = CAST(next_offset AS TEXT), last_id = MAX(
+            0, next_offset - 1, (
+                SELECT COALESCE(MAX(id), 0) FROM (
+                    SELECT update_id AS id FROM messages
+                    UNION ALL SELECT update_id FROM conversations
+                    UNION ALL SELECT update_id FROM turns
+                    UNION ALL SELECT update_id FROM proposals
+                    UNION ALL SELECT decision_update_id FROM web_requests
+                    UNION ALL SELECT json_extract(payload, '$.update_id') FROM ops
+                        WHERE kind = 'admin'
+                    UNION ALL SELECT CAST(replace(substr(identity, 7), 'refused:', '') AS INTEGER)
+                        FROM ops WHERE kind = 'admin'
+                    UNION ALL
+                    SELECT CAST(substr(identity, instr(identity, ':submit:') + 8) AS INTEGER)
+                        FROM ops WHERE instr(identity, ':submit:') > 0
+                    UNION ALL
+                    SELECT CAST(substr(identity, instr(identity, ':resolve:') + 9) AS INTEGER)
+                        FROM ops WHERE instr(identity, ':resolve:') > 0
+                )
+            )
+        )
+        """,
+        "ALTER TABLE polling DROP COLUMN next_offset",
+    ),
 )

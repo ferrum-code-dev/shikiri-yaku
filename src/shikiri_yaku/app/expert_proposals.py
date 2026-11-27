@@ -117,7 +117,7 @@ class ProposalLog(Protocol):
         self,
         op_id: int,
         update_id: int,
-        sender: int,
+        sender: str,
         *,
         admin: bool,
         approve: bool,
@@ -327,14 +327,14 @@ class ExpertProposals:
             reason = "Only a listed admin may decide."
         elif state != _ADMIN_INTENDED:
             # keep: a done decline turn may be undelivered after a stop, and run only delivers it
-            turn = self._conversations.turn(item.update_id)
+            turn = self._conversations.turn(item.id)
             if (
                 state == _ADMIN_DECLINED
                 and turn is not None
                 and turn.state in (_TURN_PENDING, _TURN_DONE)
                 and turn.conversation_id == conversation_id
             ):
-                await run(conversation_id, item.update_id)
+                await run(conversation_id, item.id)
             reason = f"Proposal is {state}."
         elif conversation.state != _CONVERSATION_OPEN:
             reason = "Conversation is closed."
@@ -344,7 +344,7 @@ class ExpertProposals:
             approved = tap[0] == ADMIN_RUN_VERB
             if self._log.decide_admin(
                 tap[1],
-                item.update_id,
+                item.id,
                 item.sender,
                 admin=admin,
                 approve=approved,
@@ -355,14 +355,14 @@ class ExpertProposals:
                 if approved and run_admin is not None:
                     await run_admin(tap[1], conversation_id)
                 elif not approved:
-                    await run(conversation_id, item.update_id)
+                    await run(conversation_id, item.id)
                 return True
             reason = "Proposal is no longer pending."
         queue_command_reply(
             self._outbox,
             [destination],
             reason,
-            key=f"admin:decision:{item.update_id}",
+            key=f"admin:decision:{item.id}",
             now=now,
             conversation_id=conversation_id,
             max_text=self._max_text,
@@ -374,7 +374,7 @@ class ExpertProposals:
             self._outbox,
             [item_destination(self._channel, item)],
             reason,
-            key=f"admin:decision:{item.update_id}",
+            key=f"admin:decision:{item.id}",
             now=self._clock.now(),
             max_text=self._max_text,
         )
@@ -421,7 +421,7 @@ class ExpertProposals:
                 self._outbox,
                 [opened.destination],
                 _FILES_NOT_COPIED,
-                key=f"expert:files:{item.update_id}",
+                key=f"expert:files:{item.id}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
                 max_text=self._max_text,
@@ -470,7 +470,7 @@ class ExpertProposals:
                 self._outbox,
                 [opened.destination],
                 _WITHHELD,
-                key=f"expert:view:{item.update_id}",
+                key=f"expert:view:{item.id}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
                 max_text=self._max_text,
@@ -481,7 +481,7 @@ class ExpertProposals:
                 self._outbox,
                 [opened.destination],
                 text,
-                key=f"expert:view:{item.update_id}:{number}",
+                key=f"expert:view:{item.id}:{number}",
                 now=self._clock.now(),
                 conversation_id=opened.conversation_id,
                 max_text=self._max_text,
@@ -551,7 +551,7 @@ class ExpertProposals:
             self._outbox,
             [opened.destination],
             _NOT_OPEN[state],
-            key=f"expert:proposal:{item.update_id}",
+            key=f"expert:proposal:{item.id}",
             now=self._clock.now(),
             conversation_id=opened.conversation_id,
             max_text=self._max_text,

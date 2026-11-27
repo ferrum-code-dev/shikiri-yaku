@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from shikiri_yaku.domain.inbound import FileRef, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import FileRef, Inbound, InboundKind, Received
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.journal.database import stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
@@ -19,7 +19,8 @@ def _inbound(row: sqlite3.Row) -> Inbound:
     kind = InboundKind(row["kind"])
     is_file = kind == InboundKind.FILE and row["data"] is not None
     return Inbound(
-        update_id=row["update_id"],
+        id=row["update_id"],
+        key=row["event_key"],
         kind=kind,
         sender=row["sender"],
         chat=int(row["chat"]),
@@ -33,35 +34,35 @@ def _inbound(row: sqlite3.Row) -> Inbound:
 
 
 class JournalInbound:
-    """What the PO sent: inbound rows of the messages table, one per update id.
+    """What the PO sent: inbound rows of the messages table, one per channel and event key.
 
-    Update ids are unique per bot, and an instance has one bot, so the id alone identifies an item.
+    The journal numbers the events of a channel from a counter it never moves back, and keeps the
+    number in the update_id column. It identifies an event everywhere else.
     """
 
     def __init__(self, database: Database) -> None:
         self._database = database
 
-    def next_offset(self, channel: str) -> int:
+    def cursor(self, channel: str) -> str | None:
         row = self._database.connection.execute(
-            "SELECT next_offset FROM polling WHERE channel = ?", (channel,)
+            "SELECT cursor FROM polling WHERE channel = ?", (channel,)
         ).fetchone()
-        return 0 if row is None else row["next_offset"]
+        return None if row is None else row["cursor"]
 
     def record_batch(
-        self, channel: str, items: Sequence[Inbound], next_offset: int, now: datetime
+        self, channel: str, events: Sequence[Received], cursor: str, now: datetime
     ) -> None:
-        # keep: one transaction, so a crash leaves the offset behind and the batch is fetched again
+        # keep: one transaction, so a crash leaves the cursor behind and the batch is fetched again
         with self._database.transaction() as connection:
-            for item in items:
-                self._insert(connection, channel, item, now)
             connection.execute(
                 """
-                INSERT INTO polling (channel, next_offset) VALUES (?, ?)
-                ON CONFLICT (channel) DO UPDATE SET
-                    next_offset = MAX(next_offset, excluded.next_offset)
+                INSERT INTO polling (channel, cursor) VALUES (?, ?)
+                ON CONFLICT (channel) DO UPDATE SET cursor = excluded.cursor
                 """,
-                (channel, next_offset),
+                (channel, cursor),
             )
+            for event in events:
+                self._insert(connection, channel, event, now)
 
     def pending(self) -> list[Inbound]:
         rows = self._database.connection.execute(
@@ -70,10 +71,10 @@ class JournalInbound:
         )
         return [_inbound(row) for row in rows]
 
-    def mark_handled(self, update_id: int) -> None:
+    def mark_handled(self, event_id: int) -> None:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
-            (Delivery.HANDLED, update_id, Delivery.RECEIVED),
+            (Delivery.HANDLED, event_id, Delivery.RECEIVED),
         )
 
     def to_delete(self) -> list[Inbound]:
@@ -94,50 +95,59 @@ class JournalInbound:
         )
         return [_inbound(row) for row in rows]
 
-    def record_deletion(self, update_id: int) -> None:
+    def record_deletion(self, event_id: int) -> None:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
-            (Delivery.DELETE_ATTEMPTED, update_id, Delivery.REFUSED),
+            (Delivery.DELETE_ATTEMPTED, event_id, Delivery.REFUSED),
         )
 
-    def defer_deletion(self, update_id: int) -> None:
+    def defer_deletion(self, event_id: int) -> None:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
-            (Delivery.REFUSED, update_id, Delivery.DELETE_ATTEMPTED),
+            (Delivery.REFUSED, event_id, Delivery.DELETE_ATTEMPTED),
         )
 
-    def confirm_deletion(self, update_id: int) -> None:
+    def confirm_deletion(self, event_id: int) -> None:
         self._database.connection.execute(
             "UPDATE messages SET delivery = ? WHERE update_id = ? AND delivery = ?",
-            (Delivery.DELETED, update_id, Delivery.DELETE_ATTEMPTED),
+            (Delivery.DELETED, event_id, Delivery.DELETE_ATTEMPTED),
         )
 
     @staticmethod
-    def _insert(connection: sqlite3.Connection, channel: str, item: Inbound, now: datetime) -> None:
-        """Insert an item once; a secret keeps its form and loses its text and data."""
-        data = item.data if item.file is None else item.file.model_dump_json()
-        form = secret_form([text for text in (item.text, data) if text is not None])
+    def _insert(
+        connection: sqlite3.Connection, channel: str, event: Received, now: datetime
+    ) -> None:
+        """Insert an event once; a secret keeps its form and loses its text and data."""
+        data = event.data if event.file is None else event.file.model_dump_json()
+        form = secret_form([text for text in (event.text, data) if text is not None])
+        # keep: an event delivered again uses up a number, which only leaves a gap
+        number = connection.execute(
+            "UPDATE polling SET last_id = last_id + 1 WHERE channel = ? RETURNING last_id",
+            (channel,),
+        ).fetchone()["last_id"]
         connection.execute(
             """
-            INSERT INTO messages (direction, channel, chat, update_id, kind, sender, message_ref,
-                                  reply_to_ref, body, data, delivery, refusal, created_at, thread)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (update_id) WHERE update_id IS NOT NULL DO NOTHING
+            INSERT INTO messages (direction, channel, chat, update_id, event_key, kind, sender,
+                                  message_ref, reply_to_ref, body, data, delivery, refusal,
+                                  created_at, thread)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (channel, event_key) WHERE event_key IS NOT NULL DO NOTHING
             """,
             (
                 Direction.IN,
                 channel,
-                str(item.chat),
-                item.update_id,
-                item.kind,
-                item.sender,
-                item.message_ref,
-                item.reply_to_ref,
-                None if form else item.text,
+                str(event.chat),
+                number,
+                event.key,
+                event.kind,
+                event.sender,
+                event.message_ref,
+                event.reply_to_ref,
+                None if form else event.text,
                 None if form else data,
                 Delivery.RECEIVED if form is None else Delivery.REFUSED,
                 form,
                 stamp(now),
-                item.thread,
+                event.thread,
             ),
         )

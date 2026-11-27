@@ -826,8 +826,8 @@ def _open_install(
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
         row = database.connection.execute(
-            "SELECT platform_message_id FROM messages WHERE notice_key = ?",
-            (f"install:{op_id}:pending:800",),
+            "SELECT platform_message_id FROM messages WHERE notice_key LIKE ?",
+            (f"install:{op_id}:pending:%",),
         ).fetchone()
     finally:
         database.close()
@@ -969,10 +969,10 @@ def test_a_tap_runs_through_replies_to_a_journaled_resolve(tmp_path: Path) -> No
         [op] = database.connection.execute(
             "SELECT state, command_id FROM ops WHERE kind = 'resolve'"
         )
-        offset = database.connection.execute("SELECT next_offset FROM polling").fetchone()
+        polled = database.connection.execute("SELECT cursor FROM polling").fetchone()
     finally:
         database.close()
-    assert (op["state"], op["command_id"], offset["next_offset"]) == ("issued", "12", 703)
+    assert (op["state"], op["command_id"], polled["cursor"]) == ("issued", "12", "703")
 
 
 def test_help_in_a_component_topic_is_answered_in_that_topic(tmp_path: Path) -> None:
@@ -1071,7 +1071,8 @@ def test_a_restart_asks_about_a_goal_interrupted_mid_submit_and_never_submits_it
             database, OpStore(database), channel_name="telegram"
         ).unfinished()
         if handled:
-            JournalInbound(database).mark_handled(_goal_update()["update_id"])
+            [asked] = JournalInbound(database).pending()
+            JournalInbound(database).mark_handled(asked.id)
     finally:
         database.close()
     assert (crashed.submits, interrupted.status) == (["Add the export"], SubmitStatus.ISSUED)
@@ -1561,10 +1562,10 @@ def _next_offset(directory: Path) -> int:
     """Return the Telegram update offset the journal has reached, read on its own connection."""
     database = Database.open(directory / JOURNAL_FILE_NAME)
     try:
-        row = database.connection.execute("SELECT next_offset FROM polling").fetchone()
+        row = database.connection.execute("SELECT cursor FROM polling").fetchone()
     finally:
         database.close()
-    return 0 if row is None else int(row["next_offset"])
+    return 0 if row is None else int(row["cursor"])
 
 
 def _messages_from(directory: Path, sender: int) -> int:
@@ -2109,7 +2110,7 @@ def test_admin_operations_settle_after_admin_mode_is_disabled(tmp_path: Path) ->
         assert journal.decide_admin(
             op,
             update + 1,
-            _OWNER,
+            str(_OWNER),
             admin=True,
             approve=True,
             now=now,

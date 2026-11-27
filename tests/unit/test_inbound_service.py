@@ -27,22 +27,32 @@ if TYPE_CHECKING:
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 OWNER: Final = 1001
-TAP: Final = Inbound(700, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
+TAP: Final = Inbound(
+    id=700,
+    key=str(700),
+    kind=InboundKind.TAP,
+    sender=str(OWNER),
+    chat=OWNER,
+    message_ref="1001/42",
+    data="a:1:1",
+)
 EXPERT_REPLY: Final = Inbound(
-    700,
-    InboundKind.REPLY,
-    OWNER,
-    OWNER,
-    "1001/90",
+    id=700,
+    key=str(700),
+    kind=InboundKind.REPLY,
+    sender=str(OWNER),
+    chat=OWNER,
+    message_ref="1001/90",
     reply_to_ref="1001/42",
     text="/expert hello",
 )
 PLAIN_REPLY: Final = Inbound(
-    700,
-    InboundKind.REPLY,
-    OWNER,
-    OWNER,
-    "1001/90",
+    id=700,
+    key=str(700),
+    kind=InboundKind.REPLY,
+    sender=str(OWNER),
+    chat=OWNER,
+    message_ref="1001/90",
     reply_to_ref="1001/42",
     text="Use it",
 )
@@ -65,7 +75,7 @@ class _Updates:
     def __init__(self, *script: Batch | Exception) -> None:
         self.script = list(script)
 
-    async def fetch(self, offset: int, wait_s: float) -> Batch:  # noqa: ARG002 -- the port's shape
+    async def fetch(self, cursor: str | None, wait_s: float) -> Batch:  # noqa: ARG002 -- the port's shape
         outcome = self.script.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -75,12 +85,12 @@ class _Updates:
 class _Replies:
     def __init__(self) -> None:
         self.down = False
-        self.handled: list[int] = []
+        self.handled: list[str] = []
 
     async def handle(self, item: Inbound) -> None:
         if self.down:
             raise ShikiruLinkDownError
-        self.handled.append(item.update_id)
+        self.handled.append(item.key)
 
 
 class Harness:
@@ -92,7 +102,7 @@ class Harness:
         sources = JournalSources(CursorStore(database, signals), signals)
         health = HealthSource(OPERATOR_SCOPE, sources, _Clock(), 10)
         poller = InboundPoller(
-            updates, self.log, _Clock(), channel="telegram", owners=[OWNER], wait_s=1
+            updates, self.log, _Clock(), channel="telegram", owners=[str(OWNER)], wait_s=1
         )
         replies: Replies = self.replies  # pyright: ignore[reportAssignmentType]
         self.service = InboundService(
@@ -169,39 +179,39 @@ def test_a_refused_poll_puts_its_code_and_telegrams_description_in_the_health_me
 
 
 def test_a_transport_failure_is_retried_without_a_signal(database: Database) -> None:
-    harness = Harness(database, _Updates(ChannelError("offline"), Batch(701, (TAP,))))
+    harness = Harness(database, _Updates(ChannelError("offline"), Batch("702", (TAP,))))
     harness.tick()
     assert harness.health_signals() == []
     harness.tick()
-    assert harness.replies.handled == [700]
+    assert harness.replies.handled == ["700"]
 
 
 def test_an_expert_command_sent_as_a_reply_stays_pending_for_its_background_run(
     database: Database,
 ) -> None:
     async def scenario() -> None:
-        harness = Harness(database, _Updates(Batch(700, (EXPERT_REPLY,)), Batch(None, ())))
+        harness = Harness(database, _Updates(Batch("701", (EXPERT_REPLY,)), Batch(None, ())))
         await harness.service.tick()
-        assert [item.update_id for item in harness.log.pending()] == [700]
+        assert [item.key for item in harness.log.pending()] == ["700"]
         assert harness.replies.handled == []
 
     asyncio.run(scenario())
 
 
 def test_an_ordinary_reply_is_handled_in_the_foreground(database: Database) -> None:
-    harness = Harness(database, _Updates(Batch(700, (PLAIN_REPLY,)), Batch(None, ())))
+    harness = Harness(database, _Updates(Batch("701", (PLAIN_REPLY,)), Batch(None, ())))
     harness.tick()
-    assert harness.replies.handled == [700]
+    assert harness.replies.handled == ["700"]
     assert harness.log.pending() == []
 
 
 def test_an_item_stays_pending_while_shikiru_is_down(database: Database) -> None:
-    harness = Harness(database, _Updates(Batch(700, (TAP,)), Batch(None, ())))
+    harness = Harness(database, _Updates(Batch("701", (TAP,)), Batch(None, ())))
     harness.replies.down = True
     harness.tick()
-    assert [item.update_id for item in harness.log.pending()] == [700]
+    assert [item.key for item in harness.log.pending()] == ["700"]
 
     harness.replies.down = False
     harness.tick()
-    assert harness.replies.handled == [700]
+    assert harness.replies.handled == ["700"]
     assert harness.log.pending() == []

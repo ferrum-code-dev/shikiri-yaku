@@ -82,22 +82,57 @@ def test_only_install_buttons_from_approval_origins_are_dispatched() -> None:
 
     async def handle_items() -> None:
         await replies.handle(
-            Inbound(1, InboundKind.TAP, 1, 1001, "approval", data=install_data(1, 8))
-        )
-        await replies.handle(
-            Inbound(2, InboundKind.TAP, 1, 1001, "approval", data=decline_data(1, 8))
-        )
-        await replies.handle(Inbound(3, InboundKind.TAP, 1, 1001, "approval", data="a:1:1"))
-        await replies.handle(
-            Inbound(4, InboundKind.TAP, 1, 1001, "notice", data=install_data(1, 8))
+            Inbound(
+                id=1,
+                key=str(1),
+                kind=InboundKind.TAP,
+                sender="1",
+                chat=1001,
+                message_ref="approval",
+                data=install_data(1, 8),
+            )
         )
         await replies.handle(
             Inbound(
-                5,
-                InboundKind.REPLY,
-                1,
-                1001,
-                "reply",
+                id=2,
+                key=str(2),
+                kind=InboundKind.TAP,
+                sender="1",
+                chat=1001,
+                message_ref="approval",
+                data=decline_data(1, 8),
+            )
+        )
+        await replies.handle(
+            Inbound(
+                id=3,
+                key=str(3),
+                kind=InboundKind.TAP,
+                sender="1",
+                chat=1001,
+                message_ref="approval",
+                data="a:1:1",
+            )
+        )
+        await replies.handle(
+            Inbound(
+                id=4,
+                key=str(4),
+                kind=InboundKind.TAP,
+                sender="1",
+                chat=1001,
+                message_ref="notice",
+                data=install_data(1, 8),
+            )
+        )
+        await replies.handle(
+            Inbound(
+                id=5,
+                key=str(5),
+                kind=InboundKind.REPLY,
+                sender="1",
+                chat=1001,
+                message_ref="reply",
                 reply_to_ref="approval",
                 text="please install it",
             )
