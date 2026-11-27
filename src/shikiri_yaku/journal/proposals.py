@@ -178,8 +178,16 @@ class JournalProposals:
                 notice()
             return turn_id
 
-    def recover_admin(self, now: datetime) -> list[tuple[int, int, str]]:
-        """Settle uncertain commands once, without replaying them."""
+    def recover_admin(
+        self,
+        now: datetime,
+        notice: Callable[[int, int, str], None] | None = None,
+    ) -> list[tuple[int, int, str]]:
+        """Settle uncertain commands once, without replaying them.
+
+        `notice` is called for each one in the same transaction, so its notice is journaled with
+        the settlement, or not at all.
+        """
         with self._database.transaction() as connection:
             rows = connection.execute(
                 "UPDATE ops SET state = CASE state WHEN 'approved' THEN 'void' ELSE 'unknown' END, "
@@ -187,10 +195,14 @@ class JournalProposals:
                 "RETURNING id, payload, state",
                 (stamp(now),),
             ).fetchall()
-            return [
+            recovered = [
                 (row["id"], json.loads(row["payload"])["conversation_id"], row["state"])
                 for row in rows
             ]
+            if notice is not None:
+                for op_id, conversation_id, state in recovered:
+                    notice(op_id, conversation_id, state)
+            return recovered
 
     def admin_op(self, op_id: int) -> tuple[int, str, datetime] | None:
         """Return the conversation, state and proposal time of an admin operation."""

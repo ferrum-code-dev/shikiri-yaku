@@ -11,7 +11,8 @@ from shikiri_yaku.app.outbox_sender import OutboxSender
 if TYPE_CHECKING:
     from shikiri_yaku.app.outbox_sender import TopicGone
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import Channel, Clock, FinalEdits, Message, Outbox
+    from shikiri_yaku.journal.outbox import JournalOutbox
+    from shikiri_yaku.ports import Channel, Clock, FinalEdits, Message
 
 
 class Platform:
@@ -37,7 +38,7 @@ class Platform:
 
 
 def deliver(
-    outbox: Outbox,
+    outbox: JournalOutbox,
     final: FinalEdits,
     clock: Clock,
     platform: Platform,
@@ -47,6 +48,6 @@ def deliver(
     """Send the queued copies, then edit the sent copies to their final state, as the workers do."""
     channel = cast("Channel", platform)
     sender = OutboxSender(outbox, channel, clock, interval_s=1, gone=gone)
-    editor = CopyEditor(final, channel, clock, interval_s=1)
+    editor = CopyEditor(final, outbox, channel, clock, interval_s=1)
     asyncio.run(sender.tick())
     asyncio.run(editor.tick())

@@ -113,6 +113,7 @@ __all__ = [
     "Outbox",
     "Pending",
     "PendingInstall",
+    "PlaceGoneError",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -1324,15 +1325,19 @@ class ChannelProtocolError(ChannelError):
     """The platform answered in a shape the Channel does not read; retrying alone will not help."""
 
 
-# keep: the reason of a refusal because the topic a message names no longer exists
-TOPIC_GONE_REASON: Final = "topic_gone"
-
-
 class ChannelRefusedError(Exception):
     """The platform will never take this message, however often it is sent.
 
     The text is the reason. It is not a ChannelError, so a sender never retries it.
     """
+
+
+# keep: the reason a refused message keeps when the place it names no longer exists
+PLACE_GONE_REASON: Final = "place_gone"
+
+
+class PlaceGoneError(ChannelRefusedError):
+    """The place a message names no longer exists, so no message can reach it."""
 
 
 class ChannelRepairError(Exception):

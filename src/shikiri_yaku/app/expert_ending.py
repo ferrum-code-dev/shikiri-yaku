@@ -11,10 +11,10 @@ from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
-    TOPIC_GONE_REASON,
     ChannelError,
     ChannelRefusedError,
     Message,
+    PlaceGoneError,
 )
 
 if TYPE_CHECKING:
@@ -112,7 +112,7 @@ class ExpertEnding:
         try:
             await self._topics.delete(row.thread_id)
         except ChannelRefusedError as refusal:
-            if str(refusal) != TOPIC_GONE_REASON:
+            if not isinstance(refusal, PlaceGoneError):
                 self._report_refusal(row)
                 return
         except ChannelError:

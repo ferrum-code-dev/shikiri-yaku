@@ -4,7 +4,7 @@
 
 ### F6
 
-- [ ] F6. Move message policy out of the channel adapter.
+- [x] F6. Move message policy out of the channel adapter.
 
 ## Acceptance criteria
 - The channel adapter does not use `Copies` and screens no secrets. Its send, edit and delete only talk to the platform and check the platform's own limits.

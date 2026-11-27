@@ -9,7 +9,6 @@ inside them.
 
 from __future__ import annotations
 
-import contextlib
 import html
 import stat
 from pathlib import Path
@@ -18,16 +17,16 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
-from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     CALLBACK_DATA_LIMIT,
     MESSAGE_TEXT_LIMIT,
-    TOPIC_GONE_REASON,
+    PLACE_GONE_REASON,
     Button,
     ChannelError,
     ChannelRefusedError,
     ChannelUnavailableError,
     CheckLine,
+    PlaceGoneError,
     join_blocks,
 )
 
@@ -35,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from shikiri_yaku.domain.schedule import Destination
-    from shikiri_yaku.ports import Clock, Copies, Message
+    from shikiri_yaku.ports import Clock, Message
 
 TELEGRAM_CHANNEL: Final = "telegram"
 TOKEN_MODE: Final = 0o600
@@ -293,17 +292,14 @@ class TelegramChannel:
 
     A message reference is `<chat id>/<message id>`, so `edit` can name the chat without being
     given the destination again. A rate limit is waited out once; a second one is a ChannelError,
-    which the sender tries again on its next tick. A secret is refused before any call. A refused
-    edit is journaled on its copy, and a secret edit also deletes that copy first.
+    which the sender tries again on its next tick. The core screens secrets and journals refusals.
     """
 
-    def __init__(self, api: FileApi, clock: Clock, copies: Copies) -> None:
+    def __init__(self, api: FileApi, clock: Clock) -> None:
         self._api = api
         self._clock = clock
-        self._copies = copies
 
     async def send(self, destination: Destination, message: Message) -> str:
-        _refuse_secret(message)
         payload: dict[str, object] = {"chat_id": destination.chat, **_content(message)}
         if destination.thread is not None:
             payload["message_thread_id"] = destination.thread
@@ -320,29 +316,10 @@ class TelegramChannel:
         return f"{reply.result.chat.id}{REF_SEPARATOR}{reply.result.message_id}"
 
     async def edit(self, message_ref: str, message: Message) -> None:
-        if (form := secret_form(message.texts())) is not None:
-            await self._delete_copy(message_ref, form)
-            raise ChannelRefusedError(form)
-        try:
-            await self._request(EDIT_MESSAGE_TEXT, {**_target(message_ref), **_content(message)})
-        except ChannelRefusedError as refusal:
-            self._copies.record_refused_edit(message_ref, str(refusal), now=self._clock.now())
-            raise
+        await self._request(EDIT_MESSAGE_TEXT, {**_target(message_ref), **_content(message)})
 
     async def delete(self, message_ref: str) -> None:
         await self._request(DELETE_MESSAGE, _target(message_ref))
-
-    async def _delete_copy(self, message_ref: str, reason: str) -> None:
-        """Delete the copy a secret was edited into, when the journal knows it.
-
-        The attempt is journaled, and the PO's notice queued, before the platform is asked. A failed
-        deletion stays journaled and is not retried; the refusal stands either way.
-        """
-        if not self._copies.record_deletion(message_ref, reason, now=self._clock.now()):
-            return
-        with contextlib.suppress(ChannelError, ChannelRefusedError):
-            await self._request(DELETE_MESSAGE, _target(message_ref))
-            self._copies.confirm_deletion(message_ref)
 
     async def _request(
         self,
@@ -362,7 +339,7 @@ class TelegramChannel:
         if isinstance(reply, _Ok):
             return reply
         if reply.error_code == BAD_REQUEST:
-            raise ChannelRefusedError(_refused_reason(reply))
+            raise _refusal(reply)
         raise ChannelError(NOT_ACCEPTED)
 
     async def _post(
@@ -405,21 +382,15 @@ def _reply_parameters(message_ref: str) -> dict[str, object]:
     return {"message_id": int(message_id), "allow_sending_without_reply": True}
 
 
-def _refused_reason(reply: _Failed) -> str:
+def _refusal(reply: _Failed) -> ChannelRefusedError:
     """Return why a 400 refuses a request: a topic that is gone, or the platform's refusal.
 
     Telegram's own text is only matched here, never kept, since it could repeat a secret.
     """
     text = reply.description.casefold()
     if THREAD_NOT_FOUND in text or TOPIC_ID_INVALID in text:
-        return TOPIC_GONE_REASON
-    return PLATFORM_REFUSED
-
-
-def _refuse_secret(message: Message) -> None:
-    """Refuse a message whose texts carry a secret form; the form is the reason."""
-    if (form := secret_form(message.texts())) is not None:
-        raise ChannelRefusedError(form)
+        return PlaceGoneError(PLACE_GONE_REASON)
+    return ChannelRefusedError(PLATFORM_REFUSED)
 
 
 def _content(message: Message) -> dict[str, object]:
@@ -643,7 +614,7 @@ class TelegramForumTopics:
         reply = _validated(body, _CLOSE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
             if reply.error_code == BAD_REQUEST:
-                raise ChannelRefusedError(_refused_reason(reply))
+                raise _refusal(reply)
             if reply.error_code == FORBIDDEN:
                 raise ChannelRefusedError(PLATFORM_REFUSED)
             raise ChannelError(NOT_ACCEPTED)

@@ -164,6 +164,7 @@ def _close(database: Database, event: ShikiruEvent) -> None:
 def _tick(database: Database, channel: _Channel) -> None:
     editor = CopyEditor(
         JournalFinalEdits(database, _replies(database)),
+        MessageStore(database, _Reporter()),
         cast("Channel", channel),
         _Clock(),
         interval_s=1,

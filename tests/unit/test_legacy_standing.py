@@ -25,6 +25,7 @@ from shikiri_yaku.extensions.notice.rules import LEGACY_COPIES as NOTICE_COPIES
 from shikiri_yaku.extensions.review.rules import LEGACY_COPIES as REVIEW_COPIES
 from shikiri_yaku.journal import (
     JournalFinalEdits,
+    MessageStore,
     NewOp,
     NewSignal,
     OpState,
@@ -141,6 +142,7 @@ def _awaiting(h: Harness) -> list[int]:
 def _edit(h: Harness, channel: _Channel) -> None:
     editor = CopyEditor(
         JournalFinalEdits(h.database, h.log(), ending_prefixes=ENDING_NOTICE_PREFIXES),
+        MessageStore(h.database, Reporter()),
         cast("Channel", channel),
         _Clock(),
         interval_s=1,

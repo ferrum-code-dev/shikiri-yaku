@@ -144,6 +144,7 @@ def _remind(database: Database, clock: _Clock) -> list[str]:
 def _edit_copies(database: Database, clock: _Clock, channel: _Channel) -> None:
     editor = CopyEditor(
         JournalFinalEdits(database, _replies(database)),
+        MessageStore(database, _Reporter()),
         cast("Channel", channel),
         clock,
         interval_s=1,

@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any, Final
 import pytest
 
 from shikiri_yaku.adapters.telegram import PLATFORM_REFUSED, TelegramForumTopics
-from shikiri_yaku.ports import TOPIC_GONE_REASON, ChannelError, ChannelRefusedError
+from shikiri_yaku.ports import (
+    ChannelError,
+    ChannelRefusedError,
+    PlaceGoneError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,14 +50,14 @@ def test_a_deleted_topic_is_named_by_the_group_and_the_thread() -> None:
     [
         pytest.param(
             {"ok": False, "error_code": 400, "description": "Bad Request: thread not found"},
-            ChannelRefusedError,
-            TOPIC_GONE_REASON,
+            PlaceGoneError,
+            "place_gone",
             id="thread-not-found",
         ),
         pytest.param(
             {"ok": False, "error_code": 400, "description": "Bad Request: TOPIC_ID_INVALID"},
-            ChannelRefusedError,
-            TOPIC_GONE_REASON,
+            PlaceGoneError,
+            "place_gone",
             id="topic-id-invalid",
         ),
         pytest.param(

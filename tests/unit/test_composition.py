@@ -2132,6 +2132,9 @@ def test_admin_operations_settle_after_admin_mode_is_disabled(tmp_path: Path) ->
         assert approved is not None
         assert issued[1] == "unknown"
         assert approved[1] == "void"
+        asyncio.run(
+            _deliver(composition.jobs, _until(lambda: len(_in_topic(bot, "check the host")) == 2))
+        )
         notices = _in_topic(bot, "check the host")
         assert len(notices) == 2
     finally:

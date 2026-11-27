@@ -38,6 +38,7 @@ from shikiri_yaku.ports import (
     Ack,
     AckStatus,
     AdminCommandResult,
+    ChannelError,
     ChannelRefusedError,
     Message,
     ShikiruLinkDownError,
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.app.expert_proposals import ExpertProposals
+    from shikiri_yaku.domain.outbound import Purpose
     from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import ShikiruClient, ShikiruError
 
@@ -1494,16 +1496,19 @@ def test_admin_restart_notices_are_not_replayed() -> None:
         ops.append(op)
     assert journal.issue_admin(ops[0], NOW) is not None
     channel = FakeChannel()
-    asyncio.run(
+    sender = OutboxSender(harness.outbox, channel, Clock(), interval_s=1)
+    for _ in range(2):
         recover_admin(
-            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
+            journal,
+            harness.conversations,
+            Clock(),
+            harness.outbox,
+            channel_name=CHANNEL,
+            group_id=CHAT,
         )
-    )
-    asyncio.run(
-        recover_admin(
-            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
-        )
-    )
+    assert harness.outbox.notice_queued(f"admin:interrupted:{ops[0]}")
+    assert harness.outbox.notice_queued(f"admin:interrupted:{ops[1]}")
+    asyncio.run(sender.tick())
     assert len(channel.sent) == 2
     issued = journal.admin_op(ops[0])
     approved = journal.admin_op(ops[1])
@@ -1511,6 +1516,139 @@ def test_admin_restart_notices_are_not_replayed() -> None:
     assert approved is not None
     assert issued[1] == "unknown"
     assert approved[1] == "void"
+
+
+class _DownOnce(FakeChannel):
+    """Fails the first send as a transient platform outage does, then accepts every send."""
+
+    async def send(self, destination: Destination, message: Message) -> str:
+        if not self.attempts:
+            self.attempts.append((destination, message))
+            raise ChannelError
+        return await super().send(destination, message)
+
+
+class _CrashingOutbox(JournalOutbox):
+    """Crashes the first time a notice is queued, as a crash inside the settlement would."""
+
+    def __init__(self, database: Database) -> None:
+        super().__init__(database, MessageStore(database, Reporter()))
+        self.crashes = 1
+
+    def queue(
+        self,
+        number: int | None,
+        purpose: Purpose,
+        destinations: Sequence[Destination],
+        message: Message,
+        *,
+        key: str,
+        now: datetime,
+        slot: str | None = None,
+        standing: bool = False,
+        conversation_id: int | None = None,
+    ) -> None:
+        if self.crashes:
+            self.crashes -= 1
+            raise CrashError
+        super().queue(
+            number,
+            purpose,
+            destinations,
+            message,
+            key=key,
+            now=now,
+            slot=slot,
+            standing=standing,
+            conversation_id=conversation_id,
+        )
+
+
+def _issued_admin_op() -> tuple[Harness, JournalProposals, int, int]:
+    """Return a harness whose admin conversation has one issued command, and that command."""
+    harness = Harness({}, mode=MODE_ADMIN, admins=frozenset({ADMIN}))
+    harness.conversations.create(
+        1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
+    )
+    harness.conversations.opened(1, THREAD)
+    conversation = harness.conversations.get(1)
+    assert conversation is not None
+    journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
+    op, _ = journal.intend_admin(conversation.id, 10, "echo test", "reason", NOW)
+    assert journal.decide_admin(
+        op, 11, ADMIN, admin=True, approve=True, now=NOW, cutoff=NOW - timedelta(minutes=1)
+    )
+    assert journal.issue_admin(op, NOW) is not None
+    return harness, journal, op, conversation.id
+
+
+def _admin_state(journal: JournalProposals, op: int) -> str:
+    """Return the state of an admin command, which the journal must hold."""
+    stored = journal.admin_op(op)
+    assert stored is not None
+    return stored[1]
+
+
+def _interrupted_notice_rows(database: Database, op: int) -> list[int | None]:
+    """Return the conversation of each journaled notice of this interrupted command."""
+    rows = database.connection.execute(
+        "SELECT conversation_id FROM messages WHERE notice_key = ?", (f"admin:interrupted:{op}",)
+    ).fetchall()
+    return [row["conversation_id"] for row in rows]
+
+
+def test_an_interrupted_admin_notice_whose_delivery_fails_is_delivered_once_after_a_restart() -> (
+    None
+):
+    harness, journal, op, conversation_id = _issued_admin_op()
+    recover_admin(
+        journal, harness.conversations, Clock(), harness.outbox, channel_name=CHANNEL, group_id=CHAT
+    )
+    channel = _DownOnce()
+    asyncio.run(OutboxSender(harness.outbox, channel, Clock(), interval_s=1).tick())
+    assert channel.sent == []
+
+    # keep: the notice must survive a process that holds none of the objects of the first run
+    database = harness.database
+    outbox = JournalOutbox(database, MessageStore(database, Reporter()))
+    recover_admin(
+        JournalProposals(database, OpStore(database), channel_name=CHANNEL),
+        Conversations(database),
+        Clock(),
+        outbox,
+        channel_name=CHANNEL,
+        group_id=CHAT,
+    )
+    asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
+    asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
+
+    [(destination, message)] = channel.sent
+    assert (destination.chat, destination.thread) == (str(CHAT), THREAD)
+    assert message.text == "Command is unknown after restart. Please check the host."
+    assert _interrupted_notice_rows(database, op) == [conversation_id]
+    assert _admin_state(journal, op) == "unknown"
+    assert journal.issue_admin(op, NOW) is None
+
+
+def test_a_crash_while_queueing_the_notice_leaves_the_command_to_be_settled_again() -> None:
+    harness, journal, op, _ = _issued_admin_op()
+    with pytest.raises(CrashError):
+        recover_admin(
+            journal,
+            harness.conversations,
+            Clock(),
+            _CrashingOutbox(harness.database),
+            channel_name=CHANNEL,
+            group_id=CHAT,
+        )
+    assert _admin_state(journal, op) == "issued"
+    assert _interrupted_notice_rows(harness.database, op) == []
+
+    recover_admin(
+        journal, harness.conversations, Clock(), harness.outbox, channel_name=CHANNEL, group_id=CHAT
+    )
+    assert _admin_state(journal, op) == "unknown"
+    assert len(_interrupted_notice_rows(harness.database, op)) == 1
 
 
 @pytest.mark.parametrize("crash", [False, True])

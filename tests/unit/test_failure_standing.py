@@ -36,6 +36,7 @@ from shikiri_yaku.journal import (
     JournalRouting,
     JournalStarts,
     JournalWaits,
+    MessageStore,
     NewSignal,
     OpStore,
     SignalState,
@@ -209,6 +210,7 @@ def _restarting(h: Harness, clock: _Clock, failure: str) -> Router:
 def _edit_copies(h: Harness, clock: _Clock, channel: _Channel) -> None:
     editor = CopyEditor(
         JournalFinalEdits(h.database, h.log()),
+        MessageStore(h.database, _Reporter()),
         cast("Channel", channel),
         clock,
         interval_s=1,

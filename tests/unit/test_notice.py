@@ -30,6 +30,7 @@ from shikiri_yaku.journal import (
     Database,
     JournalFinalEdits,
     JournalRouting,
+    MessageStore,
     NewSignal,
     OpStore,
     SignalState,
@@ -368,6 +369,7 @@ def test_a_health_message_is_sent_once_and_its_closing_edits_it_to_recovered(
     replies = JournalReplies(memory, signals, OpStore(memory), channel_name="telegram")
     editor = CopyEditor(
         JournalFinalEdits(memory, replies),
+        MessageStore(memory, StderrReporter()),
         cast("Channel", channel),
         _Clock(),
         interval_s=1,
@@ -418,6 +420,7 @@ def test_a_health_copy_sent_before_the_upgrade_is_edited_to_recovered_and_never_
     channel = _Channel()
     editor = CopyEditor(
         JournalFinalEdits(memory, replies, ending_prefixes=ENDING_NOTICE_PREFIXES),
+        MessageStore(memory, StderrReporter()),
         cast("Channel", channel),
         _Clock(),
         interval_s=1,

@@ -30,12 +30,13 @@ from shikiri_yaku.journal.outbox import JournalOutbox
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.ports import (
-    TOPIC_GONE_REASON,
+    PLACE_GONE_REASON,
     Button,
     ChannelError,
     ChannelRefusedError,
     Expert,
     Message,
+    PlaceGoneError,
     ShikiruTask,
 )
 from tests.support.attachments import FakeDownloads
@@ -111,7 +112,7 @@ class Topics:
         if self.refusals:
             raise self.refusals.pop(0)
         if thread_id in self.deleted:
-            raise ChannelRefusedError(TOPIC_GONE_REASON)
+            raise PlaceGoneError(PLACE_GONE_REASON)
         self.deleted.append(thread_id)
 
     async def create_expert(self, name: str) -> int:
@@ -172,7 +173,7 @@ class RefusingThreadChannel:
     async def send(self, destination: Destination, message: Message) -> str:
         del message
         if destination.thread == self._thread_id:
-            raise ChannelRefusedError(TOPIC_GONE_REASON)
+            raise PlaceGoneError(PLACE_GONE_REASON)
         return f"{destination.chat}/{destination.thread}"
 
 
@@ -331,7 +332,7 @@ async def _topic_gone_on_send(h: Harness, conversation: int, thread: int) -> Non
     )
     sender = OutboxSender(
         h.outbox,
-        cast("Channel", RefusingChannel(ChannelRefusedError(TOPIC_GONE_REASON))),
+        cast("Channel", RefusingChannel(PlaceGoneError(PLACE_GONE_REASON))),
         h.clock,
         interval_s=1,
         gone=h.ending,
@@ -426,7 +427,7 @@ def test_a_topic_that_is_already_gone_ends_its_conversation_without_a_report(
 ) -> None:
     h = build()
     conversation = h.open_conversation(CREATED, TARGET_THREAD)
-    h.topics.refusals = [ChannelRefusedError(TOPIC_GONE_REASON)]
+    h.topics.refusals = [PlaceGoneError(PLACE_GONE_REASON)]
 
     asyncio.run(h.ending.end(conversation))
 
@@ -617,7 +618,7 @@ def test_a_failed_directory_removal_keeps_the_rows_until_the_sweep_finishes(
         real_rmtree(path)
 
     monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
-    h.topics.refusals = [ChannelRefusedError(TOPIC_GONE_REASON)]
+    h.topics.refusals = [PlaceGoneError(PLACE_GONE_REASON)]
 
     async def scenario() -> None:
         with pytest.raises(OSError, match="busy"):
@@ -648,7 +649,7 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
         real_erase(conversation_id, topic_chat=topic_chat)
 
     monkeypatch.setattr(h.log, "erase", crashing_erase)
-    h.topics.refusals = [ChannelRefusedError(TOPIC_GONE_REASON)]
+    h.topics.refusals = [PlaceGoneError(PLACE_GONE_REASON)]
 
     async def scenario() -> None:
         with pytest.raises(RuntimeError, match="crash"):
