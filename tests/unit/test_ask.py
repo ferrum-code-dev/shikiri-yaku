@@ -51,6 +51,7 @@ from shikiri_yaku.ports import (
 from tests.support.attachments import FakeDownloads
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.rooms import FakeRooms, FakeSharedChat
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -101,33 +102,22 @@ class Client:
         return []
 
 
-class Topics:
+class Topics(FakeRooms):
     def __init__(self) -> None:
+        super().__init__()
         self.created: list[str] = []
         self.renamed: list[str] = []
         self.refuse_rename = False
 
-    async def delete(self, thread_id: int) -> None:
-        raise NotImplementedError
+    async def open(self, title: str) -> str:
+        self.created.append(title)
+        return str(21 + len(self.created))
 
-    async def create_expert(self, name: str) -> int:
-        self.created.append(name)
-        return 21 + len(self.created)
-
-    async def rename(self, thread_id: int, name: str) -> None:  # noqa: ARG002
-        self.renamed.append(name)
+    async def rename(self, room: str, title: str) -> None:  # noqa: ARG002
+        self.renamed.append(title)
         if self.refuse_rename:
             message = "refused"
             raise ChannelRefusedError(message)
-
-    async def addressed(self, word: str) -> bool:
-        return word.lower() in ("/expert@bot", "/admin@bot")
-
-    async def bot_name(self) -> str:
-        return "bot"
-
-    def link(self, thread_id: int) -> str:
-        return f"https://t.me/c/123/{thread_id}"
 
 
 class Expert:
@@ -197,9 +187,8 @@ class Harness:
             self.topics,
             self.outbox,
             Clock(),
+            places=FixedDestinations(),
             directory=path,
-            channel="telegram",
-            group_id=-100123,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),
             final=JournalFinalEdits(
@@ -212,12 +201,11 @@ class Harness:
             self.outbox,
             Clock(),
             expert=self.expert,
-            topics=self.topics,
+            rooms=self.topics,
             clients=clients,
             scope={name: path / name for name in ("api", "web")},
             directory=path,
             channel="telegram",
-            group_id=-100123,
             runs=self.runs,
             ending=self.ending,
             downloads=FakeDownloads(),
@@ -226,8 +214,7 @@ class Harness:
                 self.outbox,
                 Clock(),
                 directory=path,
-                channel="telegram",
-                group_id=-100123,
+                rooms=self.topics,
                 outbox_interval_s=1,
             ),
             proposals=expert_proposals(
@@ -249,7 +236,8 @@ class Harness:
             self.outbox,
             Clock(),
             configured=enabled,
-            topics=self.topics if group else None,
+            rooms=self.topics if group else None,
+            shared=FakeSharedChat() if shared else None,
             turns=self.turns,
             scope={name: path / name for name in ("api", "web")},
             channel="telegram",
@@ -268,7 +256,7 @@ class Harness:
             destinations=FixedDestinations(topics={77: "api"}),
             channel="telegram",
             name_max_chars=40,
-            shared_group=shared,
+            shared=FakeSharedChat() if shared else None,
             ask=self.ask,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -344,7 +332,7 @@ def test_crash_before_topic_is_uncertain(tmp_path: Path) -> None:
 def test_crash_after_topic_resumes_once(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.log.create(1, chat=-100123, thread=None, text="hello", scope=["api"], now=NOW)
-    h.log.opened(1, 22)
+    h.log.opened(1, "22")
     h.turns.recover()
     h.send()
     h.send()
@@ -506,14 +494,14 @@ def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path
 
     remaining = h.log.get(1)
     assert remaining is not None
-    assert remaining.thread_id == 22
+    assert remaining.room == "22"
     assert conversation_directory(tmp_path, remaining.id).exists()
 
 
 def test_private_origin_interrupted_turn_is_reported_in_the_group_topic(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.log.create(1, chat=5, thread=None, text="hello", scope=["api"], now=NOW)
-    h.log.opened(1, 22)
+    h.log.opened(1, "22")
     assert h.log.start(1)
     h.turns.recover()
 
@@ -562,8 +550,8 @@ def test_each_ask_reply_names_its_own_command_and_opens_its_own_topic(tmp_path: 
         [button] = [item for item in buttons if item.message.reply_to == command]
         conversation = h.log.get(update_id)
         assert conversation is not None
-        assert conversation.thread_id is not None
-        assert button.message.buttons[0].url == h.topics.link(conversation.thread_id)
+        assert conversation.room is not None
+        assert button.message.buttons[0].url == h.topics.link(conversation.room)
 
 
 class FlakyChannel(Channel):
@@ -741,7 +729,7 @@ def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
     asyncio.run(sender.tick())
     assert channel.sent[0][1].reply_to == original.message_ref
     h.log.create(1, chat=-100123, thread=None, text="question 1", scope=["api", "web"], now=NOW)
-    h.log.opened(1, 22)
+    h.log.opened(1, "22")
     h.turns.recover()
     tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
     assert asyncio.run(h.commands.tap(tap))
@@ -884,6 +872,16 @@ def _sent_texts(h: Harness) -> list[str]:
     return [message.text for _, message in channel.sent]
 
 
+@pytest.mark.parametrize("text", ["/expert hello", "/admin hello"])
+def test_a_shared_chat_without_rooms_refuses_an_unaddressed_ask(tmp_path: Path, text: str) -> None:
+    h = Harness(tmp_path, group=False, shared=True, admins=frozenset({ADMIN}))
+    _admin_text(h, text, ADMIN)
+    [pending] = h.outbox.pending()
+    assert not pending.message.buttons
+    assert "group" in pending.message.text.lower()
+    assert not h.topics.created
+
+
 @pytest.mark.parametrize(
     ("admins", "sender", "opened"),
     [
@@ -936,11 +934,11 @@ def test_only_a_listed_admin_takes_part_in_an_admin_topic(tmp_path: Path) -> Non
     _admin_text(h, "/admin hello", ADMIN)
     topic = h.log.get(1)
     assert topic is not None
-    assert topic.thread_id is not None
+    assert topic.room is not None
     for update_id, sender in ((2, OTHER_OWNER), (3, ADMIN)):
         item = Inbound(
             update_id, InboundKind.TEXT, sender, -100123, str(update_id),
-            text="more", thread=topic.thread_id,
+            text="more", thread=int(topic.room),
         )  # fmt: skip
         asyncio.run(h.turns.handle(item))
         asyncio.run(h.turns.handle(item))
@@ -952,7 +950,8 @@ def test_a_removed_admin_cannot_continue_an_admin_topic(tmp_path: Path) -> None:
     _admin_text(h, "/admin hello", ADMIN)
     topic = h.log.get(1)
     assert topic is not None
-    item = Inbound(2, InboundKind.TEXT, ADMIN, -100123, "2", text="more", thread=topic.thread_id)
+    assert topic.room is not None
+    item = Inbound(2, InboundKind.TEXT, ADMIN, -100123, "2", text="more", thread=int(topic.room))
     asyncio.run(h.turns.handle(item))
     assert len(h.expert.requests) == 1
 
@@ -980,8 +979,8 @@ class _Later(Clock):
 
 
 class _DeletableTopics(Topics):
-    async def delete(self, thread_id: int) -> None:
-        del thread_id
+    async def delete(self, room: str) -> None:
+        del room
 
 
 def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Path) -> None:
@@ -994,9 +993,8 @@ def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Pa
         _DeletableTopics(),
         h.outbox,
         _Later(),
+        places=FixedDestinations(),
         directory=tmp_path,
-        channel="telegram",
-        group_id=-100123,
         retention=timedelta(days=14),
         admin_idle=timedelta(minutes=15),
         final=JournalFinalEdits(
@@ -1111,12 +1109,12 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
     _admin_text(h, "/admin hello", ADMIN)
     conversation = h.log.get(1)
     assert conversation is not None
-    assert conversation.thread_id is not None
+    assert conversation.room is not None
     assert conversation.session is not None
     asyncio.run(
         h.turns.handle(
             Inbound(
-                2, InboundKind.TEXT, ADMIN, -100123, "2", text="next", thread=conversation.thread_id
+                2, InboundKind.TEXT, ADMIN, -100123, "2", text="next", thread=int(conversation.room)
             )
         )
     )
@@ -1126,6 +1124,7 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
     assert secret not in "\n".join(h.database.connection.iterdump())
     assert not any(secret in text for text in _sent_texts(h))
     first.down = True
+    assert conversation.room is not None
     asyncio.run(
         h.turns.handle(
             Inbound(
@@ -1135,7 +1134,7 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
                 -100123,
                 "3",
                 text="continue",
-                thread=conversation.thread_id,
+                thread=int(conversation.room),
             )
         )
     )

@@ -34,6 +34,7 @@ from shikiri_yaku.settings import (
     MESSAGE_TITLE_MAX_CHARS,
 )
 from tests.support.destinations import FixedDestinations
+from tests.support.rooms import FakeSharedChat
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -138,7 +139,7 @@ class Harness:
             destinations=FixedDestinations([OWNER], topics=TOPICS),
             channel="telegram",
             name_max_chars=COMMAND_NAME_MAX_CHARS,
-            shared_group=self.shared_group,
+            shared=FakeSharedChat() if self.shared_group else None,
             max_text=MESSAGE_TEXT_LIMIT,
         )
         return Replies(

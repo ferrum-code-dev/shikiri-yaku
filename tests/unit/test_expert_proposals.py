@@ -45,6 +45,7 @@ from shikiri_yaku.ports import (
     ShikiruRejectedError,
 )
 from tests.support.expert_proposals import expert_proposals
+from tests.support.rooms import FakeRooms
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Mapping, Sequence
@@ -234,7 +235,7 @@ class Harness:
                 now=NOW,
                 mode=self.mode,
             )
-            self.conversations.opened(update_id, THREAD)
+            self.conversations.opened(update_id, str(THREAD))
             conversation = self.conversations.get(update_id)
             assert conversation is not None
             self.conversation_id = conversation.id
@@ -983,7 +984,7 @@ def test_admin_op_decisions_are_conditional_and_duplicate_safe() -> None:
     _DATABASES.append(database)
     conversations = Conversations(database)
     conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
-    conversations.opened(1, THREAD)
+    conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
@@ -1016,7 +1017,7 @@ def test_admin_expiry_only_changes_pending_operations() -> None:
     _DATABASES.append(database)
     conversations = Conversations(database)
     conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
-    conversations.opened(1, THREAD)
+    conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
@@ -1226,7 +1227,7 @@ def test_admin_issue_and_recovery_never_repeat() -> None:
     _DATABASES.append(database)
     conversations = Conversations(database)
     conversations.create(1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN)
-    conversations.opened(1, THREAD)
+    conversations.opened(1, str(THREAD))
     conversation = conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(database, OpStore(database), channel_name=CHANNEL)
@@ -1279,7 +1280,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
@@ -1345,8 +1346,7 @@ def test_admin_executor_serializes_claims_and_delivers_one_turn_per_approval(
             timeout_s=1,
             max_bytes=100,
             secrets=(),
-            channel=CHANNEL,
-            group_id=CHAT,
+            rooms=FakeRooms(CHAT),
             max_text=MESSAGE_TEXT_LIMIT,
         )
         turns: list[tuple[int, int]] = []
@@ -1395,7 +1395,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
@@ -1441,8 +1441,7 @@ def test_admin_result_status_reaches_notice_and_expert_turn(
         timeout_s=1,
         max_bytes=100,
         secrets=(),
-        channel=CHANNEL,
-        group_id=CHAT,
+        rooms=FakeRooms(CHAT),
         max_text=MESSAGE_TEXT_LIMIT,
     )
     asyncio.run(executor.execute(op, run))
@@ -1479,7 +1478,7 @@ def test_admin_restart_notices_are_not_replayed() -> None:
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
@@ -1505,8 +1504,7 @@ def test_admin_restart_notices_are_not_replayed() -> None:
             harness.conversations,
             Clock(),
             harness.outbox,
-            channel_name=CHANNEL,
-            group_id=CHAT,
+            rooms=FakeRooms(CHAT),
         )
     assert harness.outbox.notice_queued(f"admin:interrupted:{ops[0]}")
     assert harness.outbox.notice_queued(f"admin:interrupted:{ops[1]}")
@@ -1572,7 +1570,7 @@ def _issued_admin_op() -> tuple[Harness, JournalProposals, int, int]:
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
@@ -1603,9 +1601,7 @@ def test_an_interrupted_admin_notice_whose_delivery_fails_is_delivered_once_afte
     None
 ):
     harness, journal, op, conversation_id = _issued_admin_op()
-    recover_admin(
-        journal, harness.conversations, Clock(), harness.outbox, channel_name=CHANNEL, group_id=CHAT
-    )
+    recover_admin(journal, harness.conversations, Clock(), harness.outbox, rooms=FakeRooms(CHAT))
     channel = _DownOnce()
     asyncio.run(OutboxSender(harness.outbox, channel, Clock(), interval_s=1).tick())
     assert channel.sent == []
@@ -1618,8 +1614,7 @@ def test_an_interrupted_admin_notice_whose_delivery_fails_is_delivered_once_afte
         Conversations(database),
         Clock(),
         outbox,
-        channel_name=CHANNEL,
-        group_id=CHAT,
+        rooms=FakeRooms(CHAT),
     )
     asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
     asyncio.run(OutboxSender(outbox, channel, Clock(), interval_s=1).tick())
@@ -1640,15 +1635,12 @@ def test_a_crash_while_queueing_the_notice_leaves_the_command_to_be_settled_agai
             harness.conversations,
             Clock(),
             _CrashingOutbox(harness.database),
-            channel_name=CHANNEL,
-            group_id=CHAT,
+            rooms=FakeRooms(CHAT),
         )
     assert _admin_state(journal, op) == "issued"
     assert _interrupted_notice_rows(harness.database, op) == []
 
-    recover_admin(
-        journal, harness.conversations, Clock(), harness.outbox, channel_name=CHANNEL, group_id=CHAT
-    )
+    recover_admin(journal, harness.conversations, Clock(), harness.outbox, rooms=FakeRooms(CHAT))
     assert _admin_state(journal, op) == "unknown"
     assert len(_interrupted_notice_rows(harness.database, op)) == 1
 
@@ -1663,7 +1655,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)
@@ -1694,8 +1686,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
             timeout_s=10,
             max_bytes=5,
             secrets=("SECRET",),
-            channel=CHANNEL,
-            group_id=CHAT,
+            rooms=FakeRooms(CHAT),
             max_text=MESSAGE_TEXT_LIMIT,
         )
         turns: list[int] = []
@@ -1737,7 +1728,7 @@ def test_admin_result_and_output_notice_roll_back_together() -> None:
     harness.conversations.create(
         1, chat=CHAT, thread=None, text="q", scope=[], now=NOW, mode=MODE_ADMIN
     )
-    harness.conversations.opened(1, THREAD)
+    harness.conversations.opened(1, str(THREAD))
     conversation = harness.conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(harness.database, OpStore(harness.database), channel_name=CHANNEL)

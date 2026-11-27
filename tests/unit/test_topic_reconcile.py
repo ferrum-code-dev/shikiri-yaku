@@ -191,4 +191,4 @@ def test_expert_topic_rename_distinguishes_permanent_refusal(
 
     forum = TelegramForumTopics(RefusingApi(), GROUP_ID)
     with pytest.raises(error):
-        asyncio.run(forum.rename(73, "title"))
+        asyncio.run(forum.rename("73", "title"))

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import ValidationError
 
-from shikiri_yaku.app.command_reply import queue_command_reply
+from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
 from shikiri_yaku.domain.callback import (
     ADMIN_DECLINE_VERB,
     ADMIN_RUN_VERB,
@@ -27,7 +27,6 @@ from shikiri_yaku.domain.callback import (
 )
 from shikiri_yaku.domain.expert import AdminAnswer, ExpertAnswer, admin_message_text, stored_answer
 from shikiri_yaku.domain.outbound import Purpose, fit
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import (
     BLOCK_SEPARATOR,
@@ -51,7 +50,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.expert import ExpertTask
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, FinalEdits, Outbox, SubmitOp
+    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Rooms, SubmitOp
 
 _ADMIN_INTENDED: Final = "intended"
 _ADMIN_DECLINED: Final = "declined"
@@ -189,7 +189,7 @@ class ExpertProposals:
         *,
         channel: str,
         max_text: int,
-        group_id: int,
+        rooms: Rooms,
         access: AdminAccess,
         approval_expiry_min: int = ADMIN_APPROVAL_EXPIRY_MIN,
         files: TaskFiles | None = None,
@@ -202,7 +202,7 @@ class ExpertProposals:
         self._clock = clock
         self._channel = channel
         self._max_text = max_text
-        self._group_id = group_id
+        self._rooms = rooms
         self._access = access
         self._admin_expiry = timedelta(minutes=approval_expiry_min)
         self._files = files
@@ -314,11 +314,12 @@ class ExpertProposals:
             return True
         conversation_id, state, created = op
         conversation = self._conversations.conversation(conversation_id)
-        if conversation is None or conversation.thread_id is None:
+        if conversation is None or conversation.room is None:
             self._admin_reply(item, "Conversation is closed.")
             return True
-        destination = Destination(self._channel, str(self._group_id), conversation.thread_id)
-        if self._log.bound(self._destination(item), item.message_ref) != f"admin:proposal:{tap[1]}":
+        destination = self._rooms.place(conversation.room)
+        place = item_destination(self._channel, item)
+        if self._log.bound(place, item.message_ref) != f"admin:proposal:{tap[1]}":
             return True
         now = self._clock.now()
         admin = self._access.is_admin(item.sender)
@@ -371,7 +372,7 @@ class ExpertProposals:
     def _admin_reply(self, item: Inbound, reason: str) -> None:
         queue_command_reply(
             self._outbox,
-            [self._destination(item)],
+            [item_destination(self._channel, item)],
             reason,
             key=f"admin:decision:{item.update_id}",
             now=self._clock.now(),
@@ -392,7 +393,8 @@ class ExpertProposals:
         proposal = self._open(tap[1])
         if proposal is not None and not self._access.admit(proposal.conversation_id, item.sender):
             return True
-        message_key = self._log.bound(self._destination(item), item.message_ref)
+        place = item_destination(self._channel, item)
+        message_key = self._log.bound(place, item.message_ref)
         if message_key != action_key(tap[1]):
             if message_key == answer_key(tap[1]):
                 opened = self._open(tap[1])
@@ -531,18 +533,15 @@ class ExpertProposals:
                 conversation_id=opened.conversation_id,
             )
 
-    def _destination(self, item: Inbound) -> Destination:
-        return Destination(self._channel, str(item.chat), item.thread)
-
     def _open(self, proposal_id: int) -> _Proposal | None:
         turn = self._conversations.turn(proposal_id)
         if turn is None or turn.answer is None:
             return None
         conversation = self._conversations.conversation(turn.conversation_id)
-        if conversation is None or conversation.thread_id is None:
+        if conversation is None or conversation.room is None:
             return None
         return _Proposal(
-            Destination(self._channel, str(self._group_id), conversation.thread_id),
+            self._rooms.place(conversation.room),
             conversation.id,
             stored_answer(turn.answer),
         )

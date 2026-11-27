@@ -30,6 +30,20 @@ class FileRef(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class Command:
+    """A text that reads `/name[@instance] arguments`.
+
+    `word` is the first word as typed. `name` is lower case, because a phone keyboard capitalises
+    the first letter. `instance` is None when the word has no `@`.
+    """
+
+    word: str
+    name: str
+    instance: str | None
+    arguments: str
+
+
+@dataclass(frozen=True, slots=True)
 class Inbound:
     """One tap, reply or text with its sender.
 
@@ -52,11 +66,15 @@ class Inbound:
     thread: int | None = None
     file: FileRef | None = None
 
-
-def is_command(text: str | None) -> bool:
-    """Return whether text names a chat command, so a reply that does takes the command route."""
-    words = (text or "").split(maxsplit=1)
-    return bool(words) and words[0].startswith("/")
+    @property
+    def command(self) -> Command | None:
+        """The command the text names, or None, so a reply that does takes the command route."""
+        words = (self.text or "").split(maxsplit=1)
+        if not words or not words[0].startswith("/"):
+            return None
+        name, at, instance = words[0].partition("@")
+        arguments = words[1].strip() if len(words) > 1 else ""
+        return Command(words[0], name.lower(), instance if at else None, arguments)
 
 
 @dataclass(frozen=True, slots=True)

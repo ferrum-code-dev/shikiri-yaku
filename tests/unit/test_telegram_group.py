@@ -16,8 +16,11 @@ from shikiri_yaku.adapters.telegram import (
     GROUP_MEMBER_COUNT_UNAVAILABLE,
     OWNER_NOT_MEMBER,
     UNEXPECTED_REPLY,
+    TelegramForumTopics,
+    TelegramSharedChat,
     probe_bot,
 )
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import ChannelError, ChannelUnavailableError
 
 if TYPE_CHECKING:
@@ -293,3 +296,39 @@ def test_expert_topics_need_the_right_to_delete_messages(
         assert "can_delete_messages" in str(raised.value)
     else:
         _probe(api, shared_group=False, delete_right=delete_right)
+
+
+@pytest.mark.parametrize(
+    ("chat", "thread", "room"),
+    [
+        pytest.param(GROUP_ID, 73, "73", id="topic-of-the-group"),
+        pytest.param(GROUP_ID, None, None, id="general"),
+        pytest.param(OWNER_ID, 73, None, id="thread-of-another-chat"),
+    ],
+)
+def test_only_a_topic_of_the_group_can_be_a_room(
+    chat: int, thread: int | None, room: str | None
+) -> None:
+    rooms = TelegramForumTopics(_Group(administrators=[], count=0), GROUP_ID)
+    place = Destination("telegram", str(chat), thread)
+
+    assert rooms.room_of(place) == room
+    if room is not None:
+        assert rooms.place(room) == place
+
+
+@pytest.mark.parametrize(
+    ("word", "addressed"),
+    [
+        ("/expert", False),
+        ("/expert@Test_Bot", True),
+        ("/expert@another_bot", False),
+    ],
+)
+def test_a_command_addresses_the_instance_of_its_bot_name(word: str, *, addressed: bool) -> None:
+    me = _reply("get_me_ok.json")
+    me["result"]["username"] = "test_bot"
+    shared = TelegramSharedChat(_Group(administrators=[], count=0, replies={"getMe": me}))
+
+    assert asyncio.run(shared.addressed(word)) is addressed
+    assert asyncio.run(shared.command_label("/expert")) == "/expert@test_bot"

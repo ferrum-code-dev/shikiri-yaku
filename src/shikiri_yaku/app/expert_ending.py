@@ -9,7 +9,7 @@ from shikiri_yaku.app.expert import closed_reply, open_reply_keys
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.domain.expert import MODE_ADMIN, MODE_EXPERT
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind
 from shikiri_yaku.ports import (
     ChannelError,
     ChannelRefusedError,
@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.expert_runs import ConversationRuns
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.ports import Clock, FinalEdits, Outbox
+    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.ports import Clock, Destinations, FinalEdits, Outbox, Rooms
 
 _REFUSED_DELETION: Final = (
     "The channel refused to delete the Expert topic of conversation {number}. The conversation "
@@ -48,13 +49,7 @@ class EndingLog(Protocol):
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
     def idle_before(self, cutoff: datetime, mode: str) -> list[ConversationRecord]: ...
     def ending(self) -> list[ConversationRecord]: ...
-    def erase(self, conversation_id: int, *, topic_chat: int) -> None: ...
-
-
-class TopicDeletion(Protocol):
-    """The one call of the channel an ending makes; a refusal is ChannelRefusedError."""
-
-    async def delete(self, thread_id: int) -> None: ...
+    def erase(self, conversation_id: int, *, room_place: Destination) -> None: ...
 
 
 class ExpertEnding:
@@ -72,25 +67,23 @@ class ExpertEnding:
         self,
         log: EndingLog,
         runs: ConversationRuns,
-        topics: TopicDeletion,
+        rooms: Rooms,
         outbox: Outbox,
         clock: Clock,
         *,
+        places: Destinations,
         directory: Path,
-        channel: str,
-        group_id: int,
         retention: timedelta,
         admin_idle: timedelta,
         final: FinalEdits,
     ) -> None:
         self._log = log
         self._runs = runs
-        self._topics = topics
+        self._rooms = rooms
+        self._places = places
         self._outbox = outbox
         self._clock = clock
         self._directory = directory
-        self._channel = channel
-        self._group_id = group_id
         self._retention = retention
         self._admin_idle = admin_idle
         self._final = final
@@ -107,17 +100,17 @@ class ExpertEnding:
             return
         self._close_reply(row)
         await self._runs.stop(conversation_id)
-        if row.thread_id is None:
+        if row.room is None:
             return
         try:
-            await self._topics.delete(row.thread_id)
+            await self._rooms.delete(row.room)
         except ChannelRefusedError as refusal:
             if not isinstance(refusal, PlaceGoneError):
                 self._report_refusal(row)
                 return
         except ChannelError:
             return
-        self._erase_when_settled(row)
+        self._erase_when_settled(row.id, row.room)
 
     async def topic_gone(self, conversation_id: int, destination: Destination) -> None:
         """Erase a conversation whose topic no longer exists; there is nothing to delete.
@@ -127,18 +120,15 @@ class ExpertEnding:
         qualifies.
         """
         row = self._log.conversation(conversation_id)
-        if (
-            row is None
-            or destination.chat != str(self._group_id)
-            or destination.thread != row.thread_id
-        ):
+        if row is None or row.room is None or self._rooms.room_of(destination) != row.room:
             return
+        room = row.room
         row = self._log.begin_ending(conversation_id, self._clock.now())
         if row is None or row.state != _CONVERSATION_CLOSING:
             return
         self._close_reply(row)
         await self._runs.stop(conversation_id)
-        self._erase_when_settled(row)
+        self._erase_when_settled(row.id, room)
 
     async def sweep(self) -> None:
         """Retry the deletions not yet done, then end the conversations idle past their period."""
@@ -159,19 +149,16 @@ class ExpertEnding:
         for key in open_reply_keys(row.update_id):
             self._final.settle_notice(key, closed, conversation_id=row.id)
 
-    def _erase_when_settled(self, row: ConversationRecord) -> None:
+    def _erase_when_settled(self, conversation_id: int, room: str) -> None:
         """Erase the conversation once no copy tagged with it waits for its final edit.
 
         The rows are the copies' record until the edit is confirmed or given up, so they stay
         until then; `sweep` erases the conversation on a later tick.
         """
-        if self._final.pending_for(row.id):
+        if self._final.pending_for(conversation_id):
             return
-        self._erase(row)
-
-    def _erase(self, row: ConversationRecord) -> None:
-        self._remove_directory(row.id)
-        self._log.erase(row.id, topic_chat=self._group_id)
+        self._remove_directory(conversation_id)
+        self._log.erase(conversation_id, room_place=self._rooms.place(room))
 
     def _remove_directory(self, conversation_id: int) -> None:
         path = conversation_directory(self._directory, conversation_id)
@@ -182,7 +169,7 @@ class ExpertEnding:
         self._outbox.queue(
             None,
             Purpose.EXPERT,
-            [Destination(self._channel, str(self._group_id))],
+            self._places.for_signal(OPERATOR_SCOPE, Kind.HEALTH),
             Message(_REFUSED_DELETION.format(number=row.id)),
             key=_DELETION_KEY.format(number=row.id),
             now=self._clock.now(),

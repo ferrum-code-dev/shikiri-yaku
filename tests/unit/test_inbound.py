@@ -15,7 +15,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
-from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, Command, FileRef, Inbound, InboundKind
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FIXTURES
@@ -266,3 +266,21 @@ def test_a_photo_or_document_becomes_a_file_item_with_its_caption(
     body = {"ok": True, "result": [{"update_id": expected.update_id, "message": message}]}
 
     assert _read(body).items == (expected,)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("hello /status", None),
+        ("/status", Command("/status", "/status", None, "")),
+        ("  /Expert@Bot  why now? \n", Command("/Expert@Bot", "/expert", "Bot", "why now?")),
+        ("/expert@ why", Command("/expert@", "/expert", "", "why")),
+        ("/effort\nhigh", Command("/effort", "/effort", None, "high")),
+    ],
+)
+def test_a_command_is_read_as_name_instance_and_arguments(
+    text: str | None, expected: Command | None
+) -> None:
+    assert Inbound(1, InboundKind.TEXT, OWNER, OWNER, "1", text=text).command == expected

@@ -76,7 +76,7 @@ class ConversationRecord:
     update_id: int
     chat: int
     origin_thread: int | None
-    thread_id: int | None
+    room: str | None
     scope: list[str]
     state: str
     effort: str | None
@@ -89,7 +89,7 @@ class ConversationRecord:
 class TurnRecord:
     update_id: int
     conversation_id: int
-    thread_id: int | None
+    room: str | None
     text: str
     state: str
     answer: str | None

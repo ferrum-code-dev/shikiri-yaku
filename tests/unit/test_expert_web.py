@@ -19,6 +19,7 @@ from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.journal.database import Database, stamp
 from shikiri_yaku.journal.final_edits import JournalFinalEdits
 from shikiri_yaku.journal.web import JournalWeb
+from tests.support.rooms import FakeRooms
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 EARLIER = datetime(2025, 12, 31, tzinfo=UTC)
@@ -48,7 +49,7 @@ def _presenter(
         outbox,  # type: ignore[arg-type]
         Clock(),
         channel="telegram",
-        group_id=1,
+        rooms=FakeRooms(1),
         access=AdminAccess(conversations, Clock(), admins=admins),
     )
 
@@ -88,7 +89,7 @@ def test_request_is_unique_and_taps_grant_once_for_later_conversations() -> None
     conversations.create(1, chat=1, thread=None, text="question", scope=[], now=NOW)
     row = conversations.get(1)
     assert row is not None
-    conversations.opened(1, 7)
+    conversations.opened(1, "7")
     log = JournalWeb(database)
     log.request(1, "docs.example")
     log.request(1, "docs.example")
@@ -142,7 +143,7 @@ def _admin_web_request(
     database = Database.open(":memory:")
     conversations = Conversations(database)
     conversations.create(1, chat=1, thread=None, text="q", scope=[], now=EARLIER, mode="admin")
-    conversations.opened(1, 7)
+    conversations.opened(1, "7")
     conversations.start(1)
     conversations.finish(1, "{}", None, None, EARLIER)
     log = JournalWeb(database)
@@ -158,7 +159,7 @@ def _admin_web_request(
         Outbox(),  # type: ignore[arg-type]
         clock,
         channel="telegram",
-        group_id=1,
+        rooms=FakeRooms(1),
         access=AdminAccess(conversations, clock, admins=admins),
     )
     return database, presenter, []
@@ -204,7 +205,7 @@ def _web_request(host: str = "docs.example") -> tuple[Database, JournalWeb, Expe
     database = Database.open(":memory:")
     conversations = Conversations(database)
     conversations.create(1, chat=1, thread=None, text="q", scope=[], now=NOW)
-    conversations.opened(1, 7)
+    conversations.opened(1, "7")
     conversations.start(1)
     conversations.finish(1, "{}", None, None, NOW)
     log = JournalWeb(database)
@@ -220,7 +221,7 @@ def _web_request(host: str = "docs.example") -> tuple[Database, JournalWeb, Expe
         Outbox(),  # type: ignore[arg-type]
         Clock(),
         channel="telegram",
-        group_id=1,
+        rooms=FakeRooms(1),
         access=AdminAccess(conversations, Clock(), admins=frozenset()),
     )
     return database, log, presenter
