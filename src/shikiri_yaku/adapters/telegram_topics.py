@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, Protocol
 
-from shikiri_yaku.adapters.telegram import TELEGRAM_CHANNEL
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.adapters.telegram import chat_and_thread, telegram_place
 from shikiri_yaku.domain.signal import OPERATOR_SCOPE, Kind
 from shikiri_yaku.ports import ChannelRepairError, ChannelStartupError, CompositionError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from shikiri_yaku.domain.place import Place
 
 TOPIC_OPEN: Final = "open"
 TOPIC_CLOSED: Final = "closed"
@@ -68,8 +69,8 @@ class ForumTopics(Protocol):
     async def close(self, thread_id: int) -> None: ...
 
 
-class TelegramDestinations:
-    """The Destinations of the Telegram channel: private chats, or the group's topics."""
+class TelegramPlaces:
+    """The Places of the Telegram channel: private chats, or the group's topics."""
 
     def __init__(
         self,
@@ -84,19 +85,20 @@ class TelegramDestinations:
         self._group_id = group_id
         self._reconciler = reconciler
 
-    def for_signal(self, project: str, kind: Kind) -> list[Destination]:  # noqa: ARG002 -- the port's shape
+    def for_signal(self, project: str, kind: Kind) -> list[Place]:  # noqa: ARG002 -- the port's shape
         if self._group_id is None:
-            return [Destination(TELEGRAM_CHANNEL, str(owner)) for owner in self._owners]
+            return [telegram_place(owner) for owner in self._owners]
         # keep: the Operator's own signals go to the built-in General topic, which has no thread id
         if project == OPERATOR_SCOPE:
-            return [Destination(TELEGRAM_CHANNEL, str(self._group_id))]
+            return [telegram_place(self._group_id)]
         topic = self._log.get(project)
         if topic is None or topic.state != TOPIC_OPEN:
             message = f"Telegram topic '{project}' is not open"
             raise CompositionError(message)
-        return [Destination(TELEGRAM_CHANNEL, str(self._group_id), topic.thread_id)]
+        return [telegram_place(self._group_id, topic.thread_id)]
 
-    def component_of(self, thread: int | None) -> str | None:
+    def component_of(self, place: Place) -> str | None:
+        _, thread = chat_and_thread(place)
         topic = None if thread is None else self._log.by_thread(thread)
         return None if topic is None or topic.state != TOPIC_OPEN else topic.component
 

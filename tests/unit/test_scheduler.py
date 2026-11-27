@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
 from shikiri_yaku.domain.schedule import due_occurrence
@@ -110,8 +111,7 @@ class _World:
     ) -> None:
         sent = self.messages.record_outbound(
             signal_number=number,
-            channel="telegram",
-            chat=chat,
+            place=telegram_place(chat),
             purpose=purpose,
             body=Message("asked"),
             notice_key=key,
@@ -123,7 +123,7 @@ class _World:
 
 def _queued(world: _World) -> list[tuple[str, str]]:
     return [
-        (pending.destination.chat, pending.message.text)
+        (pending.place.id, pending.message.text)
         for pending in JournalOutbox(world.database, world.messages).pending()
     ]
 
@@ -169,7 +169,7 @@ def test_reminders_fire_at_the_configured_times_and_never_twice(world: _World) -
         world.clock.moment = START + timedelta(hours=hours)
         _tick(world)
         assert len(_queued(world)) == sent, hours
-    assert {destination for destination, _ in _queued(world)} == {CHAT}
+    assert {place for place, _ in _queued(world)} == {CHAT}
 
 
 def test_answered_signal_gets_no_reminder(world: _World) -> None:
@@ -198,8 +198,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
     number = world.signal("e1", SignalState.FORWARDED)
     copy = world.messages.record_outbound(
         signal_number=number,
-        channel="telegram",
-        chat=CHAT,
+        place=telegram_place(CHAT),
         purpose=Purpose.QUESTION,
         body=Message("asked"),
         notice_key="copy",
@@ -212,7 +211,7 @@ def test_repeated_copies_in_one_chat_get_one_reminder_and_each_owner_chat_gets_o
     _tick(world)
     _tick(world)
 
-    assert sorted(destination for destination, _ in _queued(world)) == [CHAT, "1002"]
+    assert sorted(place for place, _ in _queued(world)) == [CHAT, "1002"]
 
 
 @pytest.mark.parametrize("final_state", [SignalState.ANSWERED, SignalState.CLOSED])
@@ -279,10 +278,10 @@ def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(
     world.ask(number, chat="1002")
     world.clock.moment = START + timedelta(hours=FIRST_H)
     record = MessageStore.record_outbound
-    calls: list[str] = []
+    calls: list[object] = []
 
     def interrupted(store: MessageStore, **kwargs: Any) -> Inserted:
-        calls.append(kwargs["chat"])
+        calls.append(kwargs["place"])
         if len(calls) == 2:
             raise KeyboardInterrupt
         return record(store, **kwargs)
@@ -295,4 +294,4 @@ def test_an_interrupted_booking_leaves_nothing_and_the_retry_queues_every_owner(
     assert world.messages.unconfirmed() == []
 
     _tick(world)
-    assert sorted(destination for destination, _ in _queued(world)) == [CHAT, "1002"]
+    assert sorted(place for place, _ in _queued(world)) == [CHAT, "1002"]

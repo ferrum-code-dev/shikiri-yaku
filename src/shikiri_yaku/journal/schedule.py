@@ -4,7 +4,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Awaiting, Destination, Parked
+from shikiri_yaku.domain.place import Place
+from shikiri_yaku.domain.schedule import Awaiting, Parked
 from shikiri_yaku.journal.database import parse_stamp
 from shikiri_yaku.journal.messages import Delivery, Direction
 from shikiri_yaku.journal.ops import NewOp, OpState
@@ -52,7 +53,7 @@ class JournalSchedule:
         rows = self._database.connection.execute(
             """
             SELECT s.number, s.project, s.task_id, m.purpose,
-                   m.channel, m.chat, m.thread, m.created_at
+                   m.channel, m.place, m.created_at
             FROM signals s JOIN messages m ON m.signal_number = s.number
             WHERE s.state = :forwarded AND m.direction = :out AND m.delivery = :sent
                 AND (m.purpose IN (:question, :approval)
@@ -75,7 +76,7 @@ class JournalSchedule:
             asked_at = parse_stamp(row["created_at"])
             if asked_at is None:
                 continue
-            where = Destination(row["channel"], row["chat"], row["thread"])
+            where = Place(row["channel"], row["place"])
             known = grouped.get(row["number"])
             if known is None:
                 grouped[row["number"]] = Awaiting(
@@ -85,9 +86,7 @@ class JournalSchedule:
                 grouped[row["number"]] = replace(
                     known,
                     asked_at=min(known.asked_at, asked_at),
-                    destinations=known.destinations
-                    if where in known.destinations
-                    else (*known.destinations, where),
+                    places=known.places if where in known.places else (*known.places, where),
                 )
         return list(grouped.values())
 
@@ -100,12 +99,10 @@ class JournalSchedule:
         with self._database.transaction():
             if not self._ops.intend(op, now).is_new:
                 return
-            for where in awaiting.destinations:
+            for where in awaiting.places:
                 self._messages.record_outbound(
                     signal_number=awaiting.number,
-                    channel=where.channel,
-                    chat=where.chat,
-                    thread=where.thread,
+                    place=where,
                     purpose=Purpose.NOTICE,
                     body=message,
                     notice_key=identity,

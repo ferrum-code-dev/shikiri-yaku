@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from shikiri_yaku.adapters.expert_web import ExpertWeb
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.expert_admin import AdminAccess
 from shikiri_yaku.app.expert_web import ExpertWebRequests
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -48,7 +48,6 @@ def _presenter(
         log,
         outbox,  # type: ignore[arg-type]
         Clock(),
-        channel="telegram",
         rooms=FakeRooms(1),
         access=AdminAccess(conversations, Clock(), admins=admins),
     )
@@ -57,7 +56,7 @@ def _presenter(
 def test_fetch_checks_every_host_and_scheme() -> None:
     database = Database.open(":memory:")
     conversations = Conversations(database)
-    conversations.create(1, chat=1, thread=None, text="question", scope=[], now=NOW)
+    conversations.create(1, origin=telegram_place(1), text="question", scope=[], now=NOW)
     log = JournalWeb(database)
     contacted: list[str] = []
 
@@ -86,7 +85,7 @@ def test_fetch_checks_every_host_and_scheme() -> None:
 def test_request_is_unique_and_taps_grant_once_for_later_conversations() -> None:
     database = Database.open(":memory:")
     conversations = Conversations(database)
-    conversations.create(1, chat=1, thread=None, text="question", scope=[], now=NOW)
+    conversations.create(1, origin=telegram_place(1), text="question", scope=[], now=NOW)
     row = conversations.get(1)
     assert row is not None
     conversations.opened(1, "7")
@@ -101,7 +100,7 @@ def test_request_is_unique_and_taps_grant_once_for_later_conversations() -> None
     presenter.queue(1)
     assert list(outbox.messages) == ["expert:web:1"]
     database.connection.execute(
-        "INSERT INTO messages (direction, channel, chat, platform_message_id, "
+        "INSERT INTO messages (direction, channel, place, platform_message_id, "
         "notice_key, delivery, created_at) "
         "VALUES ('out', 'telegram', '1', '9', 'expert:web:1', 'sent', ?)",
         (NOW.isoformat(),),
@@ -117,15 +116,14 @@ def test_request_is_unique_and_taps_grant_once_for_later_conversations() -> None
             key=str(update),
             kind=InboundKind.TAP,
             sender="1",
-            chat=1,
+            place=telegram_place(1, 7),
             message_ref="9",
             data="w:1",
-            thread=7,
         )
         asyncio.run(presenter.tap(item, run))
     assert runs == [(row.id, 2)]
     assert database.connection.execute("SELECT count(*) FROM web_grants").fetchone()[0] == 1
-    conversations.create(4, chat=1, thread=None, text="next", scope=[], now=NOW)
+    conversations.create(4, origin=telegram_place(1), text="next", scope=[], now=NOW)
     contacted: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -151,14 +149,14 @@ def _admin_web_request(
 ) -> tuple[Database, ExpertWebRequests, list[int]]:
     database = Database.open(":memory:")
     conversations = Conversations(database)
-    conversations.create(1, chat=1, thread=None, text="q", scope=[], now=EARLIER, mode="admin")
+    conversations.create(1, origin=telegram_place(1), text="q", scope=[], now=EARLIER, mode="admin")
     conversations.opened(1, "7")
     conversations.start(1)
     conversations.finish(1, "{}", None, None, EARLIER)
     log = JournalWeb(database)
     log.request(1, "docs.example")
     database.connection.execute(
-        "INSERT INTO messages (direction, channel, chat, platform_message_id, "
+        "INSERT INTO messages (direction, channel, place, platform_message_id, "
         "notice_key, delivery, created_at) "
         "VALUES ('out', 'telegram', '1', '9', 'expert:web:1', 'sent', ?)",
         (NOW.isoformat(),),
@@ -167,7 +165,6 @@ def _admin_web_request(
         log,
         Outbox(),  # type: ignore[arg-type]
         clock,
-        channel="telegram",
         rooms=FakeRooms(1),
         access=AdminAccess(conversations, clock, admins=admins),
     )
@@ -186,10 +183,9 @@ def test_web_tap_in_admin_conversation_needs_a_listed_admin_and_counts_as_activi
         key=str(2),
         kind=InboundKind.TAP,
         sender="6",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="9",
         data="w:1",
-        thread=7,
     )
     assert asyncio.run(presenter.tap(other, run))
     assert runs == []
@@ -204,10 +200,9 @@ def test_web_tap_in_admin_conversation_needs_a_listed_admin_and_counts_as_activi
         key=str(3),
         kind=InboundKind.TAP,
         sender="5",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="9",
         data="w:1",
-        thread=7,
     )
     assert asyncio.run(presenter.tap(listed, run))
     assert runs == [3]
@@ -227,10 +222,9 @@ def test_web_tap_after_the_admin_is_removed_from_the_list_is_ignored() -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="5",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="9",
         data="w:1",
-        thread=7,
     )
     assert asyncio.run(presenter.tap(item, run))
     assert runs == []
@@ -240,14 +234,14 @@ def test_web_tap_after_the_admin_is_removed_from_the_list_is_ignored() -> None:
 def _web_request(host: str = "docs.example") -> tuple[Database, JournalWeb, ExpertWebRequests]:
     database = Database.open(":memory:")
     conversations = Conversations(database)
-    conversations.create(1, chat=1, thread=None, text="q", scope=[], now=NOW)
+    conversations.create(1, origin=telegram_place(1), text="q", scope=[], now=NOW)
     conversations.opened(1, "7")
     conversations.start(1)
     conversations.finish(1, "{}", None, None, NOW)
     log = JournalWeb(database)
     log.request(1, host)
     database.connection.execute(
-        "INSERT INTO messages (direction, channel, chat, platform_message_id, "
+        "INSERT INTO messages (direction, channel, place, platform_message_id, "
         "notice_key, delivery, created_at, conversation_id) "
         "VALUES ('out', 'telegram', '1', '9', 'expert:web:1', 'sent', ?, 1)",
         (NOW.isoformat(),),
@@ -256,7 +250,6 @@ def _web_request(host: str = "docs.example") -> tuple[Database, JournalWeb, Expe
         log,
         Outbox(),  # type: ignore[arg-type]
         Clock(),
-        channel="telegram",
         rooms=FakeRooms(1),
         access=AdminAccess(conversations, Clock(), admins=frozenset()),
     )
@@ -288,10 +281,9 @@ def test_web_tap_settles_request_message_after_decision(data: str, word: str, st
         key=str(2),
         kind=InboundKind.TAP,
         sender="1",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="9",
         data=data,
-        thread=7,
     )
     assert asyncio.run(presenter.tap(item, run))
     assert len(runs) == 1
@@ -320,10 +312,9 @@ def test_web_tap_settles_once_across_duplicate_taps() -> None:
             key=str(update),
             kind=InboundKind.TAP,
             sender="1",
-            chat=1,
+            place=telegram_place(1, 7),
             message_ref="9",
             data="w:1",
-            thread=7,
         )
         assert asyncio.run(presenter.tap(item, run))
     assert runs == [2]
@@ -349,10 +340,9 @@ def test_web_tap_from_another_message_does_not_settle() -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="1",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="other",
         data="w:1",
-        thread=7,
     )
     assert asyncio.run(presenter.tap(item, run))
     assert database.connection.execute("SELECT final_body FROM messages").fetchone()[0] is None
@@ -375,10 +365,9 @@ def test_web_tap_in_unauthorized_conversation_does_not_settle() -> None:
         key=str(2),
         kind=InboundKind.TAP,
         sender="6",
-        chat=1,
+        place=telegram_place(1, 7),
         message_ref="9",
         data="w:1",
-        thread=7,
     )
     assert asyncio.run(presenter.tap(other, run))
     assert database.connection.execute("SELECT final_body FROM messages").fetchone()[0] is None

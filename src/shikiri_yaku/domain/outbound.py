@@ -49,7 +49,7 @@ REMINDERS_STOPPED_LINE: Final = "Reminders stopped"
 # keep: the last line of a copy that a newer copy replaced, when the platform will not delete it
 REPLACED_LINE: Final = "Replaced by a newer message"
 # keep: a slot names the one live copy of a kind of message for a signal
-# keep: a newer copy in the same slot, chat and thread replaces the older one once accepted
+# keep: a newer copy in the same slot and place replaces the older one once accepted
 QUESTION_SLOT: Final = "question"
 INSTALL_SLOT: Final = "install"
 # keep: the notice key of a forwarded signal is this name, a colon and its number

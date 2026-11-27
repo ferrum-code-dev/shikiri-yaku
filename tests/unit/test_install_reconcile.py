@@ -12,8 +12,8 @@ from shikiri_yaku.app.install_executor import ANSWER, FINAL_LINE, REFUSED, Insta
 from shikiri_yaku.app.install_reask import InstallReasker
 from shikiri_yaku.app.install_reconciler import InstallReconciler
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.signal import Closing, Kind, Lifecycle, LifecycleState, Resolved, Signal
 from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
@@ -45,8 +45,8 @@ from shikiri_yaku.ports import (
     ShikiruLinkDownError,
     ShikiruRejectedError,
 )
-from tests.support.destinations import FixedDestinations
 from tests.support.notices import FailingReporter
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
@@ -59,7 +59,7 @@ STARTED: Final = datetime(2026, 10, 31, 9, tzinfo=UTC)
 RESTART: Final = NOW + timedelta(hours=1)
 FOUND: Final = "/opt/homebrew/bin/ffmpeg"
 SHELL: Final = "/bin/sh"
-OWNER: Final = Destination("telegram", "1001")
+OWNER: Final = Place("telegram", "1001")
 LOST_MIN: Final = 2
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result=None, message=None)
 QUEUED: Final = Ack(id=8, status=AckStatus.QUEUED, result=None, message=None)
@@ -355,7 +355,7 @@ class _World:
             self.ops,
             InstallApprovalPresenter(),
             self.outbox,
-            FixedDestinations([OWNER]),
+            FixedPlaces([OWNER]),
             clock,
         )
         return InstallReconciler(
@@ -418,7 +418,7 @@ def _product_forwarder(world: _World) -> ProductForwarder:
         {"api": cast("ShikiruClient", world.shikiru)},
         world.outbox,
         _Clock(),
-        FixedDestinations([OWNER]),
+        FixedPlaces([OWNER]),
         button_label_max_chars=32,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -722,7 +722,7 @@ def test_rejected_recovery_answer_queues_the_question_with_reason_before_voiding
         {"api": cast("ShikiruClient", world.shikiru)},
         world.outbox,
         _Clock(),
-        FixedDestinations([OWNER]),
+        FixedPlaces([OWNER]),
         button_label_max_chars=32,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -765,7 +765,7 @@ def test_rejection_is_durable_when_reshow_lookup_fails_then_escalation_closes(
         {"api": cast("ShikiruClient", world.shikiru)},
         world.outbox,
         _Clock(),
-        FixedDestinations([OWNER]),
+        FixedPlaces([OWNER]),
         button_label_max_chars=32,
         max_text=MESSAGE_TEXT_LIMIT,
     )

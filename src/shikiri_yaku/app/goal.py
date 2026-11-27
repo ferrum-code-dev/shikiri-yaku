@@ -6,10 +6,9 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import ValidationError
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.domain.callback import SUBMIT_VERB, decode_callback, submit_data
 from shikiri_yaku.domain.outbound import Purpose, fit
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
     Button,
     Message,
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.app.submit import Submitter
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Destinations, Outbox, ReplyLog, ShikiruClient, SubmitOp
+    from shikiri_yaku.ports import Clock, Outbox, Places, ReplyLog, ShikiruClient, SubmitOp
 
 _WORDS: Final = 3
 _IMPLIED_WORDS: Final = 2
@@ -32,10 +31,10 @@ _SUBMIT_AGAIN: Final = "Submit again"
 
 
 class GoalCommand:
-    """Submits a request and reports its outcome in the chat and thread it was sent from.
+    """Submits a request and reports its outcome in the place it was sent from.
 
-    The destination is stored with the request, so the outcome and any question go
-    where the request was sent. A request sent in a thread that names a component
+    The place is stored with the request, so the outcome and any question go
+    where the request was sent. A request sent in a component's place
     implies that component. An unknown outcome is asked about with *Submit again*;
     only that tap retries the request.
 
@@ -51,8 +50,7 @@ class GoalCommand:
         outbox: Outbox,
         clock: Clock,
         *,
-        destinations: Destinations,
-        channel: str,
+        places: Places,
         max_text: int,
         shared_group: bool = False,
     ) -> None:
@@ -61,13 +59,11 @@ class GoalCommand:
         self._clients = clients
         self._outbox = outbox
         self._clock = clock
-        self._destinations = destinations
-        self._channel = channel
+        self._places = places
         self._max_text = max_text
         self._shared_group = shared_group
 
     async def handle(self, item: Inbound) -> None:
-        destination = item_destination(self._channel, item)
         component, request = self._parse(item)
         if self._shared_group and component is not None and component not in self._clients:
             return
@@ -75,20 +71,19 @@ class GoalCommand:
             names = ", ".join(sorted(self._clients))
             queue_command_reply(
                 self._outbox,
-                [destination],
+                [item.place],
                 f"Usage: /submit <component> <request>. Components: {names}.",
                 key=f"submit:usage:{item.id}",
                 now=self._clock.now(),
                 max_text=self._max_text,
             )
             return
-        payload = SubmitPayload(component=component, request=request, destination=destination)
+        payload = SubmitPayload(component=component, request=request, place=item.place)
         self._report(await self._submitter.submit(item.id, payload))
 
     async def tap(self, item: Inbound) -> None:
-        """Retry the request of a *Submit again* that was offered in the chat of the tap."""
-        destination = Destination(self._channel, str(item.chat))
-        message = self._log.sent_message(destination, item.message_ref)
+        """Retry the request of the *Submit again* button on the tapped message."""
+        message = self._log.sent_message(item.place.channel, item.message_ref)
         if message is None or not item.data:
             return
         if item.data not in {button.data for button in message.buttons}:
@@ -111,10 +106,10 @@ class GoalCommand:
     def _parse(self, item: Inbound) -> tuple[str | None, str | None]:
         """Return the component and request of a submit; a part the text lacks is None.
 
-        In a thread that names a component the whole text after `/submit` is the request; elsewhere
+        In a component's place the whole text after `/submit` is the request; elsewhere
         the text is `/submit <component> <request>`.
         """
-        implied = self._destinations.component_of(item.thread)
+        implied = self._places.component_of(item.place)
         if implied is not None:
             words = (item.text or "").split(maxsplit=1)
             return implied, words[1] if len(words) == _IMPLIED_WORDS else None
@@ -123,18 +118,18 @@ class GoalCommand:
         return component, words[_WORDS - 1] if len(words) == _WORDS else None
 
     def _report(self, op: SubmitOp) -> None:
-        destinations = [op.payload.destination]
+        places = [op.payload.place]
         key = f"submit:{op.id}"
         now = self._clock.now()
         if op.status == SubmitStatus.CONFIRMED:
             text = f"Request submitted as task {op.task_id}."
             queue_command_reply(
-                self._outbox, destinations, text, key=key, now=now, max_text=self._max_text
+                self._outbox, places, text, key=key, now=now, max_text=self._max_text
             )
         elif op.status == SubmitStatus.FAILED:
             text = "Shikiru did not take this request; it was not submitted."
             queue_command_reply(
-                self._outbox, destinations, text, key=key, now=now, max_text=self._max_text
+                self._outbox, places, text, key=key, now=now, max_text=self._max_text
             )
         elif op.status == SubmitStatus.UNKNOWN:
             room = self._max_text - len(_ASK_HEAD) - len(_ASK_TAIL)
@@ -143,7 +138,7 @@ class GoalCommand:
             self._outbox.queue(
                 None,
                 Purpose.QUESTION,
-                destinations,
+                places,
                 Message(text, (button,)),
                 key=key,
                 now=now,

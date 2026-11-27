@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.open_command import OpenCommand
@@ -19,8 +19,8 @@ from shikiri_yaku.domain.callback import decline_data, install_data
 from shikiri_yaku.domain.classification import InstallProposal, Verdict
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.recipes import InstallOpPayload
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.extensions.infrastructure.install import InstallApprovalPresenter
 from shikiri_yaku.extensions.infrastructure.install_replies import InstallApprovalReplies
 from shikiri_yaku.extensions.infrastructure.rules import INFRASTRUCTURE
@@ -58,7 +58,7 @@ from shikiri_yaku.settings import (
     MESSAGE_TITLE_MAX_CHARS,
     InfrastructureSettings,
 )
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
 ANSWERED_AT = datetime(2026, 10, 28, 12, 3, tzinfo=UTC)
 LATER_AT = datetime(2026, 10, 28, 13, 30, tzinfo=UTC)
-OWNER = Destination("telegram", "1001")
+OWNER = Place("telegram", "1001")
 
 
 class Client:
@@ -164,8 +164,7 @@ class Harness:
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.number,
-            channel="telegram",
-            chat="1001",
+            place=telegram_place("1001"),
             purpose=purpose,
             body=Message("question", tuple(Button("Choice", value) for value in data)),
             notice_key=key,
@@ -185,13 +184,13 @@ class Harness:
     def commands(self, at: datetime, topics: Mapping[int, str] | None = None) -> Commands:
         sources = JournalSources(CursorStore(self.database, self.signals), self.signals)
         status = Status(self.clients, sources, Clock(at), JournalOpen(self.database, self.signals))
-        destinations = FixedDestinations([OWNER], topics=topics)
+        places = FixedPlaces([OWNER], topics=topics)
         reshower = ProductForwarder(
             MESSAGE_TITLE_MAX_CHARS,
             self.clients,
             self.outbox,
             Clock(at),
-            destinations,
+            places,
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -201,8 +200,7 @@ class Harness:
             reshower,
             self.outbox,
             Clock(at),
-            destinations=destinations,
-            channel="telegram",
+            places=places,
             install_approval=InstallApprovalPresenter(),
             approval_expiry_h=InfrastructureSettings().approval_expiry_h,
             max_text=MESSAGE_TEXT_LIMIT,
@@ -212,7 +210,7 @@ class Harness:
             self.clients,
             self.outbox,
             Clock(at),
-            FixedDestinations(),
+            FixedPlaces(),
             channel="telegram",
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -222,8 +220,7 @@ class Harness:
             status,
             opened,
             goal,
-            destinations=destinations,
-            channel="telegram",
+            places=places,
             name_max_chars=COMMAND_NAME_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -234,7 +231,7 @@ class Harness:
             key=str(update),
             kind=InboundKind.TEXT,
             sender="1001",
-            chat=1001,
+            place=telegram_place(1001),
             message_ref="1001/90",
             text="/pending",
         )
@@ -269,7 +266,7 @@ class Harness:
                 self.clients,
                 self.outbox,
                 Clock(at),
-                FixedDestinations(),
+                FixedPlaces(),
                 channel="telegram",
                 max_text=MESSAGE_TEXT_LIMIT,
             ),
@@ -281,7 +278,7 @@ class Harness:
             key=str(update),
             kind=InboundKind.TAP if text is None else InboundKind.REPLY,
             sender="1001",
-            chat=1001,
+            place=telegram_place(1001),
             message_ref=ref if text is None else "1001/90",
             reply_to_ref=ref if text else None,
             text=text,
@@ -334,7 +331,7 @@ class Harness:
             self.clients,
             self.outbox,
             Clock(clock_at),
-            FixedDestinations([OWNER]),
+            FixedPlaces([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -635,7 +632,7 @@ def test_later_answer_to_a_resolved_question_gets_the_recorded_choice_and_time(
 
 
 class EditChannel:
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:

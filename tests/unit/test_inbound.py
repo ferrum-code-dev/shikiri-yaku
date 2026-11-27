@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
+from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY, telegram_place
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.domain.inbound import Batch, Command, FileRef, InboundKind, Received
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError
@@ -22,6 +22,8 @@ from tests.support.telegram_bot import FIXTURES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from shikiri_yaku.domain.place import Place
 
 OWNER: Final = 1001
 GROUP: Final = -1009
@@ -64,7 +66,7 @@ def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
         key=str(TEXT),
         kind=InboundKind.TEXT,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="1001/90",
         text="Use the second way",
     )
@@ -74,7 +76,7 @@ def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
         key=str(TAP),
         kind=InboundKind.TAP,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="1001/42",
         data="a:1:1",
     )
@@ -92,10 +94,9 @@ _TOPIC_SHAPES: Final = [
             key=str(710),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/80",
             text="/help",
-            thread=TOPIC,
         ),
         id="command in topic",
     ),
@@ -105,10 +106,9 @@ _TOPIC_SHAPES: Final = [
             key=str(711),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/81",
             text="Use it",
-            thread=TOPIC,
         ),
         id="plain message in topic",
     ),
@@ -118,11 +118,10 @@ _TOPIC_SHAPES: Final = [
             key=str(712),
             kind=InboundKind.REPLY,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/82",
             reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
             text="Use it",
-            thread=TOPIC,
         ),
         id="reply to a bot message in topic",
     ),
@@ -132,11 +131,10 @@ _TOPIC_SHAPES: Final = [
             key=str(717),
             kind=InboundKind.REPLY,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/87",
             reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
             text="/details",
-            thread=TOPIC,
         ),
         id="command sent as a reply to a bot message in topic",
     ),
@@ -146,7 +144,7 @@ _TOPIC_SHAPES: Final = [
             key=str(713),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=OWNER,
+            place=telegram_place(OWNER),
             message_ref=f"{OWNER}/83",
             text="/help",
         ),
@@ -158,7 +156,7 @@ _TOPIC_SHAPES: Final = [
             key=str(714),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP),
             message_ref=f"{GROUP}/84",
             text="/help",
         ),
@@ -170,7 +168,7 @@ _TOPIC_SHAPES: Final = [
             key=str(716),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP),
             message_ref=f"{GROUP}/86",
             text="/expert@bot hello",
         ),
@@ -195,11 +193,10 @@ def test_a_closed_topic_is_read_as_its_topic_closed_item() -> None:
     assert _read(body).events == (
         Received(
             key=str(715),
-            kind=InboundKind.TOPIC_CLOSED,
+            kind=InboundKind.ROOM_CLOSED,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/85",
-            thread=TOPIC,
         ),
     )
 
@@ -267,6 +264,40 @@ def test_a_reply_that_is_not_a_list_of_updates_fails_the_poll(body: object) -> N
         _read(body)
 
 
+@pytest.mark.parametrize(
+    ("message", "place"),
+    [
+        pytest.param({"chat": {"id": OWNER}}, telegram_place(OWNER), id="private chat"),
+        pytest.param({"chat": {"id": GROUP}}, telegram_place(GROUP), id="General"),
+        pytest.param(
+            {"chat": {"id": GROUP}, "message_thread_id": GENERAL, "is_topic_message": True},
+            telegram_place(GROUP),
+            id="General named as a topic",
+        ),
+        pytest.param(
+            {"chat": {"id": GROUP}, "message_thread_id": TOPIC, "is_topic_message": True},
+            telegram_place(GROUP, TOPIC),
+            id="topic",
+        ),
+        pytest.param(
+            {"chat": {"id": GROUP}, "message_thread_id": TOPIC},
+            telegram_place(GROUP),
+            id="chain of replies outside a topic",
+        ),
+    ],
+)
+def test_a_tap_carries_the_place_of_the_tapped_message(
+    message: dict[str, object], place: Place
+) -> None:
+    tapped = {"message_id": BOT_MESSAGE, **message}
+    callback = {"from": {"id": OWNER}, "message": tapped, "data": "a:1:1"}
+    body = {"ok": True, "result": [{"update_id": TAP, "callback_query": callback}]}
+
+    [tap] = _read(body).events
+
+    assert tap.place == place
+
+
 _FILE_SHAPES = [
     pytest.param(
         {
@@ -279,10 +310,9 @@ _FILE_SHAPES = [
             key=str(720),
             kind=InboundKind.FILE,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/90",
             text="see",
-            thread=TOPIC,
             file=FileRef(id="large", name="photo.jpg", size=9),
         ),
         id="photo takes its largest size and the caption",
@@ -293,9 +323,8 @@ _FILE_SHAPES = [
             key=str(721),
             kind=InboundKind.FILE,
             sender=str(OWNER),
-            chat=GROUP,
+            place=telegram_place(GROUP, TOPIC),
             message_ref=f"{GROUP}/91",
-            thread=TOPIC,
             file=FileRef(id="doc", name="document", size=5),
         ),
         id="document without a name",
@@ -306,7 +335,7 @@ _FILE_SHAPES = [
             key=str(722),
             kind=InboundKind.FILE,
             sender=str(OWNER),
-            chat=OWNER,
+            place=telegram_place(OWNER),
             message_ref=f"{OWNER}/92",
             file=FileRef(id="pdf", name="spec.pdf"),
         ),
@@ -344,7 +373,7 @@ def test_a_command_is_read_as_name_instance_and_arguments(
             key=str(1),
             kind=InboundKind.TEXT,
             sender=str(OWNER),
-            chat=OWNER,
+            place=telegram_place(OWNER),
             message_ref="1",
             text=text,
         ).command

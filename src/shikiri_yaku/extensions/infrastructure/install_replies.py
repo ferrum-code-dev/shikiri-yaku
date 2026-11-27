@@ -141,7 +141,7 @@ class InstallApprovalReplies:
         self._outbox.queue(
             origin.number,
             Purpose.NOTICE,
-            [origin.destination],
+            [origin.place],
             Message(f"S{origin.number} · {note}"),
             key=key,
             now=self._clock.now(),

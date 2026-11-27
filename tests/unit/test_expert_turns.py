@@ -13,7 +13,7 @@ import pytest
 
 from shikiri_yaku.adapters.agents.claude import ClaudeExpert
 from shikiri_yaku.adapters.agents.muse import MuseExpert
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.expert import Ask
@@ -60,9 +60,9 @@ from tests.support.attachments import (
 )
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
-from tests.support.destinations import FixedDestinations
 from tests.support.event_numbers import number_next_event
 from tests.support.expert_proposals import expert_proposals
+from tests.support.places import FixedPlaces
 from tests.support.rooms import FakeRooms, FakeSharedChat
 from tests.support.secrets import SECRETS
 
@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.expert import ExpertRequest, ExpertResult
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import (
         EscalationView,
         Expert,
@@ -252,7 +252,7 @@ class Harness:
             self.topics,
             self.outbox,
             Clock(),
-            places=FixedDestinations(),
+            places=FixedPlaces(),
             directory=path,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),
@@ -267,7 +267,6 @@ class Harness:
             clients=clients,
             scope=scope,
             directory=path,
-            channel=CHANNEL,
             runs=self.runs,
             ending=self.ending,
             downloads=self.downloads,
@@ -288,7 +287,6 @@ class Harness:
                 JournalWeb(self.database),
                 self.outbox,
                 Clock(),
-                channel=CHANNEL,
                 rooms=self.topics,
                 access=AdminAccess(self.log, Clock(), admins=frozenset()),
             ),
@@ -314,7 +312,6 @@ class Harness:
             shared=FakeSharedChat() if shared_group else None,
             turns=self.turns,
             scope=scope,
-            channel=CHANNEL,
             max_text=MESSAGE_TEXT_LIMIT,
         )
         self.commands = Commands(
@@ -323,8 +320,7 @@ class Harness:
             cast("Status", None),
             cast("OpenCommand", None),
             cast("GoalCommand", None),
-            destinations=FixedDestinations(topics={77: "api"}),
-            channel=CHANNEL,
+            places=FixedPlaces(topics={77: "api"}),
             name_max_chars=40,
             shared=FakeSharedChat() if shared_group else None,
             ask=self.ask,
@@ -381,10 +377,9 @@ def _item(
         key=str(update_id),
         kind=InboundKind.TEXT,
         sender=str(sender),
-        chat=chat,
+        place=telegram_place(chat, thread),
         message_ref=str(update_id),
         text=text,
-        thread=thread,
     )
 
 
@@ -596,11 +591,10 @@ def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> 
         key=str(2),
         kind=InboundKind.REPLY,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref="2",
         reply_to_ref="1",
         text=MESSAGES[1],
-        thread=THREAD,
     )
 
     async def scenario() -> None:
@@ -650,18 +644,17 @@ def test_a_private_origin_ends_through_the_expert_group_topic(
 
         conversation = h.log.get(1)
         assert conversation is not None
-        assert conversation.chat == OWNER
+        assert conversation.origin == telegram_place(OWNER)
         assert not h.turns.owns(_item(2, "/close", thread=THREAD, chat=OWNER))
 
         close_log = _Log(h.database, expected=1)
         closed = Inbound(
             id=2,
             key=str(2),
-            kind=InboundKind.TOPIC_CLOSED,
+            kind=InboundKind.ROOM_CLOSED,
             sender=str(OWNER),
-            chat=GROUP_ID,
+            place=telegram_place(GROUP_ID, THREAD),
             message_ref="2",
-            thread=THREAD,
         )
         close_log.record_batch(CHANNEL, [closed], "3", Clock().now())
         close_service = InboundService(
@@ -1000,7 +993,7 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
     runner = Runner(hold=True)
     h = build(ladder(runner, muse=muse), muse=muse)
     now = Clock().now()
-    h.log.create(1, chat=CHAT, thread=None, text="question", scope=["api"], now=now)
+    h.log.create(1, origin=telegram_place(CHAT), text="question", scope=["api"], now=now)
     conversation = h.log.get(1)
     assert conversation is not None
     h.log.opened(1, str(THREAD))
@@ -1009,7 +1002,7 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
     web = JournalWeb(h.database)
     web.request(1, "docs.example")
     h.database.connection.execute(
-        "INSERT INTO messages (direction, channel, chat, platform_message_id, "
+        "INSERT INTO messages (direction, channel, place, platform_message_id, "
         "notice_key, delivery, created_at) VALUES ('out', ?, ?, '9', 'expert:web:1', 'sent', ?)",
         (CHANNEL, str(CHAT), now.isoformat()),
     )
@@ -1018,20 +1011,18 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
         key=str(2),
         kind=InboundKind.TAP,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref="9",
         data="w:1",
-        thread=THREAD,
     )
     second = Inbound(
         id=3,
         key=str(3),
         kind=InboundKind.TAP,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref="9",
         data="w:1",
-        thread=THREAD,
     )
     command = _item(4, "/help")
     log = _Log(h.database, expected=3)
@@ -1116,7 +1107,7 @@ def test_admin_command_that_cannot_be_shown_is_not_stored(
     runner = RefusalRunner()
     h = build(ladder(runner))
     h.log.create(
-        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+        1, origin=telegram_place(CHAT), text="question", scope=[], now=Clock().now(), mode="admin"
     )
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
@@ -1158,7 +1149,7 @@ def test_consecutive_refused_commands_each_get_an_expert_turn(
     runner = RepeatedRefusalRunner()
     h = build(ladder(runner))
     h.log.create(
-        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+        1, origin=telegram_place(CHAT), text="question", scope=[], now=Clock().now(), mode="admin"
     )
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
@@ -1176,7 +1167,7 @@ def test_refusal_follow_up_keeps_conversation_order_in_history(
 ) -> None:
     h = build(ladder(Runner()))
     now = Clock().now()
-    h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
+    h.log.create(1, origin=telegram_place(CHAT), text="one", scope=[], now=now, mode="admin")
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
@@ -1199,7 +1190,7 @@ def test_refusal_follow_up_keeps_conversation_order_in_history(
 def test_done_refusal_follow_up_is_delivered_on_replay(build: Callable[..., Harness]) -> None:
     h = build(ladder(Runner()))
     now = Clock().now()
-    h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
+    h.log.create(1, origin=telegram_place(CHAT), text="one", scope=[], now=now, mode="admin")
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
@@ -1223,7 +1214,7 @@ def test_decline_replay_delivers_finished_turn_once(
     monkeypatch.setitem(ANSWER, "command", "echo first")
     monkeypatch.setitem(ANSWER, "reason", "first reason")
     h.log.create(
-        1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
+        1, origin=telegram_place(CHAT), text="question", scope=[], now=Clock().now(), mode="admin"
     )
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
@@ -1239,10 +1230,9 @@ def test_decline_replay_delivers_finished_turn_once(
         key=str(2),
         kind=InboundKind.TAP,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref="admin-ref",
         data=f"v:{op}",
-        thread=THREAD,
     )
     monkeypatch.setitem(ANSWER, "reply", "Decline answer")
     monkeypatch.setitem(ANSWER, "command", "echo replacement")
@@ -1295,7 +1285,7 @@ def test_restart_resumes_pending_admin_output_before_new_turns(
     runner = Runner()
     h = build(ladder(runner))
     now = Clock().now()
-    h.log.create(1, chat=CHAT, thread=None, text="question", scope=[], now=now, mode="admin")
+    h.log.create(1, origin=telegram_place(CHAT), text="question", scope=[], now=now, mode="admin")
     h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
@@ -1373,10 +1363,9 @@ def _file_item(
         key=str(update_id),
         kind=InboundKind.FILE,
         sender=str(OWNER),
-        chat=CHAT,
+        place=telegram_place(CHAT, THREAD),
         message_ref=str(update_id),
         text=caption,
-        thread=THREAD,
         file=FileRef(id=file_id, name=name, size=size),
     )
 
@@ -1533,7 +1522,7 @@ def test_a_file_outside_an_expert_topic_is_not_run_as_a_command() -> None:
         key=str(9),
         kind=InboundKind.FILE,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="9",
         text="/status",
         file=FileRef(id="f", name="a"),
@@ -1842,8 +1831,8 @@ class _Channel:
         self.release_progress = asyncio.Event()
         self.refusal_notice_sent = asyncio.Event()
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        del destination
+    async def send(self, place: Place, message: Message) -> str:
+        del place
         if message.text == DRAWING:
             self.progress_attempts += 1
             if self.hold_progress:

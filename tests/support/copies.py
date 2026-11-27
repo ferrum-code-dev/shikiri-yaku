@@ -10,7 +10,7 @@ from shikiri_yaku.app.outbox_sender import OutboxSender
 
 if TYPE_CHECKING:
     from shikiri_yaku.app.outbox_sender import TopicGone
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.journal.outbox import JournalOutbox
     from shikiri_yaku.ports import Clock, Deleter, Editor, FinalEdits, Message, Sender
 
@@ -23,8 +23,8 @@ class Platform:
         self.edit_failures: list[Exception] = []
         self._sent = 0
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        del destination, message
+    async def send(self, place: Place, message: Message) -> str:
+        del place, message
         self._sent += 1
         return f"copy-{self._sent}"
 

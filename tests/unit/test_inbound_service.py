@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.health_source import HealthSource
 from shikiri_yaku.app.inbound_poller import InboundPoller
@@ -32,7 +33,7 @@ TAP: Final = Inbound(
     key=str(700),
     kind=InboundKind.TAP,
     sender=str(OWNER),
-    chat=OWNER,
+    place=telegram_place(OWNER),
     message_ref="1001/42",
     data="a:1:1",
 )
@@ -41,7 +42,7 @@ EXPERT_REPLY: Final = Inbound(
     key=str(700),
     kind=InboundKind.REPLY,
     sender=str(OWNER),
-    chat=OWNER,
+    place=telegram_place(OWNER),
     message_ref="1001/90",
     reply_to_ref="1001/42",
     text="/expert hello",
@@ -51,7 +52,7 @@ PLAIN_REPLY: Final = Inbound(
     key=str(700),
     kind=InboundKind.REPLY,
     sender=str(OWNER),
-    chat=OWNER,
+    place=telegram_place(OWNER),
     message_ref="1001/90",
     reply_to_ref="1001/42",
     text="Use it",

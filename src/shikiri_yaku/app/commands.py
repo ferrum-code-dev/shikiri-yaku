@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.app.command_reply import item_destination, queue_command_reply
+from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.domain.outbound import fit
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
     from shikiri_yaku.domain.inbound import Command, Inbound
-    from shikiri_yaku.ports import Clock, Destinations, Outbox, SharedChat
+    from shikiri_yaku.ports import Clock, Outbox, Places, SharedChat
 
 _STATUS: Final = "/status"
 _DETAILS: Final = "/details"
@@ -41,7 +41,7 @@ class Commands:
     Free text gets the command list. A message that starts with `/` and names no known command gets
     the name as typed, cut to `name_max_chars`, and the list. Names match without case (a phone
     keyboard capitalises the first letter) and without the `@bot` of the channel's addressed form.
-    In a thread that names a component, `/status`, `/details` and `/pending` cover only it.
+    In a component's place, `/status`, `/details` and `/pending` cover only it.
 
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
@@ -60,8 +60,7 @@ class Commands:
         open_command: OpenCommand,
         goal: GoalCommand,
         *,
-        destinations: Destinations,
-        channel: str,
+        places: Places,
         max_text: int,
         name_max_chars: int,
         shared: SharedChat | None = None,
@@ -72,8 +71,7 @@ class Commands:
         self._status = status
         self._open = open_command
         self._goal = goal
-        self._destinations = destinations
-        self._channel = channel
+        self._places = places
         self._max_text = max_text
         self._name_max_chars = name_max_chars
         self._shared = shared
@@ -82,8 +80,8 @@ class Commands:
     async def handle(self, item: Inbound) -> None:
         command = item.command
         name = "" if command is None else command.name
-        place = item_destination(self._channel, item)
-        component = self._destinations.component_of(item.thread)
+        place = item.place
+        component = self._places.component_of(place)
         shared = self._shared
         if shared is not None and component is None and not shared.is_main(place):
             return

@@ -8,14 +8,14 @@ from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import ChannelError, ChannelRefusedError, PlaceGoneError
 
 if TYPE_CHECKING:
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, Outbox, Pending, Sender
 
 
 class TopicGone(Protocol):
     """Ends a conversation whose topic the Channel no longer has."""
 
-    async def topic_gone(self, conversation_id: int, destination: Destination) -> None: ...
+    async def topic_gone(self, conversation_id: int, place: Place) -> None: ...
 
 
 class OutboxSender:
@@ -65,7 +65,7 @@ class OutboxSender:
                     and pending.conversation_id is not None
                     and isinstance(error, PlaceGoneError)
                 ):
-                    await self._gone.topic_gone(pending.conversation_id, pending.destination)
+                    await self._gone.topic_gone(pending.conversation_id, pending.place)
                 continue
             except ChannelError:
                 if pending.conversation_id is not None:
@@ -76,4 +76,4 @@ class OutboxSender:
     async def _send(self, pending: Pending) -> str:
         if (form := secret_form(pending.message.texts())) is not None:
             raise ChannelRefusedError(form)
-        return await self._sender.send(pending.destination, pending.message)
+        return await self._sender.send(pending.place, pending.message)

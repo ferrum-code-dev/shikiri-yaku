@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from shikiri_yaku.domain.classification import Classifier
-from shikiri_yaku.domain.schedule import Destination  # noqa: TC001 -- pydantic reads it at runtime
+from shikiri_yaku.domain.place import Place  # noqa: TC001 -- pydantic reads it at runtime
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -75,7 +75,6 @@ __all__ = [
     "CompositionError",
     "Copies",
     "Deleter",
-    "Destinations",
     "DispatchLog",
     "DoctorCheck",
     "DoctorReport",
@@ -115,6 +114,7 @@ __all__ = [
     "Pending",
     "PendingInstall",
     "PlaceGoneError",
+    "Places",
     "QuotaWindow",
     "Reasoner",
     "ReasonerError",
@@ -810,13 +810,13 @@ class Message:
 
 
 class Sender(Protocol):
-    """Sends a message to a destination and returns the reference the platform gives it.
+    """Sends a message to a place and returns the reference the platform gives it.
 
     A message the platform refuses for good raises ChannelRefusedError; any other failure raises
     ChannelError and is tried again.
     """
 
-    async def send(self, destination: Destination, message: Message) -> str: ...
+    async def send(self, place: Place, message: Message) -> str: ...
 
 
 class Editor(Protocol):
@@ -845,7 +845,7 @@ class Channel:
     editor: Editor
     deleter: Deleter
     downloads: Downloads
-    places: Destinations
+    places: Places
     check: ChannelCheck
     owners: frozenset[str]
     max_text: int
@@ -862,9 +862,9 @@ class Rooms(Protocol):
         """Open a room and return its id; a failure raises ChannelError."""
         ...
 
-    def place(self, room: str) -> Destination: ...
+    def place(self, room: str) -> Place: ...
 
-    def room_of(self, place: Destination) -> str | None:
+    def room_of(self, place: Place) -> str | None:
         """Return the id of the room the place can be, or None; whether it is open is not known."""
         ...
 
@@ -880,7 +880,7 @@ class Rooms(Protocol):
 class SharedChat(Protocol):
     """One chat that several instances share, each with its own bot."""
 
-    def is_main(self, place: Destination) -> bool:
+    def is_main(self, place: Place) -> bool:
         """Return whether every instance answers in this place."""
         ...
 
@@ -913,17 +913,17 @@ class CheckLine:
     detail: str | None = None
 
 
-class Destinations(Protocol):
-    """Where a Channel's messages go, and what an inbound item says of its component.
+class Places(Protocol):
+    """Where a Channel's messages go, and the component a place belongs to.
 
-    The core asks for destinations by project and kind, and for the component an inbound thread
-    implies, and never reads how the channel organises its chats. `prepare` runs once at start-up,
-    before anything is sent, and raises ChannelStartupError if the channel cannot be made ready.
+    The core asks for places by project and kind, and for the component of a place, and never reads
+    a place id. `prepare` runs once at start-up, before anything is sent, and raises
+    ChannelStartupError if the channel cannot be made ready.
     """
 
-    def for_signal(self, project: str, kind: Kind) -> Sequence[Destination]: ...
+    def for_signal(self, project: str, kind: Kind) -> Sequence[Place]: ...
 
-    def component_of(self, thread: int | None) -> str | None: ...
+    def component_of(self, place: Place) -> str | None: ...
 
     async def prepare(self) -> None: ...
 
@@ -971,7 +971,7 @@ class Pending:
     """A recorded message the sender has not yet seen confirmed."""
 
     message_id: int
-    destination: Destination
+    place: Place
     message: Message
     conversation_id: int | None = None
 
@@ -988,7 +988,7 @@ class Outbox(Protocol):
         self,
         number: int | None,
         purpose: Purpose,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         message: Message,
         *,
         key: str,
@@ -997,9 +997,9 @@ class Outbox(Protocol):
         standing: bool = False,
         conversation_id: int | None = None,
     ) -> None:
-        """Record the message once per key and destination; a key seen before records nothing.
+        """Record the message once per key and place; a key seen before records nothing.
 
-        A message with a slot replaces the older copies of the same slot, chat and thread once the
+        A message with a slot replaces the older copies of the same slot and place once the
         platform has accepted it. A standing message keeps Stop reminders until the PO
         stops them; the handler that queues it says so, not the kind of its signal.
         """
@@ -1032,7 +1032,7 @@ class Outbox(Protocol):
 
     def queue_command_reply(
         self,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         parts: Sequence[Message],
         *,
         key: str,
@@ -1042,7 +1042,7 @@ class Outbox(Protocol):
         """Journal a command reply claim and every bounded part atomically, once per update."""
         ...
 
-    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+    def expert_selection(self, item: Inbound) -> Inbound | None:
         """Return the original command for a tap on its recorded selection message."""
         ...
 
@@ -1492,7 +1492,7 @@ class ReplyOrigin:
     purpose: Purpose
     message: Message
     key: str | None
-    destination: Destination
+    place: Place
     suggestion: str = ""
 
 
@@ -1522,8 +1522,8 @@ class ReplyLog(Protocol):
 
     def origin(self, channel: str, message_ref: str) -> ReplyOrigin | None: ...
 
-    def sent_message(self, destination: Destination, message_ref: str) -> Message | None:
-        """Return the body of the message sent to the destination, or None if none is journaled."""
+    def sent_message(self, channel: str, message_ref: str) -> Message | None:
+        """Return the body of the channel's sent message, or None if none is journaled."""
         ...
 
     def recorded_resolution(self, number: int) -> RecordedResolution | None:
@@ -1719,7 +1719,7 @@ class ProposalStatus:
 class SubmitPayload(BaseModel):
     """What a submit op sends: the component whose Shikiru takes it, and the request.
 
-    `destination` is the chat the outcome is reported in. `retry_of` is the unknown submit that a
+    `place` is where the outcome is reported. `retry_of` is the unknown submit that a
     replacement consumed; it is None for a goal the PO sent. `proposal` is the update id of the
     Expert proposal the task belongs to; it is None for a goal. `mode` is the Shikiru task mode;
     None leaves the choice to Shikiru, as a goal does.
@@ -1728,7 +1728,7 @@ class SubmitPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     component: str
     request: str
-    destination: Destination
+    place: Place
     retry_of: int | None = None
     proposal: int | None = None
     mode: str | None = None

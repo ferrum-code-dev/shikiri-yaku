@@ -338,7 +338,7 @@ class Replies:
         self._outbox.queue(
             origin.number,
             purpose,
-            [origin.destination],
+            [origin.place],
             message,
             key=key,
             now=self._clock.now(),

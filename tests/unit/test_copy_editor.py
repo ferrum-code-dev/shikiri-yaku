@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 from pydantic import TypeAdapter
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import EventSource
 from shikiri_yaku.domain.outbound import Purpose
@@ -39,7 +39,7 @@ from tests.support.secrets import SECRETS, secret_messages
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import ShikiruClient
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -79,7 +79,7 @@ class _Channel:
         self.edits: list[tuple[str, Message, bool]] = []
         self.deletions: list[tuple[str, str, int]] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -140,8 +140,7 @@ class _Harness:
         for index, ref in enumerate(REFS):
             row = messages.record_outbound(
                 signal_number=self.number,
-                channel="telegram",
-                chat=str(1001 + index),
+                place=telegram_place(1001 + index),
                 purpose=Purpose.QUESTION,
                 body=QUESTION,
                 notice_key=None,
@@ -419,8 +418,7 @@ def test_a_resolve_the_operator_issued_is_not_shown_as_made_elsewhere(h: _Harnes
 def test_a_copy_sent_after_the_external_resolve_is_edited_too(h: _Harness) -> None:
     late = MessageStore(h.database, _Reporter()).record_outbound(
         signal_number=h.number,
-        channel="telegram",
-        chat="1003",
+        place=telegram_place("1003"),
         purpose=Purpose.QUESTION,
         body=QUESTION,
         notice_key=None,

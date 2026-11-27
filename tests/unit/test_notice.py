@@ -14,7 +14,7 @@ import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
-from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramPlaces
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.health_source import LINK_SCOPE, RECOVERED_LINE
 from shikiri_yaku.app.notifier import Notifier
@@ -49,8 +49,8 @@ from shikiri_yaku.ports import (
     TaskStatus,
 )
 from shikiri_yaku.settings import NOTICE_TASKS_MAX
-from tests.support.destinations import FixedDestinations
 from tests.support.notices import WHERE, journal_notifier, journal_outbox
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -161,7 +161,7 @@ def _handler(
         outbox,
         journal_notifier(outbox, _Clock()),
         _Clock(),
-        destinations=FixedDestinations([WHERE]),
+        places=FixedPlaces([WHERE]),
         tasks_max=tasks_max,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -453,7 +453,7 @@ def _router(database: Database, client: _Tasks, fallback: _Fallback) -> Router:
         outbox,
         journal_notifier(outbox, _Clock()),
         _Clock(),
-        destinations=FixedDestinations([WHERE]),
+        places=FixedPlaces([WHERE]),
         tasks_max=NOTICE_TASKS_MAX,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -508,15 +508,15 @@ def test_the_integrated_notice_names_the_component_only_outside_its_topic(
 ) -> None:
     topics = TopicStore(memory)
     topics.save(PROJECT, 73, TOPIC_OPEN)
-    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    places = TelegramPlaces(topics, owners=(1001,), group_id=group_id, reconciler=None)
     outbox = journal_outbox(memory)
     handler = NoticeHandler(
         {PROJECT: cast("ShikiruClient", _Tasks([_task("T-1", TaskStatus.DONE)]))},
         SignalStore(memory),
         outbox,
-        Notifier(outbox, destinations, _Clock()),
+        Notifier(outbox, places, _Clock()),
         _Clock(),
-        destinations=destinations,
+        places=places,
         tasks_max=NOTICE_TASKS_MAX,
         max_text=MESSAGE_TEXT_LIMIT,
     )

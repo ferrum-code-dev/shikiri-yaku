@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.replies import Replies
 from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
@@ -15,7 +15,7 @@ from shikiri_yaku.journal import JournalFinalEdits, JournalReplacements
 from shikiri_yaku.journal.signals import NewSignal, SignalState
 from shikiri_yaku.ports import EscalationStatus, ShikiruClient, ShikiruLinkDownError
 from shikiri_yaku.settings import InfrastructureSettings
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.unit.test_replies import NOW, Client, Clock, Harness
 
 if TYPE_CHECKING:
@@ -87,7 +87,7 @@ def _open(h: Harness, update: int = 700, thread: int | None = None, at: datetime
             h.clients,
             h.outbox,
             Clock(at),
-            FixedDestinations(),
+            FixedPlaces(),
             channel="telegram",
             max_text=MESSAGE_TEXT_LIMIT,
         ),
@@ -100,10 +100,9 @@ def _open(h: Harness, update: int = 700, thread: int | None = None, at: datetime
                 key=str(update),
                 kind=InboundKind.TEXT,
                 sender="1001",
-                chat=1001,
+                place=telegram_place(1001, thread),
                 message_ref="1001/90",
                 text="/pending",
-                thread=thread,
             )
         )
     )

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, Outbox, Rooms, Sketcher
 
 DRAWING: Final = "Drawing the sketch…"
@@ -68,17 +68,17 @@ class ExpertSketches:
         key = sketch_key(update_id)
         if conversation.room is None or self._outbox.notice_queued(key):
             return
-        destination = self._rooms.place(conversation.room)
+        place = self._rooms.place(conversation.room)
         if self._sketcher is None:
-            self._notice(destination, NO_CODEX, key, conversation.id)
+            self._notice(place, NO_CODEX, key, conversation.id)
             return
         if self._withheld(description):
-            self._notice(destination, WITHHELD, key, conversation.id)
+            self._notice(place, WITHHELD, key, conversation.id)
             return
         queue_expert_notice(
             self._outbox,
             self._clock,
-            destination,
+            place,
             DRAWING,
             key=progress_key(update_id),
             slot=key,
@@ -89,19 +89,19 @@ class ExpertSketches:
         try:
             drawn = await self._sketcher.draw(description)
         except SketchError as error:
-            self._notice(destination, NOT_DRAWN.format(reason=error), key, conversation.id)
+            self._notice(place, NOT_DRAWN.format(reason=error), key, conversation.id)
             return
         try:
             picture = move_sketch(
                 conversation_directory(self._directory, conversation.id), update_id, drawn
             )
         except OSError:
-            self._notice(destination, NOT_SAVED, key, conversation.id)
+            self._notice(place, NOT_SAVED, key, conversation.id)
             return
         self._outbox.queue(
             None,
             Purpose.EXPERT,
-            [destination],
+            [place],
             Message("", photo=str(picture)),
             key=key,
             now=self._clock.now(),
@@ -130,11 +130,11 @@ class ExpertSketches:
             secret in description for secret in self._known_secrets
         )
 
-    def _notice(self, destination: Destination, text: str, key: str, conversation_id: int) -> None:
+    def _notice(self, place: Place, text: str, key: str, conversation_id: int) -> None:
         queue_expert_notice(
             self._outbox,
             self._clock,
-            destination,
+            place,
             text,
             key=key,
             slot=key,

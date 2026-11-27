@@ -16,7 +16,7 @@ from shikiri_yaku.extensions.review.rules import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.ports import Clock, Destinations, Outbox, ShikiruClient, SignalNumbers
+    from shikiri_yaku.ports import Clock, Outbox, Places, ShikiruClient, SignalNumbers
 
 
 def review_extension(
@@ -26,7 +26,7 @@ def review_extension(
     clock: Clock,
     *,
     product: str,
-    destinations: Destinations,
+    places: Places,
     max_text: int,
 ) -> Extension:
     """Return the review category; it is registered before the product catch-all."""
@@ -36,7 +36,7 @@ def review_extension(
         outbox,
         clock,
         product=product,
-        destinations=destinations,
+        places=places,
         max_text=max_text,
     )
     return Extension(

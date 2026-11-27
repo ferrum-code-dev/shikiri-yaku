@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         Notifier,
         Outbox,
+        Places,
         ShikiruClient,
         SignalNumbers,
     )
@@ -33,7 +33,7 @@ def notice_extension(
     notifier: Notifier,
     clock: Clock,
     *,
-    destinations: Destinations,
+    places: Places,
     tasks_max: int,
     max_text: int,
 ) -> Extension:
@@ -44,7 +44,7 @@ def notice_extension(
         outbox,
         notifier,
         clock,
-        destinations=destinations,
+        places=places,
         tasks_max=tasks_max,
         max_text=max_text,
     )

@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.signal import Signal
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         InstallApprovalRenderer,
         InstallReaskLog,
         Outbox,
+        Places,
     )
 
 
@@ -32,13 +32,13 @@ class InstallReasker:
         installs: InstallReaskLog,
         renderer: InstallApprovalRenderer,
         outbox: Outbox,
-        destinations: Destinations,
+        places: Places,
         clock: Clock,
     ) -> None:
         self._installs = installs
         self._renderer = renderer
         self._outbox = outbox
-        self._destinations = destinations
+        self._places = places
         self._clock = clock
 
     def ask_again(self, op_id: int, payload: InstallOpPayload, signal: Signal) -> None:
@@ -51,7 +51,7 @@ class InstallReasker:
             self._outbox.queue(
                 payload.number,
                 Purpose.APPROVAL,
-                self._destinations.for_signal(signal.project, signal.kind),
+                self._places.for_signal(signal.project, signal.kind),
                 self._renderer.render(new.id, new.payload),
                 key=f"install:{new.id}",
                 now=now,

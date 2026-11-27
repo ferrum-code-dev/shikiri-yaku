@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import schedule_log
@@ -110,8 +110,7 @@ def _engine_down_on_screen(database: Database) -> int:
     messages = MessageStore(database, _Reporter())
     row = messages.record_outbound(
         signal_number=number,
-        channel="telegram",
-        chat=CHAT,
+        place=telegram_place(CHAT),
         purpose=Purpose.NOTICE,
         body=body,
         notice_key=f"forward:{number}",
@@ -140,7 +139,7 @@ def _remind(database: Database, clock: _Clock) -> list[str]:
     )
     asyncio.run(scheduler.tick())
     outbox = JournalOutbox(database, MessageStore(database, _Reporter()))
-    return [pending.destination.chat for pending in outbox.pending()]
+    return [pending.place.id for pending in outbox.pending()]
 
 
 def _edit_copies(database: Database, clock: _Clock, channel: _Channel) -> None:

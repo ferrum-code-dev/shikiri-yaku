@@ -10,17 +10,17 @@ import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
 from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
-from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramPlaces
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.outcome import Forward, Notified
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.signal import PullRequest
 from shikiri_yaku.extensions.review.handler import NOTHING_TRIED, SENT, ReviewHandler
 from shikiri_yaku.extensions.review.message import OPEN_PR_LABEL
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, NewSignal, SignalStore
 from shikiri_yaku.journal.topics import TopicStore
 from shikiri_yaku.ports import Button, ShikiruLinkDownError, TaskDetail
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
@@ -33,7 +33,7 @@ TASK_ID: Final = "T-1"
 TASK_TITLE: Final = "Add retries to the sync"
 PRODUCT: Final = "Shop"
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
-OWNER: Final = Destination("telegram", "1001")
+OWNER: Final = Place("telegram", "1001")
 PULL: Final = PullRequest("https://github.com/acme/api/pull/7", 3)
 
 
@@ -68,13 +68,13 @@ class _Client:
 
 class _Outbox:
     def __init__(self) -> None:
-        self.queued: list[tuple[int | None, Purpose, Sequence[Destination], Message, str]] = []
+        self.queued: list[tuple[int | None, Purpose, Sequence[Place], Message, str]] = []
 
     def queue(
         self,
         number: int | None,
         purpose: Purpose,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         message: Message,
         *,
         key: str,
@@ -83,7 +83,7 @@ class _Outbox:
         standing: bool = False,
     ) -> None:
         del now, slot, standing
-        self.queued.append((number, purpose, destinations, message, key))
+        self.queued.append((number, purpose, places, message, key))
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def _handler(database: Database, client: _Client, outbox: Outbox) -> ReviewHandl
         outbox,
         _Clock(),
         product=PRODUCT,
-        destinations=FixedDestinations([OWNER]),
+        places=FixedPlaces([OWNER]),
         max_text=MESSAGE_TEXT_LIMIT,
     )
 
@@ -133,8 +133,8 @@ def test_a_pull_request_gets_one_review_message_with_its_link_and_signal_number(
     outcome = asyncio.run(_handler(memory, _Client(), cast("Outbox", outbox)).handle(signal))
 
     assert outcome == Notified(SENT)
-    [(queued, purpose, destinations, message, key)] = outbox.queued
-    assert (queued, purpose, tuple(destinations), key) == (
+    [(queued, purpose, places, message, key)] = outbox.queued
+    assert (queued, purpose, tuple(places), key) == (
         number,
         Purpose.NOTICE,
         (OWNER,),
@@ -199,7 +199,7 @@ def test_the_review_header_names_the_component_only_outside_its_topic(
 ) -> None:
     topics = TopicStore(memory)
     topics.save(PROJECT, 73, TOPIC_OPEN)
-    destinations = TelegramDestinations(topics, owners=(1001,), group_id=group_id, reconciler=None)
+    places = TelegramPlaces(topics, owners=(1001,), group_id=group_id, reconciler=None)
     _, signal = _stored(memory, PULL)
     outbox = _Outbox()
     handler = ReviewHandler(
@@ -208,7 +208,7 @@ def test_the_review_header_names_the_component_only_outside_its_topic(
         cast("Outbox", outbox),
         _Clock(),
         product=PRODUCT,
-        destinations=destinations,
+        places=places,
         max_text=MESSAGE_TEXT_LIMIT,
     )
 

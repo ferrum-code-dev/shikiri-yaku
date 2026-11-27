@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import ValidationError
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.domain.callback import decode_callback
 from shikiri_yaku.domain.outbound import STOP_REMINDERS_LABEL, Purpose
 from shikiri_yaku.domain.signal import Kind
@@ -98,8 +98,7 @@ def test_stop_reminders_silences_a_standing_notice_and_closes_information(
     messages = MessageStore(memory, _Reporter())
     stored = messages.record_outbound(
         signal_number=number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=Purpose.NOTICE,
         body=Message("x", (Button(STOP_REMINDERS_LABEL, f"k:{number}"),)),
         notice_key=f"forward:{number}",
@@ -140,8 +139,7 @@ def test_a_tap_on_information_closes_it_and_edits_every_copy_once(memory: Databa
     for chat, reference in (("1001", "1001/42"), ("1002", "1002/7")):
         stored = messages.record_outbound(
             signal_number=number,
-            channel="telegram",
-            chat=chat,
+            place=telegram_place(chat),
             purpose=Purpose.NOTICE,
             body=body,
             notice_key=f"forward:{number}",
@@ -187,8 +185,7 @@ def test_origin_binds_only_delivered_outbound_copy_to_channel_and_purpose(purpos
     body = Message("question", (Button("Retry", f"a:{number}:1"),))
     stored = messages.record_outbound(
         signal_number=number,
-        channel="telegram",
-        chat="1001",
+        place=telegram_place("1001"),
         purpose=purpose,
         body=body,
         notice_key=None,

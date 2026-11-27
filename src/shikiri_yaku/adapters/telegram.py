@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.ports import (
     PLACE_GONE_REASON,
     Button,
@@ -65,6 +65,8 @@ DELETE_FORUM_TOPIC: Final = "deleteForumTopic"
 THREAD_NOT_FOUND: Final = "thread not found"
 TOPIC_ID_INVALID: Final = "topic_id_invalid"
 REF_SEPARATOR: Final = "/"
+# keep: a place id is `<chat>`, or `<chat>/<thread>` inside a topic
+PLACE_SEPARATOR: Final = "/"
 SUPERGROUP: Final = "supergroup"
 CREATOR: Final = "creator"
 ADMINISTRATOR: Final = "administrator"
@@ -288,11 +290,23 @@ _CREATE_TOPIC_REPLY: Final[TypeAdapter[_CreatedTopic | _Failed]] = TypeAdapter(
 _CLOSE_TOPIC_REPLY: Final[TypeAdapter[_ClosedTopic | _Failed]] = TypeAdapter(_ClosedTopic | _Failed)
 
 
+def telegram_place(chat: int | str, thread: int | None = None) -> Place:
+    """Return the place of a chat, or of a topic in it; the General topic is the chat alone."""
+    topic = "" if thread is None else f"{PLACE_SEPARATOR}{thread}"
+    return Place(TELEGRAM_CHANNEL, f"{chat}{topic}")
+
+
+def chat_and_thread(place: Place) -> tuple[str, int | None]:
+    """Return the chat a place id names, and its topic's thread, None outside a topic."""
+    chat, _, thread = place.id.partition(PLACE_SEPARATOR)
+    return chat, int(thread) if thread else None
+
+
 class TelegramChannel:
-    """Sends, edits and deletes messages in one chat per destination.
+    """Sends, edits and deletes messages, each sent to one place.
 
     A message reference is `<chat id>/<message id>`, so `edit` can name the chat without being
-    given the destination again. A rate limit is waited out once; a second one is a ChannelError,
+    given the place again. A rate limit is waited out once; a second one is a ChannelError,
     which the sender tries again on its next tick. The core screens secrets and journals refusals.
     """
 
@@ -300,10 +314,11 @@ class TelegramChannel:
         self._api = api
         self._clock = clock
 
-    async def send(self, destination: Destination, message: Message) -> str:
-        payload: dict[str, object] = {"chat_id": destination.chat, **_content(message)}
-        if destination.thread is not None:
-            payload["message_thread_id"] = destination.thread
+    async def send(self, place: Place, message: Message) -> str:
+        chat, thread = chat_and_thread(place)
+        payload: dict[str, object] = {"chat_id": chat, **_content(message)}
+        if thread is not None:
+            payload["message_thread_id"] = thread
         if message.reply_to is not None:
             payload["reply_parameters"] = _reply_parameters(message.reply_to)
         if message.photo is None:
@@ -570,13 +585,14 @@ class TelegramForumTopics:
             raise ChannelError(NOT_ACCEPTED)
         return str(reply.result.message_thread_id)
 
-    def place(self, room: str) -> Destination:
-        return Destination(TELEGRAM_CHANNEL, str(self._group_id), int(room))
+    def place(self, room: str) -> Place:
+        return telegram_place(self._group_id, int(room))
 
-    def room_of(self, place: Destination) -> str | None:
-        if place.chat != str(self._group_id) or place.thread is None:
+    def room_of(self, place: Place) -> str | None:
+        chat, thread = chat_and_thread(place)
+        if chat != str(self._group_id) or thread is None:
             return None
-        return str(place.thread)
+        return str(thread)
 
     async def rename(self, room: str, title: str) -> None:
         body = await self._api.call(
@@ -627,9 +643,9 @@ class TelegramSharedChat:
     def __init__(self, api: BotApi) -> None:
         self._api = api
 
-    def is_main(self, place: Destination) -> bool:
+    def is_main(self, place: Place) -> bool:
         # keep: General has no thread, and neither has a private chat
-        return place.thread is None
+        return chat_and_thread(place)[1] is None
 
     async def addressed(self, word: str) -> bool:
         _, _, address = word.partition("@")

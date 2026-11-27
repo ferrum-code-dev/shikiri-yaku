@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.app.secret_cleanup import SecretCleanup
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.journal import Database, Delivery, JournalInbound
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
 CHANNEL: Final = "telegram"
@@ -50,7 +51,7 @@ class _Channel:
         self.deleted: list[str] = []
         self.states: list[str] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -80,7 +81,7 @@ def _message(kind: InboundKind, text: str) -> Inbound:
         key=str(TEXT),
         kind=kind,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref=TEXT_REF,
         reply_to_ref=origin,
         text=text,
@@ -144,7 +145,7 @@ def test_a_tap_with_a_secret_in_its_data_is_refused_but_the_bots_message_is_kept
             key=str(TAP),
             kind=InboundKind.TAP,
             sender=str(OWNER),
-            chat=OWNER,
+            place=telegram_place(OWNER),
             message_ref=QUESTION_REF,
             data=SECRETS["sk_key"],
         ),

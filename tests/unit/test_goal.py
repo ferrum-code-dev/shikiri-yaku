@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
-from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramDestinations
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
+from shikiri_yaku.adapters.telegram_topics import TOPIC_OPEN, TelegramPlaces
 from shikiri_yaku.app.goal import GoalCommand
 from shikiri_yaku.app.submit import Submitter
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal import Database, JournalOutbox, MessageStore, OpStore, SignalStore
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.submits import JournalSubmits
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, Message, ShikiruClient
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
-OWNER: Final = Destination("telegram", "1001")
+OWNER: Final = Place("telegram", "1001")
 SUBMIT: Final = "/submit api Add the export"
 DONE: Final = Ack(id=7, status=AckStatus.DONE, result={"task_id": "T-9"}, message=None)
 GROUP: Final = -1005
@@ -80,10 +80,7 @@ class _Submit:
             clients,
             self.outbox,
             clock,
-            destinations=TelegramDestinations(
-                self.topics, owners=(1001,), group_id=GROUP, reconciler=None
-            ),
-            channel="telegram",
+            places=TelegramPlaces(self.topics, owners=(1001,), group_id=GROUP, reconciler=None),
             shared_group=shared_group,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -94,10 +91,9 @@ class _Submit:
             key=str(update),
             kind=InboundKind.TEXT,
             sender="1001",
-            chat=chat,
+            place=telegram_place(chat, thread),
             message_ref=f"{chat}/90",
             text=text,
-            thread=thread,
         )
         asyncio.run(self.command.handle(item))
 
@@ -109,7 +105,7 @@ class _Submit:
                     key=str(update),
                     kind=InboundKind.TAP,
                     sender="1001",
-                    chat=chat,
+                    place=telegram_place(chat),
                     message_ref=ref,
                     data=data,
                 )
@@ -153,7 +149,7 @@ def _unknown_submit(submit: _Submit, chat: int = 1001) -> tuple[int, str]:
 def test_a_submit_is_submitted_once_and_its_task_id_is_reported(submit: _Submit) -> None:
     submit.send(SUBMIT)
     [pending] = submit.outbox.pending()
-    assert pending.destination == OWNER
+    assert pending.place == OWNER
     assert "T-9" in pending.message.text
     assert submit.client.requests == ["Add the export"]
 
@@ -221,7 +217,7 @@ def test_a_duplicate_delivery_of_one_tap_retries_once_and_replies_once(submit: _
 def test_a_tap_that_was_never_offered_retries_nothing(submit: _Submit) -> None:
     prompt, ref = _unknown_submit(submit)
     submit.tap(f"s:{prompt}", "M-missing", update=2)
-    submit.tap(f"s:{prompt}", ref, update=3, chat=2002)
+    submit.tap(f"s:{prompt}", "2002/90", update=3, chat=2002)
     submit.tap("s:999", ref, update=4)
     assert submit.client.requests == ["Add the export"]
 
@@ -231,7 +227,7 @@ def test_submit_again_tapped_in_the_group_retries_and_reports_in_the_group(submi
     submit.tap(f"s:{prompt}", ref, chat=GROUP)
     [pending] = submit.outbox.pending()
     assert "T-9" in pending.message.text
-    assert pending.destination == Destination("telegram", str(GROUP))
+    assert pending.place == Place("telegram", str(GROUP))
     assert submit.client.requests == ["Add the export"] * 2
 
 
@@ -241,7 +237,7 @@ def test_a_submit_in_a_component_topic_is_submitted_to_that_component_in_that_to
     submit.topics.save("api", TOPIC, TOPIC_OPEN)
     submit.send("/submit Add the export", chat=GROUP, thread=TOPIC)
     [pending] = submit.outbox.pending()
-    assert pending.destination == Destination("telegram", str(GROUP), TOPIC)
+    assert pending.place == telegram_place(GROUP, TOPIC)
     assert submit.client.requests == ["Add the export"]
 
 
@@ -251,7 +247,7 @@ def test_a_submit_in_the_general_topic_without_a_component_gets_usage_and_submit
     submit.send("/submit fix the export", chat=GROUP)
     [pending] = submit.outbox.pending()
     assert "/submit" in pending.message.text
-    assert pending.destination == Destination("telegram", str(GROUP))
+    assert pending.place == Place("telegram", str(GROUP))
     assert submit.client.requests == []
 
 

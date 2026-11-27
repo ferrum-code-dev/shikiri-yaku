@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.adapters.telegram import chat_and_thread, telegram_place
+
+if TYPE_CHECKING:
+    from shikiri_yaku.domain.place import Place
 
 GROUP: Final = -100123
 BOT: Final = "bot"
@@ -14,18 +17,19 @@ class FakeRooms:
     """Maps rooms to places; a test overrides each call it expects, and any other call fails."""
 
     def __init__(self, group_id: int = GROUP) -> None:
-        self._group = str(group_id)
+        self._group = group_id
 
     async def open(self, title: str) -> str:
         raise NotImplementedError
 
-    def place(self, room: str) -> Destination:
-        return Destination("telegram", self._group, int(room))
+    def place(self, room: str) -> Place:
+        return telegram_place(self._group, int(room))
 
-    def room_of(self, place: Destination) -> str | None:
-        if place.chat != self._group or place.thread is None:
+    def room_of(self, place: Place) -> str | None:
+        chat, thread = chat_and_thread(place)
+        if chat != str(self._group) or thread is None:
             return None
-        return str(place.thread)
+        return str(thread)
 
     async def rename(self, room: str, title: str) -> None:
         raise NotImplementedError
@@ -40,8 +44,8 @@ class FakeRooms:
 class FakeSharedChat:
     """The instance is `BOT`; the main place is the one outside every thread."""
 
-    def is_main(self, place: Destination) -> bool:
-        return place.thread is None
+    def is_main(self, place: Place) -> bool:
+        return chat_and_thread(place)[1] is None
 
     async def addressed(self, word: str) -> bool:
         _, _, instance = word.partition("@")

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 from pydantic import TypeAdapter
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_replacer import CopyReplacer
 from shikiri_yaku.domain.outbound import REPLACED_LINE, Purpose
 from shikiri_yaku.journal import (
@@ -28,7 +28,7 @@ from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Messag
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import FinalEdit
 
 NOW: Final = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
@@ -59,7 +59,7 @@ class _Channel:
         self.deleted: list[str] = []
         self.states: list[str] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         raise NotImplementedError
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -119,9 +119,7 @@ class _Journal:
     ) -> None:
         row = self.messages.record_outbound(
             signal_number=self.numbers[signal],
-            channel="telegram",
-            chat=chat,
-            thread=thread,
+            place=telegram_place(chat, thread),
             purpose=Purpose.QUESTION,
             body=QUESTION,
             notice_key=f"question:{ref}",

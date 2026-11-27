@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.domain.loop_guard import Cause
 from shikiri_yaku.journal import (
     CursorStore,
@@ -252,8 +253,7 @@ def test_a_notice_is_queued_once_per_owner_chat(memory: Database) -> None:
     def queue(chat: str) -> Inserted:
         return messages.record_outbound(
             signal_number=signal,
-            channel="telegram",
-            chat=chat,
+            place=telegram_place(chat),
             purpose=Purpose.NOTICE,
             body=Message("done"),
             notice_key="done:api:T-1",

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final, cast
 import pytest
 
 from shikiri_yaku.app.submit import Submitter
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal.database import Database
 from shikiri_yaku.journal.ops import NewOp, OpStore
 from shikiri_yaku.journal.submits import JournalSubmits
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 NOW: Final = datetime(2026, 10, 28, tzinfo=UTC)
 PAYLOAD: Final = SubmitPayload(
-    component="api", request="Add the export", destination=Destination("telegram", "1001")
+    component="api", request="Add the export", place=Place("telegram", "1001")
 )
 UPDATE: Final = 41
 NEXT_UPDATE: Final = 42
@@ -118,7 +118,7 @@ def test_a_planning_payload_is_sent_in_plan_mode(
     payload = SubmitPayload(
         component=PAYLOAD.component,
         request="Plan this work, then execute it",
-        destination=PAYLOAD.destination,
+        place=PAYLOAD.place,
         mode="plan",
     )
     op = asyncio.run(submitter.submit(UPDATE, payload))

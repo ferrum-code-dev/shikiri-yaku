@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from shikiri_yaku.extensions.notice.family import Family
     from shikiri_yaku.ports import (
         Clock,
-        Destinations,
         Notifier,
         Outbox,
+        Places,
         ShikiruClient,
         ShikiruTask,
         SignalNumbers,
@@ -54,7 +54,7 @@ class NoticeHandler:
         notifier: Notifier,
         clock: Clock,
         *,
-        destinations: Destinations,
+        places: Places,
         tasks_max: int,
         max_text: int,
     ) -> None:
@@ -64,7 +64,7 @@ class NoticeHandler:
         self._outbox = outbox
         self._notifier = notifier
         self._clock = clock
-        self._destinations = destinations
+        self._places = places
         self._tasks_max = tasks_max
 
     async def handle(self, signal: Signal) -> Outcome:
@@ -93,11 +93,8 @@ class NoticeHandler:
         return Informed(SENT)
 
     def _in_component_topic(self, signal: Signal) -> bool:
-        destinations = self._destinations.for_signal(signal.project, signal.kind)
-        return all(
-            self._destinations.component_of(destination.thread) == signal.project
-            for destination in destinations
-        )
+        places = self._places.for_signal(signal.project, signal.kind)
+        return all(self._places.component_of(place) == signal.project for place in places)
 
     def _health(self, signal: Signal) -> Outcome:
         number = self._numbers.number_of(signal)
@@ -107,7 +104,7 @@ class NoticeHandler:
         self._outbox.queue(
             number,
             Purpose.NOTICE,
-            self._destinations.for_signal(signal.project, signal.kind),
+            self._places.for_signal(signal.project, signal.kind),
             Message(
                 fit(signal.text, self._max_text),
                 (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),),

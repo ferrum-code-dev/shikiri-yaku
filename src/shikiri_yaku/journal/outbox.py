@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal.messages import Delivery
 from shikiri_yaku.ports import Pending
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class JournalOutbox:
-    """The outbound rows of the messages table: body and destination are stored before any send.
+    """The outbound rows of the messages table: body and place are stored before any send.
 
     It is also the Copies the CopyEditor journals refused edits and deletions on, on the same rows.
     """
@@ -38,7 +38,7 @@ class JournalOutbox:
         self,
         number: int | None,
         purpose: Purpose,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         message: Message,
         *,
         key: str,
@@ -47,14 +47,12 @@ class JournalOutbox:
         standing: bool = False,
         conversation_id: int | None = None,
     ) -> None:
-        # keep: one transaction, so an interruption leaves every destination or none
+        # keep: one transaction, so an interruption leaves every place or none
         with self._database.transaction():
-            for where in destinations:
+            for where in places:
                 self._messages.record_outbound(
                     signal_number=number,
-                    channel=where.channel,
-                    chat=where.chat,
-                    thread=where.thread,
+                    place=where,
                     purpose=purpose,
                     body=message,
                     notice_key=key,
@@ -94,7 +92,7 @@ class JournalOutbox:
             rows = connection.execute(
                 """SELECT progress.id, progress.notice_key, progress.delivery,
                     SUBSTR(progress.notice_key, 1, LENGTH(progress.notice_key) - 9) AS sketch_key,
-                    progress.channel, progress.chat, progress.thread, progress.conversation_id
+                    progress.channel, progress.place, progress.conversation_id
             FROM messages AS progress
             WHERE progress.direction = 'out'
               AND progress.delivery IN (?, ?)
@@ -114,9 +112,7 @@ class JournalOutbox:
                     )
                 self._messages.record_outbound(
                     signal_number=None,
-                    channel=row["channel"],
-                    chat=row["chat"],
-                    thread=row["thread"],
+                    place=Place(row["channel"], row["place"]),
                     purpose=Purpose.EXPERT,
                     body=message,
                     notice_key=row["sketch_key"],
@@ -127,7 +123,7 @@ class JournalOutbox:
 
     def queue_command_reply(
         self,
-        destinations: Sequence[Destination],
+        places: Sequence[Place],
         parts: Sequence[Message],
         *,
         key: str,
@@ -142,12 +138,10 @@ class JournalOutbox:
             if created.rowcount != 1:
                 return
             for index, part in enumerate(parts):
-                for where in destinations:
+                for where in places:
                     self._messages.record_outbound(
                         signal_number=None,
-                        channel=where.channel,
-                        chat=where.chat,
-                        thread=where.thread,
+                        place=where,
                         purpose=Purpose.NOTICE,
                         body=part,
                         notice_key=f"{key}:{index}",
@@ -155,16 +149,16 @@ class JournalOutbox:
                         conversation_id=conversation_id,
                     )
 
-    def expert_selection(self, channel: str, item: Inbound) -> Inbound | None:
+    def expert_selection(self, item: Inbound) -> Inbound | None:
         row = self._database.connection.execute(
             """SELECT original.* FROM messages AS offered
             JOIN messages AS original
               ON offered.notice_key = 'expert:select:' || original.update_id || ':0'
             WHERE offered.direction = 'out' AND offered.delivery = 'sent'
-              AND offered.channel = ? AND offered.chat = ? AND offered.platform_message_id = ?
+              AND offered.channel = ? AND offered.platform_message_id = ?
               AND original.direction = 'in' AND original.kind IN ('text', 'reply')
               AND ? = 'expert:' || original.update_id""",
-            (channel, str(item.chat), item.message_ref, item.data),
+            (item.place.channel, item.message_ref, item.data),
         ).fetchone()
         if row is None:
             return None
@@ -173,10 +167,9 @@ class JournalOutbox:
             key=row["event_key"],
             kind=InboundKind.TEXT,
             sender=row["sender"],
-            chat=int(row["chat"]),
+            place=Place(row["channel"], row["place"]),
             message_ref=row["message_ref"],
             text=row["body"],
-            thread=row["thread"],
         )
 
     def pending(self) -> list[Pending]:
@@ -184,7 +177,7 @@ class JournalOutbox:
         return [
             Pending(
                 stored.id,
-                Destination(stored.channel, stored.chat, stored.thread),
+                stored.place,
                 stored.body,
                 stored.conversation_id,
             )
@@ -199,14 +192,14 @@ class JournalOutbox:
             return None
         return Pending(
             stored.id,
-            Destination(stored.channel, stored.chat, stored.thread),
+            stored.place,
             stored.body,
             stored.conversation_id,
         )
 
     def _ready(self, message_id: int) -> bool:
         pending = self._database.connection.execute(
-            "SELECT notice_key, final_body, channel, chat, thread FROM messages WHERE id = ?",
+            "SELECT notice_key, final_body, channel, place FROM messages WHERE id = ?",
             (message_id,),
         ).fetchone()
         if pending is None:
@@ -226,12 +219,11 @@ class JournalOutbox:
             return False
         answer_key = notice_key.removesuffix(":actions")
         rows = self._database.connection.execute(
-            "SELECT delivery FROM messages WHERE channel = ? AND chat = ? AND thread IS ?"
+            "SELECT delivery FROM messages WHERE channel = ? AND place = ?"
             " AND (notice_key = ? OR notice_key LIKE ?)",
             (
                 pending["channel"],
-                pending["chat"],
-                pending["thread"],
+                pending["place"],
                 answer_key,
                 f"{answer_key}:part:%",
             ),

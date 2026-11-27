@@ -9,6 +9,7 @@ import pytest
 
 from shikiri_yaku import bootstrap
 from shikiri_yaku.adapters.stderr import StderrReporter
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.app.stats import Stats
 from shikiri_yaku.domain.classification import Verdict
 from shikiri_yaku.domain.outbound import Purpose
@@ -71,8 +72,7 @@ def _signal(
     for minute in queued:
         messages.record_outbound(
             signal_number=number,
-            channel="telegram",
-            chat="1001",
+            place=telegram_place("1001"),
             purpose=purpose,
             body=Message("question"),
             notice_key=None,

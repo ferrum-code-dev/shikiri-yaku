@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import TypeAdapter
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.outbox_sender import OutboxSender
 from shikiri_yaku.app.scheduler import Scheduler
 from shikiri_yaku.bootstrap import ENDING_NOTICE_PREFIXES, schedule_log
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.domain.signal import Closing, Kind, Signal
 from shikiri_yaku.extensions.notice.handler import HEALTH_KEY
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
@@ -28,7 +28,7 @@ from shikiri_yaku.journal import (
 from shikiri_yaku.journal.conversations import Conversations
 from shikiri_yaku.ports import Button, ChannelError, ChannelRefusedError, Message
 from shikiri_yaku.settings import BUTTON_LABEL_MAX_CHARS, MESSAGE_TITLE_MAX_CHARS
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.support.secrets import SECRETS, secret_cases, secret_messages
 
 if TYPE_CHECKING:
@@ -37,8 +37,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.schedule import Parked
 
 START = datetime(2026, 10, 28, 9, 0, tzinfo=UTC)
-OWNER = Destination("telegram", "1001")
-OTHER = Destination("telegram", "1002")
+OWNER = Place("telegram", "1001")
+OTHER = Place("telegram", "1002")
 QUESTION = Message("S1 · Which way?", (Button("1", "a:1:1"),))
 HEALTH = Message("api: Shikiru link down for 10 minutes")
 SENT = "1001/42"
@@ -58,18 +58,18 @@ class _Clock:
 
 class _Channel:
     def __init__(self) -> None:
-        self.sent: list[tuple[Destination, Message]] = []
+        self.sent: list[tuple[Place, Message]] = []
         self.failing = False
         self.refusal: str | None = None
         self.attempts = 0
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         self.attempts += 1
         if self.refusal is not None:
             raise ChannelRefusedError(self.refusal)
         if self.failing:
             raise ChannelError
-        self.sent.append((destination, message))
+        self.sent.append((place, message))
         return str(len(self.sent))
 
     async def edit(self, message_ref: str, message: Message) -> None:
@@ -85,12 +85,12 @@ class _FailOnceChannel(_Channel):
         self.failed_text = failed_text
         self.attempted: list[str] = []
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         self.attempted.append(message.text)
         if message.text == self.failed_text:
             self.failed_text = ""
             raise ChannelError
-        return await super().send(destination, message)
+        return await super().send(place, message)
 
 
 class _WaitingChannel(_Channel):
@@ -99,11 +99,11 @@ class _WaitingChannel(_Channel):
         self.started = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def send(self, destination: Destination, message: Message) -> str:
+    async def send(self, place: Place, message: Message) -> str:
         if self.attempts == 0:
             self.started.set()
             await self.release.wait()
-        return await super().send(destination, message)
+        return await super().send(place, message)
 
 
 class _Reporter:
@@ -177,7 +177,7 @@ def _stored_values(database: Database) -> list[object]:
 def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_confirmed(
     memory: Database,
 ) -> None:
-    topic = Destination("telegram", "-1009", 73)
+    topic = telegram_place(-1009, 73)
     number = _signal(memory)
     _outbox(memory).queue(number, Purpose.QUESTION, [topic], QUESTION, key="forward:1", now=START)
     channel = _Channel()
@@ -192,12 +192,12 @@ def test_a_recorded_message_is_sent_after_a_restart_once_and_never_again_once_co
 def test_a_failed_expert_answer_blocks_later_answers_in_its_conversation_only(
     memory: Database,
 ) -> None:
-    topic = Destination("telegram", "-1009", 73)
-    unrelated_topic = Destination("telegram", "-1009", 74)
+    topic = telegram_place(-1009, 73)
+    unrelated_topic = telegram_place(-1009, 74)
     outbox = _outbox(memory)
     conversations = Conversations(memory)
-    conversations.create(1, chat=-1009, thread=None, text="first", scope=[], now=START)
-    conversations.create(2, chat=-1009, thread=None, text="unrelated", scope=[], now=START)
+    conversations.create(1, origin=telegram_place(-1009), text="first", scope=[], now=START)
+    conversations.create(2, origin=telegram_place(-1009), text="unrelated", scope=[], now=START)
     first_conversation = conversations.get(1)
     unrelated_conversation = conversations.get(2)
     assert first_conversation is not None
@@ -342,7 +342,7 @@ def test_a_question_and_a_reminder_are_sent_by_the_same_sender(memory: Database)
         {},
         _outbox(memory),
         clock,
-        FixedDestinations([OWNER]),
+        FixedPlaces([OWNER]),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -432,7 +432,7 @@ def test_a_refused_message_gets_one_notice_in_each_chat_it_was_queued_for(memory
 
     asyncio.run(_sender(memory, channel).tick())
 
-    assert [destination for destination, _ in channel.sent] == [OWNER, OTHER]
+    assert [place for place, _ in channel.sent] == [OWNER, OTHER]
 
 
 def test_a_notice_the_platform_refuses_is_reported_and_gets_no_notice_of_its_own(

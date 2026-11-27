@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 
+from shikiri_yaku.adapters.telegram import telegram_place
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
 from shikiri_yaku.app.inbound_poller import InboundPoller
 from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind, Received
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.journal import Database, JournalInbound
 from shikiri_yaku.journal.conversations import Conversations
 from tests.support.secrets import SECRETS
@@ -37,7 +38,7 @@ ITEMS: Final = (
         key=str(TEXT),
         kind=InboundKind.REPLY,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="1001/90",
         reply_to_ref="1001/42",
         text="Use the second way",
@@ -46,7 +47,7 @@ ITEMS: Final = (
         key=str(TAP),
         kind=InboundKind.TAP,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="1001/42",
         data="a:1:1",
     ),
@@ -54,7 +55,7 @@ ITEMS: Final = (
         key=str(OTHER),
         kind=InboundKind.TEXT,
         sender=str(STRANGER),
-        chat=STRANGER,
+        place=telegram_place(STRANGER),
         message_ref="2002/92",
         text="hello",
     ),
@@ -135,10 +136,10 @@ def test_an_erased_event_is_not_stored_again_and_its_id_is_never_used_again(
     journal.record_batch(CHANNEL, ITEMS[:1], "first", NOW)
     [asked] = journal.pending()
     conversations = Conversations(database)
-    conversations.create(asked.id, chat=OWNER, thread=None, text="q", scope=[], now=NOW)
+    conversations.create(asked.id, origin=telegram_place(OWNER), text="q", scope=[], now=NOW)
     conversation = conversations.get(asked.id)
     assert conversation is not None
-    conversations.erase(conversation.id, room_place=Destination(CHANNEL, str(GROUP), 7))
+    conversations.erase(conversation.id, room_place=telegram_place(GROUP, 7))
     assert journal.pending() == []
 
     journal.record_batch(CHANNEL, ITEMS[:1], "again", NOW)
@@ -151,12 +152,12 @@ def test_an_erased_event_is_not_stored_again_and_its_id_is_never_used_again(
 
 def test_channels_never_share_an_id_or_a_key(journal: JournalInbound) -> None:
     journal.record_batch(CHANNEL, ITEMS[:2], "a", NOW)
-    journal.record_batch("later", ITEMS[:1], "b", NOW)
+    elsewhere = replace(ITEMS[0], place=Place("later", ITEMS[0].place.id))
+    journal.record_batch("later", [elsewhere], "b", NOW)
     journal.record_batch(CHANNEL, ITEMS[2:], "c", NOW)
 
-    assert journal.pending() == [
-        _stored(number, ITEMS[at]) for number, at in enumerate((0, 1, 0, 2), 1)
-    ]
+    stored = (ITEMS[0], ITEMS[1], elsewhere, ITEMS[2])
+    assert journal.pending() == [_stored(number, event) for number, event in enumerate(stored, 1)]
 
 
 def test_an_update_of_someone_but_an_owner_is_not_stored_and_the_offset_moves_on(
@@ -192,7 +193,7 @@ def test_an_owner_item_is_kept_from_the_private_chat_or_the_configured_group_onl
         key=str(TEXT),
         kind=InboundKind.TEXT,
         sender=str(sender),
-        chat=chat,
+        place=telegram_place(chat),
         message_ref=f"{chat}/90",
         text="hello",
     )
@@ -249,7 +250,7 @@ def test_text_with_a_secret_is_kept_without_its_text_and_is_not_pending(
         key=str(TEXT),
         kind=kind,
         sender=str(OWNER),
-        chat=OWNER,
+        place=telegram_place(OWNER),
         message_ref="1001/90",
         text=secret if kind == InboundKind.TEXT else None,
         data=secret if kind == InboundKind.TAP else None,
@@ -268,10 +269,9 @@ def test_a_file_item_is_kept_with_its_caption_and_its_file_reference(
         key=str(740),
         kind=InboundKind.FILE,
         sender=str(OWNER),
-        chat=GROUP,
+        place=telegram_place(GROUP),
         message_ref=f"{GROUP}/95",
         text="look",
-        thread=None,
         file=FileRef(id="file-1", name="spec.pdf", size=3),
     )
 
@@ -285,7 +285,7 @@ def test_a_file_from_someone_but_an_owner_is_not_kept(journal: JournalInbound) -
         key=str(741),
         kind=InboundKind.FILE,
         sender=str(STRANGER),
-        chat=GROUP,
+        place=telegram_place(GROUP),
         message_ref=f"{GROUP}/96",
         file=FileRef(id="file-2", name="x.bin"),
     )
@@ -302,7 +302,7 @@ def test_a_file_whose_caption_carries_a_secret_is_refused_and_kept_only_to_delet
         key=str(742),
         kind=InboundKind.FILE,
         sender=str(OWNER),
-        chat=GROUP,
+        place=telegram_place(GROUP),
         message_ref=f"{GROUP}/97",
         text=f"key {SECRETS['sk_key']}",
         file=FileRef(id="file-3", name="key.txt"),

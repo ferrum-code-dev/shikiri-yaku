@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Final, Self, cast, overload
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, TelegramChannel
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, TelegramChannel, telegram_place
 from shikiri_yaku.app.command_reply import queue_command_reply
 from shikiri_yaku.app.commands import Commands
 from shikiri_yaku.app.open_command import OpenCommand
@@ -22,7 +22,7 @@ from shikiri_yaku.app.status import Status
 from shikiri_yaku.bootstrap import goal_command
 from shikiri_yaku.domain.inbound import Inbound, InboundKind
 from shikiri_yaku.domain.outbound import refusal_notice, split_reply
-from shikiri_yaku.domain.schedule import Destination
+from shikiri_yaku.domain.place import Place
 from shikiri_yaku.extensions.product.forwarder import ProductForwarder
 from shikiri_yaku.journal import (
     CursorStore,
@@ -39,7 +39,7 @@ from shikiri_yaku.settings import (
     COMMAND_NAME_MAX_CHARS,
     MESSAGE_TITLE_MAX_CHARS,
 )
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FakeBotApi
 
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import EscalationView, ShikiruClient
 
 NOW = datetime(2026, 10, 29, 9, 0, tzinfo=UTC)
-OWNER = Destination("telegram", "1001")
+OWNER = Place("telegram", "1001")
 TASKS = 120
 COMPONENTS: Final = 60
 TOKEN: Final = SECRETS["bot_token"]
@@ -157,7 +157,7 @@ class _Stack:
             self.clients,
             self.outbox,
             _Clock(),
-            FixedDestinations([OWNER]),
+            FixedPlaces([OWNER]),
             button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -167,8 +167,7 @@ class _Stack:
             reshower,
             self.outbox,
             _Clock(),
-            destinations=FixedDestinations([OWNER]),
-            channel="telegram",
+            places=FixedPlaces([OWNER]),
             max_text=MESSAGE_TEXT_LIMIT,
         )
         goal = goal_command(
@@ -176,7 +175,7 @@ class _Stack:
             self.clients,
             self.outbox,
             _Clock(),
-            FixedDestinations(),
+            FixedPlaces(),
             channel="telegram",
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -186,8 +185,7 @@ class _Stack:
             self.status,
             opened,
             goal,
-            destinations=FixedDestinations([OWNER]),
-            channel="telegram",
+            places=FixedPlaces([OWNER]),
             name_max_chars=COMMAND_NAME_MAX_CHARS,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -206,7 +204,7 @@ class _Stack:
                     key=str(update),
                     kind=InboundKind.TEXT,
                     sender="1001",
-                    chat=1001,
+                    place=telegram_place(1001),
                     message_ref="1001/90",
                     text=text,
                 )
@@ -283,14 +281,14 @@ def test_replay_after_live_status_changes_reuses_the_committed_reply(
         queue_group = stack.outbox.queue_command_reply
 
         def interrupt_after_commit(
-            destinations: Sequence[Destination],
+            places: Sequence[Place],
             parts: Sequence[Message],
             *,
             key: str,
             now: datetime,
             conversation_id: int | None = None,
         ) -> None:
-            queue_group(destinations, parts, key=key, now=now, conversation_id=conversation_id)
+            queue_group(places, parts, key=key, now=now, conversation_id=conversation_id)
             raise KeyboardInterrupt
 
         monkeypatch.setattr(stack.outbox, "queue_command_reply", interrupt_after_commit)

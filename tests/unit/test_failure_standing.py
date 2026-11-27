@@ -56,7 +56,7 @@ from shikiri_yaku.settings import (
     NOTICE_TASKS_MAX,
     InfrastructureSettings,
 )
-from tests.support.destinations import FixedDestinations
+from tests.support.places import FixedPlaces
 from tests.unit.test_replies import OWNER, Harness
 
 if TYPE_CHECKING:
@@ -174,7 +174,7 @@ def _forwarder(h: Harness, clock: _Clock, clients: Mapping[str, ShikiruClient]) 
         clients,
         h.outbox,
         clock,
-        FixedDestinations([OWNER]),
+        FixedPlaces([OWNER]),
         button_label_max_chars=BUTTON_LABEL_MAX_CHARS,
         max_text=MESSAGE_TEXT_LIMIT,
     )
@@ -196,7 +196,7 @@ def _restarting(h: Harness, clock: _Clock, failure: str) -> Router:
         clock,
         waits=JournalWaits(journal, OpStore(journal)),
         starts=JournalStarts(journal, OpStore(journal), SignalStore(journal)),
-        notifier=Notifier(h.outbox, FixedDestinations([OWNER]), clock),
+        notifier=Notifier(h.outbox, FixedPlaces([OWNER]), clock),
         install=_NoInstall(),
         quota_wait_max=timedelta(hours=INFRA.quota_wait_max_h),
         quota_wait_margin=timedelta(minutes=INFRA.quota_wait_margin_min),
@@ -288,14 +288,14 @@ def test_a_failed_notice_is_information_and_closes_its_signal(h: Harness) -> Non
     )
     clock = _Clock()
     clients = {PROJECT: cast("ShikiruClient", _TaskListDown())}
-    destinations = FixedDestinations([OWNER])
+    places = FixedPlaces([OWNER])
     extension = notice_extension(
         clients,
         SignalStore(h.database),
         h.outbox,
-        Notifier(h.outbox, destinations, clock),
+        Notifier(h.outbox, places, clock),
         clock,
-        destinations=destinations,
+        places=places,
         tasks_max=NOTICE_TASKS_MAX,
         max_text=MESSAGE_TEXT_LIMIT,
     )

@@ -50,7 +50,6 @@ def expert_proposals(
         final or JournalFinalEdits(database, replies, max_text=MESSAGE_TEXT_LIMIT),
         outbox,
         clock,
-        channel=channel,
         rooms=FakeRooms(group_id),
         access=access or AdminAccess(conversations, clock, admins=frozenset()),
         files=files,

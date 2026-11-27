@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 import pytest
 
-from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT
+from shikiri_yaku.adapters.telegram import MESSAGE_TEXT_LIMIT, telegram_place
 from shikiri_yaku.app.copy_editor import CopyEditor
 from shikiri_yaku.app.event_source import (
     CLOSED_UNMERGED_LINE,
@@ -141,8 +141,7 @@ def _review_on_screen(database: Database) -> int:
     for index, ref in enumerate(REFS):
         row = messages.record_outbound(
             signal_number=number,
-            channel="telegram",
-            chat=str(1001 + index),
+            place=telegram_place(1001 + index),
             purpose=Purpose.NOTICE,
             body=body,
             notice_key=f"review:{number}",

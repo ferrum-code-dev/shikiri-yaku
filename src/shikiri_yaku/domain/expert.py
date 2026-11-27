@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.domain.classification import CallRecord
+    from shikiri_yaku.domain.place import Place
 
 
 class ExpertTask(BaseModel):
@@ -74,8 +75,7 @@ class ExpertSession:
 class ConversationRecord:
     id: int
     update_id: int
-    chat: int
-    origin_thread: int | None
+    origin: Place
     room: str | None
     scope: list[str]
     state: str

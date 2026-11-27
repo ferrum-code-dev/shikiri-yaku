@@ -1,6 +1,6 @@
 """The copies a newer copy of their slot replaced, and the journal of their deletion.
 
-A copy is superseded when a newer copy of the same slot, signal, chat and thread has been sent. Its
+A copy is superseded when a newer copy of the same slot, signal and place has been sent. Its
 deletion is journaled before the platform is asked. A copy the platform will not delete keeps its
 text and is edited to the line that says it was replaced; a transient failure puts it back.
 """
@@ -44,8 +44,7 @@ class JournalReplacements:
                 SELECT 1 FROM messages AS newer
                 WHERE newer.id > old.id AND newer.direction = :out AND newer.delivery = :sent
                   AND newer.slot = old.slot AND newer.signal_number IS old.signal_number
-                  AND newer.channel = old.channel AND newer.chat = old.chat
-                  AND newer.thread IS old.thread
+                  AND newer.channel = old.channel AND newer.place = old.place
               )
             ORDER BY old.id
             """,

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from shikiri_yaku.domain.place import Place
     from shikiri_yaku.domain.signal import Signal
 
 
@@ -22,13 +23,6 @@ class Parked:
 
 
 @dataclass(frozen=True, slots=True)
-class Destination:
-    channel: str
-    chat: str
-    thread: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class Awaiting:
     """A forwarded signal the PO has not answered, asked first at `asked_at`."""
 
@@ -36,7 +30,7 @@ class Awaiting:
     project: str
     task_id: str | None
     asked_at: datetime
-    destinations: tuple[Destination, ...]
+    places: tuple[Place, ...]
 
 
 def due_occurrence(asked_at: datetime, now: datetime, first_h: int, repeat_h: int) -> int:
