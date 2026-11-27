@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, StrictInt, TypeAdapter, ValidationError
 
+from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import (
     PLACE_GONE_REASON,
     Button,
@@ -31,7 +32,6 @@ from shikiri_yaku.ports import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.ports import Clock, Message
 
 TELEGRAM_CHANNEL: Final = "telegram"
@@ -539,7 +539,11 @@ async def _probe_webhook(api: BotApi) -> None:
 
 
 class TelegramForumTopics:
-    """Create and close topics in the configured group through the Bot API."""
+    """The topics of the configured group through the Bot API.
+
+    Component topics are created and closed at start-up. The other operations are the channel's
+    Rooms: a room is a topic, and its id is the thread number as text.
+    """
 
     def __init__(self, api: BotApi, group_id: int) -> None:
         self._api = api
@@ -552,27 +556,35 @@ class TelegramForumTopics:
             raise ChannelError(NOT_ACCEPTED)
         return reply.result.message_thread_id
 
-    async def create_expert(self, name: str) -> int:
+    async def open(self, title: str) -> str:
         body = await self._api.call(
             CREATE_FORUM_TOPIC,
             {
                 "chat_id": self._group_id,
-                "name": name[:TOPIC_NAME_LIMIT],
+                "name": title[:TOPIC_NAME_LIMIT],
                 "icon_color": EXPERT_TOPIC_COLOR,
             },
         )
         reply = _validated(body, _CREATE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
-        return reply.result.message_thread_id
+        return str(reply.result.message_thread_id)
 
-    async def rename(self, thread_id: int, name: str) -> None:
+    def place(self, room: str) -> Destination:
+        return Destination(TELEGRAM_CHANNEL, str(self._group_id), int(room))
+
+    def room_of(self, place: Destination) -> str | None:
+        if place.chat != str(self._group_id) or place.thread is None:
+            return None
+        return str(place.thread)
+
+    async def rename(self, room: str, title: str) -> None:
         body = await self._api.call(
             EDIT_FORUM_TOPIC,
             {
                 "chat_id": self._group_id,
-                "message_thread_id": thread_id,
-                "name": name[:TOPIC_NAME_LIMIT],
+                "message_thread_id": int(room),
+                "name": title[:TOPIC_NAME_LIMIT],
             },
         )
         reply = _validated(body, _CLOSE_TOPIC_REPLY)
@@ -581,21 +593,9 @@ class TelegramForumTopics:
                 raise ChannelRefusedError(PLATFORM_REFUSED)
             raise ChannelError(NOT_ACCEPTED)
 
-    async def addressed(self, word: str) -> bool:
-        _, _, address = word.partition("@")
-        if not address:
-            return False
-        return address.casefold() == (await self.bot_name()).casefold()
-
-    async def bot_name(self) -> str:
-        reply = _validated(await self._api.call(GET_ME, {}), _PROBE_REPLY)
-        if isinstance(reply, _Failed) or not reply.result.username:
-            raise ChannelUnavailableError(BOT_NOT_IDENTIFIED)
-        return reply.result.username
-
-    def link(self, thread_id: int) -> str:
+    def link(self, room: str) -> str:
         group = str(self._group_id).removeprefix(TELEGRAM_SUPERGROUP_PREFIX)
-        return f"https://t.me/c/{group}/{thread_id}"
+        return f"https://t.me/c/{group}/{room}"
 
     async def close(self, thread_id: int) -> None:
         body = await self._api.call(
@@ -606,11 +606,11 @@ class TelegramForumTopics:
         if isinstance(reply, _Failed):
             raise ChannelError(NOT_ACCEPTED)
 
-    async def delete(self, thread_id: int) -> None:
+    async def delete(self, room: str) -> None:
         """Delete the topic and its messages; a refusal is ChannelRefusedError, a gone topic too."""
         body = await self._api.call(
             DELETE_FORUM_TOPIC,
-            {"chat_id": self._group_id, "message_thread_id": thread_id},
+            {"chat_id": self._group_id, "message_thread_id": int(room)},
         )
         reply = _validated(body, _CLOSE_TOPIC_REPLY)
         if isinstance(reply, _Failed):
@@ -619,6 +619,32 @@ class TelegramForumTopics:
             if reply.error_code == FORBIDDEN:
                 raise ChannelRefusedError(PLATFORM_REFUSED)
             raise ChannelError(NOT_ACCEPTED)
+
+
+class TelegramSharedChat:
+    """The shared forum group: every instance answers outside topics, and `@bot` addresses one."""
+
+    def __init__(self, api: BotApi) -> None:
+        self._api = api
+
+    def is_main(self, place: Destination) -> bool:
+        # keep: General has no thread, and neither has a private chat
+        return place.thread is None
+
+    async def addressed(self, word: str) -> bool:
+        _, _, address = word.partition("@")
+        if not address:
+            return False
+        return address.casefold() == (await self._bot_name()).casefold()
+
+    async def command_label(self, command: str) -> str:
+        return f"{command}@{await self._bot_name()}"
+
+    async def _bot_name(self) -> str:
+        reply = _validated(await self._api.call(GET_ME, {}), _PROBE_REPLY)
+        if isinstance(reply, _Failed) or not reply.result.username:
+            raise ChannelUnavailableError(BOT_NOT_IDENTIFIED)
+        return reply.result.username
 
 
 async def _probe_group(

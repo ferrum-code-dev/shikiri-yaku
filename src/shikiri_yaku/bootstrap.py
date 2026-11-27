@@ -33,6 +33,7 @@ from shikiri_yaku.adapters.telegram import (
     TelegramChannel,
     TelegramChannelCheck,
     TelegramForumTopics,
+    TelegramSharedChat,
 )
 from shikiri_yaku.adapters.telegram_files import DOWNLOAD_LIMIT_BYTES, TelegramFiles
 from shikiri_yaku.adapters.telegram_http import HttpBotApi
@@ -224,32 +225,27 @@ def http_bot(settings: Settings) -> BotApi:
     return HttpBotApi(settings.telegram.token_file, settings.operator.telegram_call_timeout_s)
 
 
-def build_channel(
-    settings: Settings, journal: Database, clock: Clock, bot: BotFactory
-) -> tuple[Channel, TelegramForumTopics | None]:
-    """Build the instance's chat channel from its `[channels.telegram]` section.
-
-    The Expert topic operations come with it, until the channel carries its own rooms; they are
-    None without a group.
-    """
+def build_channel(settings: Settings, journal: Database, clock: Clock, bot: BotFactory) -> Channel:
+    """Build the instance's chat channel from its `[channels.telegram]` section."""
     telegram = settings.telegram
     group_id = telegram.group_id
     bot_api = bot(settings)
     # keep: the factory builds HttpBotApi, which also uploads and downloads; tests may pass less
     files_api = cast("FileApi", bot_api)
     topics = TopicStore(journal)
+    forum = None if group_id is None else TelegramForumTopics(bot_api, group_id)
     reconciler = (
         None
-        if group_id is None
+        if forum is None
         else TopicReconciler(
             topics,
-            TelegramForumTopics(bot_api, group_id),
+            forum,
             [component.name for component in settings.components],
             product=settings.product,
         )
     )
     sending = TelegramChannel(files_api, clock)
-    channel = Channel(
+    return Channel(
         name=TELEGRAM_CHANNEL,
         inbox=TelegramUpdates(bot_api, group_id=group_id),
         sender=sending,
@@ -272,9 +268,9 @@ def build_channel(
         max_text=MESSAGE_TEXT_LIMIT,
         max_file_bytes=DOWNLOAD_LIMIT_BYTES,
         secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
+        rooms=forum,
+        shared=TelegramSharedChat(bot_api) if telegram.shared_group else None,
     )
-    expert_topics = None if group_id is None else TelegramForumTopics(bot_api, group_id)
-    return channel, expert_topics
 
 
 def compose(  # noqa: PLR0915 -- composition wires each job
@@ -338,9 +334,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     outbox = JournalOutbox(
         journal, MessageStore(journal, reporter), ending_prefixes=ENDING_NOTICE_PREFIXES
     )
-    channel, expert_topics = build_channel(settings, journal, clock, bot)
+    channel = build_channel(settings, journal, clock, bot)
     destinations = channel.places
-    group_id = settings.telegram.group_id
     guard = LoopGuard(
         JournalActions(OpStore(journal)),
         clock,
@@ -415,26 +410,20 @@ def compose(  # noqa: PLR0915 -- composition wires each job
     conversations = Conversations(journal)
     admins = frozenset(() if settings.admin is None else settings.admin.admins)
     access = AdminAccess(conversations, clock, admins=admins)
-    topics = expert_topics
+    rooms = channel.rooms
     runs = ConversationRuns()
     ending: ExpertEnding | None = None
     proposals: ExpertProposals | None = None
     turns = None
-    if (
-        expert is not None
-        and settings.expert is not None
-        and topics is not None
-        and group_id is not None
-    ):
+    if expert is not None and settings.expert is not None and rooms is not None:
         ending = ExpertEnding(
             conversations,
             runs,
-            topics,
+            rooms,
             outbox,
             clock,
+            places=destinations,
             directory=directory,
-            channel=channel.name,
-            group_id=group_id,
             retention=timedelta(days=settings.expert.retention_days),
             admin_idle=timedelta(minutes=settings.admin_idle_min),
             final=JournalFinalEdits(
@@ -455,9 +444,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 timeout_s=settings.admin.command_timeout_s,
                 max_bytes=settings.admin.output_max_bytes,
                 secrets=channel.secrets,
-                channel=channel.name,
+                rooms=rooms,
                 max_text=channel.max_text,
-                group_id=group_id,
             )
         proposals = ExpertProposals(
             JournalProposals(journal, OpStore(journal), channel_name=channel.name),
@@ -474,7 +462,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             clock,
             channel=channel.name,
             max_text=channel.max_text,
-            group_id=group_id,
+            rooms=rooms,
             access=access,
             approval_expiry_min=(
                 settings.admin.approval_expiry_min
@@ -489,8 +477,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             outbox,
             clock,
             directory=directory,
-            channel=channel.name,
-            group_id=group_id,
+            rooms=rooms,
             known_secrets=channel.secrets,
             outbox_interval_s=settings.operator.outbox_interval_s,
         )
@@ -499,12 +486,11 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             outbox,
             clock,
             expert=expert,
-            topics=topics,
+            rooms=rooms,
             clients=clients,
             scope={component.name: component.path for component in settings.components},
             directory=directory,
             channel=channel.name,
-            group_id=group_id,
             max_text=channel.max_text,
             max_file_bytes=channel.max_file_bytes,
             runs=runs,
@@ -520,7 +506,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
                 outbox,
                 clock,
                 channel=channel.name,
-                group_id=group_id,
+                rooms=rooms,
                 access=access,
             ),
         )
@@ -529,7 +515,8 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         outbox,
         clock,
         configured=expert is not None,
-        topics=topics,
+        rooms=rooms,
+        shared=channel.shared,
         turns=turns,
         scope={component.name: component.path for component in settings.components},
         channel=channel.name,
@@ -561,7 +548,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         destinations,
         channel=channel.name,
         max_text=channel.max_text,
-        shared_group=settings.telegram.shared_group,
+        shared_group=channel.shared is not None,
     )
     inbound = inbound_job(
         settings,
@@ -615,8 +602,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
             conversations,
             clock,
             outbox,
-            channel_name=channel.name,
-            group_id=group_id,
+            rooms=rooms,
         )
         if turns is not None:
             turns.recover()
@@ -1035,7 +1021,7 @@ def inbound_job(
         channel=channel.name,
         max_text=channel.max_text,
         name_max_chars=operator.command_name_max_chars,
-        shared_group=settings.telegram.shared_group,
+        shared=channel.shared,
         ask=ask,
     )
     replies = Replies(

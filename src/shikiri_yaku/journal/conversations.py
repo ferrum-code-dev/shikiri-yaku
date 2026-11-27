@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import sqlite3
     from datetime import datetime
 
+    from shikiri_yaku.domain.schedule import Destination
     from shikiri_yaku.journal.database import Database
 
 _SCOPE = TypeAdapter(list[str])
@@ -31,14 +32,19 @@ _TURN_SELECT: Final = """
 _OWNED_UPDATES: Final = """
     SELECT update_id FROM messages
     WHERE (conversation_id = :id OR update_id = :update_id OR
-           (chat = :topic_chat AND thread = :thread_id))
+           (chat = :room_chat AND thread = :room_thread))
         AND update_id IS NOT NULL
 """
 _ERASE_MESSAGES: Final = """
     DELETE FROM messages
     WHERE conversation_id = :id OR update_id = :update_id OR
-          (chat = :topic_chat AND thread = :thread_id)
+          (chat = :room_chat AND thread = :room_thread)
 """
+
+
+def _room_id(thread_id: int | None) -> str | None:
+    """Return the room id of the stored thread number."""
+    return None if thread_id is None else str(thread_id)
 
 
 def _record(row: sqlite3.Row) -> ConversationRecord:
@@ -48,7 +54,7 @@ def _record(row: sqlite3.Row) -> ConversationRecord:
         update_id=row["update_id"],
         chat=row["chat"],
         origin_thread=row["origin_thread"],
-        thread_id=row["thread_id"],
+        room=_room_id(row["thread_id"]),
         scope=_SCOPE.validate_json(row["scope"]),
         state=row["state"],
         effort=row["effort"],
@@ -62,7 +68,7 @@ def _turn(row: sqlite3.Row) -> TurnRecord:
     return TurnRecord(
         update_id=row["update_id"],
         conversation_id=row["conversation_id"],
-        thread_id=row["thread_id"],
+        room=_room_id(row["thread_id"]),
         text=row["text"],
         state=row["state"],
         answer=row["answer"],
@@ -157,10 +163,10 @@ class Conversations:
         ).fetchone()
         return None if row is None else _record(row)
 
-    def at_thread(self, thread: int) -> ConversationRecord | None:
+    def at_room(self, room: str) -> ConversationRecord | None:
         row = self._database.connection.execute(
             "SELECT * FROM conversations WHERE thread_id = ? AND state = 'open'",
-            (thread,),
+            (room,),
         ).fetchone()
         return None if row is None else _record(row)
 
@@ -226,18 +232,11 @@ class Conversations:
             "UPDATE conversations SET state = 'failed' WHERE update_id = ?", (update_id,)
         )
 
-    def opened(self, update_id: int, thread: int) -> None:
+    def opened(self, update_id: int, room: str) -> None:
         with self._database.transaction() as connection:
             connection.execute(
                 "UPDATE conversations SET state = 'open', thread_id = ? WHERE update_id = ?",
-                (thread, update_id),
-            )
-            connection.execute(
-                """
-                INSERT INTO topics (component, thread_id, state, conversation_id)
-                SELECT NULL, ?, 'open', id FROM conversations WHERE update_id = ?
-                """,
-                (thread, update_id),
+                (room, update_id),
             )
 
     def start(self, update_id: int) -> bool:
@@ -335,27 +334,27 @@ class Conversations:
         ).fetchall()
         return [_record(row) for row in rows]
 
-    def erase(self, conversation_id: int, *, topic_chat: int) -> None:
+    def erase(self, conversation_id: int, *, room_place: Destination) -> None:
         """Delete every row of a conversation.
 
-        That is its messages and replies, topic, turns, request, and its proposals with their tasks,
-        whose request texts are the conversation's own.
+        That is its messages and replies, turns, request, and its proposals with their tasks, whose
+        request texts are the conversation's own.
 
         A message is the conversation's when it is tagged with it, is its request, or was sent in
-        its topic. A channel does not reuse a topic's id in its chat, so the topic picks out only
-        the messages of this conversation.
+        its room. A channel does not reuse a room's id, so the room's place picks out only the
+        messages of this conversation.
         """
         with self._database.transaction() as connection:
             row = connection.execute(
-                "SELECT update_id, thread_id FROM conversations WHERE id = ?", (conversation_id,)
+                "SELECT update_id FROM conversations WHERE id = ?", (conversation_id,)
             ).fetchone()
             if row is None:
                 return
             owned = {
                 "id": conversation_id,
                 "update_id": row["update_id"],
-                "topic_chat": str(topic_chat),
-                "thread_id": row["thread_id"],
+                "room_chat": room_place.chat,
+                "room_thread": room_place.thread,
             }
             updates = connection.execute(_OWNED_UPDATES, owned).fetchall()
             connection.executemany(
@@ -373,6 +372,7 @@ class Conversations:
                 [(notice["notice_key"].rpartition(":")[0],) for notice in notices],
             )
             connection.execute(_ERASE_MESSAGES, owned)
+            # keep: an earlier version wrote such a row, and its reference blocks the erasure
             connection.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
             connection.execute(
                 "DELETE FROM ops WHERE kind = 'submit' AND json_extract(payload, '$.proposal')"

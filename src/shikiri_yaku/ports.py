@@ -130,12 +130,14 @@ __all__ = [
     "ResolvePayload",
     "RetryAttempt",
     "RetryLog",
+    "Rooms",
     "RoutingLog",
     "RungState",
     "RungStates",
     "ScheduleLog",
     "SecretLog",
     "Sender",
+    "SharedChat",
     "ShikiruClient",
     "ShikiruError",
     "ShikiruEvent",
@@ -849,6 +851,46 @@ class Channel:
     max_text: int
     max_file_bytes: int
     secrets: tuple[str, ...]
+    rooms: Rooms | None = None
+    shared: SharedChat | None = None
+
+
+class Rooms(Protocol):
+    """The places a channel opens, one for each Expert conversation, each known by a room id."""
+
+    async def open(self, title: str) -> str:
+        """Open a room and return its id; a failure raises ChannelError."""
+        ...
+
+    def place(self, room: str) -> Destination: ...
+
+    def room_of(self, place: Destination) -> str | None:
+        """Return the id of the room the place can be, or None; whether it is open is not known."""
+        ...
+
+    async def rename(self, room: str, title: str) -> None: ...
+
+    async def delete(self, room: str) -> None:
+        """Delete the room and its messages; a room already gone raises PlaceGoneError."""
+        ...
+
+    def link(self, room: str) -> str | None: ...
+
+
+class SharedChat(Protocol):
+    """One chat that several instances share, each with its own bot."""
+
+    def is_main(self, place: Destination) -> bool:
+        """Return whether every instance answers in this place."""
+        ...
+
+    async def addressed(self, word: str) -> bool:
+        """Return whether the command word names this instance."""
+        ...
+
+    async def command_label(self, command: str) -> str:
+        """Return the command as addressed to this instance."""
+        ...
 
 
 class ChannelCheck(Protocol):

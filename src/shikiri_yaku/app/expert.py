@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_turns import ExpertTurns
     from shikiri_yaku.domain.expert import ConversationRecord, TurnRecord
     from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, FinalEdits, Outbox
+    from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Rooms, SharedChat
 
 _OPEN: Final = "open"
 OPEN_REPLY: Final = "Open the Expert conversation."
@@ -58,7 +58,7 @@ class ConversationLog(Protocol):
     ) -> bool: ...
     def get(self, update_id: int) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
-    def at_thread(self, thread: int) -> ConversationRecord | None: ...
+    def at_room(self, room: str) -> ConversationRecord | None: ...
     def turn(self, update_id: int) -> TurnRecord | None: ...
     def oldest_pending(self, conversation_id: int) -> TurnRecord | None: ...
     def followups(self, conversation_id: int) -> list[TurnRecord]: ...
@@ -68,7 +68,7 @@ class ConversationLog(Protocol):
     def refuse_admin(self, conversation_id: int, update_id: int, now: datetime) -> int | None: ...
     def set_effort(self, conversation_id: int, effort: str) -> None: ...
     def fail(self, update_id: int) -> None: ...
-    def opened(self, update_id: int, thread: int) -> None: ...
+    def opened(self, update_id: int, room: str) -> None: ...
     def start(self, update_id: int) -> bool: ...
     def finish(
         self,
@@ -86,16 +86,6 @@ class ConversationLog(Protocol):
     def recover_turns(self) -> list[TurnRecord]: ...
 
 
-class ExpertTopics(Protocol):
-    """The channel operations for an Expert topic."""
-
-    async def create_expert(self, name: str) -> int: ...
-    async def rename(self, thread_id: int, name: str) -> None: ...
-    def link(self, thread_id: int) -> str: ...
-    async def addressed(self, word: str) -> bool: ...
-    async def bot_name(self) -> str: ...
-
-
 class Ask:
     """Journal a request before creating its topic and starting its first turn."""
 
@@ -106,7 +96,8 @@ class Ask:
         clock: Clock,
         *,
         configured: bool,
-        topics: ExpertTopics | None,
+        rooms: Rooms | None,
+        shared: SharedChat | None = None,
         turns: ExpertTurns | None,
         scope: Mapping[str, Path],
         channel: str,
@@ -118,7 +109,8 @@ class Ask:
         self._outbox = outbox
         self._clock = clock
         self._configured = configured
-        self._topics = topics
+        self._rooms = rooms
+        self._shared = shared
         self._turns = turns
         self._scope = scope
         self._channel = channel
@@ -126,31 +118,26 @@ class Ask:
         self._final = final
         self._admins = admins
 
-    async def addressed(self, word: str) -> bool:
-        return self._topics is not None and await self._topics.addressed(word)
-
     def is_admin(self, sender: int) -> bool:
         return sender in self._admins
 
     async def offer(self, item: Inbound) -> None:
-        if not self._configured or self._topics is None:
+        if not self._configured or self._rooms is None or self._shared is None:
             return
-        words = (item.text or "").split(maxsplit=1)
-        text = words[1].strip() if len(words) > 1 else ""
+        text = _question(item)
         if _is_admin(item) and item.sender not in self._admins:
             return
         reason = self._refusal(item, text)
         if reason:
             await self.handle(item, None)
             return
-        name = await self._topics.bot_name()
-        command = ADMIN_COMMAND if _is_admin(item) else "/expert"
+        label = await self._shared.command_label(ADMIN_COMMAND if _is_admin(item) else "/expert")
         self._outbox.queue_command_reply(
             [item_destination(self._channel, item)],
             [
                 Message(
                     "Choose an Expert.",
-                    (Button(f"{command}@{name}", f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
+                    (Button(label, f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
                     reply_to=item.message_ref,
                 )
             ],
@@ -170,8 +157,7 @@ class Ask:
     async def handle(
         self, item: Inbound, component: str | None, *, selection: bool = False
     ) -> None:
-        words = (item.text or "").split(maxsplit=1)
-        text = words[1].strip() if len(words) > 1 else ""
+        text = _question(item)
         reason = self._refusal(item, text)
         if reason:
             queue_command_reply(
@@ -183,14 +169,15 @@ class Ask:
                 max_text=self._max_text,
             )
             return
-        if self._topics is None or self._turns is None:
+        if self._rooms is None or self._turns is None:
             return
-        row = await self._open(self._topics, item, component, text)
-        if row is None or row.state != _OPEN or row.thread_id is None:
+        row = await self._open(self._rooms, item, component, text)
+        if row is None or row.state != _OPEN or row.room is None:
             return
-        button = Button("Open topic", url=self._topics.link(row.thread_id))
+        url = self._rooms.link(row.room)
+        buttons = () if url is None else (Button("Open topic", url=url),)
         admin = row.mode == MODE_ADMIN
-        message = Message(ADMIN_OPEN_REPLY if admin else OPEN_REPLY, (button,))
+        message = Message(ADMIN_OPEN_REPLY if admin else OPEN_REPLY, buttons)
         if selection:
             if self._final is not None:
                 _, selection_key = open_reply_keys(item.update_id)
@@ -208,7 +195,7 @@ class Ask:
         await self._turns.run(row.id, item.update_id)
 
     async def _open(
-        self, topics: ExpertTopics, item: Inbound, component: str | None, text: str
+        self, rooms: Rooms, item: Inbound, component: str | None, text: str
     ) -> ConversationRecord | None:
         names = [component] if component is not None else list(self._scope)
         created = self._log.create(
@@ -222,7 +209,7 @@ class Ask:
         )
         if created:
             try:
-                thread = await topics.create_expert(f"💬 {text}")
+                room = await rooms.open(f"💬 {text}")
             except ChannelError:
                 self._log.fail(item.update_id)
                 queue_expert_notice(
@@ -233,13 +220,13 @@ class Ask:
                     key=f"expert:creation:{item.update_id}",
                 )
                 return None
-            self._log.opened(item.update_id, thread)
+            self._log.opened(item.update_id, room)
         return self._log.get(item.update_id)
 
     def _refusal(self, item: Inbound, text: str) -> str:
         if not self._configured:
             return "The Expert is not configured."
-        if self._topics is None:
+        if self._rooms is None:
             return "The Expert requires a forum group."
         if _is_admin(item):
             if not self._admins:
@@ -251,5 +238,10 @@ class Ask:
 
 
 def _is_admin(item: Inbound) -> bool:
-    words = (item.text or "").split(maxsplit=1)
-    return bool(words) and words[0].split("@", 1)[0].lower() == ADMIN_COMMAND
+    command = item.command
+    return command is not None and command.name == ADMIN_COMMAND
+
+
+def _question(item: Inbound) -> str:
+    command = item.command
+    return "" if command is None else command.arguments

@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.goal import GoalCommand
     from shikiri_yaku.app.open_command import OpenCommand
     from shikiri_yaku.app.status import Status
-    from shikiri_yaku.domain.inbound import Inbound
-    from shikiri_yaku.ports import Clock, Destinations, Outbox
+    from shikiri_yaku.domain.inbound import Command, Inbound
+    from shikiri_yaku.ports import Clock, Destinations, Outbox, SharedChat
 
 _STATUS: Final = "/status"
 _DETAILS: Final = "/details"
@@ -46,10 +46,10 @@ class Commands:
     A command reply has no signal, so it is journaled with none. Its notice keys are the update id
     and the part's index: a repeated delivery of the same update queues nothing.
 
-    With `shared_group`, an Expert topic is routed to the Expert before this class; a message
-    in a thread that is neither General nor one of this instance's open component topics nor
-    its Expert topics belongs to another instance, so it gets no reply and is not journaled.
-    Free text outside such a thread gets the list, as anywhere else.
+    In a shared chat, an open Expert room is routed to the Expert before this class; a message
+    in a place that is neither main nor one of this instance's component places belongs to
+    another instance, so it gets no reply and is not journaled. Free text elsewhere gets the
+    list, as anywhere else.
     """
 
     def __init__(
@@ -64,7 +64,7 @@ class Commands:
         channel: str,
         max_text: int,
         name_max_chars: int,
-        shared_group: bool = False,
+        shared: SharedChat | None = None,
         ask: Ask | None = None,
     ) -> None:
         self._outbox = outbox
@@ -76,27 +76,25 @@ class Commands:
         self._channel = channel
         self._max_text = max_text
         self._name_max_chars = name_max_chars
-        self._shared_group = shared_group
+        self._shared = shared
         self._ask = ask
 
     async def handle(self, item: Inbound) -> None:
-        word = _first_word(item.text)
-        name = _command_name(word)
+        command = item.command
+        name = "" if command is None else command.name
+        place = item_destination(self._channel, item)
         component = self._destinations.component_of(item.thread)
-        in_other_topic = self._shared_group and item.thread is not None and component is None
-        if in_other_topic:
+        shared = self._shared
+        if shared is not None and component is None and not shared.is_main(place):
             return
-        if name in (_EXPERT, _ADMIN) and self._ask is not None:
-            if not (self._shared_group and name == _ADMIN and not self._ask.is_admin(item.sender)):
-                if (
-                    self._shared_group
-                    and item.thread is None
-                    and not await self._ask.addressed(word)
-                ):
-                    if word.lower() in (_EXPERT, _ADMIN):
-                        await self._ask.offer(item)
-                else:
-                    await self._ask.handle(item, component)
+        if command is not None and name in (_EXPERT, _ADMIN) and self._ask is not None:
+            # keep: in a shared chat only an instance that lists the sender answers `/admin`
+            if shared is not None and name == _ADMIN and not self._ask.is_admin(item.sender):
+                return
+            if shared is None or not shared.is_main(place) or await shared.addressed(command.word):
+                await self._ask.handle(item, component)
+            elif command.instance is None:
+                await self._ask.offer(item)
             return
         if name == _PENDING:
             await self._open.handle(item, component)
@@ -109,8 +107,8 @@ class Commands:
             return
         queue_command_reply(
             self._outbox,
-            [item_destination(self._channel, item)],
-            await self._answer(word, name, component),
+            [place],
+            await self._answer(command, component),
             key=key,
             now=self._clock.now(),
             max_text=self._max_text,
@@ -119,21 +117,11 @@ class Commands:
     async def tap(self, item: Inbound) -> bool:
         return self._ask is not None and await self._ask.tap(item)
 
-    async def _answer(self, word: str, name: str, component: str | None) -> str:
-        if not word.startswith("/") or name == _HELP_NAME:
+    async def _answer(self, command: Command | None, component: str | None) -> str:
+        if command is None or command.name == _HELP_NAME:
             return _HELP
-        if name == _STATUS:
+        if command.name == _STATUS:
             return await self._status.report(component)
-        if name == _DETAILS:
+        if command.name == _DETAILS:
             return await self._status.details(component)
-        return _UNKNOWN.format(name=fit(word, self._name_max_chars), help=_HELP)
-
-
-def _first_word(text: str | None) -> str:
-    words = (text or "").split(maxsplit=1)
-    return words[0] if words else ""
-
-
-def _command_name(word: str) -> str:
-    """Return the command a word names: lower case, without the `@bot` of the addressed form."""
-    return word.split("@", 1)[0].lower()
+        return _UNKNOWN.format(name=fit(command.word, self._name_max_chars), help=_HELP)

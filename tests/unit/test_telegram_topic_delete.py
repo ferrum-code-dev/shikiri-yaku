@@ -33,7 +33,7 @@ class _Api:
 
 def _delete(body: object) -> _Api:
     api = _Api(body)
-    asyncio.run(TelegramForumTopics(api, GROUP_ID).delete(THREAD))
+    asyncio.run(TelegramForumTopics(api, GROUP_ID).delete(str(THREAD)))
     return api
 
 

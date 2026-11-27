@@ -2099,7 +2099,7 @@ def test_admin_operations_settle_after_admin_mode_is_disabled(tmp_path: Path) ->
     conversations = Conversations(database)
     now = _NOW
     conversations.create(1, chat=_OWNER, thread=None, text="q", scope=[], now=now, mode="admin")
-    conversations.opened(1, _TOPIC)
+    conversations.opened(1, str(_TOPIC))
     conversation = conversations.get(1)
     assert conversation is not None
     journal = JournalProposals(database, OpStore(database), channel_name="telegram")

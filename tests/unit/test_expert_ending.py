@@ -45,7 +45,9 @@ from shikiri_yaku.ports import (
 from tests.support.attachments import FakeDownloads
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
+from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.rooms import FakeRooms
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator
@@ -64,6 +66,7 @@ NOW: Final = datetime(2026, 1, 1, tzinfo=UTC)
 CREATED: Final = 500
 TARGET_THREAD: Final = 22
 BYSTANDER_THREAD: Final = 33
+OPERATOR_PLACE: Final = Destination(CHANNEL, "operator")
 
 
 class Clock:
@@ -104,34 +107,20 @@ class StalledClient(Client):
         return []
 
 
-class Topics:
+class Topics(FakeRooms):
     """Deletes topics; each deletion raises the next scripted refusal first."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.deleted: list[int] = []
         self.refusals: list[Exception] = []
 
-    async def delete(self, thread_id: int) -> None:
+    async def delete(self, room: str) -> None:
         if self.refusals:
             raise self.refusals.pop(0)
-        if thread_id in self.deleted:
+        if int(room) in self.deleted:
             raise PlaceGoneError(PLACE_GONE_REASON)
-        self.deleted.append(thread_id)
-
-    async def create_expert(self, name: str) -> int:
-        raise NotImplementedError
-
-    async def rename(self, thread_id: int, name: str) -> None:
-        raise NotImplementedError
-
-    async def addressed(self, word: str) -> bool:
-        raise NotImplementedError
-
-    async def bot_name(self) -> str:
-        return "bot"
-
-    def link(self, thread_id: int) -> str:
-        raise NotImplementedError
+        self.deleted.append(int(room))
 
 
 class AnsweringExpert:
@@ -199,9 +188,8 @@ class Harness:
             self.topics,
             self.outbox,
             self.clock,
+            places=FixedDestinations([OPERATOR_PLACE]),
             directory=path,
-            channel=CHANNEL,
-            group_id=GROUP_ID,
             retention=RETENTION,
             admin_idle=timedelta(minutes=15),
             final=self.final,
@@ -212,12 +200,11 @@ class Harness:
             self.outbox,
             self.clock,
             expert=expert,
-            topics=self.topics,
+            rooms=self.topics,
             clients=clients,
             scope={"api": path / "api"},
             directory=path,
             channel=CHANNEL,
-            group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
             proposals=expert_proposals(
@@ -235,8 +222,7 @@ class Harness:
                 self.outbox,
                 self.clock,
                 directory=path,
-                channel=CHANNEL,
-                group_id=GROUP_ID,
+                rooms=self.topics,
                 outbox_interval_s=1,
             ),
             max_text=MESSAGE_TEXT_LIMIT,
@@ -253,7 +239,7 @@ class Harness:
             scope=["api"],
             now=self.clock.now(),
         )
-        self.log.opened(update_id, thread)
+        self.log.opened(update_id, str(thread))
         row = self.log.get(update_id)
         assert row is not None
         directory = conversation_directory(self.directory, row.id)
@@ -404,9 +390,26 @@ def test_a_refused_deletion_keeps_the_conversation_reports_once_and_is_retried(
 
     asyncio.run(scenario())
 
+    [report] = [item for item in h.outbox.pending() if item.conversation_id is None]
+    assert report.destination == OPERATOR_PLACE
     assert h.remaining(conversation) == 0
     assert not conversation_directory(h.directory, conversation).exists()
     assert h.topics.deleted == [TARGET_THREAD]
+
+
+def test_a_topic_row_of_an_earlier_version_is_erased_with_its_conversation(
+    build: Callable[..., Harness],
+) -> None:
+    h = build()
+    conversation = h.open_conversation(CREATED, TARGET_THREAD)
+    h.database.connection.execute(
+        "INSERT INTO topics (thread_id, state, conversation_id) VALUES (?, 'open', ?)",
+        (TARGET_THREAD, conversation),
+    )
+
+    asyncio.run(h.ending.end(conversation))
+
+    assert h.remaining(conversation) == 0
 
 
 def test_a_deletion_that_fails_for_now_is_retried_without_a_report(
@@ -648,10 +651,10 @@ def test_a_crash_after_the_directory_is_removed_keeps_the_rows_until_the_sweep_f
     real_erase = h.log.erase
     crashes: list[RuntimeError] = [RuntimeError("crash")]
 
-    def crashing_erase(conversation_id: int, *, topic_chat: int) -> None:
+    def crashing_erase(conversation_id: int, *, room_place: Destination) -> None:
         if crashes:
             raise crashes.pop()
-        real_erase(conversation_id, topic_chat=topic_chat)
+        real_erase(conversation_id, room_place=room_place)
 
     monkeypatch.setattr(h.log, "erase", crashing_erase)
     h.topics.refusals = [PlaceGoneError(PLACE_GONE_REASON)]
@@ -854,7 +857,7 @@ def test_erasing_a_conversation_deletes_the_reply_keys_of_its_own_replies_only()
         outbox = JournalOutbox(database, MessageStore(database, Reporter()))
         for update_id, thread in ((CREATED, TARGET_THREAD), (CREATED + 100, BYSTANDER_THREAD)):
             conversations.create(update_id, chat=CHAT, thread=None, text="hi", scope=[], now=NOW)
-            conversations.opened(update_id, thread)
+            conversations.opened(update_id, str(thread))
         target = _conversation_row(database, CREATED)
         bystander = _conversation_row(database, CREATED + 100)
         destination = [Destination(CHANNEL, str(CHAT), TARGET_THREAD)]
@@ -877,7 +880,7 @@ def test_erasing_a_conversation_deletes_the_reply_keys_of_its_own_replies_only()
         )
         outbox.queue_command_reply(destination, [Message("e")], key="expert:select:603", now=NOW)
 
-        conversations.erase(target, topic_chat=CHAT)
+        conversations.erase(target, room_place=destination[0])
 
         kept = {
             row[0] for row in database.connection.execute("SELECT reply_key FROM command_replies")

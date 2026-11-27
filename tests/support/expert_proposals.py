@@ -14,6 +14,7 @@ from shikiri_yaku.journal.proposals import JournalProposals
 from shikiri_yaku.journal.replies import JournalReplies
 from shikiri_yaku.journal.signals import SignalStore
 from shikiri_yaku.journal.submits import JournalSubmits
+from tests.support.rooms import FakeRooms
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -50,7 +51,7 @@ def expert_proposals(
         outbox,
         clock,
         channel=channel,
-        group_id=group_id,
+        rooms=FakeRooms(group_id),
         access=access or AdminAccess(conversations, clock, admins=frozenset()),
         files=files,
         max_text=MESSAGE_TEXT_LIMIT,

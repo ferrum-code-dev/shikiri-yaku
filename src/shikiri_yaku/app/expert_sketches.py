@@ -8,7 +8,6 @@ from shikiri_yaku.app.expert_files import move_sketch
 from shikiri_yaku.app.expert_runs import conversation_directory
 from shikiri_yaku.app.expert_turns import queue_expert_notice
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.domain.secrets import secret_form
 from shikiri_yaku.ports import Message, SketchError
 
@@ -16,7 +15,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shikiri_yaku.domain.expert import ConversationRecord
-    from shikiri_yaku.ports import Clock, Outbox, Sketcher
+    from shikiri_yaku.domain.schedule import Destination
+    from shikiri_yaku.ports import Clock, Outbox, Rooms, Sketcher
 
 DRAWING: Final = "Drawing the sketch…"
 NO_CODEX: Final = "No Codex rung is in expert.ladder, so the sketch was not drawn."
@@ -50,8 +50,7 @@ class ExpertSketches:
         clock: Clock,
         *,
         directory: Path,
-        channel: str,
-        group_id: int,
+        rooms: Rooms,
         outbox_interval_s: float,
         known_secrets: tuple[str, ...] = (),
     ) -> None:
@@ -59,8 +58,7 @@ class ExpertSketches:
         self._outbox = outbox
         self._clock = clock
         self._directory = directory
-        self._channel = channel
-        self._group_id = group_id
+        self._rooms = rooms
         self._outbox_interval_s = outbox_interval_s
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
@@ -68,9 +66,9 @@ class ExpertSketches:
         self, conversation: ConversationRecord, update_id: int, description: str
     ) -> None:
         key = sketch_key(update_id)
-        if conversation.thread_id is None or self._outbox.notice_queued(key):
+        if conversation.room is None or self._outbox.notice_queued(key):
             return
-        destination = Destination(self._channel, str(self._group_id), conversation.thread_id)
+        destination = self._rooms.place(conversation.room)
         if self._sketcher is None:
             self._notice(destination, NO_CODEX, key, conversation.id)
             return

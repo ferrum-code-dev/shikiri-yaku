@@ -44,7 +44,7 @@ class JournalWeb:
             (update_id, host),
         )
 
-    def pending(self, update_id: int | None = None) -> list[tuple[int, int, int, str]]:
+    def pending(self, update_id: int | None = None) -> list[tuple[int, int, str, str]]:
         rows = self._database.connection.execute(
             "SELECT w.id, t.conversation_id, c.thread_id, w.host FROM web_requests w "
             "JOIN turns t ON t.update_id = w.update_id "
@@ -54,7 +54,7 @@ class JournalWeb:
             "ORDER BY w.id",
             (update_id, update_id),
         ).fetchall()
-        return [(r["id"], r["conversation_id"], r["thread_id"], r["host"]) for r in rows]
+        return [(r["id"], r["conversation_id"], str(r["thread_id"]), r["host"]) for r in rows]
 
     def conversation_of(self, request_id: int) -> int | None:
         row = self._database.connection.execute(

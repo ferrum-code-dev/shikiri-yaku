@@ -62,6 +62,7 @@ from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
 from tests.support.expert_proposals import expert_proposals
+from tests.support.rooms import FakeRooms, FakeSharedChat
 from tests.support.secrets import SECRETS
 
 if TYPE_CHECKING:
@@ -126,33 +127,24 @@ class Client:
         return []
 
 
-class Topics:
+class Topics(FakeRooms):
     def __init__(self) -> None:
+        super().__init__()
         self.created = 0
         self.deleted: list[int] = []
 
-    async def create_expert(self, name: str) -> int:
-        del name
+    async def open(self, title: str) -> str:
+        del title
         self.created += 1
-        return THREAD
+        return str(THREAD)
 
-    async def rename(self, thread_id: int, name: str) -> None:
-        del thread_id, name
+    async def rename(self, room: str, title: str) -> None:
+        del room, title
 
-    async def delete(self, thread_id: int) -> None:
-        if thread_id in self.deleted:
+    async def delete(self, room: str) -> None:
+        if int(room) in self.deleted:
             raise PlaceGoneError(PLACE_GONE_REASON)
-        self.deleted.append(thread_id)
-
-    async def addressed(self, word: str) -> bool:
-        del word
-        return False
-
-    async def bot_name(self) -> str:
-        return "bot"
-
-    def link(self, thread_id: int) -> str:
-        return f"https://t.me/c/123/{thread_id}"
+        self.deleted.append(int(room))
 
 
 class FlakyClient(Client):
@@ -259,9 +251,8 @@ class Harness:
             self.topics,
             self.outbox,
             Clock(),
+            places=FixedDestinations(),
             directory=path,
-            channel=CHANNEL,
-            group_id=GROUP_ID,
             retention=timedelta(days=14),
             admin_idle=timedelta(minutes=15),
             final=self.final,
@@ -271,12 +262,11 @@ class Harness:
             self.outbox,
             Clock(),
             expert=expert,
-            topics=self.topics,
+            rooms=self.topics,
             clients=clients,
             scope=scope,
             directory=path,
             channel=CHANNEL,
-            group_id=GROUP_ID,
             runs=self.runs,
             ending=self.ending,
             downloads=self.downloads,
@@ -290,8 +280,7 @@ class Harness:
                 ),
                 Clock(),
                 directory=path,
-                channel=CHANNEL,
-                group_id=GROUP_ID,
+                rooms=self.topics,
                 outbox_interval_s=0.01,
             ),
             web=ExpertWebRequests(
@@ -299,7 +288,7 @@ class Harness:
                 self.outbox,
                 Clock(),
                 channel=CHANNEL,
-                group_id=GROUP_ID,
+                rooms=self.topics,
                 access=AdminAccess(self.log, Clock(), admins=frozenset()),
             ),
             proposals=expert_proposals(
@@ -320,7 +309,8 @@ class Harness:
             self.outbox,
             Clock(),
             configured=True,
-            topics=self.topics,
+            rooms=self.topics,
+            shared=FakeSharedChat() if shared_group else None,
             turns=self.turns,
             scope=scope,
             channel=CHANNEL,
@@ -335,7 +325,7 @@ class Harness:
             destinations=FixedDestinations(topics={77: "api"}),
             channel=CHANNEL,
             name_max_chars=40,
-            shared_group=shared_group,
+            shared=FakeSharedChat() if shared_group else None,
             ask=self.ask,
             max_text=MESSAGE_TEXT_LIMIT,
         )
@@ -993,7 +983,7 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
     h.log.create(1, chat=CHAT, thread=None, text="question", scope=["api"], now=now)
     conversation = h.log.get(1)
     assert conversation is not None
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     h.log.start(1)
     h.log.finish(1, json.dumps(ANSWER), None, None, now)
     web = JournalWeb(h.database)
@@ -1089,7 +1079,7 @@ def test_admin_command_that_cannot_be_shown_is_not_stored(
     h.log.create(
         1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
     )
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
 
@@ -1131,7 +1121,7 @@ def test_consecutive_refused_commands_each_get_an_expert_turn(
     h.log.create(
         1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
     )
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
     asyncio.run(h.turns.run(conversation.id, 1))
@@ -1148,7 +1138,7 @@ def test_refusal_follow_up_keeps_conversation_order_in_history(
     h = build(ladder(Runner()))
     now = Clock().now()
     h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
     h.log.add_turn(conversation.id, 5, "two", now)
@@ -1171,7 +1161,7 @@ def test_done_refusal_follow_up_is_delivered_on_replay(build: Callable[..., Harn
     h = build(ladder(Runner()))
     now = Clock().now()
     h.log.create(1, chat=CHAT, thread=None, text="one", scope=[], now=now, mode="admin")
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
     h.log.start(1)
@@ -1196,7 +1186,7 @@ def test_decline_replay_delivers_finished_turn_once(
     h.log.create(
         1, chat=CHAT, thread=None, text="question", scope=[], now=Clock().now(), mode="admin"
     )
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
     asyncio.run(h.turns.run(conversation.id, 1))
@@ -1258,7 +1248,7 @@ def test_restart_resumes_pending_admin_output_before_new_turns(
     h = build(ladder(runner))
     now = Clock().now()
     h.log.create(1, chat=CHAT, thread=None, text="question", scope=[], now=now, mode="admin")
-    h.log.opened(1, THREAD)
+    h.log.opened(1, str(THREAD))
     conversation = h.log.get(1)
     assert conversation is not None
     journal = JournalProposals(h.database, OpStore(h.database), channel_name=CHANNEL)
@@ -1343,7 +1333,7 @@ def _file_item(
 
 
 def _conversation_directory(h: Harness, root: Path) -> Path:
-    conversation = h.log.at_thread(THREAD)
+    conversation = h.log.at_room(str(THREAD))
     assert conversation is not None
     return root / "conversations" / str(conversation.id)
 
@@ -1521,7 +1511,7 @@ def test_a_sketch_is_drawn_once_however_often_its_turn_is_delivered(
     sketcher = FakeSketcher(tmp_path / "codex" / "pic.png")
     h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
     asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
-    conversation = h.log.at_thread(THREAD)
+    conversation = h.log.at_room(str(THREAD))
     assert conversation is not None
 
     asyncio.run(h.turns.run(conversation.id, 1))
@@ -1610,7 +1600,7 @@ def test_a_conversation_that_ends_during_a_download_gets_no_file_and_no_turn(
         downloads = HeldDownloads({"file-1": b"attached"})
         h = build(ladder(Runner()), downloads=downloads)
         await h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None)
-        conversation = h.log.at_thread(THREAD)
+        conversation = h.log.at_room(str(THREAD))
         assert conversation is not None
         attach = asyncio.create_task(h.turns.handle(_file_item(2, "file-1", "a.png")))
         await asyncio.wait_for(downloads.started.wait(), timeout=1)
@@ -1634,7 +1624,7 @@ def test_an_ending_stops_a_sketch_being_drawn(
         h = build(ladder(Runner(answer={**ANSWER, "image": "a graph"})), sketcher=sketcher)
         asked = asyncio.create_task(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
         await asyncio.wait_for(sketcher.started.wait(), timeout=1)
-        conversation = h.log.at_thread(THREAD)
+        conversation = h.log.at_room(str(THREAD))
         assert conversation is not None
 
         assert PROGRESS_KEY in _answer_keys(h)

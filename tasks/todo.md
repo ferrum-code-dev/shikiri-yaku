@@ -26,7 +26,7 @@
 
 ### F8
 
-- [ ] F8. Rooms and shared chat, after F7.
+- [x] F8. Rooms and shared chat, after F7.
 
 ## Acceptance criteria
 - No module of `app`, `domain` or `extensions` takes a group id or builds a destination from a group and a thread. A conversation keeps its room id as text; `ExpertTopics` and `TopicDeletion` are gone. No migration: the journal converts the stored thread number. The journal stops writing conversation rows into the `topics` table, after checking that nothing reads them.

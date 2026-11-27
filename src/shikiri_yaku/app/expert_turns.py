@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-    from shikiri_yaku.app.expert import ConversationLog, ExpertTopics
+    from shikiri_yaku.app.expert import ConversationLog
     from shikiri_yaku.app.expert_admin import AdminExecutor
     from shikiri_yaku.app.expert_ending import ExpertEnding
     from shikiri_yaku.app.expert_proposals import ExpertProposals
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.app.expert_web import ExpertWebRequests
     from shikiri_yaku.domain.expert import ConversationRecord
     from shikiri_yaku.domain.inbound import FileRef, Inbound
-    from shikiri_yaku.ports import Clock, Downloads, Expert, Outbox, ShikiruClient
+    from shikiri_yaku.ports import Clock, Downloads, Expert, Outbox, Rooms, ShikiruClient
 
 CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
 SUMMARY_PROMPT: Final = "Summarize this conversation in two or three short sentences."
@@ -132,12 +132,11 @@ class ExpertTurns:
         clock: Clock,
         *,
         expert: Expert,
-        topics: ExpertTopics,
+        rooms: Rooms,
         clients: Mapping[str, ShikiruClient],
         scope: Mapping[str, Path],
         directory: Path,
         channel: str,
-        group_id: int,
         max_text: int,
         max_file_bytes: int,
         runs: ConversationRuns,
@@ -157,12 +156,11 @@ class ExpertTurns:
         self._outbox = outbox
         self._clock = clock
         self._expert = expert
-        self._topics = topics
+        self._rooms = rooms
         self._clients = clients
         self._scope = scope
         self._directory = directory
         self._channel = channel
-        self._group_id = group_id
         self._max_text = max_text
         self._max_file_bytes = max_file_bytes
         self._runs = runs
@@ -177,17 +175,15 @@ class ExpertTurns:
         return (
             item.kind
             in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.FILE, InboundKind.TOPIC_CLOSED)
-            and item.chat == self._group_id
-            and item.thread is not None
-            and self._log.at_thread(item.thread) is not None
+            and self._conversation_of(item) is not None
         )
 
+    def _conversation_of(self, item: Inbound) -> ConversationRecord | None:
+        room = self._rooms.room_of(item_destination(self._channel, item))
+        return None if room is None else self._log.at_room(room)
+
     async def handle(self, item: Inbound) -> None:
-        conversation = (
-            None
-            if item.chat != self._group_id or item.thread is None
-            else self._log.at_thread(item.thread)
-        )
+        conversation = self._conversation_of(item)
         if conversation is None:
             return
         if item.kind is InboundKind.TOPIC_CLOSED:
@@ -200,18 +196,17 @@ class ExpertTurns:
             await self._attach(item, conversation, item.file)
             return
         text = item.text or ""
-        words = text.split()
-        if not words or not words[0].startswith("/"):
+        command = item.command
+        if command is None:
             self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
             await self.run(conversation.id, item.update_id)
             return
-        name = words[0].split("@", 1)[0].lower()
-        if name == _EFFORT:
-            self._effort(item, conversation, words[1:])
-        elif name == _SUMMARIZE:
+        if command.name == _EFFORT:
+            self._effort(item, conversation, command.arguments.split())
+        elif command.name == _SUMMARIZE:
             self._log.add_turn(conversation.id, item.update_id, SUMMARY_PROMPT, self._clock.now())
             await self.run(conversation.id, item.update_id)
-        elif name == _CLOSE:
+        elif command.name == _CLOSE:
             await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
         else:
             self._reply(item, _HELP, conversation.id)
@@ -260,10 +255,12 @@ class ExpertTurns:
         return conversation is not None and conversation.state == _CONVERSATION_OPEN
 
     def _file_notice(self, item: Inbound, conversation: ConversationRecord, text: str) -> None:
+        if conversation.room is None:
+            return
         queue_expert_notice(
             self._outbox,
             self._clock,
-            Destination(self._channel, str(self._group_id), conversation.thread_id),
+            self._rooms.place(conversation.room),
             text,
             key=f"expert:file:{item.update_id}",
             conversation_id=conversation.id,
@@ -271,10 +268,12 @@ class ExpertTurns:
 
     def warn_admin(self, conversation: ConversationRecord) -> None:
         """Say in the topic of an admin conversation that the chat is not private."""
+        if conversation.room is None:
+            return
         queue_expert_notice(
             self._outbox,
             self._clock,
-            Destination(self._channel, str(self._group_id), conversation.thread_id),
+            self._rooms.place(conversation.room),
             ADMIN_WARNING,
             key=f"admin:warning:{conversation.update_id}",
             conversation_id=conversation.id,
@@ -424,7 +423,7 @@ class ExpertTurns:
         """Queue the answer of a done turn, and name the topic after the first answer."""
         conversation = self._log.conversation(conversation_id)
         turn = self._log.turn(update_id)
-        if conversation is None or conversation.thread_id is None or turn is None:
+        if conversation is None or conversation.room is None or turn is None:
             return
         if turn.state != _DONE or turn.answer is None:
             return
@@ -435,7 +434,7 @@ class ExpertTurns:
             self._web.queue(update_id)
         if answer.title and not self._log.history(conversation_id, before=update_id):
             with suppress(ChannelRefusedError):
-                await self._topics.rename(conversation.thread_id, f"💬 {answer.title}")
+                await self._rooms.rename(conversation.room, f"💬 {answer.title}")
         if description := (answer.image or "").strip():
             await self._draw(conversation_id, update_id, description)
 
@@ -515,10 +514,12 @@ class ExpertTurns:
                 conversation_id=row.id,
             )
         for turn in self._log.recover_turns():
+            if turn.room is None:
+                continue
             queue_expert_notice(
                 self._outbox,
                 self._clock,
-                Destination(self._channel, str(self._group_id), turn.thread_id),
+                self._rooms.place(turn.room),
                 _INTERRUPTED,
                 key=f"expert:interrupted:{turn.update_id}",
                 conversation_id=turn.conversation_id,

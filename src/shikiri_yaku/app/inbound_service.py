@@ -119,11 +119,11 @@ class InboundService:
 
 
 def _is_expert(item: Inbound) -> bool:
-    words = (item.text or "").split(maxsplit=1)
+    command = item.command
     return (
         item.kind in (InboundKind.TEXT, InboundKind.REPLY)
-        and bool(words)
-        and words[0].split("@", 1)[0].lower() in _EXPERT
+        and command is not None
+        and command.name in _EXPERT
     )
 
 

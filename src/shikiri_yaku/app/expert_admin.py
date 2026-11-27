@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from shikiri_yaku.domain.expert import MODE_ADMIN
 from shikiri_yaku.domain.outbound import Purpose
-from shikiri_yaku.domain.schedule import Destination
 from shikiri_yaku.ports import Message
 
 if TYPE_CHECKING:
@@ -23,6 +22,7 @@ if TYPE_CHECKING:
         Clock,
         HostLock,
         Outbox,
+        Rooms,
     )
 
 _CUT_NOTE = " Cut output."
@@ -99,9 +99,8 @@ class AdminExecutor:
         timeout_s: float,
         max_bytes: int,
         secrets: Sequence[str],
-        channel: str,
+        rooms: Rooms,
         max_text: int,
-        group_id: int,
     ) -> None:
         self._log = log
         self._conversations = conversations
@@ -114,9 +113,8 @@ class AdminExecutor:
         self._timeout_s = timeout_s
         self._max_bytes = max_bytes
         self._secrets = secrets
-        self._channel = channel
+        self._rooms = rooms
         self._max_text = max_text
-        self._group_id = group_id
 
     async def execute(self, op_id: int, run: Callable[[int, int], Awaitable[None]]) -> None:
         async with self._host.hold():
@@ -136,11 +134,9 @@ class AdminExecutor:
             duration = (now - started).total_seconds()
             text = _result_text(result, duration, self._max_text)
             conversation = self._conversations.conversation(conversation_id)
-            thread = None if conversation is None else conversation.thread_id
+            room = None if conversation is None else conversation.room
             notice = (
-                None
-                if thread is None
-                else partial(self._notice, op_id, conversation_id, thread, text)
+                None if room is None else partial(self._notice, op_id, conversation_id, room, text)
             )
             turn = self._log.finish_admin(
                 op_id,
@@ -154,11 +150,11 @@ class AdminExecutor:
         if turn is not None:
             await run(conversation_id, turn)
 
-    def _notice(self, op_id: int, conversation_id: int, thread: int, text: str) -> None:
+    def _notice(self, op_id: int, conversation_id: int, room: str, text: str) -> None:
         self._outbox.queue(
             None,
             Purpose.EXPERT,
-            [Destination(self._channel, str(self._group_id), thread)],
+            [self._rooms.place(room)],
             Message(text),
             key=f"admin:result:{op_id}",
             now=self._clock.now(),
@@ -185,8 +181,7 @@ def recover_admin(
     clock: Clock,
     outbox: Outbox,
     *,
-    channel_name: str,
-    group_id: int | None,
+    rooms: Rooms | None,
 ) -> None:
     """Settle interrupted operations even if admin mode is no longer configured.
 
@@ -196,12 +191,12 @@ def recover_admin(
 
     def notice(op_id: int, conversation_id: int, state: str) -> None:
         conversation = conversations.conversation(conversation_id)
-        if conversation is None or conversation.thread_id is None or group_id is None:
+        if conversation is None or conversation.room is None or rooms is None:
             return
         outbox.queue(
             None,
             Purpose.EXPERT,
-            [Destination(channel_name, str(group_id), conversation.thread_id)],
+            [rooms.place(conversation.room)],
             Message(f"Command is {state} after restart. Please check the host."),
             key=f"admin:interrupted:{op_id}",
             now=clock.now(),
