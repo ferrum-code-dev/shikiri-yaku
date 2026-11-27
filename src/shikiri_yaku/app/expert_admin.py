@@ -42,15 +42,15 @@ class AdminAccess:
     An admitted action in an admin conversation counts as activity, so the idle period restarts.
     """
 
-    def __init__(self, log: AdminConversations, clock: Clock, *, admins: frozenset[int]) -> None:
+    def __init__(self, log: AdminConversations, clock: Clock, *, admins: frozenset[str]) -> None:
         self._log = log
         self._clock = clock
         self._admins = admins
 
-    def is_admin(self, sender: int) -> bool:
+    def is_admin(self, sender: str) -> bool:
         return sender in self._admins
 
-    def admit(self, conversation_id: int, sender: int) -> bool:
+    def admit(self, conversation_id: int, sender: str) -> bool:
         conversation = self._log.conversation(conversation_id)
         if conversation is None or conversation.mode != MODE_ADMIN:
             return True

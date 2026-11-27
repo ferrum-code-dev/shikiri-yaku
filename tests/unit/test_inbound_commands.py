@@ -167,13 +167,31 @@ class Harness:
     ) -> None:
         kind = InboundKind.REPLY if reply_to is not None else InboundKind.TEXT
         item = Inbound(
-            update, kind, 1001, 1001, "1001/90", reply_to_ref=reply_to, text=text, thread=thread
+            id=update,
+            key=str(update),
+            kind=kind,
+            sender="1001",
+            chat=1001,
+            message_ref="1001/90",
+            reply_to_ref=reply_to,
+            text=text,
+            thread=thread,
         )
         asyncio.run(self.replies().handle(item))
 
     def tap(self, data: str, ref: str, update: int = 800) -> None:
         asyncio.run(
-            self.replies().handle(Inbound(update, InboundKind.TAP, 1001, 1001, ref, data=data))
+            self.replies().handle(
+                Inbound(
+                    id=update,
+                    key=str(update),
+                    kind=InboundKind.TAP,
+                    sender="1001",
+                    chat=1001,
+                    message_ref=ref,
+                    data=data,
+                )
+            )
         )
 
 

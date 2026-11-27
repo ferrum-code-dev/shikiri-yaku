@@ -169,11 +169,12 @@ class JournalOutbox:
         if row is None:
             return None
         return Inbound(
-            row["update_id"],
-            InboundKind.TEXT,
-            row["sender"],
-            int(row["chat"]),
-            row["message_ref"],
+            id=row["update_id"],
+            key=row["event_key"],
+            kind=InboundKind.TEXT,
+            sender=row["sender"],
+            chat=int(row["chat"]),
+            message_ref=row["message_ref"],
             text=row["body"],
             thread=row["thread"],
         )

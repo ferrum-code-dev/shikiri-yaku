@@ -61,6 +61,7 @@ from tests.support.attachments import (
 from tests.support.copies import Platform
 from tests.support.copies import deliver as deliver_copies
 from tests.support.destinations import FixedDestinations
+from tests.support.event_numbers import number_next_event
 from tests.support.expert_proposals import expert_proposals
 from tests.support.rooms import FakeRooms, FakeSharedChat
 from tests.support.secrets import SECRETS
@@ -224,7 +225,7 @@ class Harness:
         client: Client | None = None,
         *,
         muse: bool = False,
-        admins: frozenset[int] = frozenset(),
+        admins: frozenset[str] = frozenset(),
         shared_group: bool = False,
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
@@ -340,7 +341,7 @@ def build(tmp_path: Path) -> Generator[Callable[..., Harness]]:
         client: Client | None = None,
         *,
         muse: bool = False,
-        admins: frozenset[int] = frozenset(),
+        admins: frozenset[str] = frozenset(),
         shared_group: bool = False,
         downloads: FakeDownloads | None = None,
         sketcher: Sketcher | None = None,
@@ -376,7 +377,14 @@ def _item(
     chat: int = CHAT,
 ) -> Inbound:
     return Inbound(
-        update_id, InboundKind.TEXT, sender, chat, str(update_id), text=text, thread=thread
+        id=update_id,
+        key=str(update_id),
+        kind=InboundKind.TEXT,
+        sender=str(sender),
+        chat=chat,
+        message_ref=str(update_id),
+        text=text,
+        thread=thread,
     )
 
 
@@ -384,7 +392,7 @@ class _Updates:
     def __init__(self, batch: Batch) -> None:
         self.batch = batch
 
-    async def fetch(self, offset: int, wait_s: float) -> Batch:  # noqa: ARG002 -- the port's shape
+    async def fetch(self, cursor: str | None, wait_s: float) -> Batch:  # noqa: ARG002 -- the port's shape
         return self.batch
 
 
@@ -407,8 +415,8 @@ class _Log(JournalInbound):
         self.count = 0
         self.handled = asyncio.Event()
 
-    def mark_handled(self, update_id: int) -> None:
-        super().mark_handled(update_id)
+    def mark_handled(self, event_id: int) -> None:
+        super().mark_handled(event_id)
         self.count += 1
         if self.count == self.expected:
             self.handled.set()
@@ -584,11 +592,12 @@ def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> 
     h = build(ladder(runner))
     asyncio.run(h.ask.handle(_item(1, f"/expert {MESSAGES[0]}"), None))
     reply = Inbound(
-        2,
-        InboundKind.REPLY,
-        OWNER,
-        CHAT,
-        "2",
+        id=2,
+        key=str(2),
+        kind=InboundKind.REPLY,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref="2",
         reply_to_ref="1",
         text=MESSAGES[1],
         thread=THREAD,
@@ -596,7 +605,8 @@ def test_a_reply_in_an_expert_topic_is_a_turn(build: Callable[..., Harness]) -> 
 
     async def scenario() -> None:
         log = _Log(h.database, expected=1)
-        log.record_batch(CHANNEL, [reply], 3, Clock().now())
+        number_next_event(h.database, CHANNEL, reply.id)
+        log.record_batch(CHANNEL, [reply], "3", Clock().now())
         service = InboundService(
             cast("InboundPoller", _Poller()),
             log,
@@ -624,7 +634,7 @@ def test_a_private_origin_ends_through_the_expert_group_topic(
     async def scenario() -> None:
         ask_log = _Log(h.database, expected=1)
         ask_log.record_batch(
-            CHANNEL, [_item(1, f"/expert {MESSAGES[0]}", chat=OWNER)], 2, Clock().now()
+            CHANNEL, [_item(1, f"/expert {MESSAGES[0]}", chat=OWNER)], "2", Clock().now()
         )
         ask_service = InboundService(
             cast("InboundPoller", _Poller()),
@@ -644,8 +654,16 @@ def test_a_private_origin_ends_through_the_expert_group_topic(
         assert not h.turns.owns(_item(2, "/close", thread=THREAD, chat=OWNER))
 
         close_log = _Log(h.database, expected=1)
-        closed = Inbound(2, InboundKind.TOPIC_CLOSED, OWNER, GROUP_ID, "2", thread=THREAD)
-        close_log.record_batch(CHANNEL, [closed], 3, Clock().now())
+        closed = Inbound(
+            id=2,
+            key=str(2),
+            kind=InboundKind.TOPIC_CLOSED,
+            sender=str(OWNER),
+            chat=GROUP_ID,
+            message_ref="2",
+            thread=THREAD,
+        )
+        close_log.record_batch(CHANNEL, [closed], "3", Clock().now())
         close_service = InboundService(
             cast("InboundPoller", _Poller()),
             close_log,
@@ -713,11 +731,11 @@ def test_a_non_owner_in_an_expert_topic_starts_nothing(build: Callable[..., Harn
     journal = JournalInbound(h.database)
     stranger = _item(2, MESSAGES[1], thread=THREAD, sender=STRANGER)
     poller = InboundPoller(
-        _Updates(Batch(2, (stranger,))),
+        _Updates(Batch("3", (stranger,))),
         journal,
         Clock(),
         channel=CHANNEL,
-        owners=[OWNER],
+        owners=[str(OWNER)],
         wait_s=20,
     )
 
@@ -835,7 +853,8 @@ def test_inbound_service_routes_expert_topic_commands_to_expert_and_others_to_co
 
     async def scenario() -> None:
         log = _Log(h.database, expected=2)
-        log.record_batch(CHANNEL, [command_in_expert, command_outside], 4, Clock().now())
+        number_next_event(h.database, CHANNEL, command_in_expert.id)
+        log.record_batch(CHANNEL, [command_in_expert, command_outside], "4", Clock().now())
         replies = Replies(
             JournalReplies(
                 h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
@@ -892,7 +911,8 @@ def test_shared_group_inbound_routing_in_foreign_expert_topic(
 
     async def route(h: Harness) -> None:
         log = _Log(h.database, expected=1)
-        log.record_batch(CHANNEL, [item], 11, Clock().now())
+        number_next_event(h.database, CHANNEL, item.id)
+        log.record_batch(CHANNEL, [item], "11", Clock().now())
         replies = Replies(
             JournalReplies(
                 h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
@@ -993,11 +1013,30 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
         "notice_key, delivery, created_at) VALUES ('out', ?, ?, '9', 'expert:web:1', 'sent', ?)",
         (CHANNEL, str(CHAT), now.isoformat()),
     )
-    first = Inbound(2, InboundKind.TAP, OWNER, CHAT, "9", data="w:1", thread=THREAD)
-    second = Inbound(3, InboundKind.TAP, OWNER, CHAT, "9", data="w:1", thread=THREAD)
+    first = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref="9",
+        data="w:1",
+        thread=THREAD,
+    )
+    second = Inbound(
+        id=3,
+        key=str(3),
+        kind=InboundKind.TAP,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref="9",
+        data="w:1",
+        thread=THREAD,
+    )
     command = _item(4, "/help")
     log = _Log(h.database, expected=3)
-    log.record_batch(CHANNEL, [first, second, command], 5, now)
+    number_next_event(h.database, CHANNEL, first.id)
+    log.record_batch(CHANNEL, [first, second, command], "5", now)
     replies = Replies(
         JournalReplies(
             h.database, SignalStore(h.database), OpStore(h.database), channel_name=CHANNEL
@@ -1028,7 +1067,7 @@ def test_web_decision_does_not_block_inbound_and_two_taps_run_once(
         assert h.log.turn(2) is not None
         assert not runner.release.is_set()
         await asyncio.wait_for(service.tick(), timeout=1)
-        assert [item.update_id for item in log.pending()] == [2]
+        assert [item.id for item in log.pending()] == [2]
         runner.release.set()
         await asyncio.wait_for(log.handled.wait(), timeout=1)
         await service.tick()
@@ -1180,7 +1219,7 @@ def test_decline_replay_delivers_finished_turn_once(
     build: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = Runner()
-    h = build(ladder(runner), admins=frozenset({OWNER}))
+    h = build(ladder(runner), admins=frozenset({str(OWNER)}))
     monkeypatch.setitem(ANSWER, "command", "echo first")
     monkeypatch.setitem(ANSWER, "reason", "first reason")
     h.log.create(
@@ -1195,7 +1234,16 @@ def test_decline_replay_delivers_finished_turn_once(
         "SELECT id FROM messages WHERE notice_key = ?", (f"admin:proposal:{op}",)
     ).fetchone()
     MessageStore(h.database, Reporter()).confirm_delivery(message[0], "admin-ref")
-    tap = Inbound(2, InboundKind.TAP, OWNER, CHAT, "admin-ref", data=f"v:{op}", thread=THREAD)
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref="admin-ref",
+        data=f"v:{op}",
+        thread=THREAD,
+    )
     monkeypatch.setitem(ANSWER, "reply", "Decline answer")
     monkeypatch.setitem(ANSWER, "command", "echo replacement")
     monkeypatch.setitem(ANSWER, "reason", "replacement reason")
@@ -1254,7 +1302,7 @@ def test_restart_resumes_pending_admin_output_before_new_turns(
     journal = JournalProposals(h.database, OpStore(h.database), channel_name=CHANNEL)
     op, _ = journal.intend_admin(conversation.id, 10, "echo safe", "reason", now)
     assert journal.decide_admin(
-        op, 11, OWNER, admin=True, approve=True, now=now, cutoff=now - timedelta(minutes=1)
+        op, 11, str(OWNER), admin=True, approve=True, now=now, cutoff=now - timedelta(minutes=1)
     )
     assert journal.issue_admin(op, now) is not None
     output_turn = journal.finish_admin(op, now, "safe output", 0, 1.0, cut=False)
@@ -1321,11 +1369,12 @@ def _file_item(
     size: int | None = None,
 ) -> Inbound:
     return Inbound(
-        update_id,
-        InboundKind.FILE,
-        OWNER,
-        CHAT,
-        str(update_id),
+        id=update_id,
+        key=str(update_id),
+        kind=InboundKind.FILE,
+        sender=str(OWNER),
+        chat=CHAT,
+        message_ref=str(update_id),
         text=caption,
         thread=THREAD,
         file=FileRef(id=file_id, name=name, size=size),
@@ -1480,7 +1529,14 @@ def test_a_file_outside_an_expert_topic_is_not_run_as_a_command() -> None:
         max_text=MESSAGE_TEXT_LIMIT,
     )
     caption = Inbound(
-        9, InboundKind.FILE, OWNER, OWNER, "9", text="/status", file=FileRef(id="f", name="a")
+        id=9,
+        key=str(9),
+        kind=InboundKind.FILE,
+        sender=str(OWNER),
+        chat=OWNER,
+        message_ref="9",
+        text="/status",
+        file=FileRef(id="f", name="a"),
     )
 
     asyncio.run(replies.handle(caption))
@@ -1604,7 +1660,7 @@ def test_a_conversation_that_ends_during_a_download_gets_no_file_and_no_turn(
         assert conversation is not None
         attach = asyncio.create_task(h.turns.handle(_file_item(2, "file-1", "a.png")))
         await asyncio.wait_for(downloads.started.wait(), timeout=1)
-        close = asyncio.create_task(h.ending.end(conversation.id, sender=OWNER, update_id=3))
+        close = asyncio.create_task(h.ending.end(conversation.id, sender=str(OWNER), update_id=3))
         # keep: lets the ending run as far as it can while the file is still downloading
         await asyncio.wait({close}, timeout=0.05)
         downloads.release.set()
@@ -1628,7 +1684,7 @@ def test_an_ending_stops_a_sketch_being_drawn(
         assert conversation is not None
 
         assert PROGRESS_KEY in _answer_keys(h)
-        ending = h.ending.end(conversation.id, sender=OWNER, update_id=2)
+        ending = h.ending.end(conversation.id, sender=str(OWNER), update_id=2)
         await asyncio.wait_for(ending, timeout=1)
         await asyncio.wait_for(asked, timeout=1)
 

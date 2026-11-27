@@ -15,7 +15,7 @@ import pytest
 
 from shikiri_yaku.adapters.telegram import UNEXPECTED_REPLY
 from shikiri_yaku.adapters.telegram_updates import TelegramUpdates
-from shikiri_yaku.domain.inbound import Batch, Command, FileRef, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, Command, FileRef, InboundKind, Received
 from shikiri_yaku.ports import ChannelError, ChannelProtocolError
 from tests.support.secrets import SECRETS
 from tests.support.telegram_bot import FIXTURES
@@ -44,12 +44,12 @@ class _Api:
 
 
 def _read(body: object) -> Batch:
-    return asyncio.run(TelegramUpdates(_Api(body), group_id=GROUP).fetch(0, WAIT_S))
+    return asyncio.run(TelegramUpdates(_Api(body), group_id=GROUP).fetch(None, WAIT_S))
 
 
 def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
     api = _Api(UPDATES)
-    batch = asyncio.run(TelegramUpdates(api, group_id=GROUP).fetch(705, WAIT_S))
+    batch = asyncio.run(TelegramUpdates(api, group_id=GROUP).fetch("705", WAIT_S))
 
     assert api.calls == [
         (
@@ -57,15 +57,27 @@ def test_each_documented_update_becomes_the_item_it_stands_for() -> None:
             {"offset": 705, "timeout": WAIT_S, "allowed_updates": ["message", "callback_query"]},
         )
     ]
-    by_id = {item.update_id: item for item in batch.items}
-    assert batch.last_update_id == TAP
-    assert set(by_id) == {TEXT, REPLY, TAP}
-    assert by_id[TEXT] == Inbound(
-        TEXT, InboundKind.TEXT, OWNER, OWNER, "1001/90", text="Use the second way"
+    by_id = {item.key: item for item in batch.events}
+    assert batch.cursor == str(TAP + 1)
+    assert set(by_id) == {str(TEXT), str(REPLY), str(TAP)}
+    assert by_id[str(TEXT)] == Received(
+        key=str(TEXT),
+        kind=InboundKind.TEXT,
+        sender=str(OWNER),
+        chat=OWNER,
+        message_ref="1001/90",
+        text="Use the second way",
     )
-    assert by_id[REPLY].kind == InboundKind.REPLY
-    assert (by_id[REPLY].message_ref, by_id[REPLY].reply_to_ref) == ("1001/91", "1001/42")
-    assert by_id[TAP] == Inbound(TAP, InboundKind.TAP, OWNER, OWNER, "1001/42", data="a:1:1")
+    assert by_id[str(REPLY)].kind == InboundKind.REPLY
+    assert (by_id[str(REPLY)].message_ref, by_id[str(REPLY)].reply_to_ref) == ("1001/91", "1001/42")
+    assert by_id[str(TAP)] == Received(
+        key=str(TAP),
+        kind=InboundKind.TAP,
+        sender=str(OWNER),
+        chat=OWNER,
+        message_ref="1001/42",
+        data="a:1:1",
+    )
 
 
 _IN_PRIVATE: Final[dict[str, object]] = {"from": {"id": OWNER}, "chat": {"id": OWNER}}
@@ -76,22 +88,38 @@ _BOT_QUESTION: Final[dict[str, object]] = {"message_id": BOT_MESSAGE}
 _TOPIC_SHAPES: Final = [
     pytest.param(
         {"message_id": 80, **_IN_TOPIC, "reply_to_message": _TOPIC_FIRST, "text": "/help"},
-        Inbound(710, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/80", text="/help", thread=TOPIC),
+        Received(
+            key=str(710),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/80",
+            text="/help",
+            thread=TOPIC,
+        ),
         id="command in topic",
     ),
     pytest.param(
         {"message_id": 81, **_IN_TOPIC, "reply_to_message": _TOPIC_FIRST, "text": "Use it"},
-        Inbound(711, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/81", text="Use it", thread=TOPIC),
+        Received(
+            key=str(711),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/81",
+            text="Use it",
+            thread=TOPIC,
+        ),
         id="plain message in topic",
     ),
     pytest.param(
         {"message_id": 82, **_IN_TOPIC, "reply_to_message": _BOT_QUESTION, "text": "Use it"},
-        Inbound(
-            712,
-            InboundKind.REPLY,
-            OWNER,
-            GROUP,
-            f"{GROUP}/82",
+        Received(
+            key=str(712),
+            kind=InboundKind.REPLY,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/82",
             reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
             text="Use it",
             thread=TOPIC,
@@ -100,12 +128,12 @@ _TOPIC_SHAPES: Final = [
     ),
     pytest.param(
         {"message_id": 87, **_IN_TOPIC, "reply_to_message": _BOT_QUESTION, "text": "/details"},
-        Inbound(
-            717,
-            InboundKind.REPLY,
-            OWNER,
-            GROUP,
-            f"{GROUP}/87",
+        Received(
+            key=str(717),
+            kind=InboundKind.REPLY,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/87",
             reply_to_ref=f"{GROUP}/{BOT_MESSAGE}",
             text="/details",
             thread=TOPIC,
@@ -114,17 +142,38 @@ _TOPIC_SHAPES: Final = [
     ),
     pytest.param(
         {"message_id": 83, **_IN_PRIVATE, "text": "/help"},
-        Inbound(713, InboundKind.TEXT, OWNER, OWNER, f"{OWNER}/83", text="/help"),
+        Received(
+            key=str(713),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=OWNER,
+            message_ref=f"{OWNER}/83",
+            text="/help",
+        ),
         id="command in private chat",
     ),
     pytest.param(
         {"message_id": 84, **_IN_GROUP, "text": "/help"},
-        Inbound(714, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/84", text="/help"),
+        Received(
+            key=str(714),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/84",
+            text="/help",
+        ),
         id="command in group without topics",
     ),
     pytest.param(
         {"message_id": 86, **_IN_GROUP, "message_thread_id": GENERAL, "text": "/expert@bot hello"},
-        Inbound(716, InboundKind.TEXT, OWNER, GROUP, f"{GROUP}/86", text="/expert@bot hello"),
+        Received(
+            key=str(716),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/86",
+            text="/expert@bot hello",
+        ),
         id="command in the General topic on the wire",
     ),
 ]
@@ -132,19 +181,26 @@ _TOPIC_SHAPES: Final = [
 
 @pytest.mark.parametrize(("message", "expected"), _TOPIC_SHAPES)
 def test_a_message_is_a_reply_only_to_a_message_other_than_the_topics_first(
-    message: dict[str, object], expected: Inbound
+    message: dict[str, object], expected: Received
 ) -> None:
-    body = {"ok": True, "result": [{"update_id": expected.update_id, "message": message}]}
+    body = {"ok": True, "result": [{"update_id": int(expected.key), "message": message}]}
 
-    assert _read(body).items == (expected,)
+    assert _read(body).events == (expected,)
 
 
 def test_a_closed_topic_is_read_as_its_topic_closed_item() -> None:
     message: dict[str, Any] = {"message_id": 85, **_IN_TOPIC, "forum_topic_closed": {}}
     body: dict[str, Any] = {"ok": True, "result": [{"update_id": 715, "message": message}]}
 
-    assert _read(body).items == (
-        Inbound(715, InboundKind.TOPIC_CLOSED, OWNER, GROUP, f"{GROUP}/85", thread=TOPIC),
+    assert _read(body).events == (
+        Received(
+            key=str(715),
+            kind=InboundKind.TOPIC_CLOSED,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/85",
+            thread=TOPIC,
+        ),
     )
 
 
@@ -153,7 +209,7 @@ def test_a_kind_the_operator_does_not_read_moves_the_batch_but_gives_no_item() -
 
     batch = _read(body)
 
-    assert (batch.last_update_id, batch.items) == (704, ())
+    assert (batch.cursor, batch.events) == ("705", ())
 
 
 @pytest.mark.parametrize(("index", "field"), [(0, "from"), (1, "chat"), (2, "data")])
@@ -219,12 +275,12 @@ _FILE_SHAPES = [
             "caption": "see",
             "photo": [{"file_id": "small", "file_size": 1}, {"file_id": "large", "file_size": 9}],
         },
-        Inbound(
-            720,
-            InboundKind.FILE,
-            OWNER,
-            GROUP,
-            f"{GROUP}/90",
+        Received(
+            key=str(720),
+            kind=InboundKind.FILE,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/90",
             text="see",
             thread=TOPIC,
             file=FileRef(id="large", name="photo.jpg", size=9),
@@ -233,12 +289,12 @@ _FILE_SHAPES = [
     ),
     pytest.param(
         {"message_id": 91, **_IN_TOPIC, "document": {"file_id": "doc", "file_size": 5}},
-        Inbound(
-            721,
-            InboundKind.FILE,
-            OWNER,
-            GROUP,
-            f"{GROUP}/91",
+        Received(
+            key=str(721),
+            kind=InboundKind.FILE,
+            sender=str(OWNER),
+            chat=GROUP,
+            message_ref=f"{GROUP}/91",
             thread=TOPIC,
             file=FileRef(id="doc", name="document", size=5),
         ),
@@ -246,12 +302,12 @@ _FILE_SHAPES = [
     ),
     pytest.param(
         {"message_id": 92, **_IN_PRIVATE, "document": {"file_id": "pdf", "file_name": "spec.pdf"}},
-        Inbound(
-            722,
-            InboundKind.FILE,
-            OWNER,
-            OWNER,
-            f"{OWNER}/92",
+        Received(
+            key=str(722),
+            kind=InboundKind.FILE,
+            sender=str(OWNER),
+            chat=OWNER,
+            message_ref=f"{OWNER}/92",
             file=FileRef(id="pdf", name="spec.pdf"),
         ),
         id="document in private chat",
@@ -261,11 +317,11 @@ _FILE_SHAPES = [
 
 @pytest.mark.parametrize(("message", "expected"), _FILE_SHAPES)
 def test_a_photo_or_document_becomes_a_file_item_with_its_caption(
-    message: dict[str, object], expected: Inbound
+    message: dict[str, object], expected: Received
 ) -> None:
-    body = {"ok": True, "result": [{"update_id": expected.update_id, "message": message}]}
+    body = {"ok": True, "result": [{"update_id": int(expected.key), "message": message}]}
 
-    assert _read(body).items == (expected,)
+    assert _read(body).events == (expected,)
 
 
 @pytest.mark.parametrize(
@@ -283,4 +339,14 @@ def test_a_photo_or_document_becomes_a_file_item_with_its_caption(
 def test_a_command_is_read_as_name_instance_and_arguments(
     text: str | None, expected: Command | None
 ) -> None:
-    assert Inbound(1, InboundKind.TEXT, OWNER, OWNER, "1", text=text).command == expected
+    assert (
+        Received(
+            key=str(1),
+            kind=InboundKind.TEXT,
+            sender=str(OWNER),
+            chat=OWNER,
+            message_ref="1",
+            text=text,
+        ).command
+        == expected
+    )

@@ -103,7 +103,7 @@ class Ask:
         channel: str,
         max_text: int,
         final: FinalEdits | None = None,
-        admins: frozenset[int] = frozenset(),
+        admins: frozenset[str] = frozenset(),
     ) -> None:
         self._log = log
         self._outbox = outbox
@@ -118,7 +118,7 @@ class Ask:
         self._final = final
         self._admins = admins
 
-    def is_admin(self, sender: int) -> bool:
+    def is_admin(self, sender: str) -> bool:
         return sender in self._admins
 
     async def offer(self, item: Inbound) -> None:
@@ -137,11 +137,11 @@ class Ask:
             [
                 Message(
                     "Choose an Expert.",
-                    (Button(label, f"{EXPERT_SELECTION_PREFIX}{item.update_id}"),),
+                    (Button(label, f"{EXPERT_SELECTION_PREFIX}{item.id}"),),
                     reply_to=item.message_ref,
                 )
             ],
-            key=f"expert:select:{item.update_id}",
+            key=f"expert:select:{item.id}",
             now=self._clock.now(),
         )
 
@@ -164,7 +164,7 @@ class Ask:
                 self._outbox,
                 [item_destination(self._channel, item)],
                 reason,
-                key=f"expert:refusal:{item.update_id}",
+                key=f"expert:refusal:{item.id}",
                 now=self._clock.now(),
                 max_text=self._max_text,
             )
@@ -180,26 +180,26 @@ class Ask:
         message = Message(ADMIN_OPEN_REPLY if admin else OPEN_REPLY, buttons)
         if selection:
             if self._final is not None:
-                _, selection_key = open_reply_keys(item.update_id)
+                _, selection_key = open_reply_keys(item.id)
                 self._final.settle_notice(selection_key, message, conversation_id=row.id)
         else:
             self._outbox.queue_command_reply(
                 [item_destination(self._channel, item)],
                 [Message(message.text, message.buttons, reply_to=item.message_ref)],
-                key=f"expert:open:{item.update_id}",
+                key=f"expert:open:{item.id}",
                 now=self._clock.now(),
                 conversation_id=row.id,
             )
         if admin:
             self._turns.warn_admin(row)
-        await self._turns.run(row.id, item.update_id)
+        await self._turns.run(row.id, item.id)
 
     async def _open(
         self, rooms: Rooms, item: Inbound, component: str | None, text: str
     ) -> ConversationRecord | None:
         names = [component] if component is not None else list(self._scope)
         created = self._log.create(
-            item.update_id,
+            item.id,
             chat=item.chat,
             thread=item.thread,
             text=text,
@@ -211,17 +211,17 @@ class Ask:
             try:
                 room = await rooms.open(f"💬 {text}")
             except ChannelError:
-                self._log.fail(item.update_id)
+                self._log.fail(item.id)
                 queue_expert_notice(
                     self._outbox,
                     self._clock,
                     item_destination(self._channel, item),
                     CREATION_UNCERTAIN,
-                    key=f"expert:creation:{item.update_id}",
+                    key=f"expert:creation:{item.id}",
                 )
                 return None
-            self._log.opened(item.update_id, room)
-        return self._log.get(item.update_id)
+            self._log.opened(item.id, room)
+        return self._log.get(item.id)
 
     def _refusal(self, item: Inbound, text: str) -> str:
         if not self._configured:

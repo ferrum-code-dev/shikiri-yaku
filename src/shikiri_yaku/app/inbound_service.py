@@ -81,14 +81,14 @@ class InboundService:
         await self._poll()
         for item in self._log.pending():
             if self._background(item):
-                if item.update_id not in self._tasks:
-                    self._tasks[item.update_id] = asyncio.create_task(self._run_background(item))
+                if item.id not in self._tasks:
+                    self._tasks[item.id] = asyncio.create_task(self._run_background(item))
                 continue
             try:
                 await self._replies.handle(item)
             except ShikiruError, ChannelError:
                 return
-            self._log.mark_handled(item.update_id)
+            self._log.mark_handled(item.id)
 
     def _background(self, item: Inbound) -> bool:
         return (
@@ -105,7 +105,7 @@ class InboundService:
                 await self._replies.handle(item)
         except ShikiruError, ChannelError:
             return
-        self._log.mark_handled(item.update_id)
+        self._log.mark_handled(item.id)
 
     async def _poll(self) -> None:
         try:

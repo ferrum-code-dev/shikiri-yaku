@@ -95,7 +95,16 @@ def _open(h: Harness, update: int = 700, thread: int | None = None, at: datetime
     )
     asyncio.run(
         replies.handle(
-            Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text="/pending", thread=thread)
+            Inbound(
+                id=update,
+                key=str(update),
+                kind=InboundKind.TEXT,
+                sender="1001",
+                chat=1001,
+                message_ref="1001/90",
+                text="/pending",
+                thread=thread,
+            )
         )
     )
 

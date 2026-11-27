@@ -42,7 +42,7 @@ class Outbox:
 
 
 def _presenter(
-    log: JournalWeb, outbox: Outbox, conversations: Conversations, admins: frozenset[int]
+    log: JournalWeb, outbox: Outbox, conversations: Conversations, admins: frozenset[str]
 ) -> ExpertWebRequests:
     return ExpertWebRequests(
         log,
@@ -112,7 +112,16 @@ def test_request_is_unique_and_taps_grant_once_for_later_conversations() -> None
         runs.append((conversation_id, update_id))
 
     for update in (2, 3):
-        item = Inbound(update, InboundKind.TAP, 1, 1, "9", data="w:1", thread=7)
+        item = Inbound(
+            id=update,
+            key=str(update),
+            kind=InboundKind.TAP,
+            sender="1",
+            chat=1,
+            message_ref="9",
+            data="w:1",
+            thread=7,
+        )
         asyncio.run(presenter.tap(item, run))
     assert runs == [(row.id, 2)]
     assert database.connection.execute("SELECT count(*) FROM web_grants").fetchone()[0] == 1
@@ -138,7 +147,7 @@ def _activity(database: Database) -> str:
 
 
 def _admin_web_request(
-    admins: frozenset[int], clock: Clock
+    admins: frozenset[str], clock: Clock
 ) -> tuple[Database, ExpertWebRequests, list[int]]:
     database = Database.open(":memory:")
     conversations = Conversations(database)
@@ -167,12 +176,21 @@ def _admin_web_request(
 
 def test_web_tap_in_admin_conversation_needs_a_listed_admin_and_counts_as_activity() -> None:
     clock = Clock()
-    database, presenter, runs = _admin_web_request(frozenset({5}), clock)
+    database, presenter, runs = _admin_web_request(frozenset({"5"}), clock)
 
     async def run(_conversation_id: int, update_id: int) -> None:
         runs.append(update_id)
 
-    other = Inbound(2, InboundKind.TAP, 6, 1, "9", data="w:1", thread=7)
+    other = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="6",
+        chat=1,
+        message_ref="9",
+        data="w:1",
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(other, run))
     assert runs == []
     assert database.connection.execute("SELECT count(*) FROM web_grants").fetchone()[0] == 0
@@ -181,7 +199,16 @@ def test_web_tap_in_admin_conversation_needs_a_listed_admin_and_counts_as_activi
         database.connection.execute("SELECT state FROM web_requests").fetchone()["state"]
         == "pending"
     )
-    listed = Inbound(3, InboundKind.TAP, 5, 1, "9", data="w:1", thread=7)
+    listed = Inbound(
+        id=3,
+        key=str(3),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=1,
+        message_ref="9",
+        data="w:1",
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(listed, run))
     assert runs == [3]
     assert _activity(database) == stamp(NOW)
@@ -195,7 +222,16 @@ def test_web_tap_after_the_admin_is_removed_from_the_list_is_ignored() -> None:
     async def run(_conversation_id: int, update_id: int) -> None:
         runs.append(update_id)
 
-    item = Inbound(2, InboundKind.TAP, 5, 1, "9", data="w:1", thread=7)
+    item = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=1,
+        message_ref="9",
+        data="w:1",
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(item, run))
     assert runs == []
     database.close()
@@ -247,7 +283,16 @@ def test_web_tap_settles_request_message_after_decision(data: str, word: str, st
     async def run(conversation_id: int, update_id: int) -> None:
         runs.append((conversation_id, update_id))
 
-    item = Inbound(2, InboundKind.TAP, 1, 1, "9", data=data, thread=7)
+    item = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="1",
+        chat=1,
+        message_ref="9",
+        data=data,
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(item, run))
     assert len(runs) == 1
     assert log.granted("docs.example") is (state == "allowed")
@@ -270,7 +315,16 @@ def test_web_tap_settles_once_across_duplicate_taps() -> None:
         runs.append(update_id)
 
     for update in (2, 3):
-        item = Inbound(update, InboundKind.TAP, 1, 1, "9", data="w:1", thread=7)
+        item = Inbound(
+            id=update,
+            key=str(update),
+            kind=InboundKind.TAP,
+            sender="1",
+            chat=1,
+            message_ref="9",
+            data="w:1",
+            thread=7,
+        )
         assert asyncio.run(presenter.tap(item, run))
     assert runs == [2]
     assert database.connection.execute("SELECT count(*) FROM web_grants").fetchone()[0] == 1
@@ -290,7 +344,16 @@ def test_web_tap_from_another_message_does_not_settle() -> None:
     async def run(_conversation_id: int, update_id: int) -> None:  # pragma: no cover
         raise AssertionError(update_id)
 
-    item = Inbound(2, InboundKind.TAP, 1, 1, "other", data="w:1", thread=7)
+    item = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="1",
+        chat=1,
+        message_ref="other",
+        data="w:1",
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(item, run))
     assert database.connection.execute("SELECT final_body FROM messages").fetchone()[0] is None
     assert (
@@ -302,12 +365,21 @@ def test_web_tap_from_another_message_does_not_settle() -> None:
 
 def test_web_tap_in_unauthorized_conversation_does_not_settle() -> None:
     clock = Clock()
-    database, presenter, runs = _admin_web_request(frozenset({5}), clock)
+    database, presenter, runs = _admin_web_request(frozenset({"5"}), clock)
 
     async def run(_conversation_id: int, update_id: int) -> None:
         runs.append(update_id)
 
-    other = Inbound(2, InboundKind.TAP, 6, 1, "9", data="w:1", thread=7)
+    other = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="6",
+        chat=1,
+        message_ref="9",
+        data="w:1",
+        thread=7,
+    )
     assert asyncio.run(presenter.tap(other, run))
     assert database.connection.execute("SELECT final_body FROM messages").fetchone()[0] is None
     database.close()

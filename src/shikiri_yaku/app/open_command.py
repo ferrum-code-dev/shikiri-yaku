@@ -91,25 +91,25 @@ class OpenCommand:
         self._approval_expiry_h = approval_expiry_h
 
     async def handle(self, item: Inbound, component: str | None) -> None:
-        if self._outbox.command_reply_queued(_done_key(item.update_id)):
+        if self._outbox.command_reply_queued(_done_key(item.id)):
             return
         listed, unreachable = await self._listed(component)
-        questions = await self._reshow_questions(item.update_id, listed)
-        approvals = self._queue_approvals(item.update_id, listed)
-        installs = self._queue_install_approvals(item.update_id, listed)
+        questions = await self._reshow_questions(item.id, listed)
+        approvals = self._queue_approvals(item.id, listed)
+        installs = self._queue_install_approvals(item.id, listed)
         if questions or approvals or installs:
             self._reply(
                 item,
                 _grouped(questions, approvals, installs),
-                f"pending:{item.update_id}:summary",
+                f"pending:{item.id}:summary",
             )
         elif not unreachable:
-            self._reply(item, _nothing(component), f"pending:{item.update_id}:nothing")
+            self._reply(item, _nothing(component), f"pending:{item.id}:nothing")
         if unreachable:
             self._reply(
                 item,
                 f"Shikiru did not answer for {', '.join(unreachable)}.",
-                f"pending:{item.update_id}:unreachable",
+                f"pending:{item.id}:unreachable",
             )
         self._complete(item)
 
@@ -181,9 +181,7 @@ class OpenCommand:
         )
 
     def _complete(self, item: Inbound) -> None:
-        self._outbox.queue_command_reply(
-            [], [], key=_done_key(item.update_id), now=self._clock.now()
-        )
+        self._outbox.queue_command_reply([], [], key=_done_key(item.id), now=self._clock.now())
 
     async def _listed(
         self, component: str | None

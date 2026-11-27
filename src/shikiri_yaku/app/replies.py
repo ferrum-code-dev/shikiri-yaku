@@ -230,13 +230,13 @@ class Replies:
         await self._resolve(item, origin, payload)
 
     async def _resolve(self, item: Inbound, origin: ReplyOrigin, payload: ResolvePayload) -> None:
-        op_id = self._log.intend_resolve(item.update_id, payload, self._clock.now())
+        op_id = self._log.intend_resolve(item.id, payload, self._clock.now())
         if op_id is None:
             self._queue(
                 origin,
                 Message(refusal_notice(origin.number)),
                 Purpose.NOTICE,
-                key=f"resolve:{item.update_id}:refused",
+                key=f"resolve:{item.id}:refused",
             )
             return
         if payload.kind in {ResolutionKind.ACCEPT, ResolutionKind.CANCEL}:
@@ -276,7 +276,7 @@ class Replies:
             origin,
             Message(f"S{origin.number} · Reply with your answer.", expects_reply=True),
             Purpose.QUESTION,
-            key=f"input:{item.update_id}",
+            key=f"input:{item.id}",
         )
 
     async def _confirm(self, item: Inbound, origin: ReplyOrigin) -> None:
@@ -299,7 +299,7 @@ class Replies:
             origin,
             Message(f"{head}{label}{tail}"),
             Purpose.NOTICE,
-            key=f"already:{item.update_id}",
+            key=f"already:{item.id}",
         )
 
     async def _details(self, item: Inbound, origin: ReplyOrigin) -> None:
@@ -315,7 +315,7 @@ class Replies:
                 origin,
                 Message(refusal_notice(origin.number)),
                 Purpose.NOTICE,
-                key=f"details:{item.update_id}:refused",
+                key=f"details:{item.id}:refused",
             )
             return
         for offset in range(0, len(view.packet), self._max_text):
@@ -323,7 +323,7 @@ class Replies:
                 origin,
                 Message(view.packet[offset : offset + self._max_text]),
                 Purpose.NOTICE,
-                key=f"details:{item.update_id}:{offset}",
+                key=f"details:{item.id}:{offset}",
             )
 
     def _queue(

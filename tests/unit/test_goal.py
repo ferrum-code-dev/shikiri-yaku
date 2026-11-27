@@ -89,11 +89,32 @@ class _Submit:
         )
 
     def send(self, text: str, update: int = 1, chat: int = 1001, thread: int | None = None) -> None:
-        item = Inbound(update, InboundKind.TEXT, 1001, chat, f"{chat}/90", text=text, thread=thread)
+        item = Inbound(
+            id=update,
+            key=str(update),
+            kind=InboundKind.TEXT,
+            sender="1001",
+            chat=chat,
+            message_ref=f"{chat}/90",
+            text=text,
+            thread=thread,
+        )
         asyncio.run(self.command.handle(item))
 
     def tap(self, data: str, ref: str, update: int = 2, chat: int = 1001) -> None:
-        asyncio.run(self.command.tap(Inbound(update, InboundKind.TAP, 1001, chat, ref, data=data)))
+        asyncio.run(
+            self.command.tap(
+                Inbound(
+                    id=update,
+                    key=str(update),
+                    kind=InboundKind.TAP,
+                    sender="1001",
+                    chat=chat,
+                    message_ref=ref,
+                    data=data,
+                )
+            )
+        )
 
     def flush(self) -> dict[str, Message]:
         """Confirm every pending message as sent, so the journal can match a tap to it."""

@@ -87,7 +87,7 @@ class JournalProposals:
         self,
         op_id: int,
         update_id: int,
-        sender: int,
+        sender: str,
         *,
         admin: bool,
         approve: bool,

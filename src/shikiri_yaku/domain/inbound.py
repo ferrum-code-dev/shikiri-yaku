@@ -43,9 +43,11 @@ class Command:
     arguments: str
 
 
-@dataclass(frozen=True, slots=True)
-class Inbound:
-    """One tap, reply or text with its sender.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Received:
+    """One tap, reply or text with its sender, as the inbox returns it.
+
+    `key` is the channel's id of the event, which only keeps it from being stored twice.
 
     `chat` is the chat the item was sent in: the sender's private chat, or a shared chat.
     `message_ref` names the message the item was sent in; for a tap it is the message whose button
@@ -55,9 +57,9 @@ class Inbound:
     reply, text or file was sent in, None outside a thread.
     """
 
-    update_id: int
+    key: str
     kind: InboundKind
-    sender: int
+    sender: str
     chat: int
     message_ref: str
     reply_to_ref: str | None = None
@@ -77,9 +79,19 @@ class Inbound:
         return Command(words[0], name.lower(), instance if at else None, arguments)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Inbound(Received):
+    """An event as the journal returns it, with the journal's own number of it."""
+
+    id: int
+
+
 @dataclass(frozen=True, slots=True)
 class Batch:
-    """Newest update id and readable items; unsupported content advances the id only."""
+    """What one read of the inbox gave; unsupported content advances the cursor only.
 
-    last_update_id: int | None
-    items: tuple[Inbound, ...]
+    `cursor` is None when nothing was read.
+    """
+
+    cursor: str | None
+    events: tuple[Received, ...]

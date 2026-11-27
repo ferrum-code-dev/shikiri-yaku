@@ -145,7 +145,7 @@ class ExpertTurns:
         downloads: Downloads,
         sketches: ExpertSketches,
         web: ExpertWebRequests | None = None,
-        admins: frozenset[int] = frozenset(),
+        admins: frozenset[str] = frozenset(),
         known_secrets: tuple[str, ...] = (),
         admin_executor: AdminExecutor | None = None,
     ) -> None:
@@ -187,7 +187,7 @@ class ExpertTurns:
         if conversation is None:
             return
         if item.kind is InboundKind.TOPIC_CLOSED:
-            await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
+            await self._ending.end(conversation.id, sender=item.sender, update_id=item.id)
             return
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
             return
@@ -198,16 +198,16 @@ class ExpertTurns:
         text = item.text or ""
         command = item.command
         if command is None:
-            self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
-            await self.run(conversation.id, item.update_id)
+            self._log.add_turn(conversation.id, item.id, text, self._clock.now())
+            await self.run(conversation.id, item.id)
             return
         if command.name == _EFFORT:
             self._effort(item, conversation, command.arguments.split())
         elif command.name == _SUMMARIZE:
-            self._log.add_turn(conversation.id, item.update_id, SUMMARY_PROMPT, self._clock.now())
-            await self.run(conversation.id, item.update_id)
+            self._log.add_turn(conversation.id, item.id, SUMMARY_PROMPT, self._clock.now())
+            await self.run(conversation.id, item.id)
         elif command.name == _CLOSE:
-            await self._ending.end(conversation.id, sender=item.sender, update_id=item.update_id)
+            await self._ending.end(conversation.id, sender=item.sender, update_id=item.id)
         else:
             self._reply(item, _HELP, conversation.id)
 
@@ -239,7 +239,7 @@ class ExpertTurns:
             try:
                 path = save_attachment(
                     conversation_directory(self._directory, conversation.id),
-                    item.update_id,
+                    item.id,
                     attached.name,
                     content,
                 )
@@ -247,8 +247,8 @@ class ExpertTurns:
                 self._file_notice(item, conversation, _NOT_SAVED)
                 return
             text = join_blocks(item.text or "", f"{_ATTACHED}{path}")
-            self._log.add_turn(conversation.id, item.update_id, text, self._clock.now())
-            await self._run_locked(conversation.id, item.update_id)
+            self._log.add_turn(conversation.id, item.id, text, self._clock.now())
+            await self._run_locked(conversation.id, item.id)
 
     def _is_open(self, conversation_id: int) -> bool:
         conversation = self._log.conversation(conversation_id)
@@ -262,7 +262,7 @@ class ExpertTurns:
             self._clock,
             self._rooms.place(conversation.room),
             text,
-            key=f"expert:file:{item.update_id}",
+            key=f"expert:file:{item.id}",
             conversation_id=conversation.id,
         )
 
@@ -490,7 +490,7 @@ class ExpertTurns:
             self._outbox,
             [item_destination(self._channel, item)],
             text,
-            key=f"expert:command:{item.update_id}",
+            key=f"expert:command:{item.id}",
             now=self._clock.now(),
             conversation_id=conversation_id,
             max_text=self._max_text,

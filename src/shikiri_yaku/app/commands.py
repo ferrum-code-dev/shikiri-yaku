@@ -102,7 +102,7 @@ class Commands:
         if name == _SUBMIT:
             await self._goal.handle(item)
             return
-        key = f"{_KEY_PREFIX}{item.update_id}"
+        key = f"{_KEY_PREFIX}{item.id}"
         if self._outbox.command_reply_queued(key):
             return
         queue_command_reply(

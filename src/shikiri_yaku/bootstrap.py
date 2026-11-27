@@ -264,7 +264,7 @@ def build_channel(settings: Settings, journal: Database, clock: Clock, bot: BotF
             shared_group=telegram.shared_group,
             delete_right=settings.expert is not None,
         ),
-        owners=frozenset(telegram.owners),
+        owners=frozenset(map(str, telegram.owners)),
         max_text=MESSAGE_TEXT_LIMIT,
         max_file_bytes=DOWNLOAD_LIMIT_BYTES,
         secrets=bot_api.known_secrets if isinstance(bot_api, HttpBotApi) else (),
@@ -408,7 +408,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         forward_retry_s=settings.operator.forward_retry_s,
     )
     conversations = Conversations(journal)
-    admins = frozenset(() if settings.admin is None else settings.admin.admins)
+    admins = frozenset(map(str, () if settings.admin is None else settings.admin.admins))
     access = AdminAccess(conversations, clock, admins=admins)
     rooms = channel.rooms
     runs = ConversationRuns()

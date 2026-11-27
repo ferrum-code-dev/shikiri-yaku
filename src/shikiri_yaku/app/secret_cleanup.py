@@ -35,12 +35,12 @@ class SecretCleanup:
 
     async def tick(self) -> None:
         for item in self._log.to_delete():
-            self._log.record_deletion(item.update_id)
+            self._log.record_deletion(item.id)
             try:
                 await self._deleter.delete(item.message_ref)
             except ChannelRefusedError:
                 continue
             except ChannelError:
-                self._log.defer_deletion(item.update_id)
+                self._log.defer_deletion(item.id)
                 continue
-            self._log.confirm_deletion(item.update_id)
+            self._log.confirm_deletion(item.id)

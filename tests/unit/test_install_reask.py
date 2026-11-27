@@ -200,7 +200,13 @@ def test_tap_on_the_replaced_approval_is_void_and_tap_on_the_new_one_runs(memory
     async def tap_both() -> None:
         for op in (old, new):
             item = Inbound(
-                1, InboundKind.TAP, 1, 1001, "approval", data=install_data(world.number, op.id)
+                id=1,
+                key=str(1),
+                kind=InboundKind.TAP,
+                sender="1",
+                chat=1001,
+                message_ref="approval",
+                data=install_data(world.number, op.id),
             )
             await replies.handle(item, _approval_origin(world, op.id), verb="i", op_id=op.id)
 

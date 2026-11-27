@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, ValidationError
 
 from shikiri_yaku.adapters.telegram import REF_SEPARATOR, UNEXPECTED_REPLY
-from shikiri_yaku.domain.inbound import Batch, FileRef, Inbound, InboundKind
+from shikiri_yaku.domain.inbound import Batch, FileRef, InboundKind, Received
 from shikiri_yaku.ports import ChannelProtocolError
 
 if TYPE_CHECKING:
@@ -92,10 +92,12 @@ _REPLY: Final[TypeAdapter[_Result | _Refused]] = TypeAdapter(_Result | _Refused)
 
 
 class TelegramUpdates:
-    """Long-polls `getUpdates` and reads each update into an Inbound item.
+    """Long-polls `getUpdates` and reads each update into a Received event.
 
-    Unsupported kinds and messages without text give no item but retain their update id. So does
-    an item from a chat that is neither a private chat nor the configured group.
+    The cursor is the last update id plus one, which `getUpdates` takes as its offset.
+
+    Unsupported kinds and messages without text give no event but move the cursor. So does
+    an event from a chat that is neither a private chat nor the configured group.
     Invalid supported updates fail the whole batch without exposing their payload in errors.
     """
 
@@ -103,7 +105,8 @@ class TelegramUpdates:
         self._api = api
         self._group_id = group_id
 
-    async def fetch(self, offset: int, wait_s: float) -> Batch:
+    async def fetch(self, cursor: str | None, wait_s: float) -> Batch:
+        offset = 0 if cursor is None else int(cursor)
         body = await self._api.call(
             GET_UPDATES,
             {"offset": offset, "timeout": wait_s, "allowed_updates": list(ALLOWED_UPDATES)},
@@ -114,45 +117,48 @@ class TelegramUpdates:
             raise ChannelProtocolError(UNEXPECTED_REPLY) from None
         if isinstance(reply, _Refused):
             raise ChannelProtocolError(_refusal(reply))
-        items: list[Inbound] = []
+        events: list[Received] = []
         last: int | None = None
         for update in reply.result:
             last = update.update_id if last is None else max(last, update.update_id)
-            if (item := _item(update)) is not None and item.chat in (item.sender, self._group_id):
-                items.append(item)
-        return Batch(last, tuple(items))
+            if (event := _event(update)) is not None and self._served_chat(event):
+                events.append(event)
+        return Batch(None if last is None else str(last + 1), tuple(events))
+
+    def _served_chat(self, event: Received) -> bool:
+        return event.chat == self._group_id or str(event.chat) == event.sender
 
 
-def _item(update: _Update) -> Inbound | None:
+def _event(update: _Update) -> Received | None:
     if update.callback_query is not None:
         tap = update.callback_query
         ref = _ref(tap.message.chat.id, tap.message.message_id)
-        return Inbound(
-            update.update_id,
-            InboundKind.TAP,
-            tap.sender.id,
-            tap.message.chat.id,
-            ref,
+        return Received(
+            key=str(update.update_id),
+            kind=InboundKind.TAP,
+            sender=str(tap.sender.id),
+            chat=tap.message.chat.id,
+            message_ref=ref,
             data=tap.data,
         )
     if update.message is not None and update.message.forum_topic_closed is not None:
         closed = update.message
-        return Inbound(
-            update.update_id,
-            InboundKind.TOPIC_CLOSED,
-            closed.sender.id,
-            closed.chat.id,
-            _ref(closed.chat.id, closed.message_id),
+        return Received(
+            key=str(update.update_id),
+            kind=InboundKind.TOPIC_CLOSED,
+            sender=str(closed.sender.id),
+            chat=closed.chat.id,
+            message_ref=_ref(closed.chat.id, closed.message_id),
             thread=_thread(closed.message_thread_id),
         )
     if update.message is not None and (attached := _file(update.message)) is not None:
         sent = update.message
-        return Inbound(
-            update.update_id,
-            InboundKind.FILE,
-            sent.sender.id,
-            sent.chat.id,
-            _ref(sent.chat.id, sent.message_id),
+        return Received(
+            key=str(update.update_id),
+            kind=InboundKind.FILE,
+            sender=str(sent.sender.id),
+            chat=sent.chat.id,
+            message_ref=_ref(sent.chat.id, sent.message_id),
             text=sent.caption,
             thread=_thread(sent.message_thread_id),
             file=attached,
@@ -160,12 +166,12 @@ def _item(update: _Update) -> Inbound | None:
     if update.message is not None and update.message.text is not None:
         sent = update.message
         replied = _replied(sent)
-        return Inbound(
-            update.update_id,
-            InboundKind.TEXT if replied is None else InboundKind.REPLY,
-            sent.sender.id,
-            sent.chat.id,
-            _ref(sent.chat.id, sent.message_id),
+        return Received(
+            key=str(update.update_id),
+            kind=InboundKind.TEXT if replied is None else InboundKind.REPLY,
+            sender=str(sent.sender.id),
+            chat=sent.chat.id,
+            message_ref=_ref(sent.chat.id, sent.message_id),
             reply_to_ref=None if replied is None else _ref(sent.chat.id, replied.message_id),
             text=sent.text,
             thread=_thread(sent.message_thread_id),

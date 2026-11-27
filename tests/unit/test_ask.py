@@ -170,8 +170,8 @@ class Harness:
         shared: bool = False,
         expert: Expert | None = None,
         clients: dict[str, ShikiruClient] | None = None,
-        admins: frozenset[int] = frozenset(),
-        turn_admins: frozenset[int] | None = None,
+        admins: frozenset[str] = frozenset(),
+        turn_admins: frozenset[str] | None = None,
         known_secrets: tuple[str, ...] = (),
     ) -> None:
         self.database = Database.open(":memory:")
@@ -264,7 +264,16 @@ class Harness:
     def send(self, text: str = "/expert hello", thread: int | None = None) -> None:
         asyncio.run(
             self.commands.handle(
-                Inbound(1, InboundKind.TEXT, 5, -100123, "1", text=text, thread=thread)
+                Inbound(
+                    id=1,
+                    key=str(1),
+                    kind=InboundKind.TEXT,
+                    sender="5",
+                    chat=-100123,
+                    message_ref="1",
+                    text=text,
+                    thread=thread,
+                )
             )
         )
 
@@ -386,18 +395,26 @@ def test_independent_asks_run_concurrently_and_are_not_scheduled_twice(tmp_path:
                 self.completed = asyncio.Event()
                 self.count = 0
 
-            def mark_handled(self, update_id: int) -> None:
-                super().mark_handled(update_id)
+            def mark_handled(self, event_id: int) -> None:
+                super().mark_handled(event_id)
                 self.count += 1
                 if self.count == 2:
                     self.completed.set()
 
         log = InboundLog(h.database)
         items = [
-            Inbound(update, InboundKind.TEXT, 5, -100123, str(update), text="/expert hello")
+            Inbound(
+                id=update,
+                key=str(update),
+                kind=InboundKind.TEXT,
+                sender="5",
+                chat=-100123,
+                message_ref=str(update),
+                text="/expert hello",
+            )
             for update in (1, 2)
         ]
-        log.record_batch("telegram", items, 3, NOW)
+        log.record_batch("telegram", items, "3", NOW)
 
         class Poller:
             async def poll_once(self) -> None:
@@ -475,11 +492,12 @@ def test_a_missing_ask_origin_topic_does_not_end_the_expert_topic(tmp_path: Path
     asyncio.run(
         h.ask.handle(
             Inbound(
-                1,
-                InboundKind.TEXT,
-                5,
-                -100123,
-                "1",
+                id=1,
+                key=str(1),
+                kind=InboundKind.TEXT,
+                sender="5",
+                chat=-100123,
+                message_ref="1",
                 text="/expert hello",
                 thread=77,
             ),
@@ -527,7 +545,13 @@ def test_refused_topic_rename_does_not_prevent_answer(tmp_path: Path) -> None:
 
 def _ask(update_id: int, message_ref: str) -> Inbound:
     return Inbound(
-        update_id, InboundKind.TEXT, 5, -100123, message_ref, text=f"/expert question {update_id}"
+        id=update_id,
+        key=str(update_id),
+        kind=InboundKind.TEXT,
+        sender="5",
+        chat=-100123,
+        message_ref=message_ref,
+        text=f"/expert question {update_id}",
     )
 
 
@@ -617,7 +641,7 @@ def _pump(h: Harness, payload: Mapping[str, object]) -> None:
         done = asyncio.Event()
         updates = TelegramUpdates(cast("BotApi", _BotApi(payload)), group_id=-100123)
         log = JournalInbound(h.database)
-        poller = InboundPoller(updates, log, Clock(), channel="telegram", owners=[5], wait_s=1)
+        poller = InboundPoller(updates, log, Clock(), channel="telegram", owners=["5"], wait_s=1)
         service = InboundService(
             poller,
             log,
@@ -677,7 +701,7 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
     h = Harness(tmp_path, shared=True)
     original = _ask(1, "-100123/71")
     inbound = JournalInbound(h.database)
-    inbound.record_batch("telegram", [original], 2, NOW)
+    inbound.record_batch("telegram", [original], "2", NOW)
     asyncio.run(h.commands.handle(original))
     asyncio.run(h.commands.handle(original))
     [offer] = h.outbox.pending()
@@ -685,8 +709,24 @@ def test_selection_opens_once_and_edits_the_reply(tmp_path: Path) -> None:
     assert offer.message.buttons[0].label == "/expert@bot"
     channel = Channel()
     asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
-    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
-    forged = Inbound(3, InboundKind.TAP, 5, -100123, "-100123/999", data="expert:1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
+    forged = Inbound(
+        id=3,
+        key=str(3),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=-100123,
+        message_ref="-100123/999",
+        data="expert:1",
+    )
     assert not asyncio.run(h.commands.tap(forged))
     assert asyncio.run(h.commands.tap(tap))
     assert asyncio.run(h.commands.tap(tap))
@@ -705,13 +745,21 @@ def test_a_selection_from_an_ask_sent_as_a_reply_opens_once(tmp_path: Path) -> N
         reply_to_ref="-100123/70",
     )
     inbound = JournalInbound(h.database)
-    inbound.record_batch("telegram", [original], 2, NOW)
+    inbound.record_batch("telegram", [original], "2", NOW)
     asyncio.run(h.commands.handle(original))
     [offer] = h.outbox.pending()
     assert offer.message.buttons[0].label == "/expert@bot"
     channel = Channel()
     asyncio.run(OutboxSender(h.outbox, channel, Clock(), interval_s=1).tick())
-    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
     assert asyncio.run(h.commands.tap(tap))
     assert asyncio.run(h.commands.tap(tap))
     assert len(h.topics.created) == len(h.expert.requests) == 1
@@ -720,7 +768,7 @@ def test_a_selection_from_an_ask_sent_as_a_reply_opens_once(tmp_path: Path) -> N
 def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
     h = Harness(tmp_path, shared=True)
     original = _ask(1, "-100123/71")
-    JournalInbound(h.database).record_batch("telegram", [original], 2, NOW)
+    JournalInbound(h.database).record_batch("telegram", [original], "2", NOW)
     asyncio.run(h.commands.handle(original))
     channel = FlakyChannel()
     sender = OutboxSender(h.outbox, channel, Clock(), interval_s=1)
@@ -731,7 +779,15 @@ def test_selection_recovers_after_topic_is_opened(tmp_path: Path) -> None:
     h.log.create(1, chat=-100123, thread=None, text="question 1", scope=["api", "web"], now=NOW)
     h.log.opened(1, "22")
     h.turns.recover()
-    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
     assert asyncio.run(h.commands.tap(tap))
     assert not h.topics.created
     assert len(h.expert.requests) == 1
@@ -744,10 +800,18 @@ def test_shared_instances_offer_independently(tmp_path: Path) -> None:
     second = Harness(tmp_path / "second", shared=True)
     original = _ask(1, "-100123/71")
     for instance in (first, second):
-        JournalInbound(instance.database).record_batch("telegram", [original], 2, NOW)
+        JournalInbound(instance.database).record_batch("telegram", [original], "2", NOW)
         asyncio.run(instance.commands.handle(original))
         asyncio.run(OutboxSender(instance.outbox, Channel(), Clock(), interval_s=1).tick())
-    tap = Inbound(2, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="5",
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
     assert asyncio.run(first.commands.tap(tap))
     assert len(first.expert.requests) == 1
     assert not second.expert.requests
@@ -758,20 +822,28 @@ def test_selection_rejects_non_owner_before_delivery(tmp_path: Path) -> None:
     h = Harness(tmp_path, shared=True)
     original = _ask(1, "-100123/71")
     inbound = JournalInbound(h.database)
-    inbound.record_batch("telegram", [original], 2, NOW)
+    inbound.record_batch("telegram", [original], "2", NOW)
     asyncio.run(h.commands.handle(original))
     asyncio.run(OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick())
-    tap = Inbound(2, InboundKind.TAP, 99, -100123, "-100123/1", data="expert:1")
+    tap = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender="99",
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
 
     class FakeUpdates:
-        async def fetch(self, offset: int, wait_s: float) -> Batch:  # noqa: ARG002
-            return Batch(2, (tap,))
+        async def fetch(self, cursor: str | None, wait_s: float) -> Batch:  # noqa: ARG002
+            return Batch("3", (tap,))
 
     poller = InboundPoller(
-        cast("Inbox", FakeUpdates()), inbound, Clock(), channel="telegram", owners=[5], wait_s=1
+        cast("Inbox", FakeUpdates()), inbound, Clock(), channel="telegram", owners=["5"], wait_s=1
     )
     asyncio.run(poller.poll_once())
-    assert all(item.update_id != 2 for item in inbound.pending())
+    assert all(item.key != "2" for item in inbound.pending())
     assert not h.topics.created
 
 
@@ -793,26 +865,50 @@ def test_selection_turns_do_not_block_inbound_or_each_other(tmp_path: Path) -> N
                 self.completed = asyncio.Event()
                 self.count = 0
 
-            def mark_handled(self, update_id: int) -> None:
-                super().mark_handled(update_id)
-                if update_id >= 3:
+            def mark_handled(self, event_id: int) -> None:
+                super().mark_handled(event_id)
+                if event_id >= 3:
                     self.count += 1
                     if self.count == 3:
                         self.completed.set()
 
         log = InboundLog(h.database)
         originals = [_ask(1, "-100123/71"), _ask(2, "-100123/72")]
-        log.record_batch("telegram", originals, 3, NOW)
+        log.record_batch("telegram", originals, "3", NOW)
         for original in originals:
             await h.commands.handle(original)
-            log.mark_handled(original.update_id)
+            log.mark_handled(original.id)
         await OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick()
         items = [
-            Inbound(3, InboundKind.TAP, 5, -100123, "-100123/1", data="expert:1"),
-            Inbound(4, InboundKind.TAP, 5, -100123, "-100123/2", data="expert:2"),
-            Inbound(5, InboundKind.TEXT, 5, -100123, "-100123/73", text="hello"),
+            Inbound(
+                id=3,
+                key=str(3),
+                kind=InboundKind.TAP,
+                sender="5",
+                chat=-100123,
+                message_ref="-100123/1",
+                data="expert:1",
+            ),
+            Inbound(
+                id=4,
+                key=str(4),
+                kind=InboundKind.TAP,
+                sender="5",
+                chat=-100123,
+                message_ref="-100123/2",
+                data="expert:2",
+            ),
+            Inbound(
+                id=5,
+                key=str(5),
+                kind=InboundKind.TEXT,
+                sender="5",
+                chat=-100123,
+                message_ref="-100123/73",
+                text="hello",
+            ),
         ]
-        log.record_batch("telegram", items, 6, NOW)
+        log.record_batch("telegram", items, "6", NOW)
 
         class Poller:
             def __init__(self) -> None:
@@ -862,7 +958,15 @@ OTHER_OWNER = 6
 
 
 def _admin_text(h: Harness, text: str, sender: int, update_id: int = 1) -> None:
-    item = Inbound(update_id, InboundKind.TEXT, sender, -100123, str(update_id), text=text)
+    item = Inbound(
+        id=update_id,
+        key=str(update_id),
+        kind=InboundKind.TEXT,
+        sender=str(sender),
+        chat=-100123,
+        message_ref=str(update_id),
+        text=text,
+    )
     asyncio.run(h.commands.handle(item))
 
 
@@ -874,7 +978,7 @@ def _sent_texts(h: Harness) -> list[str]:
 
 @pytest.mark.parametrize("text", ["/expert hello", "/admin hello"])
 def test_a_shared_chat_without_rooms_refuses_an_unaddressed_ask(tmp_path: Path, text: str) -> None:
-    h = Harness(tmp_path, group=False, shared=True, admins=frozenset({ADMIN}))
+    h = Harness(tmp_path, group=False, shared=True, admins=frozenset({str(ADMIN)}))
     _admin_text(h, text, ADMIN)
     [pending] = h.outbox.pending()
     assert not pending.message.buttons
@@ -885,14 +989,14 @@ def test_a_shared_chat_without_rooms_refuses_an_unaddressed_ask(tmp_path: Path, 
 @pytest.mark.parametrize(
     ("admins", "sender", "opened"),
     [
-        (frozenset[int](), ADMIN, False),
-        (frozenset({ADMIN}), OTHER_OWNER, False),
-        (frozenset({ADMIN}), ADMIN, True),
+        (frozenset[str](), ADMIN, False),
+        (frozenset({str(ADMIN)}), OTHER_OWNER, False),
+        (frozenset({str(ADMIN)}), ADMIN, True),
     ],
 )
 def test_admin_opens_only_for_a_listed_admin(
     tmp_path: Path,
-    admins: frozenset[int],
+    admins: frozenset[str],
     sender: int,
     opened: bool,  # noqa: FBT001
 ) -> None:
@@ -906,7 +1010,7 @@ def test_admin_opens_only_for_a_listed_admin(
 def test_admin_conversation_warns_uses_admin_answers_and_survives_duplicates(
     tmp_path: Path,
 ) -> None:
-    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}))
     _admin_text(h, "/admin hello", ADMIN)
     _admin_text(h, "/admin hello", ADMIN)
     [request] = h.expert.requests
@@ -919,7 +1023,7 @@ def test_admin_conversation_warns_uses_admin_answers_and_survives_duplicates(
 
 
 def test_ordinary_ask_stays_an_expert_conversation(tmp_path: Path) -> None:
-    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}))
     _admin_text(h, "/expert hello", ADMIN)
     [request] = h.expert.requests
     assert not request.admin
@@ -930,44 +1034,83 @@ def test_ordinary_ask_stays_an_expert_conversation(tmp_path: Path) -> None:
 
 
 def test_only_a_listed_admin_takes_part_in_an_admin_topic(tmp_path: Path) -> None:
-    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}))
     _admin_text(h, "/admin hello", ADMIN)
     topic = h.log.get(1)
     assert topic is not None
     assert topic.room is not None
     for update_id, sender in ((2, OTHER_OWNER), (3, ADMIN)):
         item = Inbound(
-            update_id, InboundKind.TEXT, sender, -100123, str(update_id),
-            text="more", thread=int(topic.room),
-        )  # fmt: skip
+            id=update_id,
+            key=str(update_id),
+            kind=InboundKind.TEXT,
+            sender=str(sender),
+            chat=-100123,
+            message_ref=str(update_id),
+            text="more",
+            thread=int(topic.room),
+        )
         asyncio.run(h.turns.handle(item))
         asyncio.run(h.turns.handle(item))
     assert [request.message for request in h.expert.requests] == ["hello", "more"]
 
 
 def test_a_removed_admin_cannot_continue_an_admin_topic(tmp_path: Path) -> None:
-    h = Harness(tmp_path, admins=frozenset({ADMIN}), turn_admins=frozenset({OTHER_OWNER}))
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}), turn_admins=frozenset({str(OTHER_OWNER)}))
     _admin_text(h, "/admin hello", ADMIN)
     topic = h.log.get(1)
     assert topic is not None
     assert topic.room is not None
-    item = Inbound(2, InboundKind.TEXT, ADMIN, -100123, "2", text="more", thread=int(topic.room))
+    item = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TEXT,
+        sender=str(ADMIN),
+        chat=-100123,
+        message_ref="2",
+        text="more",
+        thread=int(topic.room),
+    )
     asyncio.run(h.turns.handle(item))
     assert len(h.expert.requests) == 1
 
 
 def test_a_shared_group_selection_of_admin_needs_an_admin_tap(tmp_path: Path) -> None:
-    h = Harness(tmp_path, shared=True, admins=frozenset({ADMIN}))
-    original = Inbound(1, InboundKind.TEXT, ADMIN, -100123, "-100123/71", text="/admin hello")
-    JournalInbound(h.database).record_batch("telegram", [original], 2, NOW)
+    h = Harness(tmp_path, shared=True, admins=frozenset({str(ADMIN)}))
+    original = Inbound(
+        id=1,
+        key=str(1),
+        kind=InboundKind.TEXT,
+        sender=str(ADMIN),
+        chat=-100123,
+        message_ref="-100123/71",
+        text="/admin hello",
+    )
+    JournalInbound(h.database).record_batch("telegram", [original], "2", NOW)
     asyncio.run(h.commands.handle(original))
     [offer] = h.outbox.pending()
     assert offer.message.buttons[0].label == "/admin@bot"
     asyncio.run(OutboxSender(h.outbox, Channel(), Clock(), interval_s=1).tick())
-    stranger = Inbound(2, InboundKind.TAP, OTHER_OWNER, -100123, "-100123/1", data="expert:1")
+    stranger = Inbound(
+        id=2,
+        key=str(2),
+        kind=InboundKind.TAP,
+        sender=str(OTHER_OWNER),
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
     assert asyncio.run(h.commands.tap(stranger))
     assert not h.topics.created
-    tap = Inbound(3, InboundKind.TAP, ADMIN, -100123, "-100123/1", data="expert:1")
+    tap = Inbound(
+        id=3,
+        key=str(3),
+        kind=InboundKind.TAP,
+        sender=str(ADMIN),
+        chat=-100123,
+        message_ref="-100123/1",
+        data="expert:1",
+    )
     assert asyncio.run(h.commands.tap(tap))
     assert asyncio.run(h.commands.tap(tap))
     assert len(h.topics.created) == len(h.expert.requests) == 1
@@ -984,7 +1127,7 @@ class _DeletableTopics(Topics):
 
 
 def test_an_idle_admin_conversation_ends_but_an_expert_one_does_not(tmp_path: Path) -> None:
-    h = Harness(tmp_path, admins=frozenset({ADMIN}))
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}))
     _admin_text(h, "/admin hello", ADMIN, 1)
     _admin_text(h, "/expert hello", ADMIN, 2)
     ending = ExpertEnding(
@@ -1017,7 +1160,7 @@ def test_a_command_in_an_admin_answer_is_stored_but_never_acted_on(tmp_path: Pat
             )
             return ExpertResult(answer, ExpertSession(0, "fake", "session", "f"), None)
 
-    h = Harness(tmp_path, admins=frozenset({ADMIN}), expert=Proposing())
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}), expert=Proposing())
     _admin_text(h, "/admin hello", ADMIN)
     assert "answer" in _sent_texts(h)
     assert all(
@@ -1030,12 +1173,20 @@ def test_a_command_in_an_admin_answer_is_stored_but_never_acted_on(tmp_path: Pat
 def test_an_unlisted_owner_gets_no_reply_to_admin_in_a_shared_group(
     tmp_path: Path, command: str
 ) -> None:
-    listed = Harness(tmp_path / "listed", shared=True, admins=frozenset({ADMIN}))
-    other = Harness(tmp_path / "other", shared=True, admins=frozenset({OTHER_OWNER}))
+    listed = Harness(tmp_path / "listed", shared=True, admins=frozenset({str(ADMIN)}))
+    other = Harness(tmp_path / "other", shared=True, admins=frozenset({str(OTHER_OWNER)}))
     unconfigured = Harness(tmp_path / "none", shared=True)
-    original = Inbound(1, InboundKind.TEXT, ADMIN, -100123, "-100123/71", text=f"{command} hello")
+    original = Inbound(
+        id=1,
+        key=str(1),
+        kind=InboundKind.TEXT,
+        sender=str(ADMIN),
+        chat=-100123,
+        message_ref="-100123/71",
+        text=f"{command} hello",
+    )
     for instance in (listed, other, unconfigured):
-        JournalInbound(instance.database).record_batch("telegram", [original], 2, NOW)
+        JournalInbound(instance.database).record_batch("telegram", [original], "2", NOW)
         asyncio.run(instance.commands.handle(original))
     assert listed.outbox.pending()
     assert not other.outbox.pending()
@@ -1054,7 +1205,7 @@ def test_an_admin_answer_with_a_secret_is_withheld_and_never_kept(tmp_path: Path
             )  # fmt: skip
             return ExpertResult(answer, ExpertSession(0, "fake", "session", "f"), None)
 
-    h = Harness(tmp_path, admins=frozenset({ADMIN}), expert=Leaking())
+    h = Harness(tmp_path, admins=frozenset({str(ADMIN)}), expert=Leaking())
     _admin_text(h, "/admin hello", ADMIN)
     assert not any(secret in text for text in _sent_texts(h))
     dump = "\n".join(h.database.connection.iterdump())
@@ -1104,7 +1255,10 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
         timeout_s=10,
     )
     h = Harness(
-        tmp_path, admins=frozenset({ADMIN}), expert=cast("Expert", ladder), known_secrets=(secret,)
+        tmp_path,
+        admins=frozenset({str(ADMIN)}),
+        expert=cast("Expert", ladder),
+        known_secrets=(secret,),
     )
     _admin_text(h, "/admin hello", ADMIN)
     conversation = h.log.get(1)
@@ -1114,7 +1268,14 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
     asyncio.run(
         h.turns.handle(
             Inbound(
-                2, InboundKind.TEXT, ADMIN, -100123, "2", text="next", thread=int(conversation.room)
+                id=2,
+                key=str(2),
+                kind=InboundKind.TEXT,
+                sender=str(ADMIN),
+                chat=-100123,
+                message_ref="2",
+                text="next",
+                thread=int(conversation.room),
             )
         )
     )
@@ -1128,11 +1289,12 @@ def test_loaded_secret_is_not_stored_or_given_to_another_provider(
     asyncio.run(
         h.turns.handle(
             Inbound(
-                3,
-                InboundKind.TEXT,
-                ADMIN,
-                -100123,
-                "3",
+                id=3,
+                key=str(3),
+                kind=InboundKind.TEXT,
+                sender=str(ADMIN),
+                chat=-100123,
+                message_ref="3",
                 text="continue",
                 thread=int(conversation.room),
             )

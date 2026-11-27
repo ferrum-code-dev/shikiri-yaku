@@ -201,7 +201,15 @@ class _Stack:
     def command(self, text: str, update: int = 700) -> None:
         asyncio.run(
             self.commands.handle(
-                Inbound(update, InboundKind.TEXT, 1001, 1001, "1001/90", text=text)
+                Inbound(
+                    id=update,
+                    key=str(update),
+                    kind=InboundKind.TEXT,
+                    sender="1001",
+                    chat=1001,
+                    message_ref="1001/90",
+                    text=text,
+                )
             )
         )
 

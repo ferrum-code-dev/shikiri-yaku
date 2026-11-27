@@ -39,7 +39,7 @@
 
 ### F9
 
-- [ ] F9. Channel-neutral event identity, after F8.
+- [x] F9. Channel-neutral event identity, after F8.
 
 ## Acceptance criteria
 - `Inbox.fetch(cursor, wait_s)` and its documented confirmation rule match the contract.

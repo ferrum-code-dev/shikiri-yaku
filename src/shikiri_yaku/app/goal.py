@@ -77,13 +77,13 @@ class GoalCommand:
                 self._outbox,
                 [destination],
                 f"Usage: /submit <component> <request>. Components: {names}.",
-                key=f"submit:usage:{item.update_id}",
+                key=f"submit:usage:{item.id}",
                 now=self._clock.now(),
                 max_text=self._max_text,
             )
             return
         payload = SubmitPayload(component=component, request=request, destination=destination)
-        self._report(await self._submitter.submit(item.update_id, payload))
+        self._report(await self._submitter.submit(item.id, payload))
 
     async def tap(self, item: Inbound) -> None:
         """Retry the request of a *Submit again* that was offered in the chat of the tap."""
@@ -99,7 +99,7 @@ class GoalCommand:
             return
         if callback[0] != SUBMIT_VERB:
             return
-        op = await self._submitter.retry(callback[1], item.update_id)
+        op = await self._submitter.retry(callback[1], item.id)
         if op is not None:
             self._report(op)
 
