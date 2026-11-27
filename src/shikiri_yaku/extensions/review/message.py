@@ -25,18 +25,21 @@ def review_message(
     title: str,
     *,
     product: str,
-    in_topic: bool,
+    in_component_place: bool,
     max_text: int,
 ) -> Message:
     """Return the review message: its header, the title and commit count, and two buttons.
 
     The Open PR button is a link; Stop reminders carries the signal number as its data, and the
     review stays open until it is fixed. The component name is left out of the header
-    where the message is already in that component's topic.
+    where the message is already in that component's place.
     """
     text = "\n".join(
         block
-        for block in (_header(number, signal, product, in_topic=in_topic), _body(pull, title))
+        for block in (
+            _header(number, signal, product, in_component_place=in_component_place),
+            _body(pull, title),
+        )
         if block
     )
     buttons = (
@@ -46,9 +49,9 @@ def review_message(
     return Message(fit(text, max_text), buttons)
 
 
-def _header(number: int, signal: Signal, product: str, *, in_topic: bool) -> str:
-    # keep: a message in its component's topic already names the component, so it is left out
-    project = "" if in_topic else signal.project
+def _header(number: int, signal: Signal, product: str, *, in_component_place: bool) -> str:
+    # keep: a message in its component's place already names the component, so it is left out
+    project = "" if in_component_place else signal.project
     parts = (f"S{number}", product, project, signal.task_id, TITLE)
     return " · ".join(part for part in parts if part)
 

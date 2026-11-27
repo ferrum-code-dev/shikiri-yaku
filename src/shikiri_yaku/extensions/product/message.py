@@ -70,7 +70,7 @@ def escalation_message(
     view: EscalationView,
     *,
     title: str,
-    in_topic: bool,
+    in_component_place: bool,
     note: str,
     suggestion: str,
     label_max_chars: int,
@@ -80,7 +80,7 @@ def escalation_message(
     buttons = tuple(
         Button(choice.button, f"{Tap.ANSWER}:{number}:{choice.option}") for choice in choices
     )
-    heading = _header(number, signal, title, in_topic=in_topic)
+    heading = _header(number, signal, title, in_component_place=in_component_place)
     text = join_blocks(
         view.question or view.escalation.headline,
         "\n".join(choice.line for choice in choices),
@@ -99,7 +99,7 @@ def information_message(
     signal: Signal,
     *,
     title: str,
-    in_topic: bool,
+    in_component_place: bool,
     note: str,
     suggestion: str,
     standing: bool,
@@ -109,7 +109,9 @@ def information_message(
 
     A standing message stays true until it is fixed, so it keeps Stop reminders.
     """
-    heading = _header(number, signal, title, in_topic=in_topic, label=TITLE_INFORMATION)
+    heading = _header(
+        number, signal, title, in_component_place=in_component_place, label=TITLE_INFORMATION
+    )
     text = join_blocks(signal.text, _notes(note, suggestion))
     buttons = (Button(STOP_REMINDERS_LABEL, stop_reminders_data(number)),) if standing else ()
     return Message(fit(text, text_room(heading, max_text)), buttons, heading)
@@ -149,9 +151,11 @@ def _with_consequences(text: str, consequences: str) -> str:
     return f"{text} ({consequences})" if consequences else text
 
 
-def _header(number: int, signal: Signal, title: str, *, in_topic: bool, label: str = "") -> str:
-    # keep: a message in its component's topic already names the component, so it is left out
-    project = "" if in_topic else signal.project
+def _header(
+    number: int, signal: Signal, title: str, *, in_component_place: bool, label: str = ""
+) -> str:
+    # keep: a message in its component's place already names the component, so it is left out
+    project = "" if in_component_place else signal.project
     parts = (project, signal.task_id or "", title, label, f"S{number}")
     return " · ".join(part for part in parts if part)
 

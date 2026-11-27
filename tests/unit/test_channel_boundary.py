@@ -135,6 +135,28 @@ def test_cli_and_core_layers_name_no_concrete_channel_outside_config_and_repair_
     assert not violations, "\n".join(violations)
 
 
+def test_core_channel_vocabulary_is_platform_neutral() -> None:
+    root = Path(__file__).resolve().parents[2] / "src" / "shikiri_yaku"
+    files = [
+        *(
+            path
+            for layer in ("app", "domain", "extensions")
+            for path in sorted((root / layer).rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
+        ),
+        root / "ports.py",
+    ]
+    forbidden = ("topic", "forum", "update_id")
+    violations = [
+        f"{path.relative_to(root)} contains {term}"
+        for path in files
+        for term in forbidden
+        if term in path.read_text(encoding="utf-8").lower()
+    ]
+
+    assert not violations, "\n".join(violations)
+
+
 def test_run_and_doctor_use_fake_channel_check_without_importing_telegram(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

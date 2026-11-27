@@ -96,27 +96,27 @@ _FINAL: Final = (
 )
 
 
-def answer_key(update_id: int) -> str:
+def answer_key(event_id: int) -> str:
     """Return the notice key of the message that shows an Expert answer."""
-    return f"expert:answer:{update_id}"
+    return f"expert:answer:{event_id}"
 
 
-def action_key(update_id: int) -> str:
+def action_key(event_id: int) -> str:
     """Return the notice key of the action message sent after every task detail."""
-    return f"{answer_key(update_id)}:actions"
+    return f"{answer_key(event_id)}:actions"
 
 
 class ProposalLog(Protocol):
     """Expert task proposals in the journal; each move is guarded on the state it expects."""
 
     def intend_admin(
-        self, conversation_id: int, update_id: int, command: str, reason: str, now: datetime
+        self, conversation_id: int, event_id: int, command: str, reason: str, now: datetime
     ) -> tuple[int, list[int]]: ...
     def admin_op(self, op_id: int) -> tuple[int, str, datetime] | None: ...
     def decide_admin(
         self,
         op_id: int,
-        update_id: int,
+        event_id: int,
         sender: str,
         *,
         admin: bool,
@@ -126,32 +126,32 @@ class ProposalLog(Protocol):
     ) -> bool: ...
     def expire_admin(self, cutoff: datetime, now: datetime) -> list[int]: ...
 
-    def offer(self, conversation_id: int, update_id: int, *, offered: bool) -> list[int]:
+    def offer(self, conversation_id: int, event_id: int, *, offered: bool) -> list[int]:
         """Record an answer's proposal and void the offered ones of its conversation.
 
         Return the proposals voided; an answer already recorded voids nothing.
         """
         ...
 
-    def state(self, update_id: int) -> str | None: ...
+    def state(self, event_id: int) -> str | None: ...
 
-    def begin(self, update_id: int, payloads: list[SubmitPayload], now: datetime) -> bool:
+    def begin(self, event_id: int, payloads: list[SubmitPayload], now: datetime) -> bool:
         """Journal the tasks and start submitting; False unless the proposal was offered."""
         ...
 
-    def reject(self, update_id: int) -> bool:
+    def reject(self, event_id: int) -> bool:
         """Reject an offered proposal; False unless it was offered."""
         ...
 
-    def finish(self, update_id: int) -> None: ...
+    def finish(self, event_id: int) -> None: ...
 
-    def ops(self, update_id: int) -> list[SubmitOp]: ...
+    def ops(self, event_id: int) -> list[SubmitOp]: ...
 
     def unfinished(self) -> list[int]:
         """Return the proposals a restart found submitting."""
         ...
 
-    def interrupt(self, update_id: int, now: datetime) -> None:
+    def interrupt(self, event_id: int, now: datetime) -> None:
         """Interrupt a submitting proposal: its issued tasks become unknown."""
         ...
 
@@ -206,7 +206,7 @@ class ExpertProposals:
         self._files = files
 
     def answer_messages(
-        self, conversation_id: int, update_id: int, answer: ExpertAnswer
+        self, conversation_id: int, event_id: int, answer: ExpertAnswer
     ) -> tuple[Message, ...]:
         """Return answer and task-list messages, followed by its action message.
 
@@ -216,34 +216,34 @@ class ExpertProposals:
         """
         if not answer.tasks:
             return (Message(fit(answer.reply, self._max_text)),)
-        for voided in self._log.offer(conversation_id, update_id, offered=True):
+        for voided in self._log.offer(conversation_id, event_id, offered=True):
             self._settle(voided)
-        state = self._log.state(update_id)
+        state = self._log.state(event_id)
         if state == ProposalStatus.OFFERED:
             return (
                 *_initial_messages(answer, self._max_text),
                 Message(
                     _ACTION_PROMPT,
                     (
-                        Button(_SUBMIT_ALL, submit_all_data(update_id)),
-                        Button(_REJECT_ALL, reject_all_data(update_id)),
-                        Button(_VIEW_ALL, view_all_data(update_id)),
+                        Button(_SUBMIT_ALL, submit_all_data(event_id)),
+                        Button(_REJECT_ALL, reject_all_data(event_id)),
+                        Button(_VIEW_ALL, view_all_data(event_id)),
                     ),
                 ),
             )
         return _initial_messages(answer, self._max_text)
 
-    def queue_answer(self, update_id: int) -> None:
+    def queue_answer(self, event_id: int) -> None:
         """Queue every answer part before its action message, using stable outbox keys."""
-        opened = self._open(update_id)
+        opened = self._open(event_id)
         if opened is None:
             return
         part = 0
-        for message in self.answer_messages(opened.conversation_id, update_id, opened.answer):
+        for message in self.answer_messages(opened.conversation_id, event_id, opened.answer):
             if message.buttons:
-                key = action_key(update_id)
+                key = action_key(event_id)
             else:
-                key = answer_key(update_id) if part == 0 else f"{answer_key(update_id)}:part:{part}"
+                key = answer_key(event_id) if part == 0 else f"{answer_key(event_id)}:part:{part}"
                 part += 1
             self._outbox.queue(
                 None,
@@ -255,9 +255,9 @@ class ExpertProposals:
                 conversation_id=opened.conversation_id,
             )
 
-    def queue_admin(self, update_id: int) -> None:
+    def queue_admin(self, event_id: int) -> None:
         """Journal an admin proposal and queue its exact text."""
-        opened = self._open(update_id)
+        opened = self._open(event_id)
         if opened is None or not isinstance(opened.answer, AdminAnswer):
             return
         answer = opened.answer
@@ -269,7 +269,7 @@ class ExpertProposals:
         ):
             return
         op_id, _ = self._log.intend_admin(
-            opened.conversation_id, update_id, answer.command, answer.reason, self._clock.now()
+            opened.conversation_id, event_id, answer.command, answer.reason, self._clock.now()
         )
         op = self._log.admin_op(op_id)
         if op is None or op[1] != _ADMIN_INTENDED:

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class Submitter:
-    """Submits a goal once per update id and returns the op as the journal now holds it.
+    """Submits a goal once per event id and returns the op as the journal now holds it.
 
     The op is journaled before the call and claimed before it is made. An op that an earlier
     attempt issued may have reached Shikiru, so it becomes unknown and is never sent again. A
@@ -33,16 +33,16 @@ class Submitter:
         self._clients = clients
         self._clock = clock
 
-    async def submit(self, update_id: int, payload: SubmitPayload) -> SubmitOp:
-        """Return the op for the update id; `payload.component` must name a client."""
+    async def submit(self, event_id: int, payload: SubmitPayload) -> SubmitOp:
+        """Return the op for the event id; `payload.component` must name a client."""
         client = self._clients[payload.component]
         now = self._clock.now()
-        return await self._advance(client, self._log.intend(update_id, payload, now), now)
+        return await self._advance(client, self._log.intend(event_id, payload, now), now)
 
-    async def retry(self, prompt_id: int, update_id: int) -> SubmitOp | None:
+    async def retry(self, prompt_id: int, event_id: int) -> SubmitOp | None:
         """Return the replacement of an unknown goal, or None when the tap may not retry it."""
         now = self._clock.now()
-        op = self._log.retry(prompt_id, update_id, now)
+        op = self._log.retry(prompt_id, event_id, now)
         if op is None:
             return None
         # keep: a component dropped from the settings leaves its replacement intended, unsent

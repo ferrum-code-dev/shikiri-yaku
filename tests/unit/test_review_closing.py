@@ -134,7 +134,7 @@ def _review_on_screen(database: Database) -> int:
         PULL,
         "Add retries",
         product=PRODUCT,
-        in_topic=False,
+        in_component_place=False,
         max_text=MESSAGE_TEXT_LIMIT,
     )
     messages = MessageStore(database, _Reporter())

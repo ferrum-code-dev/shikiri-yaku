@@ -351,7 +351,7 @@ class CliExpert(ABC):
         return [
             "_expert-web",
             str(self._journal_path),
-            str(request.update_id),
+            str(request.event_id),
             str(self._web_timeout_s),
             str(self._web_max_bytes),
             str(self._web_max_redirects),

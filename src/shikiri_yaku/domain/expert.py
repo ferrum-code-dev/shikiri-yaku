@@ -74,7 +74,7 @@ class ExpertSession:
 @dataclass(frozen=True, slots=True)
 class ConversationRecord:
     id: int
-    update_id: int
+    event_id: int
     origin: Place
     room: str | None
     scope: list[str]
@@ -87,7 +87,7 @@ class ConversationRecord:
 
 @dataclass(frozen=True, slots=True)
 class TurnRecord:
-    update_id: int
+    event_id: int
     conversation_id: int
     room: str | None
     text: str
@@ -111,7 +111,7 @@ class ExpertRequest:
     effort: str | None = None
     session: ExpertSession | None = None
     turns: tuple[ExpertTurn, ...] = ()
-    update_id: int = 0
+    event_id: int = 0
     admin: bool = False
 
 

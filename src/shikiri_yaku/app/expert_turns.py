@@ -1,4 +1,4 @@
-"""Turns of an Expert conversation and the commands of its topic."""
+"""Turns of an Expert conversation and the commands of its room."""
 
 from __future__ import annotations
 
@@ -49,10 +49,10 @@ if TYPE_CHECKING:
     from shikiri_yaku.domain.place import Place
     from shikiri_yaku.ports import Clock, Downloads, Expert, Outbox, Rooms, ShikiruClient
 
-CREATION_UNCERTAIN: Final = "Topic creation was uncertain. Please ask again."
+CREATION_UNCERTAIN: Final = "Opening the conversation was uncertain. Please ask again."
 SUMMARY_PROMPT: Final = "Summarize this conversation in two or three short sentences."
 ADMIN_WARNING: Final = (
-    "This chat is not private: members of the group can read this topic, including any command "
+    "This chat is not private: others here can read this conversation, including any command "
     "the Expert proposes and its output."
 )
 _INTERRUPTED: Final = "The Expert turn was interrupted. Please ask again."
@@ -115,7 +115,7 @@ def queue_expert_notice(
 
 
 class ExpertTurns:
-    """Run the turns of Expert conversations and answer the commands of their topics.
+    """Run the turns of Expert conversations and answer the commands of their rooms.
 
     The turns of one conversation run one at a time, oldest first: each takes the conversation's
     lock before any await, and asyncio wakes lock waiters in order, so the order of arrival holds.
@@ -169,7 +169,7 @@ class ExpertTurns:
         self._known_secrets = tuple(secret for secret in known_secrets if secret)
 
     def owns(self, item: Inbound) -> bool:
-        """Return whether a text, reply, file or closed room belongs to an open Expert topic."""
+        """Return whether a text, reply, file or closed room belongs to an open Expert room."""
         return (
             item.kind
             in (InboundKind.TEXT, InboundKind.REPLY, InboundKind.FILE, InboundKind.ROOM_CLOSED)
@@ -185,7 +185,7 @@ class ExpertTurns:
         if conversation is None:
             return
         if item.kind is InboundKind.ROOM_CLOSED:
-            await self._ending.end(conversation.id, sender=item.sender, update_id=item.id)
+            await self._ending.end(conversation.id, sender=item.sender, event_id=item.id)
             return
         if conversation.mode == MODE_ADMIN and item.sender not in self._admins:
             return
@@ -205,7 +205,7 @@ class ExpertTurns:
             self._log.add_turn(conversation.id, item.id, SUMMARY_PROMPT, self._clock.now())
             await self.run(conversation.id, item.id)
         elif command.name == _CLOSE:
-            await self._ending.end(conversation.id, sender=item.sender, update_id=item.id)
+            await self._ending.end(conversation.id, sender=item.sender, event_id=item.id)
         else:
             self._reply(item, _HELP, conversation.id)
 
@@ -265,7 +265,7 @@ class ExpertTurns:
         )
 
     def warn_admin(self, conversation: ConversationRecord) -> None:
-        """Say in the topic of an admin conversation that the chat is not private."""
+        """Say in the conversation of an admin that the chat is not private."""
         if conversation.room is None:
             return
         queue_expert_notice(
@@ -273,55 +273,55 @@ class ExpertTurns:
             self._clock,
             self._rooms.place(conversation.room),
             ADMIN_WARNING,
-            key=f"admin:warning:{conversation.update_id}",
+            key=f"admin:warning:{conversation.event_id}",
             conversation_id=conversation.id,
         )
 
-    async def run(self, conversation_id: int, update_id: int) -> None:
+    async def run(self, conversation_id: int, event_id: int) -> None:
         """Run the turns before this one that are pending, then this one, and send their answers.
 
         A turn that is already done only sends its answer again, which the outbox keeps once.
         """
         async with self._runs.lock(conversation_id):
-            await self._run_locked(conversation_id, update_id)
+            await self._run_locked(conversation_id, event_id)
 
-    async def _run_locked(self, conversation_id: int, update_id: int) -> None:
+    async def _run_locked(self, conversation_id: int, event_id: int) -> None:
         while (turn := self._log.oldest_pending(conversation_id)) is not None:
-            if turn.update_id < 0 or turn.update_id >= update_id:
+            if turn.event_id < 0 or turn.event_id >= event_id:
                 break
-            if not await self._execute(conversation_id, turn.update_id):
+            if not await self._execute(conversation_id, turn.event_id):
                 return
-            await self._deliver(conversation_id, turn.update_id)
-        own = self._log.turn(update_id)
+            await self._deliver(conversation_id, turn.event_id)
+        own = self._log.turn(event_id)
         awaits_run = own is not None and own.state == _PENDING
-        if awaits_run and not await self._execute(conversation_id, update_id):
+        if awaits_run and not await self._execute(conversation_id, event_id):
             return
-        await self._deliver(conversation_id, update_id)
+        await self._deliver(conversation_id, event_id)
         # keep: a generated turn may be done but undelivered after a stop, so each is delivered
         delivered: set[int] = set()
         while followup := next(
-            (t for t in self._log.followups(conversation_id) if t.update_id not in delivered),
+            (t for t in self._log.followups(conversation_id) if t.event_id not in delivered),
             None,
         ):
             if followup.state == _PENDING and not await self._execute(
-                conversation_id, followup.update_id
+                conversation_id, followup.event_id
             ):
                 return
-            await self._deliver(conversation_id, followup.update_id)
-            delivered.add(followup.update_id)
+            await self._deliver(conversation_id, followup.event_id)
+            delivered.add(followup.event_id)
 
     async def _run_admin(self, op_id: int, conversation_id: int) -> None:
         async with self._runs.lock(conversation_id):
             if self._admin_executor is not None:
                 await self._admin_executor.execute(op_id, self._run_locked)
 
-    async def _execute(self, conversation_id: int, update_id: int) -> bool:
+    async def _execute(self, conversation_id: int, event_id: int) -> bool:
         """Run one pending turn in a task of its own; False when it did not run because it ends."""
         conversation = self._log.conversation(conversation_id)
         if conversation is None or conversation.state != _CONVERSATION_OPEN:
             return False
         # keep: its own task, so an ending stops the turn, not the message task that awaits it
-        running = asyncio.create_task(self._answer(conversation, update_id))
+        running = asyncio.create_task(self._answer(conversation, event_id))
         self._runs.track(conversation_id, running)
         try:
             await asyncio.wait({running})
@@ -332,13 +332,13 @@ class ExpertTurns:
             return False
         return running.result()
 
-    async def _answer(self, conversation: ConversationRecord, update_id: int) -> bool:
+    async def _answer(self, conversation: ConversationRecord, event_id: int) -> bool:
         """Gather context, run the turn and journal its answer; False if it did not start."""
-        turn = self._log.turn(update_id)
+        turn = self._log.turn(event_id)
         if turn is None:
             return False
         context = await self._context(conversation.scope)
-        if not self._log.start(update_id):
+        if not self._log.start(event_id):
             return False
         directory = conversation_directory(self._directory, conversation.id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -347,7 +347,7 @@ class ExpertTurns:
             scope={name: self._scope[name] for name in conversation.scope},
             message=turn.text,
             files=conversation_file_names(directory),
-            update_id=update_id,
+            event_id=event_id,
             admin=conversation.mode == MODE_ADMIN,
             context=json.dumps(context),
             effort=conversation.effort,
@@ -357,7 +357,7 @@ class ExpertTurns:
                     message=past.text,
                     reply=stored_answer(past.answer).reply,
                 )
-                for past in self._log.history(conversation.id, before=update_id)
+                for past in self._log.history(conversation.id, before=event_id)
                 if past.answer is not None
             ),
         )
@@ -370,7 +370,7 @@ class ExpertTurns:
                 tasks=[],
                 findings="",
             )
-            self._log.finish(update_id, answer.model_dump_json(), None, None, self._clock.now())
+            self._log.finish(event_id, answer.model_dump_json(), None, None, self._clock.now())
         else:
             stored = result.answer
             texts = (
@@ -407,7 +407,7 @@ class ExpertTurns:
                     reason="",
                 )
             self._log.finish(
-                update_id,
+                event_id,
                 stored.model_dump_json(),
                 json.dumps(asdict(result.session)),
                 None if result.call is None else json.dumps(asdict(result.call)),
@@ -417,31 +417,31 @@ class ExpertTurns:
             )
         return True
 
-    async def _deliver(self, conversation_id: int, update_id: int) -> None:
-        """Queue the answer of a done turn, and name the topic after the first answer."""
+    async def _deliver(self, conversation_id: int, event_id: int) -> None:
+        """Queue the answer of a done turn, and name the room after the first answer."""
         conversation = self._log.conversation(conversation_id)
-        turn = self._log.turn(update_id)
+        turn = self._log.turn(event_id)
         if conversation is None or conversation.room is None or turn is None:
             return
         if turn.state != _DONE or turn.answer is None:
             return
         answer = stored_answer(turn.answer)
-        self._proposals.queue_answer(update_id)
-        self._proposals.queue_admin(update_id)
+        self._proposals.queue_answer(event_id)
+        self._proposals.queue_admin(event_id)
         if self._web is not None:
-            self._web.queue(update_id)
-        if answer.title and not self._log.history(conversation_id, before=update_id):
+            self._web.queue(event_id)
+        if answer.title and not self._log.history(conversation_id, before=event_id):
             with suppress(ChannelRefusedError):
                 await self._rooms.rename(conversation.room, f"💬 {answer.title}")
         if description := (answer.image or "").strip():
-            await self._draw(conversation_id, update_id, description)
+            await self._draw(conversation_id, event_id, description)
 
-    async def _draw(self, conversation_id: int, update_id: int, description: str) -> None:
+    async def _draw(self, conversation_id: int, event_id: int, description: str) -> None:
         """Draw an answer's sketch in a task an ending stops, unless the conversation is ending."""
         conversation = self._log.conversation(conversation_id)
         if conversation is None or conversation.state != _CONVERSATION_OPEN:
             return
-        drawing = asyncio.create_task(self._sketches.draw(conversation, update_id, description))
+        drawing = asyncio.create_task(self._sketches.draw(conversation, event_id, description))
         self._runs.track(conversation_id, drawing)
         try:
             await asyncio.wait({drawing})
@@ -496,11 +496,11 @@ class ExpertTurns:
 
     async def resume_admin_followups(self) -> None:
         """Resume generated admin turns left pending before a restart."""
-        for conversation_id, update_id in self._log.pending_admin_followups():
-            await self.run(conversation_id, update_id)
+        for conversation_id, event_id in self._log.pending_admin_followups():
+            await self.run(conversation_id, event_id)
 
     def recover(self) -> None:
-        """Tell topics about creations left uncertain and turns a restart interrupted."""
+        """Tell rooms about creations left uncertain and turns a restart interrupted."""
         self._proposals.recover()
         for row in self._log.recover_creations():
             queue_expert_notice(
@@ -508,7 +508,7 @@ class ExpertTurns:
                 self._clock,
                 row.origin,
                 CREATION_UNCERTAIN,
-                key=f"expert:creation:{row.update_id}",
+                key=f"expert:creation:{row.event_id}",
                 conversation_id=row.id,
             )
         for turn in self._log.recover_turns():
@@ -519,7 +519,7 @@ class ExpertTurns:
                 self._clock,
                 self._rooms.place(turn.room),
                 _INTERRUPTED,
-                key=f"expert:interrupted:{turn.update_id}",
+                key=f"expert:interrupted:{turn.event_id}",
                 conversation_id=turn.conversation_id,
             )
         self._sketches.recover()

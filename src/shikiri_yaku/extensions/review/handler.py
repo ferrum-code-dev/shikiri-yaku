@@ -58,7 +58,9 @@ class ReviewHandler:
             raise LookupError(message)
         title = await self._title(signal)
         places = self._places.for_signal(signal.project, signal.kind)
-        in_topic = all(self._places.component_of(place) == signal.project for place in places)
+        in_component_place = all(
+            self._places.component_of(place) == signal.project for place in places
+        )
         self._outbox.queue(
             number,
             Purpose.NOTICE,
@@ -69,7 +71,7 @@ class ReviewHandler:
                 pull,
                 title,
                 product=self._product,
-                in_topic=in_topic,
+                in_component_place=in_component_place,
                 max_text=self._max_text,
             ),
             key=f"{NOTICE_KEY}:{number}",

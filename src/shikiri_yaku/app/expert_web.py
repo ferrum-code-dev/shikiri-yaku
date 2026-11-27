@@ -22,11 +22,11 @@ if TYPE_CHECKING:
 class WebRequests(Protocol):
     """The durable web requests and their decisions."""
 
-    def pending(self, update_id: int | None = None) -> list[tuple[int, int, str, str]]: ...
+    def pending(self, event_id: int | None = None) -> list[tuple[int, int, str, str]]: ...
     def conversation_of(self, request_id: int) -> int | None: ...
     def bound(self, channel: str, message_ref: str) -> str | None: ...
     def decide(
-        self, request_id: int, update_id: int, *, allow: bool, now: datetime
+        self, request_id: int, event_id: int, *, allow: bool, now: datetime
     ) -> int | None: ...
     def settle_decided(self) -> None: ...
 
@@ -49,8 +49,8 @@ class ExpertWebRequests:
         self._rooms = rooms
         self._access = access
 
-    def queue(self, update_id: int | None = None) -> None:
-        for request_id, conversation_id, room, host in self._log.pending(update_id):
+    def queue(self, event_id: int | None = None) -> None:
+        for request_id, conversation_id, room, host in self._log.pending(event_id):
             self._outbox.queue(
                 None,
                 Purpose.EXPERT,

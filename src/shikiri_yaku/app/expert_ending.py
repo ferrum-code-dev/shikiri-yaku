@@ -1,4 +1,4 @@
-"""Ends an Expert conversation: stop its work, delete its topic, then erase its rows and files."""
+"""Ends an Expert conversation: stop its work, delete its room, then erase its rows and files."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import Clock, FinalEdits, Outbox, Places, Rooms
 
 _REFUSED_DELETION: Final = (
-    "The channel refused to delete the Expert topic of conversation {number}. The conversation "
+    "The channel refused to delete the room for Expert conversation {number}. The conversation "
     "stays, and the deletion is tried again."
 )
 _DELETION_KEY: Final = "expert:deletion:{number}"
@@ -44,7 +44,7 @@ class EndingLog(Protocol):
         now: datetime,
         *,
         sender: str | None = None,
-        update_id: int | None = None,
+        event_id: int | None = None,
     ) -> ConversationRecord | None: ...
     def conversation(self, conversation_id: int) -> ConversationRecord | None: ...
     def idle_before(self, cutoff: datetime, mode: str) -> list[ConversationRecord]: ...
@@ -53,11 +53,11 @@ class EndingLog(Protocol):
 
 
 class ExpertEnding:
-    """Every way a conversation ends: its topic closed, /close, expiry, or a topic that is gone.
+    """Every way a conversation ends: its room closed, /close, expiry, or a room that is gone.
 
     The conversation is marked ending first, so nothing new reaches it. Its /expert reply is closed
     before that, so the chat shows the closed reply. Its running agent call is stopped and its
-    queued work drained before its topic is deleted. A refused deletion keeps the rows and is tried
+    queued work drained before its room is deleted. A refused deletion keeps the rows and is tried
     again by `sweep`; the PO is told once. The rows and directory of this conversation are erased
     once its closed reply is confirmed or given up, so `sweep` finishes the erasure. Only the rows
     and directory of this conversation are touched.
@@ -90,11 +90,11 @@ class ExpertEnding:
         self.admin_expiry: Callable[[], None] | None = None
 
     async def end(
-        self, conversation_id: int, *, sender: str | None = None, update_id: int | None = None
+        self, conversation_id: int, *, sender: str | None = None, event_id: int | None = None
     ) -> None:
-        """End the conversation: its topic is deleted now, or retried by `sweep` if refused."""
+        """End the conversation: its room is deleted now, or retried by `sweep` if refused."""
         row = self._log.begin_ending(
-            conversation_id, self._clock.now(), sender=sender, update_id=update_id
+            conversation_id, self._clock.now(), sender=sender, event_id=event_id
         )
         if row is None or row.state != _CONVERSATION_CLOSING:
             return
@@ -112,11 +112,11 @@ class ExpertEnding:
             return
         self._erase_when_settled(row.id, row.room)
 
-    async def topic_gone(self, conversation_id: int, place: Place) -> None:
-        """Erase a conversation whose topic no longer exists; there is nothing to delete.
+    async def room_gone(self, conversation_id: int, place: Place) -> None:
+        """Erase a conversation whose room no longer exists; there is nothing to delete.
 
         The directory goes before the rows: the closing rows are the retry state, so a crash or a
-        failed removal leaves them for `sweep` to finish. Only a failed send to this topic
+        failed removal leaves them for `sweep` to finish. Only a failed send to this room
         qualifies.
         """
         row = self._log.conversation(conversation_id)
@@ -146,7 +146,7 @@ class ExpertEnding:
         if row.ending_at is None:
             return
         closed = closed_reply(row.ending_at)
-        for key in open_reply_keys(row.update_id):
+        for key in open_reply_keys(row.event_id):
             self._final.settle_notice(key, closed, conversation_id=row.id)
 
     def _erase_when_settled(self, conversation_id: int, room: str) -> None:

@@ -37,7 +37,7 @@ class InboundService:
     A transport failure is tried again on the next tick. A batch that cannot be read opens one
     `health` signal, which the next readable batch closes. An item whose Shikiru call fails stays
     pending, and ordinary items after it wait. Independent `/expert` requests, Expert selections,
-    web decisions and messages in Expert topics run concurrently and remain pending until their
+    web decisions and messages in Expert rooms run concurrently and remain pending until their
     work finishes; the Expert orders the turns of each conversation itself.
     """
 
@@ -74,9 +74,9 @@ class InboundService:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
     async def tick(self) -> None:
-        for update_id, task in tuple(self._tasks.items()):
+        for event_id, task in tuple(self._tasks.items()):
             if task.done():
-                del self._tasks[update_id]
+                del self._tasks[event_id]
                 task.result()
         await self._poll()
         for item in self._log.pending():

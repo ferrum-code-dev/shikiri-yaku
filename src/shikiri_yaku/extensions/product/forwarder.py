@@ -124,13 +124,13 @@ class ProductForwarder:
         now = self._clock.now()
         # keep: a handler may run twice for one signal, and the key makes the second queue nothing
         for place in self._places.for_signal(signal.project, signal.kind):
-            in_topic = self._places.component_of(place) == signal.project
+            in_component_place = self._places.component_of(place) == signal.project
             purpose, message = self._render(
                 number,
                 signal,
                 view,
                 title,
-                in_topic=in_topic,
+                in_component_place=in_component_place,
                 note=note,
                 suggestion=suggestion,
                 standing=standing,
@@ -157,7 +157,7 @@ class ProductForwarder:
         view: EscalationView | None,
         title: str,
         *,
-        in_topic: bool,
+        in_component_place: bool,
         note: str,
         suggestion: str,
         standing: bool,
@@ -167,7 +167,7 @@ class ProductForwarder:
                 number,
                 signal,
                 title=title,
-                in_topic=in_topic,
+                in_component_place=in_component_place,
                 note=note,
                 suggestion=suggestion,
                 standing=standing,
@@ -179,7 +179,7 @@ class ProductForwarder:
             signal,
             view,
             title=title,
-            in_topic=in_topic,
+            in_component_place=in_component_place,
             note=note,
             suggestion=suggestion,
             label_max_chars=self._button_label_max_chars,

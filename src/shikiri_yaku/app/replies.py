@@ -64,11 +64,11 @@ def confirm_message(number: int, kind: str, data: str) -> Message:
     return Message(f"S{number} · Confirm {kind}?", (Button("Confirm", data),))
 
 
-def confirm_key(op_id: int, update_id: int | None = None) -> str:
+def confirm_key(op_id: int, event_id: int | None = None) -> str:
     """Return the notice key of an approval; a copy /pending shows again also names its update."""
-    if update_id is None:
+    if event_id is None:
         return f"{_CONFIRM}:{op_id}"
-    return f"{_CONFIRM}:{op_id}:{update_id}"
+    return f"{_CONFIRM}:{op_id}:{event_id}"
 
 
 def _confirm_op(key: str) -> int | None:
@@ -114,7 +114,7 @@ class Replies:
         self._expert_turns = expert_turns
 
     async def handle(self, item: Inbound) -> None:
-        # keep: a file outside an Expert topic is ignored, even when its caption reads as a command
+        # keep: a file outside an Expert room is ignored, even when its caption reads as a command
         if item.kind == InboundKind.FILE:
             return
         if item.kind == InboundKind.TEXT or item.command is not None:

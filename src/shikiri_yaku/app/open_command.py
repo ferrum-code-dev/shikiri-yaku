@@ -39,8 +39,8 @@ _NOTHING: Final = "Nothing is waiting for you."
 _NOTHING_IN: Final = "Nothing is waiting for you in {component}."
 
 
-def _done_key(update_id: int) -> str:
-    return f"pending:{update_id}:done"
+def _done_key(event_id: int) -> str:
+    return f"pending:{event_id}:done"
 
 
 def _nothing(component: str | None) -> str:
@@ -112,18 +112,18 @@ class OpenCommand:
         self._complete(item)
 
     async def _reshow_questions(
-        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+        self, event_id: int, listed: Mapping[tuple[str, str], EscalationView]
     ) -> list[int]:
         shown: list[int] = []
         for number, signal in self._log.forwarded():
             if (signal.project, signal.escalation_id) not in listed:
                 continue
-            if await self._reshower.reshow(number, signal, "", key=f"pending:{update_id}:{number}"):
+            if await self._reshower.reshow(number, signal, "", key=f"pending:{event_id}:{number}"):
                 shown.append(number)
         return shown
 
     def _queue_approvals(
-        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+        self, event_id: int, listed: Mapping[tuple[str, str], EscalationView]
     ) -> list[tuple[int, str]]:
         shown: list[tuple[int, str]] = []
         for approval in self._log.pending_approvals():
@@ -138,14 +138,14 @@ class OpenCommand:
                 confirm_message(
                     approval.number, approval.kind, answer_data(approval.number, option)
                 ),
-                key=confirm_key(approval.op_id, update_id),
+                key=confirm_key(approval.op_id, event_id),
                 slot=confirm_key(approval.op_id),
             )
             shown.append((approval.number, approval.kind))
         return shown
 
     def _queue_install_approvals(
-        self, update_id: int, listed: Mapping[tuple[str, str], EscalationView]
+        self, event_id: int, listed: Mapping[tuple[str, str], EscalationView]
     ) -> list[int]:
         if self._install_approval is None or self._approval_expiry_h is None:
             return []
@@ -162,7 +162,7 @@ class OpenCommand:
                 operation.project,
                 Purpose.APPROVAL,
                 self._install_approval.render(operation.id, payload),
-                key=f"install:{operation.id}:pending:{update_id}",
+                key=f"install:{operation.id}:pending:{event_id}",
                 slot=INSTALL_SLOT,
             )
             shown.append(payload.number)

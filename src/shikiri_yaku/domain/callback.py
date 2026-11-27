@@ -51,17 +51,17 @@ def submit_data(op_id: int) -> str:
 
 
 def submit_all_data(proposal_id: int) -> str:
-    """Return the callback data of *Submit all*; the proposal is the Expert turn's update id."""
+    """Return the callback data of *Submit all*; the proposal is the Expert turn's event id."""
     return f"{SUBMIT_ALL_VERB}:{proposal_id}"
 
 
 def reject_all_data(proposal_id: int) -> str:
-    """Return the callback data of *Reject all*; the proposal is the Expert turn's update id."""
+    """Return the callback data of *Reject all*; the proposal is the Expert turn's event id."""
     return f"{REJECT_ALL_VERB}:{proposal_id}"
 
 
 def view_all_data(proposal_id: int) -> str:
-    """Return the callback data of *View all*; the proposal is the Expert turn's update id."""
+    """Return the callback data of *View all*; the proposal is the Expert turn's event id."""
     return f"{VIEW_ALL_VERB}:{proposal_id}"
 
 

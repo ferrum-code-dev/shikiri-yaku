@@ -82,8 +82,8 @@ class NoticeHandler:
             raise LookupError(message)
         if not family.settled:
             return Resolved(WAITING)
-        # keep: a notice in its component's topic already names the component, so it is left out
-        prefix = "" if self._in_component_topic(signal) else f"{signal.project} · "
+        # keep: a notice in its component's place already names the component, so it is left out
+        prefix = "" if self._in_component_place(signal) else f"{signal.project} · "
         text = _notice_text(prefix, family, self._tasks_max, self._max_text)
         self._notifier.tell(
             signal,
@@ -92,7 +92,7 @@ class NoticeHandler:
         )
         return Informed(SENT)
 
-    def _in_component_topic(self, signal: Signal) -> bool:
+    def _in_component_place(self, signal: Signal) -> bool:
         places = self._places.for_signal(signal.project, signal.kind)
         return all(self._places.component_of(place) == signal.project for place in places)
 

@@ -1183,8 +1183,8 @@ def test_refusal_follow_up_keeps_conversation_order_in_history(
     h.log.start(9)
     h.log.finish(9, STORED, None, None, now)
 
-    assert [t.update_id for t in h.log.history(conversation.id, before=followup)] == [1, 5]
-    assert [t.update_id for t in h.log.history(conversation.id, before=9)] == [1, 5, followup]
+    assert [t.event_id for t in h.log.history(conversation.id, before=followup)] == [1, 5]
+    assert [t.event_id for t in h.log.history(conversation.id, before=9)] == [1, 5, followup]
 
 
 def test_done_refusal_follow_up_is_delivered_on_replay(build: Callable[..., Harness]) -> None:
@@ -1652,7 +1652,7 @@ def test_a_conversation_that_ends_during_a_download_gets_no_file_and_no_turn(
         assert conversation is not None
         attach = asyncio.create_task(h.turns.handle(_file_item(2, "file-1", "a.png")))
         await asyncio.wait_for(downloads.started.wait(), timeout=1)
-        close = asyncio.create_task(h.ending.end(conversation.id, sender=str(OWNER), update_id=3))
+        close = asyncio.create_task(h.ending.end(conversation.id, sender=str(OWNER), event_id=3))
         # keep: lets the ending run as far as it can while the file is still downloading
         await asyncio.wait({close}, timeout=0.05)
         downloads.release.set()
@@ -1676,7 +1676,7 @@ def test_an_ending_stops_a_sketch_being_drawn(
         assert conversation is not None
 
         assert PROGRESS_KEY in _answer_keys(h)
-        ending = h.ending.end(conversation.id, sender=str(OWNER), update_id=2)
+        ending = h.ending.end(conversation.id, sender=str(OWNER), event_id=2)
         await asyncio.wait_for(ending, timeout=1)
         await asyncio.wait_for(asked, timeout=1)
 

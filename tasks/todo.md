@@ -64,7 +64,7 @@
 
 ### F11
 
-- [ ] F11. Neutral words and proof, after F10.
+- [x] F11. Neutral words and proof, after F10.
 
 ## Acceptance criteria
 - Texts the core sends speak of the conversation and its chat, not of topics or forum groups. The button of a new conversation reads *Open conversation*. The README and `docs/reference.md` match.

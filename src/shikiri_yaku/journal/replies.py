@@ -101,11 +101,11 @@ class JournalReplies:
         payload = ResolvePayload.model_validate_json(row["payload"])
         return RecordedResolution(payload.label, datetime.fromisoformat(row["updated_at"]))
 
-    def intend_resolve(self, update_id: int, payload: ResolvePayload, now: datetime) -> int | None:
+    def intend_resolve(self, event_id: int, payload: ResolvePayload, now: datetime) -> int | None:
         form = secret_form([payload.text or ""])
         inserted = self._ops.intend(
             NewOp(
-                identity=f"{self._channel_name}:resolve:{update_id}",
+                identity=f"{self._channel_name}:resolve:{event_id}",
                 kind=_RESOLVE,
                 project=payload.project,
                 task_id=payload.task_id,

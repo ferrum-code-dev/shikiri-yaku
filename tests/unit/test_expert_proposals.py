@@ -1184,7 +1184,7 @@ def test_admin_state_and_final_edit_commit_together(action: str) -> None:
             journal.expire_admin(NOW, NOW)
         elif action == "close":
             harness.conversations.begin_ending(
-                harness.conversation_id, NOW, sender=str(ADMIN), update_id=2
+                harness.conversation_id, NOW, sender=str(ADMIN), event_id=2
             )
         elif action == "idle":
             harness.conversations.begin_ending(harness.conversation_id, NOW)
@@ -1727,9 +1727,7 @@ def test_admin_output_is_redacted_before_journal_topic_and_expert(
         assert turn is not None
         assert turn.text.endswith("\nxx***")
         assert turn.state == "pending"
-        assert harness.conversations.pending_admin_followups() == [
-            (conversation.id, turn.update_id)
-        ]
+        assert harness.conversations.pending_admin_followups() == [(conversation.id, turn.event_id)]
         message = harness.database.connection.execute(
             "SELECT body FROM messages WHERE notice_key = ?", (f"admin:result:{op}",)
         ).fetchone()

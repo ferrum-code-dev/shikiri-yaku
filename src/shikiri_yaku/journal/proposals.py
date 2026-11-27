@@ -47,13 +47,13 @@ class JournalProposals:
         self._submits = JournalSubmits(database, ops, channel_name=channel_name)
 
     def intend_admin(
-        self, conversation_id: int, update_id: int, command: str, reason: str, now: datetime
+        self, conversation_id: int, event_id: int, command: str, reason: str, now: datetime
     ) -> tuple[int, list[int]]:
         """Record one proposal and void earlier pending proposals atomically."""
         with self._database.transaction() as connection:
             inserted = self._ops.intend(
                 NewOp(
-                    identity=f"admin:{update_id}",
+                    identity=f"admin:{event_id}",
                     kind=MODE_ADMIN,
                     project="",
                     reason=reason,
@@ -77,7 +77,7 @@ class JournalProposals:
                     "payload = json_set(payload, '$.update_id', ?, '$.actor', "
                     "(SELECT sender FROM messages WHERE update_id = ?), '$.approver', NULL) "
                     "WHERE id = ?",
-                    (stamp(now), update_id, update_id, op_id),
+                    (stamp(now), event_id, event_id, op_id),
                 )
                 settle_notice(connection, f"admin:proposal:{op_id}", Message("Proposal voided."))
             return inserted.row_id, voided
@@ -85,7 +85,7 @@ class JournalProposals:
     def decide_admin(
         self,
         op_id: int,
-        update_id: int,
+        event_id: int,
         sender: str,
         *,
         admin: bool,
@@ -107,7 +107,7 @@ class JournalProposals:
                     stamp(now),
                     sender,
                     sender,
-                    update_id,
+                    event_id,
                     op_id,
                     admin,
                     stamp(cutoff),
@@ -125,7 +125,7 @@ class JournalProposals:
                     "SELECT json_extract(payload, '$.conversation_id'), ?, "
                     "'The admin declined the proposed command.', 'pending' FROM ops WHERE id = ? "
                     "ON CONFLICT(update_id) DO NOTHING",
-                    (update_id, op_id),
+                    (event_id, op_id),
                 )
             return changed == 1
 
@@ -231,7 +231,7 @@ class JournalProposals:
                 )
             return [row["id"] for row in rows]
 
-    def offer(self, conversation_id: int, update_id: int, *, offered: bool) -> list[int]:
+    def offer(self, conversation_id: int, event_id: int, *, offered: bool) -> list[int]:
         """Record an answer's proposal and void the offered ones of its conversation.
 
         An answer already recorded, such as a turn delivered again, changes nothing: a replay
@@ -242,7 +242,7 @@ class JournalProposals:
             inserted = connection.execute(
                 "INSERT INTO proposals (update_id, conversation_id, state) VALUES (?, ?, ?)"
                 " ON CONFLICT (update_id) DO NOTHING",
-                (update_id, conversation_id, state),
+                (event_id, conversation_id, state),
             ).rowcount
             if inserted != 1:
                 return []
@@ -251,7 +251,7 @@ class JournalProposals:
                 for row in connection.execute(
                     "SELECT update_id FROM proposals"
                     " WHERE conversation_id = ? AND state = ? AND update_id <> ?",
-                    (conversation_id, ProposalStatus.OFFERED, update_id),
+                    (conversation_id, ProposalStatus.OFFERED, event_id),
                 ).fetchall()
             ]
             connection.executemany(
@@ -260,29 +260,29 @@ class JournalProposals:
             )
         return voided
 
-    def state(self, update_id: int) -> str | None:
+    def state(self, event_id: int) -> str | None:
         row = self._database.connection.execute(
-            "SELECT state FROM proposals WHERE update_id = ?", (update_id,)
+            "SELECT state FROM proposals WHERE update_id = ?", (event_id,)
         ).fetchone()
         return None if row is None else row["state"]
 
-    def begin(self, update_id: int, payloads: list[SubmitPayload], now: datetime) -> bool:
+    def begin(self, event_id: int, payloads: list[SubmitPayload], now: datetime) -> bool:
         """Journal the tasks and move the proposal to submitting; False unless it was offered."""
         with self._database.transaction():
-            if not self._move(update_id, ProposalStatus.OFFERED, ProposalStatus.SUBMITTING):
+            if not self._move(event_id, ProposalStatus.OFFERED, ProposalStatus.SUBMITTING):
                 return False
             for index, payload in enumerate(payloads):
-                self._submits.intend_task(update_id, index, payload, now)
+                self._submits.intend_task(event_id, index, payload, now)
         return True
 
-    def reject(self, update_id: int) -> bool:
-        return self._move(update_id, ProposalStatus.OFFERED, ProposalStatus.REJECTED)
+    def reject(self, event_id: int) -> bool:
+        return self._move(event_id, ProposalStatus.OFFERED, ProposalStatus.REJECTED)
 
-    def finish(self, update_id: int) -> None:
-        self._move(update_id, ProposalStatus.SUBMITTING, ProposalStatus.SUBMITTED)
+    def finish(self, event_id: int) -> None:
+        self._move(event_id, ProposalStatus.SUBMITTING, ProposalStatus.SUBMITTED)
 
-    def ops(self, update_id: int) -> list[SubmitOp]:
-        return self._submits.for_proposal(update_id)
+    def ops(self, event_id: int) -> list[SubmitOp]:
+        return self._submits.for_proposal(event_id)
 
     def unfinished(self) -> list[int]:
         """Return the proposals a restart found submitting."""
@@ -320,20 +320,20 @@ class JournalProposals:
         ).fetchone()
         return None if row is None else row["notice_key"]
 
-    def interrupt(self, update_id: int, now: datetime) -> None:
+    def interrupt(self, event_id: int, now: datetime) -> None:
         """Mark a submitting proposal interrupted; its issued tasks become unknown, never resent.
 
         An intended task was never issued, so it stays unsent.
         """
         with self._database.transaction():
-            if self._move(update_id, ProposalStatus.SUBMITTING, ProposalStatus.INTERRUPTED):
-                for op in self._submits.for_proposal(update_id):
+            if self._move(event_id, ProposalStatus.SUBMITTING, ProposalStatus.INTERRUPTED):
+                for op in self._submits.for_proposal(event_id):
                     if op.status == SubmitStatus.ISSUED:
                         self._submits.uncertain(op.id, now)
 
-    def _move(self, update_id: int, expected: str, new: str) -> bool:
+    def _move(self, event_id: int, expected: str, new: str) -> bool:
         moved = self._database.connection.execute(
             "UPDATE proposals SET state = ? WHERE update_id = ? AND state = ?",
-            (new, update_id, expected),
+            (new, event_id, expected),
         ).rowcount
         return moved == 1
