@@ -558,15 +558,13 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         # keep: operator health signals belong to no component; a restart must not close them
         SignalStore(journal).close_removed((*clients, OPERATOR_SCOPE), REMOVED_NOTE, clock.now())
         goal.recover()
-        asyncio.run(
-            recover_admin(
-                JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
-                conversations,
-                clock,
-                channel,
-                channel_name=TELEGRAM_CHANNEL,
-                group_id=group_id,
-            )
+        recover_admin(
+            JournalProposals(journal, OpStore(journal), channel_name=TELEGRAM_CHANNEL),
+            conversations,
+            clock,
+            outbox,
+            channel_name=TELEGRAM_CHANNEL,
+            group_id=group_id,
         )
         if turns is not None:
             turns.recover()

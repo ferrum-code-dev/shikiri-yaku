@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from shikiri_yaku.domain.expert import MODE_ADMIN
 from shikiri_yaku.domain.outbound import Purpose
 from shikiri_yaku.domain.schedule import Destination
-from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, ChannelError, Message
+from shikiri_yaku.ports import MESSAGE_TEXT_LIMIT, Message
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -21,7 +20,6 @@ if TYPE_CHECKING:
     from shikiri_yaku.ports import (
         AdminCommandResult,
         AdminCommandRunner,
-        Channel,
         Clock,
         HostLock,
         Outbox,
@@ -77,7 +75,11 @@ class AdminLog(Protocol):
         cut: bool,
         notice: Callable[[], None] | None = None,
     ) -> int | None: ...
-    def recover_admin(self, now: datetime) -> list[tuple[int, int, str]]: ...
+    def recover_admin(
+        self,
+        now: datetime,
+        notice: Callable[[int, int, str], None] | None = None,
+    ) -> list[tuple[int, int, str]]: ...
 
 
 class AdminExecutor:
@@ -175,22 +177,33 @@ def _result_text(result: AdminCommandResult, duration: float) -> str:
     return f"{status}\n{body[-(MESSAGE_TEXT_LIMIT - len(status) - 1) :]}"
 
 
-async def recover_admin(
+def recover_admin(
     log: AdminLog,
     conversations: AdminConversations,
     clock: Clock,
-    channel: Channel,
+    outbox: Outbox,
     *,
     channel_name: str,
     group_id: int | None,
 ) -> None:
-    """Settle interrupted operations even if admin mode is no longer configured."""
-    for _, conversation_id, state in log.recover_admin(clock.now()):
+    """Settle interrupted operations even if admin mode is no longer configured.
+
+    Each notice is queued in the transaction that settles its operation, so a restart cannot lose
+    it; the outbox sender delivers it, and tries again after a failed delivery.
+    """
+
+    def notice(op_id: int, conversation_id: int, state: str) -> None:
         conversation = conversations.conversation(conversation_id)
         if conversation is None or conversation.thread_id is None or group_id is None:
-            continue
-        destination = Destination(channel_name, str(group_id), conversation.thread_id)
-        with suppress(ChannelError):
-            await channel.send(
-                destination, Message(f"Command is {state} after restart. Please check the host.")
-            )
+            return
+        outbox.queue(
+            None,
+            Purpose.EXPERT,
+            [Destination(channel_name, str(group_id), conversation.thread_id)],
+            Message(f"Command is {state} after restart. Please check the host."),
+            key=f"admin:interrupted:{op_id}",
+            now=clock.now(),
+            conversation_id=conversation_id,
+        )
+
+    log.recover_admin(clock.now(), notice)

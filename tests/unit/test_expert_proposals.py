@@ -1494,16 +1494,19 @@ def test_admin_restart_notices_are_not_replayed() -> None:
         ops.append(op)
     assert journal.issue_admin(ops[0], NOW) is not None
     channel = FakeChannel()
-    asyncio.run(
+    sender = OutboxSender(harness.outbox, channel, Clock(), interval_s=1)
+    for _ in range(2):
         recover_admin(
-            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
+            journal,
+            harness.conversations,
+            Clock(),
+            harness.outbox,
+            channel_name=CHANNEL,
+            group_id=CHAT,
         )
-    )
-    asyncio.run(
-        recover_admin(
-            journal, harness.conversations, Clock(), channel, channel_name=CHANNEL, group_id=CHAT
-        )
-    )
+    assert harness.outbox.notice_queued(f"admin:interrupted:{ops[0]}")
+    assert harness.outbox.notice_queued(f"admin:interrupted:{ops[1]}")
+    asyncio.run(sender.tick())
     assert len(channel.sent) == 2
     issued = journal.admin_op(ops[0])
     approved = journal.admin_op(ops[1])
