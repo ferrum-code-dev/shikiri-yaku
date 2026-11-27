@@ -1,5 +1,14 @@
 # Todo
 
+## Planned work: Channel contract (F6–F11)
+
+- [ ] F6. Move message policy out of the channel adapter.
+- [ ] F7. Bundle the channel and inject its limits, after F6.
+- [ ] F8. Add rooms and shared chat, after F7.
+- [ ] F9. Make event identity channel-neutral, after F8.
+- [ ] F10. Replace chat and thread with one opaque place, after F9.
+- [ ] F11. Neutral words and the fake-channel proof, after F10.
+
 ## Planned work: An ended conversation leaves no command replies (T-193)
 
 - [x] T-193. Erase the reply keys of an ended conversation's messages.
