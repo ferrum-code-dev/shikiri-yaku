@@ -344,7 +344,7 @@ When the process exits, code records the exit code, the duration and whether the
 * an `approved` op that was never issued is never run; it becomes `void`;
 * an `issued` op with no recorded result is never run again; it becomes `unknown`.
 
-The admin is told in the topic of each op that became `void` or `unknown` and asked to check the host. The notice is sent once, when the op is settled; a restart before it is sent loses it, and the journal still holds the state.
+The admin is told in the topic of each op that became `void` or `unknown` and asked to check the host. The notice goes through the outbox once, when the op is settled, so a delivery that fails is tried again; the journal holds the state either way.
 
 ## Journal
 
@@ -354,7 +354,7 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 |---|---|---|
 | `cursors` | Per project: last event id, last lifecycle event, and the id of the last respected clean stop | Resume without losing or replaying events; the liveness rule |
 | `signals` | Id and number, project, kind, reason, text, category and who set it (rule or Reasoner, with its verdict and timing), handler, state, notes, wake-up time | Deferred work, no double handling, misroute review |
-| `messages` | The outbox and every message sent: signal or Expert conversation, channel, chat, platform message id, purpose (`question`, `approval`, `notice` or `expert`), notice key, delivery state, body | Edits, reminders, duplicates recognized |
+| `messages` | The outbox and every message sent: signal or Expert conversation, channel, place, platform message id, purpose (`question`, `approval`, `notice` or `expert`), notice key, delivery state, body | Edits, reminders, duplicates recognized |
 | `ops` | Every effect: kind (`resolve`, `start`, `submit`, `install`, `wait`, `admin`), identity or Telegram update id, project, task, reason, payload (for an install: the exact argument list; for an admin command: the exact command text and the approver), state, Shikiru's command id, output path, timestamps | Safe restart, the loop guard, approvals that run exactly what was shown, the admin audit |
 | `conversations` | Each Expert or admin conversation: mode, number, scope, topic, effort, provider and session id, findings, state, last activity | The topic, the session and the handoff survive a restart |
 | `turns` | Each Expert turn: conversation, event id, text, answer, rung, state, call record | A turn is never run twice, and an interrupted one is reported |
@@ -363,7 +363,7 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 
 A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install and an admin command also pass `approved` and may end `declined`, `expired` or `void`.
 
-The other tables hold the inbox cursor and the event id counter (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component and of each Expert conversation (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
+The other tables hold the inbox cursor and the event id counter (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
 
 Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert and admin conversations, except the admin `ops` records, which are the audit ([Admin mode](#admin-mode)).
 
@@ -431,7 +431,7 @@ shikiri-yaku/
     app/          dispatcher, router, scheduler, loop guard, sources, replies, outbox sender,
                   reconcilers, install executor, Reasoner ladder and assessor, Expert and its ladder
     extensions/   infrastructure/ product/ review/ notice/   (each: rules, handler, actions)
-    ports.py      Protocols the core uses: ShikiruClient, Channel, Updates, Reasoner, ...
+    ports.py      Protocols the core uses: ShikiruClient, Channel and its parts, Reasoner, ...
     adapters/     Shikiru MCP link, Telegram, Reasoner CLIs, Expert CLIs, Expert web tool,
                   process runner, host lock, clock
     journal/      SQLite access; the only place with SQL
