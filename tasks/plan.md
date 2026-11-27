@@ -1,5 +1,201 @@
 # Task plan
 
+## Planned work: Channel contract (F6–F11)
+
+The core is tied to one chat platform: the Expert builds group and topic addresses itself, ids are integers, platform limits sit in the core, and the channel adapter holds the secret screen. These tasks put one contract between the core and a channel, with no platform terms in it, so that a later channel is a new adapter. No new channel is built here. `docs/design.md`, section "Channel contract", is the design.
+
+### Rules for every task of this section
+
+- Run the tasks in order, F6 to F11, each after the previous one is integrated. One task, one change.
+- The design describes the state after F11. A difference from it that a later task removes is neither a conflict to escalate nor work to do early.
+- Behavior stays as it is, except where a task lists a change.
+- No code for Slack, Discord or WhatsApp. No new setting, dependency or configuration change. Do not edit `docs/design.md`.
+- Change a test only because the code it protects moved or its types changed. Never delete or weaken a stated guarantee.
+- A migration is added, never edited. It does not drop or recreate a table that another table refers to: add a column, copy the values, drop the old column. No file under `journal/` names a platform.
+- Offline tests cover the criteria; `uv run poe check` passes, or unrelated failures are reported with evidence. Use the ponytail skill.
+- If a task cannot be done as written, or conflicts with the design, escalate. Do not change its scope.
+
+### Terms
+
+| Term | Meaning | Replaces in the core |
+|---|---|---|
+| channel | one connected chat platform | |
+| place | where a message is; only the channel reads its id | chat, thread, destination |
+| room | a place the channel opens for one Expert conversation, known by a room id | topic |
+| inbox | what users send to the channel | updates |
+| cursor | how far the inbox has been read | offset |
+| key, id | the channel's id of an event; the journal's own number of it | update id |
+
+### Contract after F11
+
+```python
+@dataclass(frozen=True)
+class Place:
+    channel: str
+    id: str
+
+@dataclass(frozen=True, kw_only=True)
+class Received:                      # what the inbox returns
+    key: str
+    kind: InboundKind                # tap, reply, text, file, room_closed
+    sender: str
+    place: Place
+    message_ref: str
+    reply_to_ref: str | None = None
+    text: str | None = None          # a command arrives as "/name[@instance] arguments"
+    data: str | None = None
+    file: FileRef | None = None
+
+@dataclass(frozen=True, kw_only=True)
+class Inbound(Received):             # what the journal returns
+    id: int
+
+@dataclass(frozen=True)
+class Batch:
+    cursor: str | None               # None: nothing was read
+    events: tuple[Received, ...]
+
+class Inbox(Protocol):
+    async def fetch(self, cursor: str | None, wait_s: float) -> Batch: ...
+    # Passing a batch's cursor back confirms that the batch is stored. Only then may the
+    # channel acknowledge it to its platform; until then it delivers it again.
+
+class Sender(Protocol):
+    async def send(self, place: Place, message: Message) -> str: ...
+
+class Editor(Protocol):
+    async def edit(self, message_ref: str, message: Message) -> None: ...
+
+class Deleter(Protocol):
+    async def delete(self, message_ref: str) -> None: ...
+
+class Downloads(Protocol):
+    async def fetch(self, file_id: str) -> bytes: ...
+
+class Places(Protocol):
+    def for_signal(self, project: str, kind: Kind) -> Sequence[Place]: ...
+    def component_of(self, place: Place) -> str | None: ...
+    async def prepare(self) -> None: ...
+
+class Rooms(Protocol):               # optional
+    async def open(self, title: str) -> str: ...      # the room id
+    def place(self, room: str) -> Place: ...
+    def room_of(self, place: Place) -> str | None: ...
+    async def rename(self, room: str, title: str) -> None: ...
+    async def delete(self, room: str) -> None: ...
+    def link(self, room: str) -> str | None: ...
+
+class SharedChat(Protocol):          # optional: several instances in one chat
+    def is_main(self, place: Place) -> bool: ...
+    async def addressed(self, word: str) -> bool: ...
+    async def command_label(self, command: str) -> str: ...
+
+@dataclass(frozen=True)
+class Channel:
+    name: str
+    inbox: Inbox
+    sender: Sender
+    editor: Editor
+    deleter: Deleter
+    downloads: Downloads
+    places: Places
+    check: ChannelCheck
+    owners: frozenset[str]
+    max_text: int
+    max_file_bytes: int
+    secrets: tuple[str, ...]
+    rooms: Rooms | None = None
+    shared: SharedChat | None = None
+```
+
+`Message` and `Button` do not change. `ChannelError` is tried again, `ChannelRefusedError` never, and `PlaceGoneError`, a kind of refusal, says the place no longer exists.
+
+Every channel guarantees: a message reference is unique within the channel; a tap carries the place of the tapped message; the typed answer to a message with `expects_reply` arrives as a reply with its `reply_to_ref`; text of `max_text` characters and button data of 64 bytes are accepted; a message it cannot show whole, buttons included, is refused and never cut.
+
+### F6. Move message policy out of the channel adapter
+
+The adapter screens secrets, deletes a leaked copy and journals refused edits (`adapters/telegram.py`, `edit`, `_delete_copy`, `_refuse_secret`). Move that policy into the core, so that no adapter has to repeat it.
+
+## Acceptance criteria
+- The channel adapter does not use `Copies` and screens no secrets. Its send, edit and delete only talk to the platform and check the platform's own limits.
+- `OutboxSender` refuses a message that carries a secret form before any channel call, with the form as the reason; the PO gets the same notice as today.
+- `CopyEditor`: an edit that carries a secret form is not made; the sent copy is deleted, with the attempt and the notice journaled before the platform call, a failed deletion is not repeated, and the edit is given up. An edit the platform refuses is journaled on its copy, the PO is told, and the edit is given up.
+- The notice about an interrupted admin command goes through the outbox, once per op and tagged with its conversation. Only `OutboxSender` calls send, so a failed delivery after a restart is tried again.
+- `PlaceGoneError` replaces the comparison with `TOPIC_GONE_REASON`; the stored refusal reason is `place_gone`.
+
+Complexity: normal.
+
+### F7. Bundle the channel and inject its limits
+
+Replace the `Channel` protocol with `Sender`, `Editor` and `Deleter`, rename `Updates` to `Inbox`, and add the `Channel` dataclass, without `rooms` and `shared`. Types of ids stay as they are: `owners` holds integers and the `places` field holds the `Destinations` port.
+
+## Acceptance criteria
+- Each consumer takes only the part it uses.
+- `max_text` and `max_file_bytes` come from the channel. `MESSAGE_TEXT_LIMIT`, `CALLBACK_DATA_LIMIT` and `DOWNLOAD_LIMIT_BYTES` live in the adapter. The core, the extensions and the journal get the limits through constructors or arguments, and the file size notice is built from the limit.
+- One function in `bootstrap.py` builds the channel from its settings section. The rest of the composition uses only the bundle: it builds and names no Telegram class outside that function, its transport factory and the topic repair commands, and takes secrets from the bundle without an `isinstance` check. Until F8 that function also hands over the Expert topic operations, and the composition still reads `group_id` and `shared_group`.
+- The inbound health scope keeps its value, so an open health signal still closes after an upgrade.
+- No migration and no configuration change.
+
+Complexity: normal.
+
+### F8. Rooms and shared chat
+
+Add `Rooms` and `SharedChat` and give the bundle both as optional parts. Until F10 a place is today's `Destination`. The adapter provides `rooms` only with `group_id` and `shared` only with `shared_group`. The journal never stored the group of a conversation's topic, which is why a conversation keeps a room id and asks the channel for its place.
+
+## Acceptance criteria
+- No module of `app`, `domain` or `extensions` takes a group id or builds a destination from a group and a thread. A conversation keeps its room id as text; `ExpertTopics` and `TopicDeletion` are gone. No migration: the journal converts the stored thread number. The journal stops writing conversation rows into the `topics` table, after checking that nothing reads them.
+- An event belongs to a conversation when `room_of` names its open room.
+- Without `rooms`, `/expert` and `/admin` are refused as today.
+- Shared chat behaves as today: a command in a place that is not main, not a component's and not an open room gets no reply; an unaddressed `/expert` or `/admin` in the main place offers the selection button, only to listed admins for `/admin`; one addressed to another instance is ignored; `/submit` for an unknown component gets no reply.
+- Web and admin taps count only from the recorded message of that request or proposal.
+- The notice about a refused room deletion goes to the Operator's own places.
+- One `Inbound.command` property reads a command's name, instance and arguments, and replaces the separate parsing in `domain/inbound.py`, `commands.py`, `inbound_service.py`, `expert.py` and `expert_turns.py`.
+
+Complexity: high.
+
+### F9. Channel-neutral event identity
+
+The inbox returns `Received` events with the platform's id as `key`, and an opaque cursor. The journal assigns each event its own id. `Inbound.update_id` becomes `Inbound.id`, and senders are text. Until F10 an event keeps `chat` and `thread` in place of `place`. Database column names may stay.
+
+## Acceptance criteria
+- `Inbox.fetch(cursor, wait_s)` and its documented confirmation rule match the contract.
+- Ids come from a stored counter per channel: strictly increasing, never used again, also after a conversation is erased, and greater than every id the journal already holds and than the stored offset minus one.
+- An event delivered again is not stored twice, including one stored before the upgrade.
+- `sender` is text in the journal and in code; `bootstrap.py` converts configured owners and admins. Settings do not change, and old audit payloads are not rewritten.
+- The Telegram cursor is the last update id plus one, and the stored offset is carried over.
+- One test upgrades a journal of schema 28 that holds a pending inbound item, a pending Expert turn, an offered proposal, an admin op, a sent question and a stored offset: nothing is lost or handled twice, the old buttons work, and `PRAGMA foreign_key_check` is empty.
+- The commit type is marked `!`.
+
+Complexity: high.
+
+### F10. One opaque place
+
+`Place(channel, id)` replaces `Destination` and the `chat` and `thread` of an inbound event; the `Destinations` port becomes `Places`. Only the adapter reads a place id. The Telegram id is `<chat>`, or `<chat>/<thread>` inside a topic; the General topic is the chat alone.
+
+## Acceptance criteria
+- No module of `app`, `domain`, `extensions` or `ports` reads, splits or builds a place id.
+- The migration turns stored chat and thread into the place of every message; keeps a notice unique per key, channel and place and a sent reference unique per channel and direction; gives conversations an origin place and a text room id; rewrites the destination inside stored submit ops; and renames the stored kind `topic_closed` to `room_closed`. The topic table of the Telegram adapter stays as it is.
+- A sent copy is looked up by channel and message reference.
+- Behavior change: a tap carries the place of the tapped message, so a reply to it appears where the button is. The adapter takes a tapped message's thread only when the platform marks it as a topic message, and General is no thread.
+- One test upgrades a journal that holds messages in a private chat, in General, in a component topic and in a room, a pending message, a copy waiting for its final edit, a signal waiting for reminders, an open conversation and an unfinished submit op. Afterwards each pending message goes to the same chat and thread, taps resolve, reminders and replacements work, and ending the conversation removes all its rows.
+- The commit type is marked `!`.
+
+Complexity: high.
+
+### F11. Neutral words and proof
+
+## Acceptance criteria
+- Texts the core sends speak of the conversation and its chat, not of topics or forum groups. The button of a new conversation reads *Open conversation*. The README and `docs/reference.md` match.
+- No file under `app`, `domain`, `extensions` or in `ports.py` contains `topic`, `forum` or `update_id`; `tests/unit/test_channel_boundary.py` enforces it.
+- A fake channel in the tests, with text ids that are not numbers, a limit of 2000 characters and a deleter that refuses messages it did not send, passes offline: a forwarded signal answered by a tap; an Expert conversation opened, continued, closed and erased; and a refused secret.
+- A fake channel without `rooms` and `shared` refuses `/expert` and serves signals.
+
+Complexity: normal.
+
+### Before a release
+
+Done by hand, after F11: the migrations are rehearsed on a copy of a real journal, and the PO checks on a real chat a signal with each button, a typed answer, `/status`, `/pending`, `/submit`, an Expert conversation with an attachment, a sketch, a proposal and `/close`, a web grant, an admin command, a message with a secret, and in a shared chat the Expert selection.
+
 ## Planned work: An ended conversation leaves no command replies (T-193)
 
 A live instance kept both `expert:view` command replies after its topic was closed. Their keys end in a task number or in no number, not in the tap's update id, so the erase of the conversation missed them. The tap's inbound row is not linked to the conversation. `docs/design.md` says the rows of an ended conversation are deleted.
