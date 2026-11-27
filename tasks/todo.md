@@ -2,12 +2,75 @@
 
 ## Planned work: Channel contract (F6–F11)
 
+### F6
+
 - [ ] F6. Move message policy out of the channel adapter.
+
+## Acceptance criteria
+- The channel adapter does not use `Copies` and screens no secrets. Its send, edit and delete only talk to the platform and check the platform's own limits.
+- `OutboxSender` refuses a message that carries a secret form before any channel call, with the form as the reason; the PO gets the same notice as today.
+- `CopyEditor`: an edit that carries a secret form is not made; the sent copy is deleted, with the attempt and the notice journaled before the platform call, a failed deletion is not repeated, and the edit is given up. An edit the platform refuses is journaled on its copy, the PO is told, and the edit is given up.
+- The notice about an interrupted admin command goes through the outbox, once per op and tagged with its conversation. Only `OutboxSender` calls send, so a failed delivery after a restart is tried again.
+- `PlaceGoneError` replaces the comparison with `TOPIC_GONE_REASON`; the stored refusal reason is `place_gone`.
+
+### F7
+
 - [ ] F7. Bundle the channel and inject its limits, after F6.
-- [ ] F8. Add rooms and shared chat, after F7.
-- [ ] F9. Make event identity channel-neutral, after F8.
-- [ ] F10. Replace chat and thread with one opaque place, after F9.
-- [ ] F11. Neutral words and the fake-channel proof, after F10.
+
+## Acceptance criteria
+- Each consumer takes only the part it uses.
+- `max_text` and `max_file_bytes` come from the channel. `MESSAGE_TEXT_LIMIT`, `CALLBACK_DATA_LIMIT` and `DOWNLOAD_LIMIT_BYTES` live in the adapter. The core, the extensions and the journal get the limits through constructors or arguments, and the file size notice is built from the limit.
+- One function in `bootstrap.py` builds the channel from its settings section. The rest of the composition uses only the bundle: it builds and names no Telegram class outside that function, its transport factory and the topic repair commands, and takes secrets from the bundle without an `isinstance` check. Until F8 that function also hands over the Expert topic operations, and the composition still reads `group_id` and `shared_group`.
+- The inbound health scope keeps its value, so an open health signal still closes after an upgrade.
+- No migration and no configuration change.
+
+### F8
+
+- [ ] F8. Rooms and shared chat, after F7.
+
+## Acceptance criteria
+- No module of `app`, `domain` or `extensions` takes a group id or builds a destination from a group and a thread. A conversation keeps its room id as text; `ExpertTopics` and `TopicDeletion` are gone. No migration: the journal converts the stored thread number. The journal stops writing conversation rows into the `topics` table, after checking that nothing reads them.
+- An event belongs to a conversation when `room_of` names its open room.
+- Without `rooms`, `/expert` and `/admin` are refused as today.
+- Shared chat behaves as today: a command in a place that is not main, not a component's and not an open room gets no reply; an unaddressed `/expert` or `/admin` in the main place offers the selection button, only to listed admins for `/admin`; one addressed to another instance is ignored; `/submit` for an unknown component gets no reply.
+- Web and admin taps count only from the recorded message of that request or proposal.
+- The notice about a refused room deletion goes to the Operator's own places.
+- One `Inbound.command` property reads a command's name, instance and arguments, and replaces the separate parsing in `domain/inbound.py`, `commands.py`, `inbound_service.py`, `expert.py` and `expert_turns.py`.
+
+### F9
+
+- [ ] F9. Channel-neutral event identity, after F8.
+
+## Acceptance criteria
+- `Inbox.fetch(cursor, wait_s)` and its documented confirmation rule match the contract.
+- Ids come from a stored counter per channel: strictly increasing, never used again, also after a conversation is erased, and greater than every id the journal already holds and than the stored offset minus one.
+- An event delivered again is not stored twice, including one stored before the upgrade.
+- `sender` is text in the journal and in code; `bootstrap.py` converts configured owners and admins. Settings do not change, and old audit payloads are not rewritten.
+- The Telegram cursor is the last update id plus one, and the stored offset is carried over.
+- One test upgrades a journal of schema 28 that holds a pending inbound item, a pending Expert turn, an offered proposal, an admin op, a sent question and a stored offset: nothing is lost or handled twice, the old buttons work, and `PRAGMA foreign_key_check` is empty.
+- The commit type is marked `!`.
+
+### F10
+
+- [ ] F10. One opaque place, after F9.
+
+## Acceptance criteria
+- No module of `app`, `domain`, `extensions` or `ports` reads, splits or builds a place id.
+- The migration turns stored chat and thread into the place of every message; keeps a notice unique per key, channel and place and a sent reference unique per channel and direction; gives conversations an origin place and a text room id; rewrites the destination inside stored submit ops; and renames the stored kind `topic_closed` to `room_closed`. The topic table of the Telegram adapter stays as it is.
+- A sent copy is looked up by channel and message reference.
+- Behavior change: a tap carries the place of the tapped message, so a reply to it appears where the button is. The adapter takes a tapped message's thread only when the platform marks it as a topic message, and General is no thread.
+- One test upgrades a journal that holds messages in a private chat, in General, in a component topic and in a room, a pending message, a copy waiting for its final edit, a signal waiting for reminders, an open conversation and an unfinished submit op. Afterwards each pending message goes to the same chat and thread, taps resolve, reminders and replacements work, and ending the conversation removes all its rows.
+- The commit type is marked `!`.
+
+### F11
+
+- [ ] F11. Neutral words and proof, after F10.
+
+## Acceptance criteria
+- Texts the core sends speak of the conversation and its chat, not of topics or forum groups. The button of a new conversation reads *Open conversation*. The README and `docs/reference.md` match.
+- No file under `app`, `domain`, `extensions` or in `ports.py` contains `topic`, `forum` or `update_id`; `tests/unit/test_channel_boundary.py` enforces it.
+- A fake channel in the tests, with text ids that are not numbers, a limit of 2000 characters and a deleter that refuses messages it did not send, passes offline: a forwarded signal answered by a tap; an Expert conversation opened, continued, closed and erased; and a refused secret.
+- A fake channel without `rooms` and `shared` refuses `/expert` and serves signals.
 
 ## Planned work: An ended conversation leaves no command replies (T-193)
 
