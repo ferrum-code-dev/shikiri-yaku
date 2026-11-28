@@ -358,12 +358,13 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 | `ops` | Every effect: kind (`resolve`, `start`, `submit`, `install`, `wait`, `admin`), identity or Telegram update id, project, task, reason, payload (for an install: the exact argument list; for an admin command: the exact command text and the approver), state, Shikiru's command id, output path, timestamps | Safe restart, the loop guard, approvals that run exactly what was shown, the admin audit |
 | `conversations` | Each Expert or admin conversation: mode, number, scope, topic, effort, provider and session id, findings, state, last activity | The topic, the session and the handoff survive a restart |
 | `turns` | Each Expert turn: conversation, event id, text, answer, rung, state, call record | A turn is never run twice, and an interrupted one is reported |
+| `proposals` | Each Expert task proposal: the event id of its turn, conversation, state | A proposal is decided once, and an interrupted submission is not repeated |
 | `web_grants` | Each granted host and when it was granted | A grant lasts for good |
 | `web_requests` | Each host an Expert turn asked for, and its state | A request waits for the PO's answer across restarts |
 
 A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install and an admin command also pass `approved` and may end `declined`, `expired` or `void`.
 
-The other tables hold the inbox cursor and the event id counter (`polling`), the platform ids of stored inbox events, kept after their conversation is erased so that none is stored twice (`event_keys`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
+The other tables hold the inbox cursor and the event id counter (`polling`), the platform ids of stored inbox events, kept after their conversation is erased so that none is stored twice (`event_keys`), the keys of command replies already sent (`command_replies`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
 
 Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert and admin conversations, except the admin `ops` records, which are the audit ([Admin mode](#admin-mode)).
 
