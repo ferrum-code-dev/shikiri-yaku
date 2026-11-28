@@ -237,8 +237,9 @@ shikiri-yaku --product shop service start
 shikiri-yaku --product shop service stop
 ```
 
-`service stop` returns once the service has stopped. A stopped service stays down until you run
-`service start` or `service restart`, or log in again.
+`service stop` returns once the service has stopped. On macOS it unloads the LaunchAgent and returns
+once launchd no longer holds it. A stopped service stays down until you run `service start` or
+`service restart`, or log in again.
 
 To stop the service and remove its unit, run `service uninstall`. It keeps `config.toml`, the token file, the journal and its backups:
 

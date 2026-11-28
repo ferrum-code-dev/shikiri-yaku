@@ -486,7 +486,7 @@ shikiri-yaku --product shop service start
 shikiri-yaku --product shop service stop
 ```
 
-`service stop` sends SIGTERM and returns once the job no longer runs. The job stays loaded, so `service start` works again without another setup step. To check whether it runs:
+`service stop` unloads the job with `launchctl bootout` and returns once launchd no longer holds it, waiting at most 30 seconds. A stopped service stays down until `service start`, `service restart` or the next login, because launchd does not start an unloaded job. `service start` loads the job again from its unit, so no setup step is needed. To check whether it runs:
 
 ```sh
 shikiri-yaku --product shop service status
@@ -523,7 +523,7 @@ journalctl --user -u shikiri-yaku-shop.service -f
 
 A running service reads its code and `config.toml` only when it starts. A change takes effect after a restart.
 
-`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k`. On Linux it runs `systemctl --user restart`. `service start`, `service stop` and `service status` act the same way, with their own commands: start does not replace a running job, stop waits on macOS until the job has stopped, and status reports `running`, `stopped`, `failed` or `not loaded`, and exits 1 unless the service runs. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit that was written but not loaded, is reported with the manager's message.
+`shikiri-yaku service restart` restarts the unit of each product under `--home`, or of the one named by `--product`. On macOS it runs `launchctl kickstart -k` when the job is loaded, and `launchctl bootstrap` when it is not. On Linux it runs `systemctl --user restart`. `service start`, `service stop` and `service status` act the same way, with their own commands. On macOS, whether a job is loaded is decided by `launchctl print`: start loads a job that is not loaded and otherwise kickstarts it without replacing a running job; stop unloads a loaded job and waits until it is gone. Status reports `running`, `stopped` or `failed`, and exits 1 unless the service runs; an installed unit whose job is not loaded is `stopped`. A product whose unit was never installed is reported as `not installed`, and nothing runs for it. An action that the service manager refuses, such as a unit it cannot load, is reported with the manager's message.
 
 `shikiri-yaku --product shop service uninstall` is the reverse of `service install`. It stops the service and keeps it from starting at a later login: on macOS it runs `launchctl bootout`, and on Linux it runs `systemctl --user disable --now` and then `systemctl --user daemon-reload` after the unit file is deleted. It then deletes the unit file. A manager answer that only says the unit is not loaded, not enabled or not running is not a failure. If the manager refuses the stop, or the file cannot be deleted, the result says why and the unit is kept or reported with its path. It keeps `config.toml`, the token file, the journal and its backups. A `run` process started in a terminal is not touched.
 

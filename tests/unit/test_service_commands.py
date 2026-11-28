@@ -34,6 +34,7 @@ _CLOCK_START: Final = datetime(2026, 1, 1, tzinfo=UTC)
 _OK: Final = CommandResult(0, "", "")
 _RUNNING: Final = CommandResult(0, "\tstate = running\n", "")
 _NOT_RUNNING: Final = CommandResult(0, "\tstate = not running\n", "")
+_GONE: Final = CommandResult(113, "", "Could not find service\n")
 _ACTIVE: Final = CommandResult(0, "active\n", "")
 _INACTIVE: Final = CommandResult(3, "inactive\n", "")
 
@@ -56,18 +57,20 @@ class _Clock:
 class _Launchctl(CommandRunner):
     """Answers each command with its product's outcome, and `launchctl print` in turn.
 
-    The last print answer repeats. Products without an outcome succeed.
+    Each product gets its own print answers; the last one repeats. A print answer that is a
+    CommandError is raised, as when launchctl cannot run. Products without an outcome succeed.
     """
 
     def __init__(
         self,
         outcomes: Mapping[str, CommandResult | CommandError] | None = None,
-        printed: Sequence[CommandResult] = (_NOT_RUNNING,),
+        printed: Sequence[CommandResult | CommandError] = (_NOT_RUNNING, _GONE),
     ) -> None:
         self.commands: list[list[str]] = []
         self.timeouts: list[float] = []
         self._outcomes = dict(outcomes or {})
-        self._printed = list(printed)
+        self._script = tuple(printed)
+        self._printed: dict[str, list[CommandResult | CommandError]] = {}
 
     @override
     async def run(
@@ -81,11 +84,16 @@ class _Launchctl(CommandRunner):
         del cwd, env
         self.commands.append(list(argv))
         self.timeouts.append(timeout_s)
-        outcome = self._outcomes.get(_product_of(argv), _OK)
+        product = _product_of(argv)
+        outcome = self._outcomes.get(product, _OK)
         if isinstance(outcome, CommandError):
             raise outcome
         if argv[1] == "print":
-            return self._printed.pop(0) if len(self._printed) > 1 else self._printed[0]
+            answers = self._printed.setdefault(product, list(self._script))
+            answer = answers.pop(0) if len(answers) > 1 else answers[0]
+            if isinstance(answer, CommandError):
+                raise answer
+            return answer
         return outcome
 
 
@@ -119,17 +127,21 @@ def _print(product: str) -> list[str]:
     return ["launchctl", "print", f"gui/{_UID}/{SERVICE_PREFIX}{product}"]
 
 
+def _bootout(product: str) -> list[str]:
+    return ["launchctl", "bootout", f"gui/{_UID}/{SERVICE_PREFIX}{product}"]
+
+
 def _documented(platform: str, verb: str, product: str) -> list[list[str]]:
-    """Return the commands one verb runs for one product, as the documented recipes give them."""
+    """Return the commands one verb runs for one loaded product, as the recipes give them."""
     name = f"{SERVICE_PREFIX}{product}"
     if platform == "linux":
         action = "is-active" if verb == "status" else verb
         return [["systemctl", "--user", action, f"{name}.service"]]
     target = f"gui/{_UID}/{name}"
     recipes = {
-        "start": [["launchctl", "kickstart", target]],
-        "restart": [["launchctl", "kickstart", "-k", target]],
-        "stop": [["launchctl", "kill", "SIGTERM", target], _print(product)],
+        "start": [_print(product), ["launchctl", "kickstart", target]],
+        "restart": [_print(product), ["launchctl", "kickstart", "-k", target]],
+        "stop": [_print(product), _bootout(product), _print(product)],
         "status": [_print(product)],
     }
     return recipes[verb]
@@ -232,27 +244,65 @@ def test_the_product_option_acts_on_only_that_product(
     assert commands.commands == _documented("linux", verb, _SHOP)
 
 
-def test_a_stop_on_macos_waits_until_the_job_is_no_longer_running(
-    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("loaded", [_RUNNING, _NOT_RUNNING], ids=["running", "loaded-not-running"])
+def test_a_stop_on_macos_unloads_a_loaded_job_and_waits_until_the_manager_lets_go_of_it(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch, loaded: CommandResult
 ) -> None:
     _pretend(monkeypatch, "darwin")
     _products(tmp_path, _SHOP)
     _install(user_home, "darwin", _SHOP)
-    commands = _Launchctl(printed=[_RUNNING, _RUNNING, _NOT_RUNNING])
+    commands = _Launchctl(printed=[loaded, loaded, loaded, _GONE])
     clock = _Clock()
 
     argv = ["--home", str(tmp_path / "instances"), "service", "stop"]
     assert _service(argv, commands, clock) == 0
 
-    assert commands.commands == [_documented("darwin", "stop", _SHOP)[0], *[_print(_SHOP)] * 3]
+    assert commands.commands == [
+        _print(_SHOP),
+        _bootout(_SHOP),
+        _print(_SHOP),
+        _print(_SHOP),
+        _print(_SHOP),
+    ]
     assert clock.slept == [1, 1]
 
 
-def test_a_stop_on_macos_that_outlasts_the_timeout_fails_after_waiting_that_long(
+def test_a_stop_on_macos_of_a_job_the_manager_does_not_hold_succeeds_without_unloading(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _pretend(monkeypatch, "darwin")
+    _products(tmp_path, _SHOP)
+    _install(user_home, "darwin", _SHOP)
+    commands = _Launchctl(printed=[_GONE])
+
+    argv = ["--home", str(tmp_path / "instances"), "service", "stop"]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == [_print(_SHOP)]
+
+
+def test_a_job_that_goes_away_before_the_unload_is_stopped_all_the_same(
+    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _pretend(monkeypatch, "darwin")
+    _products(tmp_path, _SHOP)
+    _install(user_home, "darwin", _SHOP)
+    refused = CommandResult(3, "", "Boot-out failed: 3: No such process\n")
+    commands = _Launchctl({_SHOP: refused}, printed=[_NOT_RUNNING, _GONE])
+
+    argv = ["--home", str(tmp_path / "instances"), "service", "stop"]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == [_print(_SHOP), _bootout(_SHOP), _print(_SHOP)]
+
+
+@pytest.mark.parametrize("loaded", [_RUNNING, _NOT_RUNNING], ids=["running", "loaded-not-running"])
+def test_a_job_still_loaded_at_the_timeout_fails_after_waiting_that_long(
     tmp_path: Path,
     user_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    loaded: CommandResult,
 ) -> None:
     _pretend(monkeypatch, "darwin")
     _products(tmp_path, _SHOP)
@@ -260,25 +310,14 @@ def test_a_stop_on_macos_that_outlasts_the_timeout_fails_after_waiting_that_long
     clock = _Clock()
 
     argv = ["--json", "--home", str(tmp_path / "instances"), "service", "stop"]
-    assert _service(argv, _Launchctl(printed=[_RUNNING]), clock, CliSettings(stop_timeout_s=3)) == 1
+    settings = CliSettings(stop_timeout_s=3)
+    assert _service(argv, _Launchctl(printed=[loaded]), clock, settings) == 1
 
     assert sum(clock.slept) == 3
     assert json.loads(capsys.readouterr().out)[0]["passed"] is False
 
 
-@pytest.mark.parametrize("final", [_NOT_RUNNING, CommandResult(113, "", "No such job")])
-def test_a_stop_on_macos_finishes_once_launchctl_no_longer_reports_the_job_running(
-    tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch, final: CommandResult
-) -> None:
-    _pretend(monkeypatch, "darwin")
-    _products(tmp_path, _SHOP)
-    _install(user_home, "darwin", _SHOP)
-
-    argv = ["--home", str(tmp_path / "instances"), "service", "stop"]
-    assert _service(argv, _Launchctl(printed=[_RUNNING, final]), _Clock()) == 0
-
-
-def test_a_failed_stop_on_macos_is_not_followed_by_a_wait(
+def test_a_failed_stop_on_macos_is_reported_and_is_not_followed_by_a_wait(
     tmp_path: Path, user_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _pretend(monkeypatch, "darwin")
@@ -289,7 +328,63 @@ def test_a_failed_stop_on_macos_is_not_followed_by_a_wait(
     argv = ["--home", str(tmp_path / "instances"), "service", "stop"]
     assert _service(argv, commands, _Clock()) == 1
 
-    assert commands.commands == [_documented("darwin", "stop", _SHOP)[0]]
+    assert commands.commands == [_print(_SHOP), _bootout(_SHOP)]
+
+
+@pytest.mark.parametrize("verb", ["start", "restart"])
+@pytest.mark.parametrize(
+    ("answer", "loaded"),
+    [(_RUNNING, True), (_NOT_RUNNING, True), (_GONE, False)],
+    ids=["running", "loaded-not-running", "not-loaded"],
+)
+def test_start_and_restart_on_macos_kick_a_loaded_job_and_bootstrap_one_that_is_not_loaded(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    verb: str,
+    answer: CommandResult,
+    loaded: bool,
+) -> None:
+    _pretend(monkeypatch, "darwin")
+    _products(tmp_path, _SHOP)
+    _install(user_home, "darwin", _SHOP)
+    commands = _Launchctl(printed=[answer])
+    bootstrap = [
+        "launchctl",
+        "bootstrap",
+        f"gui/{_UID}",
+        str(unit_path("darwin", user_home, _SHOP)),
+    ]
+    action = _documented("darwin", verb, _SHOP)[1:] if loaded else [bootstrap]
+
+    argv = ["--home", str(tmp_path / "instances"), "service", verb]
+    assert _service(argv, commands, _Clock()) == 0
+
+    assert commands.commands == [_print(_SHOP), *action]
+
+
+@pytest.mark.parametrize("verb", ["start", "stop", "restart"])
+def test_a_macos_job_that_cannot_be_checked_is_reported_and_nothing_changes(
+    *,
+    tmp_path: Path,
+    user_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    verb: str,
+) -> None:
+    _pretend(monkeypatch, "darwin")
+    _products(tmp_path, _SHOP)
+    _install(user_home, "darwin", _SHOP)
+    commands = _Launchctl(printed=[CommandError("launchctl: command not found")])
+
+    argv = ["--json", "--home", str(tmp_path / "instances"), "service", verb]
+    assert _service(argv, commands, _Clock()) == 1
+
+    assert commands.commands == [_print(_SHOP)]
+    assert json.loads(capsys.readouterr().out) == [
+        {"product": _SHOP, "passed": False, "result": "launchctl: command not found"}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -353,7 +448,7 @@ def test_a_service_manager_that_cannot_run_gives_its_error(
     [
         ("darwin", _RUNNING, "running"),
         ("darwin", _NOT_RUNNING, "stopped"),
-        ("darwin", CommandResult(113, "", "Could not find service\n"), "not loaded"),
+        ("darwin", _GONE, "stopped"),
         ("linux", _ACTIVE, "running"),
         ("linux", _INACTIVE, "stopped"),
         ("linux", CommandResult(3, "failed\n", ""), "failed"),

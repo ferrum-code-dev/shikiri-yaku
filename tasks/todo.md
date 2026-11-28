@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: Keep a stopped macOS service stopped (T-202)
+
+- [x] T-202. Keep a stopped macOS service stopped: stop unloads the job; start, restart and status follow `launchctl print`.
+
 ## Planned work: Close the channel contract (T-201)
 
 - [x] T-201. Close the channel contract gaps: health scope, neutral wording, refused-secret test.
