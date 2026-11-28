@@ -1,5 +1,9 @@
 # Todo
 
+## Planned work: Close the channel contract (T-201)
+
+- [x] T-201. Close the channel contract gaps: health scope, neutral wording, refused-secret test.
+
 ## Planned work: Channel contract (F6–F11)
 
 ### F6

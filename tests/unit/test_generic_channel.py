@@ -5,19 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
 from shikiri_yaku import bootstrap
 from shikiri_yaku.adapters.shikiru_mcp import DECLARED_TOOLS
 from shikiri_yaku.domain.inbound import InboundKind, Received
 from shikiri_yaku.domain.outbound import Purpose
+from shikiri_yaku.journal import Delivery
 from shikiri_yaku.journal.messages import MessageStore
 from shikiri_yaku.journal.outbox import JournalOutbox
-from shikiri_yaku.ports import Channel, ChannelRefusedError, CommandResult, Message
+from shikiri_yaku.ports import Channel, CommandResult, Message
 from shikiri_yaku.settings import load_settings
 from tests.support.clock import NapClock
 from tests.support.generic_channel import (
@@ -29,8 +30,11 @@ from tests.support.generic_channel import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 
+    import pytest
+
     from shikiri_yaku.adapters.shikiru_mcp import Connector, ToolSession
     from shikiri_yaku.cli import Job
+    from shikiri_yaku.ports import Deleter
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "shikiru"
 _SECRET = "sk-ABCDEFGHIJKLMNOPQRSTUV"  # noqa: S105 -- harmless value used to test secret refusal
@@ -103,6 +107,25 @@ class _Reporter:
         raise AssertionError(line)
 
 
+class _CountingDeleter:
+    """Records each deletion the core asks for, then gives the fake channel's answer."""
+
+    def __init__(self, channel: GenericChannel) -> None:
+        self._channel = channel
+        self.calls: list[str] = []
+
+    async def delete(self, message_ref: str) -> None:
+        self.calls.append(message_ref)
+        await self._channel.transport.delete(message_ref)
+
+
+def _delivery_of(composition: bootstrap.Composition, event_key: str) -> str | None:
+    row = composition.journal.connection.execute(
+        "SELECT delivery FROM messages WHERE event_key = ?", (event_key,)
+    ).fetchone()
+    return None if row is None else str(row["delivery"])
+
+
 def _directory(root: Path) -> Path:
     component = root / "component"
     component.mkdir()
@@ -156,9 +179,11 @@ def _matching(
     ]
 
 
-def _build_channel(channel: GenericChannel) -> Callable[..., Channel]:
+def _build_channel(
+    channel: GenericChannel, deleter: Deleter | None = None
+) -> Callable[..., Channel]:
     def build_channel(*_args: object) -> Channel:
-        return channel.bundle
+        return channel.bundle if deleter is None else replace(channel.bundle, deleter=deleter)
 
     return build_channel
 
@@ -340,11 +365,60 @@ def test_channel_without_rooms_or_shared_chat_refuses_expert_and_serves_signals(
         composition.close()
 
 
-def test_channel_deleter_refuses_a_reference_it_did_not_send() -> None:
+def test_an_owner_secret_is_refused_and_its_refused_deletion_is_not_tried_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = _directory(tmp_path)
     channel = GenericChannel()
+    clock = NapClock()
+    session = _Session(clock)
+    deleter = _CountingDeleter(channel)
+    monkeypatch.setattr(bootstrap, "build_channel", _build_channel(channel, deleter))
+    composition = _compose(directory, session, _AgentRunner(), clock)
+    try:
+        composition.recover()
 
-    async def delete_unknown() -> None:
-        with pytest.raises(ChannelRefusedError):
-            await channel.transport.delete("message/ref/unknown")
+        async def scenario() -> None:
+            channel.inbox.add(
+                Received(
+                    key="event/secret/owner",
+                    kind=InboundKind.TEXT,
+                    sender=OWNER,
+                    place=MAIN_PLACE,
+                    message_ref="owner/message/secret",
+                    text=f"the key is {_SECRET}",
+                )
+            )
+            await _until(clock, lambda: len(deleter.calls) == 1)
+            channel.inbox.add(
+                Received(
+                    key="event/later/help",
+                    kind=InboundKind.TEXT,
+                    sender=OWNER,
+                    place=MAIN_PLACE,
+                    message_ref="owner/message/help",
+                    text="/help",
+                )
+            )
+            await _until(
+                clock, lambda: _delivery_of(composition, "event/later/help") == Delivery.HANDLED
+            )
 
-    asyncio.run(delete_unknown())
+            assert deleter.calls == ["owner/message/secret"]
+            row = composition.journal.connection.execute(
+                "SELECT delivery, body, data, refusal FROM messages WHERE event_key = ?",
+                ("event/secret/owner",),
+            ).fetchone()
+            assert row["delivery"] == Delivery.DELETE_ATTEMPTED
+            assert row["body"] is None
+            assert row["data"] is None
+            assert row["refusal"] is not None
+            stored = composition.journal.connection.execute("SELECT * FROM messages").fetchall()
+            assert not any(_SECRET in str(value) for stored_row in stored for value in stored_row)
+            assert not any(
+                _SECRET in message.text for _, message in channel.transport.sent.values()
+            )
+
+        asyncio.run(_drive(composition.jobs, scenario()))
+    finally:
+        composition.close()

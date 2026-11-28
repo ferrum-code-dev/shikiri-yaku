@@ -125,7 +125,7 @@ class Harness:
             self.outbox,
             _Clock(),
             FixedPlaces(),
-            shared_group=self.shared_group,
+            shared_chat=self.shared_group,
             channel="telegram",
             max_text=MESSAGE_TEXT_LIMIT,
         )

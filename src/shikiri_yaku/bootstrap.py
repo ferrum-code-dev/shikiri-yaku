@@ -183,7 +183,6 @@ if TYPE_CHECKING:
 
 
 REMOVED_NOTE: Final = "closed at startup: the component was removed from the config"
-INBOUND_HEALTH_SCOPE: Final = "telegram_inbound_batch"
 # keep: a copy without buttons that the signal ends, sent before the upgrade, still gets its edit
 # keep: a notice with these prefixes still unsent when its signal has closed is never sent
 ENDING_NOTICE_PREFIXES: Final = (f"{HEALTH_KEY}:",)
@@ -544,7 +543,7 @@ def compose(  # noqa: PLR0915 -- composition wires each job
         places,
         channel=channel.name,
         max_text=channel.max_text,
-        shared_group=channel.shared is not None,
+        shared_chat=channel.shared is not None,
     )
     inbound = inbound_job(
         settings,
@@ -1047,7 +1046,8 @@ def inbound_job(
         health,
         clock,
         interval_s=operator.inbound_interval_s,
-        health_scope=INBOUND_HEALTH_SCOPE,
+        # keep: an open health signal keeps this scope, so the upgrade must not change its value
+        health_scope=f"{channel.name}_inbound_batch",
         expert=turns,
     )
     return service.run
@@ -1068,7 +1068,7 @@ def goal_command(
     *,
     channel: str,
     max_text: int,
-    shared_group: bool = False,
+    shared_chat: bool = False,
 ) -> GoalCommand:
     """Return the /submit command, which journals its submits and replies."""
     submitter = Submitter(
@@ -1083,7 +1083,7 @@ def goal_command(
         clock,
         places=places,
         max_text=max_text,
-        shared_group=shared_group,
+        shared_chat=shared_chat,
     )
 
 

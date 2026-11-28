@@ -142,7 +142,7 @@ class ExpertEnding:
                 await self.end(row.id)
 
     def _close_reply(self, row: ConversationRecord) -> None:
-        """Show the fixed ending time and associate any shared-group selection reply."""
+        """Show the fixed ending time and associate any shared-chat selection reply."""
         if row.ending_at is None:
             return
         closed = closed_reply(row.ending_at)

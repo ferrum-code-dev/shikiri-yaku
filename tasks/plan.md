@@ -1,5 +1,19 @@
 # Task plan
 
+## Planned work: Close the channel contract (T-201)
+
+The review of F6–F11 found gaps: the inbound health scope is a Telegram name, some core names and comments still speak of one platform, and the deleter test checks only the fake. `docs/design.md`, section "Channel contract", is the design.
+
+### T-201. Close the channel contract gaps
+
+Derive the inbound health scope from the built channel's name, so Telegram keeps `telegram_inbound_batch`. Reword the named core docstrings in the contract's terms and rename `GoalCommand`'s `shared_group` to `shared_chat`. Replace the fake deleter test with one through the composed service: an owner's message that carries a secret is refused, its text is not kept, the deleter's refusal is final, and later messages are still served.
+
+## Acceptance criteria
+- The inbound health scope is the channel name and `_inbound_batch`; for Telegram it is `telegram_inbound_batch`, and the restart test checks the stored health signal has that reason.
+- `app/expert_turns.py`, `app/commands.py`, `app/goal.py` and `journal/conversations.py` name no Bot API, `@bot`, shared group parameter or topic; setting, table, migration and user-facing texts are unchanged.
+- A composed test sends an owner's secret through the service: the message is refused, its text is kept nowhere, the deleter is asked once and refuses, the refusal is not tried again, and a later `/help` is handled.
+- No behavior change for Telegram, no setting, dependency or migration, `docs/design.md` unchanged; `uv run poe check` passes.
+
 ## Planned work: Channel contract (F6–F11)
 
 The core is tied to one chat platform: the Expert builds group and topic addresses itself, ids are integers, platform limits sit in the core, and the channel adapter holds the secret screen. These tasks put one contract between the core and a channel, with no platform terms in it, so that a later channel is a new adapter. No new channel is built here. `docs/design.md`, section "Channel contract", is the design.

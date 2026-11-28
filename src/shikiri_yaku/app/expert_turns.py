@@ -214,7 +214,7 @@ class ExpertTurns:
     ) -> None:
         """Save an owner's file, then make its turn: the caption and the file's absolute path.
 
-        A file over the Bot API's limit, or one the Bot API will not give, gets a notice and no
+        A file over the channel's limit, or one the channel will not give, gets a notice and no
         turn. A transient failure raises ChannelError, so the item stays pending and is tried again.
         """
         if attached.size is not None and attached.size > self._max_file_bytes:
