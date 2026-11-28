@@ -363,7 +363,7 @@ One SQLite file (WAL), written only by the Operator. Its schema is created and c
 
 A signal moves through `new → handling → parked | forwarded → answered → resolved`, or to `closed`. An op moves from `intended` to `issued`, then to `confirmed`, `failed` or `unknown`; an install and an admin command also pass `approved` and may end `declined`, `expired` or `void`.
 
-The other tables hold the inbox cursor and the event id counter (`polling`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
+The other tables hold the inbox cursor and the event id counter (`polling`), the platform ids of stored inbox events, kept after their conversation is erased so that none is stored twice (`event_keys`), the keys of command replies already sent (`command_replies`), the messages of each signal per destination (`messages_by_destination`), the forum topic of each component (`topics`) and the one-time repairs of an upgraded journal (`repairs`). Faults the journal cannot keep are written to stderr, which the service manager captures; the journal is the audit trail.
 
 Not stored: tasks, escalation packets, logs, agent usage beyond the call records kept with signals and turns. Tasks and packets stay in Shikiru and are read on demand. The only retention job deletes ended Expert and admin conversations, except the admin `ops` records, which are the audit ([Admin mode](#admin-mode)).
 
