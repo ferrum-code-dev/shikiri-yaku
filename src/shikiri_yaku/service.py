@@ -25,8 +25,6 @@ LAUNCHD_PLATFORM: Final = "darwin"
 SYSTEMD_PLATFORM: Final = "linux"
 SERVICE_PREFIX: Final = "shikiri-yaku-"
 NOT_INSTALLED: Final = "not installed"
-NOT_LOADED: Final = "not loaded"
-RUNNING: Final = "running"
 STOPPED: Final = "stopped"
 # keep: launchctl print gives a loaded job's state on its own line; only that line says it runs
 _LAUNCHD_RUNNING_LINE: Final = "state = running"
@@ -90,10 +88,10 @@ def start_argv(platform: str, product: str, uid: int) -> list[str]:
 
 
 def stop_argv(platform: str, product: str, uid: int) -> list[str]:
-    """Return the service manager's command that asks the product's unit to stop."""
+    """Return the service manager's command that stops the product's unit."""
     name = service_name(product)
     if platform == LAUNCHD_PLATFORM:
-        return ["launchctl", "kill", "SIGTERM", f"gui/{uid}/{name}"]
+        return ["launchctl", "bootout", f"gui/{uid}/{name}"]
     if platform == SYSTEMD_PLATFORM:
         return ["systemctl", "--user", "stop", f"{name}.service"]
     raise _unsupported(platform)
@@ -152,14 +150,7 @@ class ServiceManager:
                 problem = await self._run(product, ["launchctl", "bootout", target])
                 if problem is not None:
                     return problem
-            actions = [
-                [
-                    "launchctl",
-                    "bootstrap",
-                    f"gui/{self._uid}",
-                    str(unit_path(self._platform, self._user_home, product)),
-                ]
-            ]
+            actions = [self._bootstrap_argv(product)]
         else:
             actions = [
                 ["systemctl", "--user", "daemon-reload"],
@@ -173,27 +164,41 @@ class ServiceManager:
         return None
 
     async def start(self, product: str) -> str | None:
-        return await self._run(product, start_argv(self._platform, product, self._uid))
+        return await self._bring_up(product, start_argv(self._platform, product, self._uid))
 
     async def restart(self, product: str) -> str | None:
-        return await self._run(product, restart_argv(self._platform, product, self._uid))
+        return await self._bring_up(product, restart_argv(self._platform, product, self._uid))
 
     async def stop(self, product: str) -> str | None:
-        problem = await self._run(product, stop_argv(self._platform, product, self._uid))
-        # keep: systemctl stop returns only once the unit has stopped
-        if problem is not None or self._platform == SYSTEMD_PLATFORM:
+        if self._platform == SYSTEMD_PLATFORM:
+            # keep: systemctl stop returns only once the unit has stopped
+            return await self._run(product, stop_argv(self._platform, product, self._uid))
+        if not self._is_installed(product):
+            return NOT_INSTALLED
+        try:
+            result = await self._launchd_print(product)
+        except CommandError as error:
+            return str(error)
+        # keep: a job the manager does not hold has nothing to stop
+        if result.returncode != 0:
+            return None
+        # keep: launchd restarts a loaded job after a failed run, so only unloading keeps it down
+        problem = await self._unload(
+            stop_argv(self._platform, product, self._uid), _LAUNCHD_NOT_LOADED
+        )
+        if problem is not None:
             return problem
-        return await self._wait_until_stopped(product)
+        return await self._wait_until_unloaded(product)
 
     async def status(self, product: str) -> str | None:
         if not self._is_installed(product):
             return NOT_INSTALLED
         if self._platform == LAUNCHD_PLATFORM:
             try:
-                state = await self._launchd_state(product)
+                result = await self._launchd_print(product)
             except CommandError as error:
                 return str(error)
-            return None if state == RUNNING else state
+            return None if result.returncode == 0 and _is_running(result.stdout) else STOPPED
         return await self._systemd_status(product)
 
     def _is_installed(self, product: str) -> bool:
@@ -236,6 +241,24 @@ class ServiceManager:
             return NOT_INSTALLED
         return await self._command(argv)
 
+    async def _bring_up(self, product: str, loaded_argv: list[str]) -> str | None:
+        if self._platform == SYSTEMD_PLATFORM:
+            return await self._run(product, loaded_argv)
+        if not self._is_installed(product):
+            return NOT_INSTALLED
+        try:
+            result = await self._launchd_print(product)
+        except CommandError as error:
+            return str(error)
+        # keep: RunAtLoad starts a bootstrapped job; a loaded one is only kicked, never replaced
+        if result.returncode != 0:
+            return await self._command(self._bootstrap_argv(product))
+        return await self._command(loaded_argv)
+
+    def _bootstrap_argv(self, product: str) -> list[str]:
+        unit = unit_path(self._platform, self._user_home, product)
+        return ["launchctl", "bootstrap", f"gui/{self._uid}", str(unit)]
+
     async def _command(self, argv: list[str]) -> str | None:
         try:
             result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
@@ -259,27 +282,23 @@ class ServiceManager:
             return STOPPED
         return answer or _failure_reason(result)
 
-    async def _launchd_state(self, product: str) -> str:
-        """Return the job's state from launchctl print; not loaded if the manager lacks the job."""
+    async def _launchd_print(self, product: str) -> CommandResult:
+        # keep: launchctl print exits non-zero exactly when the manager does not hold the job
         argv = ["launchctl", "print", f"gui/{self._uid}/{service_name(product)}"]
-        result = await self._commands.run(argv, timeout_s=self._command_timeout_s)
-        if result.returncode != 0:
-            return NOT_LOADED
-        return RUNNING if _is_running(result.stdout) else STOPPED
+        return await self._commands.run(argv, timeout_s=self._command_timeout_s)
 
-    async def _wait_until_stopped(self, product: str) -> str | None:
-        # keep: launchd keeps a stopped job loaded, so the job's state decides, not its presence
+    async def _wait_until_unloaded(self, product: str) -> str | None:
         deadline = self._clock.now() + timedelta(seconds=self._stop_timeout_s)
         while True:
             try:
-                state = await self._launchd_state(product)
+                result = await self._launchd_print(product)
             except CommandError as error:
                 return str(error)
-            if state != RUNNING:
+            if result.returncode != 0:
                 return None
             remaining = deadline - self._clock.now()
             if remaining <= timedelta():
-                return f"still running {self._stop_timeout_s:g} seconds after the stop"
+                return f"still loaded {self._stop_timeout_s:g} seconds after the stop"
             await self._clock.sleep(min(self._stop_poll_s, remaining.total_seconds()))
 
 

@@ -1,5 +1,24 @@
 # Task plan
 
+## Planned work: Keep a stopped macOS service stopped (T-202)
+
+On macOS `service stop` ran `launchctl kill SIGTERM` and left the job loaded. The unit has `KeepAlive` with `SuccessfulExit` false, so launchd restarted a job whose last run failed. A stop sent between two runs found the job not running and reported it stopped, while launchd went on restarting it (observed 2026-11-28: exit status 1, a restart about every 10 seconds). Linux does not change.
+
+### T-202. Keep a stopped macOS service stopped
+
+`service stop` unloads the job with `launchctl bootout` and returns once the manager no longer has it, waiting at most the stop timeout. `service start` bootstraps a job that is not loaded and kickstarts a loaded one; `service restart` bootstraps a job that is not loaded and kickstarts a loaded one with `-k`. `service status` reports an installed unit whose job is not loaded as `stopped`, and the `not loaded` state goes. Whether a job is loaded is decided by `launchctl print`, as before. The unit's content does not change, and `launchctl disable` is not used.
+
+## Acceptance criteria
+- On macOS, `service stop` of an installed service runs `launchctl print`. If the manager holds the job, it runs `launchctl bootout gui/<uid>/<name>` and polls `launchctl print` until the job is gone; a job still loaded at the stop timeout fails, and the reason says so.
+- A stop of an installed service whose job is not loaded succeeds without running `bootout`.
+- Any other refusal of `bootout` is reported with the manager's reason, and no wait follows.
+- On macOS, `service start` runs `launchctl bootstrap gui/<uid> <unit path>` when the job is not loaded and `launchctl kickstart gui/<uid>/<name>` (without `-k`) when it is loaded. It never replaces a running job.
+- On macOS, `service restart` runs `launchctl bootstrap` when the job is not loaded and `launchctl kickstart -k` when it is loaded.
+- `service status` reports an installed unit whose job is not loaded as `stopped`; `NOT_LOADED` and its mentions are gone.
+- If `launchctl print` cannot run, start, stop and restart report its reason and run nothing else.
+- Linux commands, the unit content, `service install` and `service uninstall` do not change.
+- Tests are table-driven with the fake CommandRunner and clock; none runs `launchctl` or `systemctl`. README.md and the Service and Applying changes sections of `docs/reference.md` describe the new behaviour. `docs/design.md` is unchanged. `uv run poe check` passes.
+
 ## Planned work: Close the channel contract (T-201)
 
 The review of F6–F11 found gaps: the inbound health scope is a Telegram name, some core names and comments still speak of one platform, and the deleter test checks only the fake. `docs/design.md`, section "Channel contract", is the design.
