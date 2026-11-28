@@ -38,7 +38,7 @@ class GoalCommand:
     implies that component. An unknown outcome is asked about with *Submit again*;
     only that tap retries the request.
 
-    With `shared_group`, a request that names a component this instance does not
+    With `shared_chat`, a request that names a component this instance does not
     have belongs to another instance, so it gets no reply.
     """
 
@@ -52,7 +52,7 @@ class GoalCommand:
         *,
         places: Places,
         max_text: int,
-        shared_group: bool = False,
+        shared_chat: bool = False,
     ) -> None:
         self._submitter = submitter
         self._log = log
@@ -61,11 +61,11 @@ class GoalCommand:
         self._clock = clock
         self._places = places
         self._max_text = max_text
-        self._shared_group = shared_group
+        self._shared_chat = shared_chat
 
     async def handle(self, item: Inbound) -> None:
         component, request = self._parse(item)
-        if self._shared_group and component is not None and component not in self._clients:
+        if self._shared_chat and component is not None and component not in self._clients:
             return
         if component is None or request is None or component not in self._clients:
             names = ", ".join(sorted(self._clients))

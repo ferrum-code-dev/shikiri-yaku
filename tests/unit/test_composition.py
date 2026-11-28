@@ -401,6 +401,16 @@ def _health_delivered(directory: Path) -> bool:
     return int(row["sent"]) > 0
 
 
+def _health_reasons(directory: Path) -> list[str]:
+    """Return the reason of each health signal in the journal, through a connection of its own."""
+    database = Database.open(directory / JOURNAL_FILE_NAME)
+    try:
+        rows = database.connection.execute("SELECT reason FROM signals WHERE kind = 'health'")
+        return [str(row["reason"]) for row in rows]
+    finally:
+        database.close()
+
+
 def _edited(bot: FakeBotApi, text: str) -> bool:
     return any(
         method == "editMessageText" and text in str(payload.get("text", ""))
@@ -1306,6 +1316,8 @@ def test_an_operator_health_message_is_edited_to_recovered_after_a_restart(
         asyncio.run(_deliver(first.jobs, _until(lambda: _health_delivered(directory))))
     finally:
         first.close()
+    # keep: an upgraded instance must find the open signal by this scope, so its value is fixed
+    assert "telegram_inbound_batch" in _health_reasons(directory)
 
     bot.refusing = False
     restarted = compose(

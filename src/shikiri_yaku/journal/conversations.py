@@ -83,7 +83,7 @@ def _turn(row: sqlite3.Row) -> TurnRecord:
 
 
 class Conversations:
-    """Store each request and each turn before its topic or agent work can start."""
+    """Store each request and each turn before its room or agent work can start."""
 
     def __init__(self, database: Database) -> None:
         self._database = database

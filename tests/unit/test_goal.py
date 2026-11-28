@@ -81,7 +81,7 @@ class _Submit:
             self.outbox,
             clock,
             places=TelegramPlaces(self.topics, owners=(1001,), group_id=GROUP, reconciler=None),
-            shared_group=shared_group,
+            shared_chat=shared_group,
             max_text=MESSAGE_TEXT_LIMIT,
         )
 
